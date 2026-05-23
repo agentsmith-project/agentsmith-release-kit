@@ -58,9 +58,8 @@ The intended future deployment model has three independent choices:
 - `substrate_source`: `external_declared` or `kit_installed`.
 - `distribution`: `online` or `airgap`.
 
-`kind_rehearsal` is only a local or CI rehearsal target. It is not a user
-deployment prerequisite and does not replace evidence from a real Kubernetes
-target when that target is in scope.
+`kind_rehearsal` is only a local or CI rehearsal target. It is not a user deployment prerequisite.
+It does not replace real Kubernetes evidence when a real Kubernetes target is in scope.
 
 ## Current Verification
 

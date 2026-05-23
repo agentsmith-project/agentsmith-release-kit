@@ -17,11 +17,22 @@ pass() {
 
 normalize_remote() {
   local remote="$1"
+  case "$remote" in
+    http://*)
+      fail "origin must use https:// or git@github.com:, not http://"
+      ;;
+    https://github.com/*)
+      remote="${remote#https://}"
+      ;;
+    git@github.com:*)
+      remote="${remote#git@}"
+      remote="${remote/:/\/}"
+      ;;
+    *)
+      fail "origin must use https://github.com/ or git@github.com: form"
+      ;;
+  esac
   remote="${remote%.git}"
-  remote="${remote#https://}"
-  remote="${remote#http://}"
-  remote="${remote#git@}"
-  remote="${remote/:/\/}"
   echo "$remote"
 }
 
@@ -128,7 +139,12 @@ require_text README.md "backend-real"
 require_text README.md "product flow"
 require_text README.md "Cloud resource provisioning"
 require_text README.md "release management UI"
-require_text README.md "kind_rehearsal"
+require_text README.md '`target_cluster`: `existing_kubernetes` or `kind_rehearsal`'
+require_text README.md '`substrate_source`: `external_declared` or `kit_installed`'
+require_text README.md '`distribution`: `online` or `airgap`'
+require_text README.md '`kind_rehearsal` is only a local or CI rehearsal target'
+require_text README.md "not a user deployment prerequisite"
+require_text README.md "does not replace real Kubernetes evidence"
 require_text DEVELOPMENT.md "There is intentionally no"
 require_text DEVELOPMENT.md "package.json"
 require_text AGENTS.md "Quick gate success is never release readiness"
@@ -199,6 +215,11 @@ reject_scan \
 reject_scan \
   "mutable image or non-digest release claim found" \
   "$mutable_image_claim_pattern" \
+  "${scan_paths[@]}"
+
+reject_scan \
+  "kind rehearsal prerequisite claim found" \
+  '(^|[^[:alnum:]_])kind(_rehearsal)?[[:space:]]+(is|as)[[:space:]]+(a[[:space:]]+)?(required|mandatory|prerequisite)|(^|[^[:alnum:]_])kind(_rehearsal)?[[:space:]]+(must|shall)[[:space:]]+|(^|[^[:alnum:]_])(required|mandatory)[[:space:]]+kind(_rehearsal)?([[:space:]]+cluster|[[:space:]]+target)?' \
   "${scan_paths[@]}"
 
 require_text docs/RELEASE_GATES.md "No mutable image or non-digest release claim is present"

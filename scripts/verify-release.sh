@@ -22,7 +22,8 @@ case "${1:-}" in
       usage >&2
       exit 2
     fi
-    exec bash "$ROOT_DIR/scripts/check-governance-guard.sh"
+    bash "$ROOT_DIR/scripts/check-governance-guard.sh"
+    echo "quick mode is not release readiness"
     ;;
   --help|-h)
     usage
