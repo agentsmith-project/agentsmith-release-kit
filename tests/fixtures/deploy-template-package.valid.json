@@ -1,0 +1,26 @@
+{
+  "schema_version": "agentsmith.deploy-template-package/v1",
+  "package_uri": "gh-artifact://agentsmith/deploy-template-package/10001/agentsmith-deploy-template-package.tgz",
+  "package_sha256": "sha256:abababababababababababababababababababababababababababababababab",
+  "manifest_sha256": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "artifact_provenance": {
+    "schema_version": "agentsmith.artifact-provenance/v1",
+    "provenance_kind": "ci_artifact",
+    "producer_repo": "github.com/agentsmith-project/agentsmith",
+    "normalized_remote": "github.com/agentsmith-project/agentsmith",
+    "commit_sha": "0123456789abcdef0123456789abcdef01234567",
+    "subject_name": "agentsmith-deploy-template-package",
+    "subject_sha256": "sha256:2c33733083b29c7d01d5382f94e19e11a737d60ac0dce39feb73f9f153744a68",
+    "subject_uri": "deploy-template-package.json",
+    "workflow_name": "release-contract",
+    "run_id": "10001",
+    "run_attempt": "1",
+    "job": "package-deploy-template",
+    "artifact_uri": "gh-artifact://agentsmith/deploy-template-package/10001/agentsmith-deploy-template-package.tgz",
+    "artifact_sha256": "sha256:abababababababababababababababababababababababababababababababab",
+    "generated_at": "2026-05-23T12:00:00.000Z",
+    "generator_command": "npm run contracts:check-release-boundary",
+    "generator_version": "p0",
+    "attestation": "none"
+  }
+}

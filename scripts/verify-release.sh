@@ -2,15 +2,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NODE_BIN="${NODE:-node}"
 
 usage() {
   cat <<'USAGE'
 Usage:
   bash scripts/verify-release.sh --quick
+  bash scripts/verify-release.sh --inputs --release-contract <json> --deploy-template-package <json> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --help
 
 Bootstrap status:
   --quick checks governance skeleton and boundary guardrails only.
+  --inputs checks release contract intake only; it is not release readiness.
   The full release gate is not implemented during bootstrap.
 USAGE
 }
@@ -24,6 +27,11 @@ case "${1:-}" in
     fi
     bash "$ROOT_DIR/scripts/check-governance-guard.sh"
     echo "quick mode is not release readiness"
+    ;;
+  --inputs)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-inputs.mjs" "$@"
+    echo "inputs mode is not release readiness"
     ;;
   --help|-h)
     usage
