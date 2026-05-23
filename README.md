@@ -1,0 +1,94 @@
+# AgentSmith Release Kit
+
+Status: bootstrap-only, docs-governance-first skeleton.
+
+This repository is the future deploy and package execution home for
+AgentSmith releases. It is intentionally small at bootstrap time: repo
+identity, boundary documents, handoff guidance, and a quick governance guard.
+It does not contain deploy tooling yet.
+
+## Canonical Identity
+
+| Field | Value |
+| --- | --- |
+| Repository | `github.com/agentsmith-project/agentsmith-release-kit` |
+| Remote URL | `https://github.com/agentsmith-project/agentsmith-release-kit.git` |
+| Default branch | `main` |
+| Local bootstrap path | `/home/percy/works/mbos-v1/agentsmith-release-kit` |
+
+The local bootstrap path is a workspace convention only. CI and future release
+evidence must use the normalized GitHub repository identity.
+
+## Scope
+
+AgentSmith Release Kit consumes:
+
+- AgentSmith release contract.
+- AgentSmith deploy template package.
+- Operator inputs, including target cluster, registry, substrate connection
+  truth, namespace, ingress, TLS, and secret references.
+
+AgentSmith Release Kit owns:
+
+- Online deploy execution.
+- Airgap package verification and deployment flow.
+- Image bundle, mirror map, and digest adoption checks.
+- Kubernetes render, apply, rollout, and smoke evidence.
+- Operator runbooks for deployment, package handling, troubleshooting, and
+  evidence collection.
+- Deployment, distribution, and package evidence produced by this repository.
+
+AgentSmith Release Kit does not own:
+
+- AgentSmith product readiness.
+- Visual, backend-real, story, e2e, or product flow validation.
+- Product database schema, product bootstrap semantics, product authorization,
+  or product UI truth.
+- Cloud resource provisioning for clusters, databases, buckets, IAM, networks,
+  or OIDC realms.
+- A release management UI, dashboard, or DevOps product surface.
+- AgentSmith product source, product contracts, product gates, or runner
+  runtime implementation.
+
+## Deployment Model
+
+The intended future deployment model has three independent choices:
+
+- `target_cluster`: `existing_kubernetes` or `kind_rehearsal`.
+- `substrate_source`: `external_declared` or `kit_installed`.
+- `distribution`: `online` or `airgap`.
+
+`kind_rehearsal` is only a local or CI rehearsal target. It is not a user
+deployment prerequisite and does not replace evidence from a real Kubernetes
+target when that target is in scope.
+
+## Current Verification
+
+Bootstrap quick gate:
+
+```bash
+bash scripts/verify-release.sh --quick
+```
+
+The quick gate checks only the governance skeleton and boundary guardrails. It
+is not release readiness and must not be used as a deploy, package, or release
+verdict.
+
+The full release gate is a future repo-local authority. It is intentionally not
+implemented during bootstrap.
+
+## Handoff
+
+After entering this repository, team members must first claim non-overlapping
+workstreams:
+
+- Docs.
+- Contracts.
+- Runbooks.
+- CI gate.
+- Implementation.
+
+All workstreams are constrained by this README, `AGENTS.md`, `DEVELOPMENT.md`,
+and `docs/RELEASE_GATES.md`. Bootstrap approval only means the repo-local team
+can begin those workstreams; it does not approve deploy tooling adoption,
+release evidence, or publishing.
