@@ -14,6 +14,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Template package archive diagnostic | Focused only | `template-package-report.json` keeps `readiness: false`. |
 | Materialized template render diagnostic | Focused only | `manifest-render-report.json` keeps `readiness: false`. |
 | Render/check image inventory diagnostic | Focused only | `render-report.json` keeps `readiness: false`. |
+| Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Release-kit evidence envelope diagnostic | Focused only | `evidence-validation-report.json` keeps `readiness: false`. |
 | Target preflight diagnostic | Focused only | `target-preflight-report.json` keeps `readiness: false`. |
 | Online deploy evidence | Not implemented | Future release-kit authority. |
@@ -47,6 +48,14 @@ digest-pinned images from the supplied release contract
 credential payloads pass focused safety checks. It does not render templates,
 apply resources, deploy, package, release, roll out workloads, smoke endpoints,
 or produce operator readiness evidence.
+
+Kubernetes apply-only output proves only that already-rendered manifests passed
+the render/check image inventory guard and were accepted by `kubectl apply`
+against `existing_kubernetes/external_declared/online`. The default path is
+server-side dry-run; real apply is allowed only with explicit confirm text and
+an operator run id. `apply-report.json` keeps `readiness: false`; it is not
+deploy, release, rollout, route smoke, product-flow, package, or operator
+readiness evidence.
 
 Release-kit evidence envelope output proves only that one pre-existing evidence
 root has the expected release-kit-owned envelope, subject, provenance, target

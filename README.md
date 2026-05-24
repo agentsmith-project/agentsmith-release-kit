@@ -5,7 +5,8 @@ Status: bootstrap-only, docs-governance-first skeleton.
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
-does not contain apply, rollout, smoke, or full deploy tooling yet.
+contains an apply-only focused diagnostic, but does not contain rollout,
+smoke, or full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -158,6 +159,31 @@ payloads. `render-report.json` is written with `readiness: false`,
 `scope: render_check_image_inventory_only`, and `status: pass`; it is not
 render readiness, deploy readiness, release readiness, apply evidence, rollout
 evidence, smoke evidence, or operator signoff.
+
+Kubernetes apply-only focused diagnostic:
+
+```bash
+bash scripts/test-apply.sh
+```
+
+`--apply` validates already-rendered manifests against a real Kubernetes API.
+It accepts only `existing_kubernetes/external_declared/online` and rejects
+`kind_rehearsal`, `airgap`, legacy names, and synonym axes. Required inputs are
+`--release-contract`, `--rendered-manifests`, `--target-profile`,
+`--namespace`, and `--output-dir`; optional inputs are `--kubeconfig`,
+`--context`, `--kubectl`, and `--forbidden-source-root`. If a sibling
+`../agentsmith` checkout exists next to release-kit, `--apply` treats it as a
+default forbidden source root before running render/check.
+
+Before any `kubectl` call, `--apply` runs the render/check image inventory
+guard. The default `--mode server-dry-run` runs `kubectl apply --server-side
+--dry-run=server` and writes `apply-report.json` only after success. Real
+apply requires `--mode apply --confirm-apply
+existing_kubernetes/external_declared/online --operator-run-id <id>`.
+`apply-report.json` keeps `readiness: false`, `scope:
+kubernetes_apply_only`, and `status: pass`; it is not deploy readiness,
+release readiness, rollout evidence, route smoke evidence, product-flow
+evidence, or operator signoff.
 
 Release-kit evidence envelope focused diagnostic:
 

@@ -155,6 +155,42 @@ contain `verdict` or `release_verdict`. It is not release readiness, package
 readiness, render readiness, apply evidence, rollout evidence, smoke evidence,
 deploy evidence, or operator signoff.
 
+## Kubernetes Apply-Only Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-apply.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh --apply`. It
+validates already-rendered manifests against a real Kubernetes API by default
+with server-side dry-run. It does not render templates, roll out workloads,
+smoke routes, run product flows, provision cloud resources, build packages, or
+claim deploy or release readiness.
+
+`--apply` accepts only `existing_kubernetes/external_declared/online`.
+`kind_rehearsal`, `airgap`, legacy profile names, and synonym axes fail fast.
+Required inputs are `--release-contract`, `--rendered-manifests`,
+`--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
+`--kubeconfig`, `--context`, `--kubectl`, and `--forbidden-source-root`.
+If a sibling `../agentsmith` checkout exists next to release-kit, `--apply`
+passes it as a default forbidden source root to render/check.
+
+Before any `kubectl` call, the apply diagnostic must pass the render/check
+image inventory guard. The default mode is `server-dry-run`, which runs
+`kubectl apply --server-side --dry-run=server`. Real apply requires all of:
+`--mode apply`, `--confirm-apply existing_kubernetes/external_declared/online`,
+and `--operator-run-id <id>`.
+
+The generated `apply-report.json` must keep `schema_version:
+agentsmith.kubernetes-apply-report/v1`, `scope: kubernetes_apply_only`,
+`readiness: false`, and `status: pass`. It records the release contract digest,
+target axes, namespace, mode, resource refs, kubectl version, and
+`operator_run_id` only for real apply mode. It must not contain `verdict`,
+`release_verdict`, deploy readiness, product-flow fields, kubeconfig content,
+or raw secret payloads.
+
 ## Evidence Envelope Focused Diagnostic
 
 Run:

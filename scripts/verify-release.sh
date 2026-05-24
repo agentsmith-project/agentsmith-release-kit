@@ -12,6 +12,8 @@ Usage:
   bash scripts/verify-release.sh --template-package --release-contract <json> --deploy-template-package <json> --archive <tgz> --output-dir <dir>
   bash scripts/verify-release.sh --render --release-contract <json> --deploy-template-package <json> --archive <tgz> --target-profile <target_cluster>/<substrate_source>/<distribution> --render-values <json> --substrate-truth <json> --output-dir <dir> [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --render-check --release-contract <json> --rendered-manifests <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir> [--forbidden-source-root <dir>]
+  bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
+  bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> --mode apply --confirm-apply existing_kubernetes/external_declared/online --operator-run-id <id> [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --evidence --release-contract <json> --evidence-root <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --output-dir <dir>
   bash scripts/verify-release.sh --help
@@ -22,6 +24,7 @@ Bootstrap status:
   --template-package checks materialized deploy template package intake only; it is not release readiness.
   --render renders repo-local materialized deploy templates only; it is not release readiness.
   --render-check checks rendered manifest image inventory only; it is not release readiness.
+  --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
   --evidence checks release-kit evidence envelope intake only; it is not release readiness.
   --target-preflight checks substrate connection truth intake only; it is not release readiness.
   The full release gate is not implemented during bootstrap.
@@ -57,6 +60,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-render-check.mjs" "$@"
     echo "render-check mode is not release readiness"
+    ;;
+  --apply)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-apply.mjs" "$@"
+    echo "apply mode is not release readiness"
     ;;
   --evidence)
     shift

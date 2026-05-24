@@ -14,6 +14,7 @@ bash scripts/test-inputs.sh
 bash scripts/test-template-package.sh
 bash scripts/test-render.sh
 bash scripts/test-render-check.sh
+bash scripts/test-apply.sh
 bash scripts/test-evidence.sh
 bash scripts/test-target-preflight.sh
 ```
@@ -91,6 +92,21 @@ values, path escapes, external symlinks, and obvious plaintext credential or
 kubeconfig payloads. It does not render templates, apply resources, roll out
 workloads, smoke a cluster, package artifacts, or claim deploy or release
 readiness.
+
+The current `--apply` path is a focused diagnostic for Kubernetes apply-only
+validation. It consumes a release contract, an already-rendered manifests
+directory, explicit target profile `existing_kubernetes/external_declared/online`,
+namespace, and output directory. It rejects `kind_rehearsal`, `airgap`, legacy
+profiles, and synonym axes. It first runs the render/check image inventory
+guard, then uses `kubectl` against the target API. Default mode is
+`server-dry-run`, which runs server-side dry-run apply. True apply requires
+`--mode apply`, `--confirm-apply existing_kubernetes/external_declared/online`,
+and `--operator-run-id <id>`. It accepts `--forbidden-source-root` and treats
+an existing sibling `../agentsmith` checkout as a default forbidden source
+root for the render/check guard. Its `apply-report.json` must keep
+`readiness: false` and `scope: kubernetes_apply_only`; it does not roll out
+workloads, smoke routes, run product flows, provision cloud resources, or claim
+deploy or release readiness.
 
 The current `--evidence` path is a focused diagnostic for release-kit evidence
 envelope intake only. It consumes a release contract, an evidence root
