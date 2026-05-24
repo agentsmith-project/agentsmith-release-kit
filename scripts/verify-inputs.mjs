@@ -13,11 +13,6 @@ const IMAGE_GROUPS = [
   'adopted_provider_images',
   'release_kit_prerequisite_images'
 ];
-const REQUIRED_FLOWS = [
-  'workspace_project',
-  'files',
-  'agent_task_managed_runner'
-];
 const REQUIRED_ARGS = [
   'releaseContract',
   'deployTemplatePackage',
@@ -27,6 +22,11 @@ const REQUIRED_ARGS = [
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_PACKAGE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
+const SUBSTRATE_CONNECTION_SCHEMA = 'agentsmith.substrate-connection.truth/v1';
+const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
+const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
+const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
+const SUPPORT_LEVEL_VALUES = new Set(['primary', 'supported', 'diagnostic']);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -184,6 +184,14 @@ function requireBoolean(value, label) {
   return value;
 }
 
+function requireEnumString(value, label, allowedValues) {
+  const text = requireString(value, label);
+  if (!allowedValues.has(text)) {
+    fail(`${label} must be one of: ${[...allowedValues].join(', ')}`);
+  }
+  return text;
+}
+
 function requireDigest(value, label) {
   const digest = requireString(value, label);
   if (!DIGEST_RE.test(digest)) {
@@ -324,15 +332,16 @@ function assertImageInventory(contract) {
   return expected;
 }
 
-function assertRequiredFlows(contract) {
+function assertProductFlowShape(contract) {
   const flows = requireArray(
     contract.required_product_flows,
     'release_contract.required_product_flows'
   );
-  for (const flow of REQUIRED_FLOWS) {
-    if (!flows.includes(flow)) {
-      fail(`release_contract.required_product_flows must include ${flow}`);
-    }
+  if (flows.length === 0) {
+    fail('release_contract.required_product_flows must not be empty');
+  }
+  for (const [index, flow] of flows.entries()) {
+    requireString(flow, `release_contract.required_product_flows[${index}]`);
   }
 }
 
@@ -343,7 +352,23 @@ function parseTargetProfile(targetProfile) {
     fail('target_profile must be <target_cluster>/<substrate_source>/<distribution>');
   }
   const [targetCluster, substrateSource, distribution] = tuple;
-  return { targetCluster, substrateSource, distribution };
+  return {
+    targetCluster: requireEnumString(
+      targetCluster,
+      'target_profile.target_cluster',
+      TARGET_CLUSTER_VALUES
+    ),
+    substrateSource: requireEnumString(
+      substrateSource,
+      'target_profile.substrate_source',
+      SUBSTRATE_SOURCE_VALUES
+    ),
+    distribution: requireEnumString(
+      distribution,
+      'target_profile.distribution',
+      DISTRIBUTION_VALUES
+    )
+  };
 }
 
 function isSecretRefValue(value) {
@@ -364,24 +389,34 @@ function assertTargetProfile(contract, targetProfile) {
   const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
   let found;
   let foundIndex = -1;
-  profiles.some((profile, index) => {
-    const object = requireObject(profile, `release_contract.target_profiles[${index}]`);
+  for (const [index, profile] of profiles.entries()) {
+    const label = `release_contract.target_profiles[${index}]`;
+    const object = requireObject(profile, label);
+    const profileTargetCluster = requireEnumString(
+      object.target_cluster,
+      `${label}.target_cluster`,
+      TARGET_CLUSTER_VALUES
+    );
+    const profileSubstrateSource = requireEnumString(
+      object.substrate_source,
+      `${label}.substrate_source`,
+      SUBSTRATE_SOURCE_VALUES
+    );
+    const profileDistribution = requireEnumString(
+      object.distribution,
+      `${label}.distribution`,
+      DISTRIBUTION_VALUES
+    );
     const isMatch = (
-      requireString(object.target_cluster, `release_contract.target_profiles[${index}].target_cluster`) ===
-        targetCluster &&
-      requireString(
-        object.substrate_source,
-        `release_contract.target_profiles[${index}].substrate_source`
-      ) === substrateSource &&
-      requireString(object.distribution, `release_contract.target_profiles[${index}].distribution`) ===
-        distribution
+      profileTargetCluster === targetCluster &&
+      profileSubstrateSource === substrateSource &&
+      profileDistribution === distribution
     );
     if (isMatch) {
       found = object;
       foundIndex = index;
     }
-    return isMatch;
-  });
+  }
 
   if (!found) {
     fail(`target_profile is not declared: ${targetProfile}`);
@@ -389,7 +424,21 @@ function assertTargetProfile(contract, targetProfile) {
 
   const label = `release_contract.target_profiles[${foundIndex}]`;
   const prerequisites = requireObject(found.prerequisites, `${label}.prerequisites`);
-  const required = requireBoolean(found.required, `${label}.required`);
+  const metadata = {};
+  const hasRequired = Object.prototype.hasOwnProperty.call(found, 'required');
+  if (hasRequired) {
+    metadata.required = requireBoolean(found.required, `${label}.required`);
+  }
+  if (Object.prototype.hasOwnProperty.call(found, 'support_level')) {
+    metadata.support_level = requireEnumString(
+      found.support_level,
+      `${label}.support_level`,
+      SUPPORT_LEVEL_VALUES
+    );
+  }
+  if (!hasRequired && !metadata.support_level) {
+    fail(`${label}.required or ${label}.support_level is required`);
+  }
   const prerequisiteFields = [
     'namespace',
     'rbac',
@@ -420,7 +469,7 @@ function assertTargetProfile(contract, targetProfile) {
     target_cluster: targetCluster,
     substrate_source: substrateSource,
     distribution,
-    required,
+    ...metadata,
     prerequisites: normalizedPrerequisites
   };
 }
@@ -852,6 +901,14 @@ function assertReleaseIdentity(contract) {
     fail('release_contract.product must be agentsmith');
   }
   requireString(contract.release_id, 'release_contract.release_id');
+  requireDigest(contract.openapi_digest, 'release_contract.openapi_digest');
+  requireDigest(contract.asyncapi_digest, 'release_contract.asyncapi_digest');
+  assertSchemaVersion(
+    contract.substrate_connection_schema,
+    SUBSTRATE_CONNECTION_SCHEMA,
+    'release_contract.substrate_connection_schema'
+  );
+  requireString(contract.min_release_kit_version, 'release_contract.min_release_kit_version');
   return requireGitSha(contract.git_sha, 'release_contract.git_sha');
 }
 
@@ -947,7 +1004,7 @@ async function main() {
   assertDeployTemplatePackageIdentity(deployTemplatePackage);
   assertTemplate(contract, deployTemplatePackage);
   const images = assertImageInventory(contract);
-  assertRequiredFlows(contract);
+  assertProductFlowShape(contract);
   const targetProfile = assertTargetProfile(contract, args.targetProfile);
   const provenance = assertProvenance(contract, deployTemplatePackage, releaseGitSha);
 

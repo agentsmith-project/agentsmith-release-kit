@@ -25,11 +25,12 @@ run_inputs() {
   local contract="$1"
   local deploy_template_package="$2"
   local output_dir="$3"
+  local target_profile="${4:-$TARGET_PROFILE}"
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --inputs \
     --release-contract "$contract" \
     --deploy-template-package "$deploy_template_package" \
-    --target-profile "$TARGET_PROFILE" \
+    --target-profile "$target_profile" \
     --output-dir "$output_dir"
 }
 
@@ -37,14 +38,28 @@ expect_fail() {
   local label="$1"
   local contract="$2"
   local deploy_template_package="${3:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
+  local target_profile="${4:-$TARGET_PROFILE}"
   local output_dir="$TMP_DIR/out-$label"
 
-  if run_inputs "$contract" "$deploy_template_package" "$output_dir" >/dev/null 2>"$TMP_DIR/$label.err"; then
+  if run_inputs "$contract" "$deploy_template_package" "$output_dir" "$target_profile" >/dev/null 2>"$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.err" >&2
     fail "expected invalid case to fail: $label"
   fi
 
   pass "invalid case rejected: $label"
+}
+
+expect_target_profile_fail() {
+  local label="$1"
+  local target_profile="$2"
+  local output_dir="$TMP_DIR/out-$label"
+
+  if run_inputs "$VALID_CONTRACT" "$VALID_DEPLOY_TEMPLATE_PACKAGE" "$output_dir" "$target_profile" >/dev/null 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected invalid target profile to fail: $label"
+  fi
+
+  pass "invalid target profile rejected: $label"
 }
 
 mutate_contract() {
@@ -159,6 +174,21 @@ switch (label) {
       )
     );
     break;
+  case 'legacy-contract-profile-local-kind':
+    contract.target_profiles[2].target_cluster = 'local-kind';
+    break;
+  case 'legacy-contract-profile-existing-cluster':
+    contract.target_profiles[0].target_cluster = 'existing-cluster';
+    break;
+  case 'legacy-contract-profile-real-k8s':
+    contract.target_profiles[0].target_cluster = 'real-k8s';
+    break;
+  case 'legacy-contract-profile-substrate-cluster':
+    contract.target_profiles[0].substrate_source = 'cluster';
+    break;
+  case 'legacy-contract-profile-distribution-cluster':
+    contract.target_profiles[0].distribution = 'cluster';
+    break;
   case 'non-agentsmith-repo-provenance':
     contract.artifact_provenance.producer_repo = 'https://github.com/example/not-agentsmith';
     contract.artifact_provenance.normalized_remote = 'https://github.com/example/not-agentsmith';
@@ -169,6 +199,27 @@ switch (label) {
     break;
   case 'non-agentsmith-product':
     contract.product = 'not-agentsmith';
+    break;
+  case 'missing-openapi-digest':
+    delete contract.openapi_digest;
+    break;
+  case 'missing-asyncapi-digest':
+    delete contract.asyncapi_digest;
+    break;
+  case 'missing-substrate-connection-schema':
+    delete contract.substrate_connection_schema;
+    break;
+  case 'missing-min-release-kit-version':
+    delete contract.min_release_kit_version;
+    break;
+  case 'bad-openapi-digest':
+    contract.openapi_digest = 'sha256:not-a-digest';
+    break;
+  case 'bad-substrate-connection-schema':
+    contract.substrate_connection_schema = 'agentsmith.substrate-connection.truth/v0';
+    break;
+  case 'bad-min-release-kit-version':
+    contract.min_release_kit_version = 1;
     break;
   case 'localhost-artifact-uri':
     contract.artifact_provenance.artifact_uri = 'http://localhost:8080/release-contract.json';
@@ -249,10 +300,11 @@ switch (label) {
       (item) => item.source !== 'adopted_provider_images'
     );
     break;
-  case 'missing-required-flow':
-    contract.required_product_flows = contract.required_product_flows.filter(
-      (flow) => flow !== 'files'
-    );
+  case 'empty-required-product-flows':
+    contract.required_product_flows = [];
+    break;
+  case 'bad-required-product-flow':
+    contract.required_product_flows = ['workspace_project', ''];
     break;
   case 'bearer-token':
     contract.operator_inputs = {
@@ -645,6 +697,9 @@ for (const file of ['intake-report.json', 'image-digest-plan.json']) {
   if (payload.target_profile?.distribution !== 'online') {
     throw new Error(`${file} did not split target profile fields`);
   }
+  if (payload.target_profile?.required !== true) {
+    throw new Error(`${file} did not preserve target profile required metadata`);
+  }
   if (!Array.isArray(payload.images) || payload.images.length !== 5) {
     throw new Error(`${file} did not include expected image inventory`);
   }
@@ -697,6 +752,19 @@ run_inputs "$SECRET_REF_CONTRACT" "$VALID_DEPLOY_TEMPLATE_PACKAGE" "$SECRET_REF_
 assert_outputs "$SECRET_REF_OUT"
 pass "valid secretRef pull_secret_ref accepted"
 
+expect_target_profile_fail "legacy-target-profile-local-kind" \
+  "local-kind/external_declared/online"
+expect_target_profile_fail "legacy-target-profile-existing-cluster" \
+  "existing-cluster/external_declared/online"
+expect_target_profile_fail "legacy-target-profile-real-k8s" \
+  "real-k8s/external_declared/online"
+expect_target_profile_fail "synonym-target-profile-kind" \
+  "kind/external_declared/online"
+expect_target_profile_fail "synonym-target-profile-substrate-cluster" \
+  "existing_kubernetes/cluster/online"
+expect_target_profile_fail "synonym-target-profile-distribution-cluster" \
+  "existing_kubernetes/external_declared/cluster"
+
 for label in \
   tag-only-image \
   digest-mismatch \
@@ -715,8 +783,20 @@ for label in \
   template-digest-drift \
   package-provenance-artifact-drift \
   missing-target-profile \
+  legacy-contract-profile-local-kind \
+  legacy-contract-profile-existing-cluster \
+  legacy-contract-profile-real-k8s \
+  legacy-contract-profile-substrate-cluster \
+  legacy-contract-profile-distribution-cluster \
   non-agentsmith-repo-provenance \
   non-agentsmith-product \
+  missing-openapi-digest \
+  missing-asyncapi-digest \
+  missing-substrate-connection-schema \
+  missing-min-release-kit-version \
+  bad-openapi-digest \
+  bad-substrate-connection-schema \
+  bad-min-release-kit-version \
   localhost-artifact-uri \
   ipv4-loopback-artifact-uri \
   ipv4-unspecified-artifact-uri \
@@ -734,7 +814,8 @@ for label in \
   duplicate-image-id \
   uppercase-image-digest \
   empty-provider-images \
-  missing-required-flow \
+  empty-required-product-flows \
+  bad-required-product-flow \
   bearer-token \
   invalid-attestation-uri \
   legacy-attestation-fields \
