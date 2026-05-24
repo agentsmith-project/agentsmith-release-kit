@@ -11,6 +11,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Canonical repo identity | Present | Remote normalizes to `github.com/agentsmith-project/agentsmith-release-kit`. |
 | Required bootstrap files | Present | Checked by quick gate. |
 | Contract intake diagnostic | Focused only | `intake-report.json` and `image-digest-plan.json` keep `readiness: false`. |
+| Template package archive diagnostic | Focused only | `template-package-report.json` keeps `readiness: false`. |
 | Online deploy evidence | Not implemented | Future release-kit authority. |
 | Airgap package evidence | Not implemented | Future release-kit authority. |
 | Kubernetes rollout evidence | Not implemented | Future release-kit authority. |
@@ -21,3 +22,8 @@ or operator evidence.
 
 Contract intake output proves contract/input digest readiness only. It is not
 deploy, package, release, rollout, or operator readiness evidence.
+
+Template package archive output proves only that one materialized deploy
+template package archive matches the declared descriptor and path-safety
+constraints. It is not render, deploy, package, release, rollout, smoke, or
+operator readiness evidence.

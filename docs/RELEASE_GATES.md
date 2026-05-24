@@ -45,6 +45,29 @@ The generated `intake-report.json` and `image-digest-plan.json` must keep
 not deploy readiness, package readiness, release readiness, rollout evidence,
 or operator signoff.
 
+## Template Package Archive Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-template-package.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--template-package`. It checks only the materialized deploy template package
+archive against the release contract and deploy template package descriptor.
+
+The check verifies descriptor equality, archive sha256, provenance artifact
+sha256 when present, archive `manifest.json` sha256, path safety for package
+entries, and obvious local source or plaintext credential payloads. It rejects
+absolute paths, `..` package-root escapes, symlinks, and hardlinks before any
+future render/check code can consume the archive.
+
+The generated `template-package-report.json` must keep `readiness: false` and
+`scope: template_package_intake_only`. It is not release readiness, package
+readiness, Kubernetes render evidence, deploy evidence, rollout evidence, smoke
+evidence, or operator signoff.
+
 ## Full Release Gate
 
 The full release gate is the future repo-local authority for online deploy,

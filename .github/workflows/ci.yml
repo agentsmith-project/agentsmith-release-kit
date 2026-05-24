@@ -18,3 +18,5 @@ jobs:
         run: bash scripts/verify-release.sh --quick
       - name: Contract intake focused guard
         run: bash scripts/test-inputs.sh
+      - name: Template package focused guard
+        run: bash scripts/test-template-package.sh

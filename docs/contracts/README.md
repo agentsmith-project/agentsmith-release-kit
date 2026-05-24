@@ -13,6 +13,12 @@ The current `--inputs` validator is a focused contract intake diagnostic only.
 Its reports keep `readiness: false` and prove contract/input digest readiness,
 not deploy, package, or release readiness.
 
+The current `--template-package` validator is a focused materialized archive
+intake diagnostic only. It confirms that the deploy template package descriptor
+matches the release contract and that the `.tgz` archive matches the declared
+package and manifest digests. Its report keeps `readiness: false` and does not
+claim render, deploy, package, or release readiness.
+
 Future contracts should cover:
 
 - Release contract input validation.

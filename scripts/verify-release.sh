@@ -9,11 +9,13 @@ usage() {
 Usage:
   bash scripts/verify-release.sh --quick
   bash scripts/verify-release.sh --inputs --release-contract <json> --deploy-template-package <json> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
+  bash scripts/verify-release.sh --template-package --release-contract <json> --deploy-template-package <json> --archive <tgz> --output-dir <dir>
   bash scripts/verify-release.sh --help
 
 Bootstrap status:
   --quick checks governance skeleton and boundary guardrails only.
   --inputs checks release contract intake only; it is not release readiness.
+  --template-package checks materialized deploy template package intake only; it is not release readiness.
   The full release gate is not implemented during bootstrap.
 USAGE
 }
@@ -32,6 +34,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-inputs.mjs" "$@"
     echo "inputs mode is not release readiness"
+    ;;
+  --template-package)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-template-package.mjs" "$@"
+    echo "template-package mode is not release readiness"
     ;;
   --help|-h)
     usage

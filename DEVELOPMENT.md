@@ -11,6 +11,7 @@ Use:
 ```bash
 bash scripts/verify-release.sh --quick
 bash scripts/test-inputs.sh
+bash scripts/test-template-package.sh
 ```
 
 There is intentionally no `package.json` in this repository.
@@ -43,6 +44,12 @@ The current `--inputs` path is a focused diagnostic for contract intake only.
 Its `intake-report.json` and `image-digest-plan.json` outputs must keep
 `readiness: false`; they prove contract/input digest readiness only and are not
 deploy, package, or release readiness evidence.
+
+The current `--template-package` path is a focused diagnostic for deploy
+template package archive intake only. It consumes the release contract, the
+deploy template package descriptor, and the materialized `.tgz` archive; it
+does not render Kubernetes resources, apply manifests, smoke a cluster, or
+claim release readiness.
 
 ## Non-Goals
 
@@ -79,6 +86,7 @@ inside the target network, but release-kit code must not create cloud resources.
    implementation.
 2. Keep changes inside this repo.
 3. Add focused checks before expanding behavior.
-4. Run the quick gate for bootstrap boundary changes.
-5. Do not claim release readiness until a future full release gate exists and
+4. Run the matching focused check for the changed slice.
+5. Run the quick gate for bootstrap boundary changes.
+6. Do not claim release readiness until a future full release gate exists and
    passes.

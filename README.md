@@ -89,6 +89,19 @@ profile, provenance, and digest-bound image inventory. `intake-report.json` and
 `image-digest-plan.json` are written with `readiness: false`; they prove only
 contract/input digest readiness, not deploy, package, or release readiness.
 
+Deploy template package archive focused diagnostic:
+
+```bash
+bash scripts/test-template-package.sh
+```
+
+`--template-package` validates only the materialized archive declared by the
+release contract and deploy template package descriptor. It checks descriptor
+equality, archive and manifest digests, unsafe archive paths, and obvious local
+source or plaintext credential payloads. `template-package-report.json` is
+written with `readiness: false`; it is not render, deploy, package, or release
+readiness.
+
 The full release gate is a future repo-local authority. It is intentionally not
 implemented during bootstrap.
 
