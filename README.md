@@ -137,12 +137,12 @@ adapter/canonical `agentsmith.release-kit-evidence/v1` shape.
 The raw envelope must set `release_kit_output` to one mapped release-kit output:
 `deploy-result.json#substrate`, `image-map.json`, or
 `render-report.json+rollout-report.json`; release-kit must not emit
-AgentSmith product-flow evidence. The mapped output must also appear in
-`evidence_subject.files`: `deploy-result.json`, `image-map.json`, or both
-`render-report.json` and `rollout-report.json`. Its provenance `subject_name`
-is `release-kit-evidence-subject`. For `external_declared` targets, the
-envelope must include inline `agentsmith.substrate-connection.truth/v1`
-connection truth.
+AgentSmith product-flow evidence. `evidence_subject.files` must contain only
+`evidence.json` plus the mapped output files: `deploy-result.json`,
+`image-map.json`, or both `render-report.json` and `rollout-report.json`. Its
+provenance `subject_name` is `release-kit-evidence-subject`. For
+`external_declared` targets, the envelope must include inline
+`agentsmith.substrate-connection.truth/v1` connection truth.
 `evidence-validation-report.json` is written with `readiness: false`,
 `scope: release_kit_evidence_intake_only`, and `status: pass`; it is not
 render, apply, smoke, package, deploy, or release readiness.
@@ -156,9 +156,11 @@ bash scripts/test-target-preflight.sh
 `--target-preflight` validates only repo-local intake of
 `agentsmith.substrate-connection.truth/v1` substrate connection truth for an
 explicit target profile. It checks the three target axes, supported focused
-profiles, required substrate services, endpoint declarations, secret
-references, TLS or sslmode declarations, PostgreSQL vector extension truth,
-object storage and OIDC fields, reachability proof fields, and obvious local
+profiles, required substrate services, canonical endpoint declarations
+(`host` for PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and
+`bucket` for object storage, and `issuer_url` for OIDC), secret references, TLS
+or sslmode declarations, `extensions.pgvector.status: installed`, reachability
+statuses `declared_reachable` or `verified_by_operator`, and obvious local
 source or plaintext credential payloads. `target-preflight-report.json` is
 written with `readiness: false`, `scope: target_preflight_intake_only`, and
 `status: pass`; it is not Kubernetes connectivity evidence, render/check

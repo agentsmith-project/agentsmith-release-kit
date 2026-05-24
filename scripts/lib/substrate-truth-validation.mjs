@@ -33,11 +33,10 @@ const SECRET_VALUE_RE = [
 ];
 const REACHABILITY_STATUS_VALUES = new Set([
   'declared_reachable',
-  'verified_by_operator',
-  'reachable',
-  'passed'
+  'verified_by_operator'
 ]);
-const VECTOR_STATUS_VALUES = new Set(['installed', 'enabled', 'available']);
+const VECTOR_STATUS_VALUES = new Set(['installed']);
+const ENDPOINT_FIELD_NAMES = ['endpoint', 'host', 'url', 'issuer', 'issuer_url'];
 
 class ValidationError extends Error {
   constructor(message) {
@@ -242,13 +241,30 @@ function assertEndpointValue(value, label) {
   return text;
 }
 
-function assertEndpoint(service, label, fields = ['endpoint', 'host', 'url']) {
-  for (const field of fields) {
-    if (Object.prototype.hasOwnProperty.call(service, field)) {
-      return assertEndpointValue(service[field], `${label}.${field}`);
+function formatAllowedFields(fields) {
+  return fields.join(' or ');
+}
+
+function assertEndpoint(service, label, allowedFields = ['host']) {
+  const allowed = new Set(allowedFields);
+  for (const field of ENDPOINT_FIELD_NAMES) {
+    if (!allowed.has(field) && Object.prototype.hasOwnProperty.call(service, field)) {
+      fail(`${label}.${field} is not allowed; use ${formatAllowedFields(allowedFields)}`);
     }
   }
-  fail(`${label} must include endpoint, host, or url`);
+
+  const present = allowedFields.filter((field) =>
+    Object.prototype.hasOwnProperty.call(service, field)
+  );
+  if (present.length === 0) {
+    fail(`${label} must include ${formatAllowedFields(allowedFields)}`);
+  }
+
+  for (const field of present) {
+    assertEndpointValue(service[field], `${label}.${field}`);
+  }
+
+  return service[present[0]];
 }
 
 function assertTlsInfo(service, label) {
@@ -306,7 +322,10 @@ function assertSecretFields(service, label, fields) {
 
 function assertVectorExtension(postgresql, label) {
   const extensions = requireObject(postgresql.extensions, `${label}.extensions`);
-  const pgvector = extensions.pgvector || extensions.vector;
+  if (Object.prototype.hasOwnProperty.call(extensions, 'vector')) {
+    fail(`${label}.extensions.vector is not allowed; use ${label}.extensions.pgvector`);
+  }
+  const pgvector = extensions.pgvector;
   const vector = requireObject(pgvector, `${label}.extensions.pgvector`);
   const status = requireEnumString(
     vector.status,
@@ -340,44 +359,40 @@ function assertServices(truth, label) {
   const postgresql = assertBaseService(
     services.postgresql,
     `${label}.services.postgresql`,
-    ['credential_secret_ref', 'admin_secret_ref']
+    ['credential_secret_ref', 'admin_secret_ref'],
+    ['host']
   );
   assertVectorExtension(postgresql, `${label}.services.postgresql`);
 
   assertBaseService(
     services.mongodb,
     `${label}.services.mongodb`,
-    ['credential_secret_ref']
+    ['credential_secret_ref'],
+    ['host']
   );
   assertBaseService(
     services.redis,
     `${label}.services.redis`,
-    ['credential_secret_ref']
+    ['credential_secret_ref'],
+    ['host']
   );
 
   const objectStorage = assertBaseService(
     services.object_storage,
     `${label}.services.object_storage`,
-    ['credential_secret_ref']
+    ['credential_secret_ref'],
+    ['url', 'endpoint']
   );
   requireString(objectStorage.bucket, `${label}.services.object_storage.bucket`);
-  if (
-    !Object.prototype.hasOwnProperty.call(objectStorage, 'region') &&
-    !Object.prototype.hasOwnProperty.call(objectStorage, 'endpoint') &&
-    !Object.prototype.hasOwnProperty.call(objectStorage, 'url')
-  ) {
-    fail(`${label}.services.object_storage must include region or endpoint`);
-  }
+  requireString(objectStorage.region, `${label}.services.object_storage.region`);
 
   const oidc = assertBaseService(
     services.oidc,
     `${label}.services.oidc`,
     ['client_secret_ref'],
-    ['issuer_url', 'issuer', 'endpoint', 'url', 'host']
+    ['issuer_url']
   );
   requireString(oidc.client_id, `${label}.services.oidc.client_id`);
-  const issuer = oidc.issuer_url || oidc.issuer;
-  assertEndpointValue(issuer, `${label}.services.oidc.issuer_url`);
 
   return {
     services_count: REQUIRED_SERVICES.length,

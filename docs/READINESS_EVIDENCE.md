@@ -45,12 +45,15 @@ profile, digest, and redaction/source-safety shape. The raw envelope schema is
 adapter/canonical `agentsmith.release-kit-evidence/v1`. It is not render,
 apply, deploy, package, release, rollout, smoke, or operator readiness
 evidence. Raw envelopes explicitly name `release_kit_output`, use
-`release-kit-evidence-subject` provenance subjects, and include inline neutral
-substrate connection truth for `external_declared`.
+`release-kit-evidence-subject` provenance subjects, list only `evidence.json`
+plus the mapped output files in `evidence_subject.files`, and include inline
+neutral substrate connection truth for `external_declared`.
 
 Target preflight output proves only that one explicit
 `agentsmith.substrate-connection.truth/v1` document matches the requested
-target axes and contains the required service, secret reference, TLS or
-sslmode, vector extension, OIDC, object storage, and reachability declarations.
-It does not connect to Kubernetes and is not render, apply, deploy, package,
-release, rollout, smoke, or operator readiness evidence.
+target axes and contains the required service, canonical endpoint, secret
+reference, TLS or sslmode, `extensions.pgvector.status: installed`, object
+storage, OIDC `issuer_url`, and reachability status `declared_reachable` or
+`verified_by_operator`. It does not connect to Kubernetes and is not render,
+apply, deploy, package, release, rollout, smoke, or operator readiness
+evidence.

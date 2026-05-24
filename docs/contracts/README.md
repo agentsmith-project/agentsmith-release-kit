@@ -42,11 +42,12 @@ shape. The evidence `git_sha` is the AgentSmith product release commit;
 required to equal it. The raw envelope must include `release_kit_output` as
 `deploy-result.json#substrate`, `image-map.json`, or
 `render-report.json+rollout-report.json`; release-kit must not output
-AgentSmith product-flow evidence. The selected output must be present in
-`evidence_subject.files`: `deploy-result.json`, `image-map.json`, or both
-`render-report.json` and `rollout-report.json`. Artifact provenance uses
-`subject_name: release-kit-evidence-subject`. `external_declared` envelopes
-must include inline neutral `substrate_connection_truth`. The subject file
+AgentSmith product-flow evidence. `evidence_subject.files` must contain only
+`evidence.json` plus the mapped output files: `deploy-result.json`,
+`image-map.json`, or both `render-report.json` and `rollout-report.json`.
+Artifact provenance uses `subject_name: release-kit-evidence-subject`.
+`external_declared` envelopes must include inline neutral
+`substrate_connection_truth`. The subject file
 entry for `evidence.json` must use the
 canonical evidence body without `artifact_provenance` as its listed sha256. All
 other subject file entries use their raw file sha256. This prevents
@@ -61,10 +62,13 @@ legacy target names, and binds the truth document to the supplied
 `target_cluster/substrate_source/distribution` tuple. It writes
 `target-preflight-report.json` with `readiness: false` and
 `scope: target_preflight_intake_only`. It validates declarations for required
-substrate services, endpoints, secret refs or redacted fingerprints, TLS or
-sslmode, PostgreSQL vector extension truth, OIDC, object storage, and
-reachability fields. It does not connect to Kubernetes, render, apply, smoke,
-package, deploy, or claim release readiness.
+substrate services, canonical endpoints (`host` for
+PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and `bucket` for
+object storage, and `issuer_url` for OIDC), secret refs or redacted
+fingerprints, TLS or sslmode, `extensions.pgvector.status: installed`, and
+reachability status `declared_reachable` or `verified_by_operator`. It does
+not connect to Kubernetes, render, apply, smoke, package, deploy, or claim
+release readiness.
 
 Future contracts should cover:
 

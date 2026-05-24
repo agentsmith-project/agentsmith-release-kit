@@ -334,6 +334,32 @@ switch (mutation) {
       }
     ];
     break;
+  case 'release_kit_output_extra_subject_file':
+    break;
+  case 'image_map_extra_subject_file':
+    releaseKitOutput = 'image-map.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'image-map.json',
+        value: imageMap
+      }
+    ];
+    break;
+  case 'render_rollout_extra_subject_file':
+    releaseKitOutput = 'render-report.json+rollout-report.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'render-report.json',
+        value: renderReport
+      },
+      {
+        path: 'rollout-report.json',
+        value: rolloutReport
+      }
+    ];
+    break;
   case 'release_kit_output_missing_subject_file':
     releaseKitOutput = 'image-map.json';
     evidence.release_kit_output = releaseKitOutput;
@@ -355,6 +381,9 @@ switch (mutation) {
     break;
   case 'substrate_truth_localhost_endpoint':
     evidence.substrate_connection_truth.services.postgresql.host = 'localhost';
+    break;
+  case 'evidence_target_host_docker_internal':
+    evidence.target.base_url = 'https://host.docker.internal:3000';
     break;
   case 'substrate_truth_sslmode_only':
     useSslmodeOnly();
@@ -396,6 +425,9 @@ switch (mutation) {
   case 'subject_file_source_payload':
     deployResult.source_path =
       '/home/percy/works/mbos-v1/' + 'agent' + 'smith/' + 'sr' + 'c/' + 'ap' + 'p/page.tsx';
+    break;
+  case 'subject_file_host_docker_internal':
+    deployResult.endpoint = 'https://host.docker.internal:20000/status';
     break;
   case 'evidence_json_secret_payload':
     evidence['client_' + 'secret'] = 'not-real-credential-value';
@@ -475,6 +507,19 @@ if (mutation === 'subject_hardlink') {
   subjectEntries.push({
     path: 'hardlink-result.json',
     sha256: digestFile(hardlinkFile)
+  });
+}
+if (
+  [
+    'release_kit_output_extra_subject_file',
+    'image_map_extra_subject_file',
+    'render_rollout_extra_subject_file'
+  ].includes(mutation)
+) {
+  const extraFile = writeJson('extra-output.json', { status: 'passed' });
+  subjectEntries.push({
+    path: 'extra-output.json',
+    sha256: digestFile(extraFile)
   });
 }
 
@@ -642,7 +687,11 @@ expect_fail unknown-release-kit-output ci_artifact unknown_release_kit_output
 expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
 expect_fail missing-substrate-connection-truth ci_artifact missing_substrate_connection_truth
 expect_fail release-kit-output-missing-subject-file ci_artifact release_kit_output_missing_subject_file
+expect_fail release-kit-output-extra-subject-file ci_artifact release_kit_output_extra_subject_file
+expect_fail image-map-extra-subject-file ci_artifact image_map_extra_subject_file
+expect_fail render-rollout-extra-subject-file ci_artifact render_rollout_extra_subject_file
 expect_fail substrate-truth-localhost-endpoint ci_artifact substrate_truth_localhost_endpoint
+expect_fail evidence-target-host-docker-internal ci_artifact evidence_target_host_docker_internal
 expect_fail reserved-agentsmith-adapter-schema ci_artifact reserved_agentsmith_adapter_schema
 expect_fail release-identity-mismatch ci_artifact release_identity_mismatch
 expect_fail target-profile-mismatch ci_artifact target_profile_mismatch
@@ -680,6 +729,7 @@ expect_fail subject-symlink ci_artifact subject_symlink
 expect_fail subject-hardlink ci_artifact subject_hardlink
 expect_fail subject-file-secret-payload ci_artifact subject_file_secret_payload
 expect_fail subject-file-source-payload ci_artifact subject_file_source_payload
+expect_fail subject-file-host-docker-internal ci_artifact subject_file_host_docker_internal
 expect_fail evidence-json-secret-payload ci_artifact evidence_json_secret_payload
 
 if bash "$ROOT_DIR/scripts/verify-release.sh" >"$TMP_DIR/full-gate.out" 2>"$TMP_DIR/full-gate.err"; then

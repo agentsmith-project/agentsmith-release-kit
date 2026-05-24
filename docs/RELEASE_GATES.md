@@ -123,9 +123,9 @@ absolute paths, `..` escapes, symlinks, hardlinks, and obvious secret payloads.
 Accepted `release_kit_output` values are `deploy-result.json#substrate`,
 `image-map.json`, and `render-report.json+rollout-report.json`; `AgentSmith
 product flow aggregate` is rejected. The provenance `subject_name` must be
-`release-kit-evidence-subject`. The subject file list must include the mapped
-output file: `deploy-result.json`, `image-map.json`, or both
-`render-report.json` and `rollout-report.json`.
+`release-kit-evidence-subject`. The subject file list must contain only
+`evidence.json` plus the mapped output files: `deploy-result.json`,
+`image-map.json`, or both `render-report.json` and `rollout-report.json`.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.
@@ -168,11 +168,13 @@ release kit only validates the document. Raw evidence envelopes for
 `substrate_connection_truth`. For `kit_installed`, the same neutral truth
 schema is used and the document must declare `installed_by` and
 `release_kit_version`. Both paths must include the required substrate services,
-endpoint declarations, secret references, TLS or sslmode declarations,
-PostgreSQL vector extension truth, object storage and OIDC fields, and
-reachability status/proof fields. Plaintext credentials, connection strings,
-kubeconfig payloads, file or source URIs, and AgentSmith source paths are
-rejected.
+canonical endpoint declarations (`host` for PostgreSQL/MongoDB/Redis, `url` or
+`endpoint` plus `region` and `bucket` for object storage, and `issuer_url` for
+OIDC), secret references, TLS or sslmode declarations,
+`extensions.pgvector.status: installed`, and reachability status
+`declared_reachable` or `verified_by_operator` with proof. Plaintext
+credentials, connection strings, kubeconfig payloads, file or source URIs, and
+AgentSmith source paths are rejected.
 
 The generated `target-preflight-report.json` must keep `readiness: false`,
 `scope: target_preflight_intake_only`, and `status: pass`. It must not contain

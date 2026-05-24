@@ -155,6 +155,45 @@ switch (mutation) {
   case 'missing_reachability':
     delete truth.services.oidc.reachability;
     break;
+  case 'reachability_status_reachable':
+    truth.services.postgresql.reachability.status = 'reachable';
+    break;
+  case 'reachability_status_passed':
+    truth.services.mongodb.reachability.status = 'passed';
+    break;
+  case 'vector_status_enabled':
+    truth.services.postgresql.extensions.pgvector.status = 'enabled';
+    break;
+  case 'vector_status_available':
+    truth.services.postgresql.extensions.pgvector.status = 'available';
+    break;
+  case 'vector_extension_alias':
+    truth.services.postgresql.extensions.vector = truth.services.postgresql.extensions.pgvector;
+    delete truth.services.postgresql.extensions.pgvector;
+    break;
+  case 'postgresql_endpoint_alias':
+    truth.services.postgresql.endpoint = truth.services.postgresql.host;
+    delete truth.services.postgresql.host;
+    break;
+  case 'mongodb_url_alias':
+    truth.services.mongodb.url = 'https://mongodb.release.example.internal';
+    delete truth.services.mongodb.host;
+    break;
+  case 'redis_endpoint_alias':
+    truth.services.redis.endpoint = truth.services.redis.host;
+    delete truth.services.redis.host;
+    break;
+  case 'object_storage_host_alias':
+    truth.services.object_storage.host = 'objects.release.example.internal';
+    delete truth.services.object_storage.url;
+    break;
+  case 'object_storage_missing_region':
+    delete truth.services.object_storage.region;
+    break;
+  case 'oidc_issuer_alias':
+    truth.services.oidc.issuer = truth.services.oidc.issuer_url;
+    delete truth.services.oidc.issuer_url;
+    break;
   case 'localhost_endpoint':
     truth.services.postgresql.host = 'localhost';
     break;
@@ -313,6 +352,17 @@ expect_fail missing-secret-ref missing_secret_ref
 expect_fail missing-tls missing_tls
 expect_fail missing-vector-extension missing_vector_extension
 expect_fail missing-reachability missing_reachability
+expect_fail reachability-status-reachable reachability_status_reachable
+expect_fail reachability-status-passed reachability_status_passed
+expect_fail vector-status-enabled vector_status_enabled
+expect_fail vector-status-available vector_status_available
+expect_fail vector-extension-alias vector_extension_alias
+expect_fail postgresql-endpoint-alias postgresql_endpoint_alias
+expect_fail mongodb-url-alias mongodb_url_alias
+expect_fail redis-endpoint-alias redis_endpoint_alias
+expect_fail object-storage-host-alias object_storage_host_alias
+expect_fail object-storage-missing-region object_storage_missing_region
+expect_fail oidc-issuer-alias oidc_issuer_alias
 expect_fail localhost-endpoint localhost_endpoint
 expect_fail raw-password raw_password
 expect_fail raw-token raw_token

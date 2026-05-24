@@ -74,11 +74,12 @@ profile. The raw envelope schema is
 The raw envelope must explicitly name `release_kit_output` as
 `deploy-result.json#substrate`, `image-map.json`, or
 `render-report.json+rollout-report.json`; release-kit cannot produce
-AgentSmith product-flow evidence. That output must be listed in
-`evidence_subject.files`: `deploy-result.json`, `image-map.json`, or both
-`render-report.json` and `rollout-report.json`. Its artifact provenance
-`subject_name` is `release-kit-evidence-subject`. `external_declared` evidence
-must carry inline neutral substrate connection truth.
+AgentSmith product-flow evidence. `evidence_subject.files` must contain only
+`evidence.json` plus the mapped output files: `deploy-result.json`,
+`image-map.json`, or both `render-report.json` and `rollout-report.json`. Its
+artifact provenance `subject_name` is `release-kit-evidence-subject`.
+`external_declared` evidence must carry inline neutral substrate connection
+truth.
 Its `evidence-validation-report.json` must keep `readiness: false` and
 `scope: release_kit_evidence_intake_only`; it does not claim deploy, package,
 smoke, operator, or release readiness.
@@ -90,6 +91,10 @@ operator-provided `agentsmith.substrate-connection.truth/v1` document. Its
 `scope: target_preflight_intake_only`; it does not connect to Kubernetes,
 render manifests, apply resources, smoke a cluster, package artifacts, or
 claim deploy or release readiness.
+Accepted connection truth uses `host` for PostgreSQL/MongoDB/Redis, `url` or
+`endpoint` plus `region` and `bucket` for object storage, `issuer_url` for
+OIDC, `extensions.pgvector.status: installed`, and reachability status
+`declared_reachable` or `verified_by_operator`.
 
 ## Non-Goals
 

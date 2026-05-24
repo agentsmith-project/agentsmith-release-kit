@@ -45,7 +45,7 @@ const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const LOCAL_URI_RE = /\b(?:file|local|source|git\+file):\/\//i;
 const LOCAL_SCHEME_RE = /^(?:file|local|source|git\+file):/i;
-const LOCALHOST_URI_RE = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?)(?::\d+)?(?:[/?#]|$)/i;
+const LOCALHOST_URI_RE = /\bhttps?:\/\/(?:localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|0\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[?(?:::|::1)\]?|host\.docker\.internal)(?::\d+)?(?:[/?#]|$)/i;
 const RELATIVE_URI_RE = /(^|[\s"'(=])\.\.?\//;
 const ABSOLUTE_LOCAL_PATH_RE = /(^|[\s"'(=])(?:~\/|\/(?:Users|home|tmp|var|private|workspace|workspaces|mnt|opt|etc)\/|[A-Za-z]:[\\/])/;
 const AGENTSMITH_SOURCE_PATH_RE = /\/home\/[^/]+\/works\/[^/]+\/agentsmith(?:\/|$)/i;
@@ -258,6 +258,7 @@ function isLoopbackHost(hostname) {
   const normalized = hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1');
   return (
     normalized === 'localhost' ||
+    normalized === 'host.docker.internal' ||
     normalized === '::' ||
     normalized === '::1' ||
     /^(?:127|0)(?:\.\d{1,3}){3}$/.test(normalized)
@@ -495,10 +496,19 @@ async function assertSubjectFiles(evidenceRoot, evidence, evidenceSubject, relea
   }
 
   const requiredFiles = RELEASE_KIT_OUTPUT_REQUIRED_FILES.get(releaseKitOutput) || [];
+  const expectedFiles = new Set(['evidence.json', ...requiredFiles]);
   for (const requiredFile of requiredFiles) {
     if (!seen.has(requiredFile)) {
       fail(`evidence.release_kit_output ${releaseKitOutput} requires evidence_subject.files to include ${requiredFile}`);
     }
+  }
+  for (const relativePath of seen) {
+    if (!expectedFiles.has(relativePath)) {
+      fail(`evidence.release_kit_output ${releaseKitOutput} requires evidence_subject.files to contain only ${[...expectedFiles].join(', ')}`);
+    }
+  }
+  if (seen.size !== expectedFiles.size) {
+    fail(`evidence.release_kit_output ${releaseKitOutput} requires evidence_subject.files to be exactly ${[...expectedFiles].join(', ')}`);
   }
 
   return {
