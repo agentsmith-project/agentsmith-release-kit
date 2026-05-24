@@ -77,6 +77,17 @@ and release/rollout digests; it must not include response bodies, raw headers,
 custom token payloads, product-flow fields, `verdict`, `release_verdict`, or
 deploy readiness fields.
 
+The current `--online-deployment-gate` validator is a focused online
+orchestration runner only. It accepts only
+`existing_kubernetes/external_declared/online`, calls existing validators in
+order, and writes `online-deployment-gate-report.json` with `schema:
+agentsmith.online-deployment-gate/v1`, `readiness: false`, and `scope:
+online_deployment_gate_only`. Default mode stops after server-side dry-run
+apply; confirmed apply runs rollout and optional smoke. The report lists only
+step names and relative report paths, and must not claim deploy readiness,
+release readiness, product-flow evidence, rollback, image mirroring, airgap
+packaging, or registry credential handling.
+
 The current `--evidence` validator is a focused release-kit evidence envelope
 intake diagnostic only. It requires `evidence.json` and
 `evidence-subject.json`, binds them to the supplied release contract raw

@@ -321,6 +321,37 @@ It must not contain response body, raw headers, custom token payloads,
 kubeconfig content, product-flow fields, `verdict`, `release_verdict`, or
 deploy readiness fields.
 
+## Online Deployment Gate Focused Orchestration
+
+Run:
+
+```bash
+bash scripts/test-online-deployment-gate.sh
+```
+
+This focused runner exercises `bash scripts/verify-release.sh
+--online-deployment-gate`. It is a KISS sequence runner for
+`existing_kubernetes/external_declared/online` only. It does not implement a
+release platform, cloud resource provisioning, image mirroring, airgap bundle
+creation, kind image import, rollback, product-flow checks, or full release
+readiness.
+
+The runner calls existing focused diagnostics in order: inputs,
+target-preflight, template-package, render, render-check, apply, and, for
+confirmed `--mode apply` only, rollout plus optional route smoke. Default
+`server-dry-run` stops after apply dry-run and rejects `--smoke-url`. Apply
+mode requires exact `--confirm-apply
+existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
+before Kubernetes calls.
+
+The generated `online-deployment-gate-report.json` must keep `schema:
+agentsmith.online-deployment-gate/v1`, `scope:
+online_deployment_gate_only`, `readiness: false`, and `status: pass`. It
+records release identity, release contract digest, target axes, mode, and
+step names with relative report paths. It must not contain raw command args,
+response bodies, kubeconfig content, secret payloads, product-flow fields,
+`verdict`, `release_verdict`, or deploy readiness fields.
+
 ## Evidence Envelope Focused Diagnostic
 
 Run:

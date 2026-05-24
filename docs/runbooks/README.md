@@ -28,5 +28,13 @@ Current focused route smoke runbook note: use `bash scripts/verify-release.sh
 URL by default; local HTTP is reserved for focused tests with explicit
 `--allow-http --allow-localhost`. Do not add custom headers or tokens.
 
+Current focused online deployment gate note: use `bash scripts/verify-release.sh
+--online-deployment-gate` when an operator wants one KISS command to run the
+online focused chain. Default mode is server-side dry-run and does not run
+rollout or smoke. Confirmed apply requires exact confirm text and an operator
+run id; smoke is optional and only runs after rollout. This is not airgap,
+kind rehearsal, image mirroring, rollback, deploy readiness, or release
+readiness.
+
 Runbooks must avoid raw secrets. They should describe secret refs, redacted
 fingerprints, prerequisites, and explicit operator inputs.

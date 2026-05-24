@@ -18,6 +18,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
 | Route/service smoke diagnostic | Focused only | `smoke-report.json` keeps `readiness: false`. |
+| Online deployment gate runner | Focused only | `online-deployment-gate-report.json` keeps `readiness: false`. |
 | Release-kit evidence envelope diagnostic | Focused only | `evidence-validation-report.json` keeps `readiness: false`. |
 | Target preflight diagnostic | Focused only | `target-preflight-report.json` keeps `readiness: false`. |
 | Online deploy evidence | Not implemented | Future release-kit authority. |
@@ -90,6 +91,16 @@ userinfo/query/hash and localhost-style URLs unless focused tests explicitly
 allow them, and records only normalized route and status summaries.
 `smoke-report.json` keeps `readiness: false`; it is not deploy, release,
 product-flow, package, full smoke, or operator readiness evidence.
+
+Online deployment gate output proves only that the repo-local runner invoked
+the focused online chain in order for
+`existing_kubernetes/external_declared/online`. Default mode stops after
+server-side dry-run apply; confirmed apply additionally runs rollout and
+optional route smoke. It does not provision cloud resources, mirror images,
+build airgap bundles, import images into kind, roll back changes, or produce
+product-flow evidence. `online-deployment-gate-report.json` keeps
+`readiness: false`; it is not deploy, release, package, airgap, kind, product
+readiness, or operator signoff evidence.
 
 Release-kit evidence envelope output proves only that one pre-existing evidence
 root has the expected release-kit-owned envelope, subject, provenance, target

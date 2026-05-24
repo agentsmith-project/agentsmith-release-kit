@@ -5,8 +5,9 @@ Status: bootstrap-only, docs-governance-first skeleton.
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
-contains image-map, apply-only, rollout/live digest, and route smoke focused
-diagnostics, but does not contain full deploy tooling yet.
+contains image-map, apply-only, rollout/live digest, route smoke, and online
+deployment gate focused diagnostics, but does not contain full deploy tooling
+yet.
 
 ## Canonical Identity
 
@@ -286,6 +287,27 @@ normalized route summary, expected/observed status, duration, release contract
 digest, and rollout report digest/summary. It must not contain response body,
 raw headers, custom tokens, kubeconfig content, verdict fields, deploy
 readiness fields, or AgentSmith product-flow fields.
+
+Online deployment gate focused orchestration:
+
+```bash
+bash scripts/test-online-deployment-gate.sh
+```
+
+`--online-deployment-gate` is a KISS runner for
+`existing_kubernetes/external_declared/online` only. It invokes existing
+focused diagnostics in order: inputs, target-preflight, template-package,
+render, render-check, apply, and, in `--mode apply` only, rollout plus optional
+route smoke. Default `server-dry-run` mode stops after apply dry-run and
+rejects `--smoke-url`. Apply mode requires exact confirm text and an operator
+run id before Kubernetes calls.
+
+This runner does not provision cloud resources, mirror images, build airgap
+bundles, import images into kind, perform rollback, or claim deploy/release
+readiness. `online-deployment-gate-report.json` keeps `schema:
+agentsmith.online-deployment-gate/v1`, `scope:
+online_deployment_gate_only`, `readiness: false`, and `status: pass`; it lists
+only step names and relative report paths.
 
 Release-kit evidence envelope focused diagnostic:
 

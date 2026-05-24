@@ -18,6 +18,7 @@ bash scripts/test-image-map.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
+bash scripts/test-online-deployment-gate.sh
 bash scripts/test-evidence.sh
 bash scripts/test-target-preflight.sh
 ```
@@ -171,6 +172,21 @@ or `host.docker.internal` unless focused tests explicitly pass
 route/status/duration and release/rollout digests, not response bodies, raw
 headers, custom tokens, kubeconfig content, product-flow fields, verdicts, or
 deploy readiness.
+
+The current `--online-deployment-gate` path is a KISS online focused
+orchestration runner only. It supports
+`existing_kubernetes/external_declared/online` and invokes existing diagnostics
+in order: inputs, target-preflight, template-package, render, render-check,
+apply, and, for confirmed `--mode apply` only, rollout plus optional smoke.
+Default `server-dry-run` does not run rollout or smoke and rejects
+`--smoke-url`. Confirmed apply requires exact `--confirm-apply
+existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
+before Kubernetes calls. Its `online-deployment-gate-report.json` must keep
+`readiness: false` and `scope: online_deployment_gate_only`; it records only
+release identity, target profile, mode, step names, and relative report paths.
+It does not provision cloud resources, mirror images, build airgap bundles,
+import images into kind, roll back changes, run product flows, or claim deploy
+or release readiness.
 
 The current `--evidence` path is a focused diagnostic for release-kit evidence
 envelope intake only. It consumes a release contract, an evidence root

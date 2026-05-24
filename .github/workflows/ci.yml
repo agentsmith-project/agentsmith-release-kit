@@ -32,6 +32,8 @@ jobs:
         run: bash scripts/test-rollout.sh
       - name: Route smoke focused guard
         run: bash scripts/test-smoke.sh
+      - name: Online deployment gate focused guard
+        run: bash scripts/test-online-deployment-gate.sh
       - name: Evidence envelope focused guard
         run: bash scripts/test-evidence.sh
       - name: Target preflight focused guard
