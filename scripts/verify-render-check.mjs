@@ -164,11 +164,36 @@ function isInsidePath(rootDir, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+async function canonicalForbiddenSourceRoots(inputRoots) {
+  const roots = [];
+
+  for (const input of inputRoots) {
+    const requested = path.resolve(input);
+    let stat;
+    try {
+      stat = await fs.stat(requested);
+    } catch {
+      cliFail(`forbidden source root must exist: ${input}`);
+    }
+
+    if (!stat.isDirectory()) {
+      cliFail(`forbidden source root must be a directory: ${input}`);
+    }
+
+    try {
+      roots.push(await fs.realpath(requested));
+    } catch (error) {
+      cliFail(`cannot resolve forbidden source root: ${error.message}`);
+    }
+  }
+
+  return roots;
+}
+
 function assertNotForbiddenSourcePath(candidate, label, forbiddenSourceRoots) {
   const resolved = path.resolve(candidate);
   for (const root of forbiddenSourceRoots) {
-    const forbiddenRoot = path.resolve(root);
-    if (isInsidePath(forbiddenRoot, resolved)) {
+    if (isInsidePath(root, resolved)) {
       fail(`${label} must not point to a configured forbidden product source tree`);
     }
   }
@@ -898,7 +923,7 @@ async function main() {
   }
 
   const targetProfile = parseTargetProfile(args.targetProfile);
-  const forbiddenSourceRoots = args.forbiddenSourceRoots || [];
+  const forbiddenSourceRoots = await canonicalForbiddenSourceRoots(args.forbiddenSourceRoots || []);
   const releaseContractPath = await assertPathBoundary(
     args.releaseContract,
     'release contract',

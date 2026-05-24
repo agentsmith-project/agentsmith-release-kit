@@ -73,6 +73,29 @@ expect_target_profile_fail() {
   pass "legacy or synonym target profile rejected: $label"
 }
 
+expect_forbidden_root_cli_fail() {
+  local label="$1"
+  local rendered_manifests="$TMP_DIR/manifests-forbidden-root-$label"
+  local output_dir="$TMP_DIR/out-forbidden-root-$label"
+  local forbidden_source_root="$TMP_DIR/missing-forbidden-source-root-$label"
+
+  write_manifests "$rendered_manifests" valid
+
+  if run_render_check "$rendered_manifests" "$output_dir" "$TARGET_PROFILE" "$VALID_CONTRACT" "$forbidden_source_root" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected forbidden source root CLI case to fail: $label"
+  fi
+
+  if ! grep -Eq "forbidden source root.*exist|forbidden source root.*directory" "$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected forbidden source root CLI message for: $label"
+  fi
+
+  pass "forbidden source root CLI rejected: $label"
+}
+
 expect_source_path_fail() {
   local label="$1"
   local mode="$2"
@@ -86,6 +109,12 @@ expect_source_path_fail() {
 
   if [[ "$mode" == "release_contract" ]]; then
     bad_contract="$forbidden_source_root/release-contract.json"
+  elif [[ "$mode" == "rendered_root_canonical_alias" ]]; then
+    local canonical_forbidden_source_root="$TMP_DIR/canonical-forbidden-product-source-$label"
+    rendered_manifests="$canonical_forbidden_source_root/rendered-manifests"
+    forbidden_source_root="$TMP_DIR/forbidden-product-source-link-$label"
+    write_manifests "$rendered_manifests" valid
+    ln -s "$canonical_forbidden_source_root" "$forbidden_source_root"
   elif [[ "$mode" == "rendered_root_symlink" ]]; then
     "$NODE_BIN" --input-type=module - "$forbidden_source_root" "$rendered_manifests" <<'NODE'
 import fs from 'node:fs';
@@ -383,7 +412,9 @@ expect_fail commented_doc_separator_unknown_image
 expect_target_profile_fail legacy_local_kind "local-kind/external_declared/online"
 expect_fail secret_payload
 expect_fail symlink_escape
+expect_forbidden_root_cli_fail missing_forbidden_root
 expect_source_path_fail release_contract_source_path release_contract
+expect_source_path_fail rendered_root_canonical_alias rendered_root_canonical_alias
 expect_source_path_fail rendered_root_source_symlink rendered_root_symlink
 
 pass "render/check focused diagnostic tests completed"
