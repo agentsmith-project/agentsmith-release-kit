@@ -44,7 +44,9 @@ profile, digest, and redaction/source-safety shape. The raw envelope schema is
 `agentsmith.release-kit-evidence-envelope/v1`, distinct from AgentSmith's
 adapter/canonical `agentsmith.release-kit-evidence/v1`. It is not render,
 apply, deploy, package, release, rollout, smoke, or operator readiness
-evidence.
+evidence. Raw envelopes explicitly name `release_kit_output`, use
+`release-kit-evidence-subject` provenance subjects, and include inline neutral
+substrate connection truth for `external_declared`.
 
 Target preflight output proves only that one explicit
 `agentsmith.substrate-connection.truth/v1` document matches the requested

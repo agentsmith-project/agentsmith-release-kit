@@ -39,7 +39,15 @@ sha256, release id, git sha, and explicit target profile, and writes
 `agentsmith.release-kit-evidence/v1` remains its adapter/canonical evidence
 shape. The evidence `git_sha` is the AgentSmith product release commit;
 `artifact_provenance.commit_sha` is the release-kit producer commit and is not
-required to equal it. The subject file entry for `evidence.json` must use the
+required to equal it. The raw envelope must include `release_kit_output` as
+`deploy-result.json#substrate`, `image-map.json`, or
+`render-report.json+rollout-report.json`; release-kit must not output
+AgentSmith product-flow evidence. The selected output must be present in
+`evidence_subject.files`: `deploy-result.json`, `image-map.json`, or both
+`render-report.json` and `rollout-report.json`. Artifact provenance uses
+`subject_name: release-kit-evidence-subject`. `external_declared` envelopes
+must include inline neutral `substrate_connection_truth`. The subject file
+entry for `evidence.json` must use the
 canonical evidence body without `artifact_provenance` as its listed sha256. All
 other subject file entries use their raw file sha256. This prevents
 `artifact_provenance.subject_sha256` from self-referencing the evidence file

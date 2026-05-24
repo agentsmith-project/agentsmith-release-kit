@@ -116,10 +116,16 @@ evidence shape and must not be used for this raw envelope.
 
 The check verifies the release contract raw sha256, release identity, exact
 target profile axes, `passed`/`failed` status and failure-class pairing,
-release-kit provenance, subject file digests, subject path safety, and
+the explicit `release_kit_output` mapping, release-kit provenance, subject file digests, subject path safety, and
 redaction/source scans for the envelope and subject files. It rejects legacy or
 synonym target values, AgentSmith product-flow fields, local provenance URIs,
 absolute paths, `..` escapes, symlinks, hardlinks, and obvious secret payloads.
+Accepted `release_kit_output` values are `deploy-result.json#substrate`,
+`image-map.json`, and `render-report.json+rollout-report.json`; `AgentSmith
+product flow aggregate` is rejected. The provenance `subject_name` must be
+`release-kit-evidence-subject`. The subject file list must include the mapped
+output file: `deploy-result.json`, `image-map.json`, or both
+`render-report.json` and `rollout-report.json`.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.
@@ -157,8 +163,10 @@ are `existing_kubernetes/external_declared/online` and
 `kind_rehearsal/kit_installed/online`.
 
 For `external_declared`, the operator provides the connection truth and the
-release kit only validates the document. For `kit_installed`, the same neutral
-truth schema is used and the document must declare `installed_by` and
+release kit only validates the document. Raw evidence envelopes for
+`external_declared` must include inline neutral connection truth under
+`substrate_connection_truth`. For `kit_installed`, the same neutral truth
+schema is used and the document must declare `installed_by` and
 `release_kit_version`. Both paths must include the required substrate services,
 endpoint declarations, secret references, TLS or sslmode declarations,
 PostgreSQL vector extension truth, object storage and OIDC fields, and

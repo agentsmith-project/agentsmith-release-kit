@@ -71,6 +71,14 @@ containing `evidence.json` and `evidence-subject.json`, and an explicit target
 profile. The raw envelope schema is
 `agentsmith.release-kit-evidence-envelope/v1`; AgentSmith
 `agentsmith.release-kit-evidence/v1` is the separate adapter/canonical shape.
+The raw envelope must explicitly name `release_kit_output` as
+`deploy-result.json#substrate`, `image-map.json`, or
+`render-report.json+rollout-report.json`; release-kit cannot produce
+AgentSmith product-flow evidence. That output must be listed in
+`evidence_subject.files`: `deploy-result.json`, `image-map.json`, or both
+`render-report.json` and `rollout-report.json`. Its artifact provenance
+`subject_name` is `release-kit-evidence-subject`. `external_declared` evidence
+must carry inline neutral substrate connection truth.
 Its `evidence-validation-report.json` must keep `readiness: false` and
 `scope: release_kit_evidence_intake_only`; it does not claim deploy, package,
 smoke, operator, or release readiness.

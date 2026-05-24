@@ -134,6 +134,15 @@ release contract digest, release identity, target profile, provenance, subject
 files, and redaction/source-safety rules. The raw envelope schema is
 `agentsmith.release-kit-evidence-envelope/v1`; AgentSmith owns the separate
 adapter/canonical `agentsmith.release-kit-evidence/v1` shape.
+The raw envelope must set `release_kit_output` to one mapped release-kit output:
+`deploy-result.json#substrate`, `image-map.json`, or
+`render-report.json+rollout-report.json`; release-kit must not emit
+AgentSmith product-flow evidence. The mapped output must also appear in
+`evidence_subject.files`: `deploy-result.json`, `image-map.json`, or both
+`render-report.json` and `rollout-report.json`. Its provenance `subject_name`
+is `release-kit-evidence-subject`. For `external_declared` targets, the
+envelope must include inline `agentsmith.substrate-connection.truth/v1`
+connection truth.
 `evidence-validation-report.json` is written with `readiness: false`,
 `scope: release_kit_evidence_intake_only`, and `status: pass`; it is not
 render, apply, smoke, package, deploy, or release readiness.

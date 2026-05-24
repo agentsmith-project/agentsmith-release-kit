@@ -103,6 +103,28 @@ const truth = {
   }
 };
 
+function useSslmodeOnly() {
+  for (const service of Object.values(truth.services)) {
+    delete service.tls;
+    service.sslmode = 'verify-full';
+  }
+}
+
+function useRedactedFingerprints() {
+  const fingerprint = `redacted:sha256:${'b'.repeat(64)}`;
+  truth.services.postgresql.credential_secret_ref = fingerprint;
+  truth.services.postgresql.admin_secret_ref = fingerprint;
+  truth.services.postgresql.tls.ca_secret_ref = fingerprint;
+  truth.services.mongodb.credential_secret_ref = fingerprint;
+  truth.services.mongodb.tls.ca_secret_ref = fingerprint;
+  truth.services.redis.credential_secret_ref = fingerprint;
+  truth.services.redis.tls.ca_secret_ref = fingerprint;
+  truth.services.object_storage.credential_secret_ref = fingerprint;
+  truth.services.object_storage.tls.ca_secret_ref = fingerprint;
+  truth.services.oidc.client_secret_ref = fingerprint;
+  truth.services.oidc.tls.ca_secret_ref = fingerprint;
+}
+
 if (substrateSource === 'kit_installed') {
   truth.installed_by = 'agentsmith-release-kit';
   truth.release_kit_version = '0.1.0';
@@ -132,6 +154,15 @@ switch (mutation) {
     break;
   case 'missing_reachability':
     delete truth.services.oidc.reachability;
+    break;
+  case 'localhost_endpoint':
+    truth.services.postgresql.host = 'localhost';
+    break;
+  case 'sslmode_only':
+    useSslmodeOnly();
+    break;
+  case 'redacted_fingerprint':
+    useRedactedFingerprints();
     break;
   case 'raw_password':
     truth.services.postgresql['pass' + 'word'] = 'plain-' + 'cre' + 'dential-value';
@@ -247,6 +278,20 @@ run_target_preflight "$KIT_PROFILE" "$KIT_TRUTH" "$KIT_OUT" >/dev/null
 assert_pass_report "$KIT_OUT/target-preflight-report.json" "$KIT_PROFILE"
 pass "valid kind_rehearsal/kit_installed/online truth accepted"
 
+SSLMODE_ONLY_TRUTH="$TMP_DIR/sslmode-only-valid.json"
+SSLMODE_ONLY_OUT="$TMP_DIR/out-sslmode-only-valid"
+write_truth "$SSLMODE_ONLY_TRUTH" "$EXTERNAL_PROFILE" sslmode_only
+run_target_preflight "$EXTERNAL_PROFILE" "$SSLMODE_ONLY_TRUTH" "$SSLMODE_ONLY_OUT" >/dev/null
+assert_pass_report "$SSLMODE_ONLY_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
+pass "valid sslmode-only truth accepted"
+
+REDACTED_FINGERPRINT_TRUTH="$TMP_DIR/redacted-fingerprint-valid.json"
+REDACTED_FINGERPRINT_OUT="$TMP_DIR/out-redacted-fingerprint-valid"
+write_truth "$REDACTED_FINGERPRINT_TRUTH" "$EXTERNAL_PROFILE" redacted_fingerprint
+run_target_preflight "$EXTERNAL_PROFILE" "$REDACTED_FINGERPRINT_TRUTH" "$REDACTED_FINGERPRINT_OUT" >/dev/null
+assert_pass_report "$REDACTED_FINGERPRINT_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
+pass "valid redacted fingerprint truth accepted"
+
 expect_profile_fail legacy-local-kind 'local-kind/external_declared/online'
 expect_profile_fail legacy-existing-cluster 'existing-cluster/external_declared/online'
 expect_profile_fail legacy-real-k8s 'real-k8s/external_declared/online'
@@ -268,6 +313,7 @@ expect_fail missing-secret-ref missing_secret_ref
 expect_fail missing-tls missing_tls
 expect_fail missing-vector-extension missing_vector_extension
 expect_fail missing-reachability missing_reachability
+expect_fail localhost-endpoint localhost_endpoint
 expect_fail raw-password raw_password
 expect_fail raw-token raw_token
 expect_fail raw-connection-string raw_connection_string

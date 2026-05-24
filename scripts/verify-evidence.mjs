@@ -3,6 +3,16 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  DISTRIBUTION_VALUES,
+  SUBSTRATE_SOURCE_VALUES,
+  TARGET_CLUSTER_VALUES,
+  assertNoUnsafeSubstratePayload,
+  isSafeSecretReference,
+  parseTargetProfile,
+  validateSubstrateConnectionTruth
+} from './lib/substrate-truth-validation.mjs';
+
 const REQUIRED_ARGS = [
   'releaseContract',
   'evidenceRoot',
@@ -13,11 +23,21 @@ const PRODUCER_REPO = 'github.com/agentsmith-project/agentsmith-release-kit';
 const EVIDENCE_SCHEMA = 'agentsmith.release-kit-evidence-envelope/v1';
 const EVIDENCE_SUBJECT_SCHEMA = 'agentsmith.release-kit-evidence-subject/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
-const EVIDENCE_SUBJECT_NAME = 'agentsmith-release-kit-evidence';
+const EVIDENCE_SUBJECT_NAME = 'release-kit-evidence-subject';
 const EVIDENCE_SUBJECT_URI = 'evidence-subject.json';
-const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
-const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
-const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
+const RELEASE_KIT_OUTPUT_VALUES = new Set([
+  'deploy-result.json#substrate',
+  'image-map.json',
+  'render-report.json+rollout-report.json'
+]);
+const RELEASE_KIT_OUTPUT_REQUIRED_FILES = new Map([
+  ['deploy-result.json#substrate', ['deploy-result.json']],
+  ['image-map.json', ['image-map.json']],
+  ['render-report.json+rollout-report.json', ['render-report.json', 'rollout-report.json']]
+]);
+const FORBIDDEN_RELEASE_KIT_OUTPUT_VALUES = new Set([
+  'AgentSmith product flow aggregate'
+]);
 const STATUS_VALUES = new Set(['passed', 'failed']);
 const PROVENANCE_KINDS = new Set(['ci_artifact', 'signed_operator_run']);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
@@ -45,7 +65,6 @@ const SECRET_VALUE_RE = [
   /\bkubeconfig\b/i
 ];
 const SAFE_REDACTED_SECRET_RE = /^(redacted|\*+)$/i;
-const SECRET_REF_PREFIX = 'secretRef:';
 const FORBIDDEN_RELEASE_KIT_KEYS = new Set(['product_flows', 'product_flow_results']);
 
 class CliError extends Error {
@@ -235,32 +254,6 @@ async function readJson(file, label) {
   }
 }
 
-function parseTargetProfile(targetProfile) {
-  requireString(targetProfile, 'target_profile');
-  const tuple = targetProfile.split('/');
-  if (tuple.length !== 3 || tuple.some((part) => part.trim() === '')) {
-    fail('target_profile must be <target_cluster>/<substrate_source>/<distribution>');
-  }
-  const [targetCluster, substrateSource, distribution] = tuple;
-  return {
-    target_cluster: requireEnumString(
-      targetCluster,
-      'target_profile.target_cluster',
-      TARGET_CLUSTER_VALUES
-    ),
-    substrate_source: requireEnumString(
-      substrateSource,
-      'target_profile.substrate_source',
-      SUBSTRATE_SOURCE_VALUES
-    ),
-    distribution: requireEnumString(
-      distribution,
-      'target_profile.distribution',
-      DISTRIBUTION_VALUES
-    )
-  };
-}
-
 function isLoopbackHost(hostname) {
   const normalized = hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1');
   return (
@@ -307,14 +300,13 @@ function requireRemoteUri(value, label) {
 }
 
 function isSafeSecretValue(value) {
+  if (typeof value !== 'string') {
+    return false;
+  }
   if (SAFE_REDACTED_SECRET_RE.test(value)) {
     return true;
   }
-  if (!value.startsWith(SECRET_REF_PREFIX)) {
-    return false;
-  }
-  const ref = value.slice(SECRET_REF_PREFIX.length);
-  return ref.trim() !== '' && !/[\r\n]/.test(ref) && !/^[\s:]+$/.test(ref);
+  return isSafeSecretReference(value);
 }
 
 function scanUnsafeString(value, label, issues) {
@@ -481,7 +473,7 @@ async function assertSubjectFile({
   return relativePath;
 }
 
-async function assertSubjectFiles(evidenceRoot, evidence, evidenceSubject) {
+async function assertSubjectFiles(evidenceRoot, evidence, evidenceSubject, releaseKitOutput) {
   const files = requireArray(evidenceSubject.files, 'evidence_subject.files');
   const seen = new Set();
 
@@ -500,6 +492,13 @@ async function assertSubjectFiles(evidenceRoot, evidence, evidenceSubject) {
 
   if (!seen.has('evidence.json')) {
     fail('evidence_subject.files must include evidence.json');
+  }
+
+  const requiredFiles = RELEASE_KIT_OUTPUT_REQUIRED_FILES.get(releaseKitOutput) || [];
+  for (const requiredFile of requiredFiles) {
+    if (!seen.has(requiredFile)) {
+      fail(`evidence.release_kit_output ${releaseKitOutput} requires evidence_subject.files to include ${requiredFile}`);
+    }
   }
 
   return {
@@ -549,6 +548,40 @@ function assertTarget(evidence, targetProfile) {
   if (!hasNamespaceBaseUrl && !hasClusterServer) {
     fail('evidence.target must include namespace/base_url or cluster/server');
   }
+}
+
+function assertReleaseKitOutput(evidence) {
+  const releaseKitOutput = requireString(
+    evidence.release_kit_output,
+    'evidence.release_kit_output'
+  );
+  if (FORBIDDEN_RELEASE_KIT_OUTPUT_VALUES.has(releaseKitOutput)) {
+    fail('evidence.release_kit_output must not be AgentSmith product flow aggregate');
+  }
+  if (!RELEASE_KIT_OUTPUT_VALUES.has(releaseKitOutput)) {
+    fail(`evidence.release_kit_output must be one of: ${[...RELEASE_KIT_OUTPUT_VALUES].join(', ')}`);
+  }
+  return releaseKitOutput;
+}
+
+function assertExternalDeclaredSubstrateConnectionTruth(evidence, targetProfile) {
+  if (evidence.substrate_source !== 'external_declared') {
+    return;
+  }
+
+  const truth = requireObject(
+    evidence.substrate_connection_truth,
+    'evidence.substrate_connection_truth'
+  );
+  assertNoUnsafeSubstratePayload(
+    truth,
+    'evidence.substrate_connection_truth',
+    JSON.stringify(truth)
+  );
+  validateSubstrateConnectionTruth(truth, targetProfile, {
+    label: 'evidence.substrate_connection_truth',
+    requiredSubstrateSource: 'external_declared'
+  });
 }
 
 function assertStatus(evidence) {
@@ -729,6 +762,7 @@ function assertEvidenceShape(evidence) {
 
 function buildReport({
   evidence,
+  releaseKitOutput,
   targetProfile,
   releaseContractInputDigest,
   provenance,
@@ -739,6 +773,7 @@ function buildReport({
     readiness: false,
     release_id: evidence.release_id,
     git_sha: evidence.git_sha,
+    release_kit_output: releaseKitOutput,
     target_profile: targetProfile,
     artifacts: {
       release_contract: {
@@ -794,6 +829,7 @@ async function main() {
   }
 
   assertEvidenceShape(evidence);
+  const releaseKitOutput = assertReleaseKitOutput(evidence);
   assertSchemaVersion(
     evidenceSubject.schema_version,
     EVIDENCE_SUBJECT_SCHEMA,
@@ -801,9 +837,15 @@ async function main() {
   );
   assertReleaseIdentity(evidence, releaseContractInput);
   assertTarget(evidence, targetProfile);
+  assertExternalDeclaredSubstrateConnectionTruth(evidence, targetProfile);
   assertStatus(evidence);
 
-  const subjectFiles = await assertSubjectFiles(evidenceRoot, evidence, evidenceSubject);
+  const subjectFiles = await assertSubjectFiles(
+    evidenceRoot,
+    evidence,
+    evidenceSubject,
+    releaseKitOutput
+  );
   const evidenceSubjectDigest = canonicalDigest(evidenceSubject);
   const provenance = assertProvenance(evidence, evidenceSubjectDigest);
 
@@ -811,6 +853,7 @@ async function main() {
     args.outputDir,
     buildReport({
       evidence,
+      releaseKitOutput,
       targetProfile,
       releaseContractInputDigest: releaseContractInput.inputDigest,
       provenance,

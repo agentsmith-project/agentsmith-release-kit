@@ -67,10 +67,11 @@ expect_target_profile_fail() {
 
 assert_pass_report() {
   local report_file="$1"
-  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+  local expected_release_kit_output="${2:-deploy-result.json#substrate}"
+  "$NODE_BIN" --input-type=module - "$report_file" "$expected_release_kit_output" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile] = process.argv.slice(2);
+const [reportFile, expectedReleaseKitOutput] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 if (report.scope !== 'release_kit_evidence_intake_only') {
   throw new Error(`unexpected scope: ${report.scope}`);
@@ -80,6 +81,9 @@ if (report.readiness !== false) {
 }
 if (report.status !== 'pass') {
   throw new Error(`unexpected status: ${report.status}`);
+}
+if (report.release_kit_output !== expectedReleaseKitOutput) {
+  throw new Error(`unexpected release_kit_output: ${report.release_kit_output}`);
 }
 if ('release_verdict' in report || 'verdict' in report) {
   throw new Error('evidence validation report must not claim a release verdict');
@@ -102,6 +106,7 @@ const producerRepo = 'github.com/agentsmith-project/agentsmith-release-kit';
 const releaseKitCommitSha = 'fedcba9876543210fedcba9876543210fedcba98';
 const contractRaw = fs.readFileSync(contractInput);
 const contract = JSON.parse(contractRaw.toString('utf8'));
+let releaseKitOutput = 'deploy-result.json#substrate';
 
 fs.mkdirSync(evidenceRoot, { recursive: true });
 
@@ -145,6 +150,7 @@ function writeJson(relativePath, value) {
 
 const evidence = {
   schema_version: 'agentsmith.release-kit-evidence-envelope/v1',
+  release_kit_output: releaseKitOutput,
   release_contract_digest: digestBuffer(contractRaw),
   release_id: contract.release_id,
   git_sha: contract.git_sha,
@@ -157,22 +163,204 @@ const evidence = {
     base_url: 'https://app.example.com'
   },
   status: 'passed',
-  failure_class: 'none'
+  failure_class: 'none',
+  substrate_connection_truth: {
+    schema_version: 'agentsmith.substrate-connection.truth/v1',
+    target_cluster: 'existing_kubernetes',
+    substrate_source: 'external_declared',
+    distribution: 'online',
+    declared_at: '2026-05-23T12:00:00.000Z',
+    declared_by: 'release-operator@example.com',
+    services: {
+      postgresql: {
+        host: 'postgresql.release.example.internal',
+        port: 5432,
+        database: 'appdb',
+        credential_secret_ref: 'secretRef:release/postgresql-credential',
+        admin_secret_ref: 'secretRef:release/postgresql-admin',
+        sslmode: 'verify-full',
+        tls: {
+          mode: 'verify-full',
+          ca_secret_ref: 'secretRef:release/postgresql-ca'
+        },
+        extensions: {
+          pgvector: {
+            status: 'installed',
+            version: '0.7.4'
+          }
+        },
+        reachability: {
+          status: 'declared_reachable',
+          proof: 'operator postgresql tcp/tls check 2026-05-23T12:00:00Z'
+        }
+      },
+      mongodb: {
+        host: 'mongodb.release.example.internal',
+        port: 27017,
+        credential_secret_ref: 'secretRef:release/mongodb-credential',
+        tls: {
+          mode: 'verify-full',
+          ca_secret_ref: 'secretRef:release/mongodb-ca'
+        },
+        reachability: {
+          status: 'declared_reachable',
+          proof: 'operator mongodb tcp/tls check 2026-05-23T12:00:00Z'
+        }
+      },
+      redis: {
+        host: 'redis.release.example.internal',
+        port: 6379,
+        credential_secret_ref: 'secretRef:release/redis-credential',
+        tls: {
+          mode: 'verify-full',
+          ca_secret_ref: 'secretRef:release/redis-ca'
+        },
+        reachability: {
+          status: 'declared_reachable',
+          proof: 'operator redis tcp/tls check 2026-05-23T12:00:00Z'
+        }
+      },
+      object_storage: {
+        url: 'https://objects.release.example.internal',
+        bucket: 'release-artifacts',
+        region: 'us-west-2',
+        credential_secret_ref: 'secretRef:release/object-storage-credential',
+        tls: {
+          mode: 'https',
+          ca_secret_ref: 'secretRef:release/object-storage-ca'
+        },
+        reachability: {
+          status: 'declared_reachable',
+          proof: 'operator bucket head-object check 2026-05-23T12:00:00Z'
+        }
+      },
+      oidc: {
+        issuer_url: 'https://keycloak.release.example.com/realms/app',
+        client_id: 'app-web',
+        client_secret_ref: 'secretRef:release/oidc-client',
+        tls: {
+          mode: 'https',
+          ca_secret_ref: 'secretRef:release/oidc-ca'
+        },
+        reachability: {
+          status: 'declared_reachable',
+          proof: 'operator oidc discovery check 2026-05-23T12:00:00Z'
+        }
+      }
+    }
+  }
 };
 
 const deployResult = {
   status: 'passed',
   namespace: 'service-ns'
 };
+const imageMap = {
+  status: 'passed',
+  images: [
+    {
+      name: 'agentsmith-web',
+      digest: `sha256:${'1'.repeat(64)}`
+    }
+  ]
+};
+const renderReport = {
+  scope: 'render_check_intake_only',
+  readiness: false,
+  status: 'pass'
+};
+const rolloutReport = {
+  scope: 'rollout_intake_only',
+  readiness: false,
+  status: 'passed'
+};
+let outputFiles = [
+  {
+    path: 'deploy-result.json',
+    value: deployResult
+  }
+];
 
 let provenanceArtifactUri =
   'gh-artifact://agentsmith-release-kit/evidence/10001/evidence-envelope.tgz';
 
+function useSslmodeOnly() {
+  for (const service of Object.values(evidence.substrate_connection_truth.services)) {
+    delete service.tls;
+    service.sslmode = 'verify-full';
+  }
+}
+
+function useRedactedFingerprints() {
+  const fingerprint = `redacted:sha256:${'b'.repeat(64)}`;
+  const services = evidence.substrate_connection_truth.services;
+  services.postgresql.credential_secret_ref = fingerprint;
+  services.postgresql.admin_secret_ref = fingerprint;
+  services.postgresql.tls.ca_secret_ref = fingerprint;
+  services.mongodb.credential_secret_ref = fingerprint;
+  services.mongodb.tls.ca_secret_ref = fingerprint;
+  services.redis.credential_secret_ref = fingerprint;
+  services.redis.tls.ca_secret_ref = fingerprint;
+  services.object_storage.credential_secret_ref = fingerprint;
+  services.object_storage.tls.ca_secret_ref = fingerprint;
+  services.oidc.client_secret_ref = fingerprint;
+  services.oidc.tls.ca_secret_ref = fingerprint;
+}
+
 switch (mutation) {
   case 'valid':
     break;
+  case 'valid_image_map_output':
+    releaseKitOutput = 'image-map.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'image-map.json',
+        value: imageMap
+      }
+    ];
+    break;
+  case 'valid_render_rollout_output':
+    releaseKitOutput = 'render-report.json+rollout-report.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'render-report.json',
+        value: renderReport
+      },
+      {
+        path: 'rollout-report.json',
+        value: rolloutReport
+      }
+    ];
+    break;
+  case 'release_kit_output_missing_subject_file':
+    releaseKitOutput = 'image-map.json';
+    evidence.release_kit_output = releaseKitOutput;
+    break;
   case 'missing_release_contract_digest':
     delete evidence.release_contract_digest;
+    break;
+  case 'missing_release_kit_output':
+    delete evidence.release_kit_output;
+    break;
+  case 'unknown_release_kit_output':
+    evidence.release_kit_output = 'unknown-output.json';
+    break;
+  case 'product_flow_release_kit_output':
+    evidence.release_kit_output = 'AgentSmith product flow aggregate';
+    break;
+  case 'missing_substrate_connection_truth':
+    delete evidence.substrate_connection_truth;
+    break;
+  case 'substrate_truth_localhost_endpoint':
+    evidence.substrate_connection_truth.services.postgresql.host = 'localhost';
+    break;
+  case 'substrate_truth_sslmode_only':
+    useSslmodeOnly();
+    break;
+  case 'substrate_truth_redacted_fingerprint':
+    useRedactedFingerprints();
     break;
   case 'reserved_agentsmith_adapter_schema':
     evidence.schema_version = 'agentsmith.release-kit-evidence/v1';
@@ -219,6 +407,7 @@ switch (mutation) {
   case 'bad_provenance_commit_sha':
   case 'missing_subject_uri':
   case 'bad_subject_name':
+  case 'old_subject_name':
   case 'missing_generated_at':
   case 'missing_generator_command':
   case 'missing_generator_version':
@@ -238,13 +427,18 @@ switch (mutation) {
     throw new Error(`unknown mutation: ${mutation}`);
 }
 
-const deployResultFile = writeJson('deploy-result.json', deployResult);
-const subjectEntries = [
-  {
-    path: 'deploy-result.json',
-    sha256: digestFile(deployResultFile)
-  }
-];
+const outputFilePaths = new Map();
+const subjectEntries = [];
+for (const outputFile of outputFiles) {
+  const file = writeJson(outputFile.path, outputFile.value);
+  outputFilePaths.set(outputFile.path, file);
+  subjectEntries.push({
+    path: outputFile.path,
+    sha256: digestFile(file)
+  });
+}
+const firstSubjectFile = outputFilePaths.get(subjectEntries[0].path);
+const deployResultFile = outputFilePaths.get('deploy-result.json') || firstSubjectFile;
 
 if (mutation === 'subject_missing_file') {
   subjectEntries.push({
@@ -313,7 +507,7 @@ const provenance = {
   producer_repo: producerRepo,
   normalized_remote: producerRepo,
   commit_sha: releaseKitCommitSha,
-  subject_name: 'agentsmith-release-kit-evidence',
+  subject_name: 'release-kit-evidence-subject',
   subject_uri: 'evidence-subject.json',
   subject_sha256: subjectSha,
   artifact_uri: provenanceArtifactUri,
@@ -363,6 +557,9 @@ if (mutation === 'missing_subject_uri') {
 if (mutation === 'bad_subject_name') {
   provenance.subject_name = 'agentsmith-release-kit-render-report';
 }
+if (mutation === 'old_subject_name') {
+  provenance.subject_name = 'agentsmith-release-kit-evidence';
+}
 if (mutation === 'missing_generated_at') {
   delete provenance.generated_at;
 }
@@ -404,6 +601,20 @@ run_evidence "$VALID_SIGNED_ROOT" "$VALID_SIGNED_OUT" >/dev/null
 assert_pass_report "$VALID_SIGNED_OUT/evidence-validation-report.json"
 pass "valid signed_operator_run evidence accepted"
 
+VALID_IMAGE_MAP_ROOT="$TMP_DIR/evidence-valid-image-map"
+VALID_IMAGE_MAP_OUT="$TMP_DIR/out-valid-image-map"
+write_evidence "$VALID_IMAGE_MAP_ROOT" ci_artifact valid_image_map_output
+run_evidence "$VALID_IMAGE_MAP_ROOT" "$VALID_IMAGE_MAP_OUT" >/dev/null
+assert_pass_report "$VALID_IMAGE_MAP_OUT/evidence-validation-report.json" "image-map.json"
+pass "valid image-map release_kit_output evidence accepted"
+
+VALID_RENDER_ROLLOUT_ROOT="$TMP_DIR/evidence-valid-render-rollout"
+VALID_RENDER_ROLLOUT_OUT="$TMP_DIR/out-valid-render-rollout"
+write_evidence "$VALID_RENDER_ROLLOUT_ROOT" ci_artifact valid_render_rollout_output
+run_evidence "$VALID_RENDER_ROLLOUT_ROOT" "$VALID_RENDER_ROLLOUT_OUT" >/dev/null
+assert_pass_report "$VALID_RENDER_ROLLOUT_OUT/evidence-validation-report.json" "render-report.json+rollout-report.json"
+pass "valid render+rollout release_kit_output evidence accepted"
+
 VALID_SECRET_REF_ROOT="$TMP_DIR/evidence-valid-secret-ref"
 VALID_SECRET_REF_OUT="$TMP_DIR/out-valid-secret-ref"
 write_evidence "$VALID_SECRET_REF_ROOT" ci_artifact valid_secret_ref
@@ -411,7 +622,27 @@ run_evidence "$VALID_SECRET_REF_ROOT" "$VALID_SECRET_REF_OUT" >/dev/null
 assert_pass_report "$VALID_SECRET_REF_OUT/evidence-validation-report.json"
 pass "valid persisted secretRef evidence accepted"
 
+VALID_SSLMODE_ONLY_ROOT="$TMP_DIR/evidence-valid-sslmode-only"
+VALID_SSLMODE_ONLY_OUT="$TMP_DIR/out-valid-sslmode-only"
+write_evidence "$VALID_SSLMODE_ONLY_ROOT" ci_artifact substrate_truth_sslmode_only
+run_evidence "$VALID_SSLMODE_ONLY_ROOT" "$VALID_SSLMODE_ONLY_OUT" >/dev/null
+assert_pass_report "$VALID_SSLMODE_ONLY_OUT/evidence-validation-report.json"
+pass "valid sslmode-only substrate truth evidence accepted"
+
+VALID_REDACTED_FINGERPRINT_ROOT="$TMP_DIR/evidence-valid-redacted-fingerprint"
+VALID_REDACTED_FINGERPRINT_OUT="$TMP_DIR/out-valid-redacted-fingerprint"
+write_evidence "$VALID_REDACTED_FINGERPRINT_ROOT" ci_artifact substrate_truth_redacted_fingerprint
+run_evidence "$VALID_REDACTED_FINGERPRINT_ROOT" "$VALID_REDACTED_FINGERPRINT_OUT" >/dev/null
+assert_pass_report "$VALID_REDACTED_FINGERPRINT_OUT/evidence-validation-report.json"
+pass "valid redacted fingerprint substrate truth evidence accepted"
+
 expect_fail missing-release-contract-digest ci_artifact missing_release_contract_digest
+expect_fail missing-release-kit-output ci_artifact missing_release_kit_output
+expect_fail unknown-release-kit-output ci_artifact unknown_release_kit_output
+expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
+expect_fail missing-substrate-connection-truth ci_artifact missing_substrate_connection_truth
+expect_fail release-kit-output-missing-subject-file ci_artifact release_kit_output_missing_subject_file
+expect_fail substrate-truth-localhost-endpoint ci_artifact substrate_truth_localhost_endpoint
 expect_fail reserved-agentsmith-adapter-schema ci_artifact reserved_agentsmith_adapter_schema
 expect_fail release-identity-mismatch ci_artifact release_identity_mismatch
 expect_fail target-profile-mismatch ci_artifact target_profile_mismatch
@@ -432,6 +663,7 @@ expect_fail missing-commit-sha ci_artifact missing_commit_sha
 expect_fail bad-provenance-commit-sha ci_artifact bad_provenance_commit_sha
 expect_fail missing-subject-uri ci_artifact missing_subject_uri
 expect_fail bad-subject-name ci_artifact bad_subject_name
+expect_fail old-subject-name ci_artifact old_subject_name
 expect_fail missing-generated-at ci_artifact missing_generated_at
 expect_fail missing-generator-command ci_artifact missing_generator_command
 expect_fail missing-generator-version ci_artifact missing_generator_version
