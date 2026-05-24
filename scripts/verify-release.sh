@@ -12,6 +12,7 @@ Usage:
   bash scripts/verify-release.sh --template-package --release-contract <json> --deploy-template-package <json> --archive <tgz> --output-dir <dir>
   bash scripts/verify-release.sh --render --release-contract <json> --deploy-template-package <json> --archive <tgz> --target-profile <target_cluster>/<substrate_source>/<distribution> --render-values <json> --substrate-truth <json> --output-dir <dir> [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --render-check --release-contract <json> --rendered-manifests <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir> [--forbidden-source-root <dir>]
+  bash scripts/verify-release.sh --image-map --release-contract <json> --target-profile existing_kubernetes/external_declared/<online|airgap> --output-dir <dir> [--target-registry <registry-host[/namespace]>]
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> --mode apply --confirm-apply existing_kubernetes/external_declared/online --operator-run-id <id> [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --rollout --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--timeout <duration>] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
@@ -26,6 +27,7 @@ Bootstrap status:
   --template-package checks materialized deploy template package intake only; it is not release readiness.
   --render renders repo-local materialized deploy templates only; it is not release readiness.
   --render-check checks rendered manifest image inventory only; it is not release readiness.
+  --image-map writes digest-pinned source/target image reference mapping only; it is not release readiness.
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
   --rollout checks Kubernetes rollout status and live image digests only; it is not release readiness.
   --smoke checks one route status after a bound rollout report only; it is not release readiness.
@@ -64,6 +66,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-render-check.mjs" "$@"
     echo "render-check mode is not release readiness"
+    ;;
+  --image-map)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-image-map.mjs" "$@"
+    echo "image-map mode is not release readiness"
     ;;
   --apply)
     shift

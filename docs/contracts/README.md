@@ -24,10 +24,28 @@ inventory diagnostic only. It consumes the release contract and an explicit
 rendered manifest directory; it does not consume AgentSmith source paths or
 declare release readiness. It binds Deployment, StatefulSet, DaemonSet,
 ReplicaSet, Job, CronJob, and Pod `containers` and `initContainers` images to
-`deploy_image_inventory` by exact image ref or digest, rejects legacy target
-profile values, and writes `render-report.json` with `readiness: false` and
-`scope: render_check_image_inventory_only`. The report must not include
-AgentSmith product-flow fields, `verdict`, or `release_verdict`.
+`deploy_image_inventory` by exact image ref or digest, rejects non-canonical
+pre-GA target profile names, and writes `render-report.json` with
+`readiness: false` and `scope: render_check_image_inventory_only`. The report
+must not include AgentSmith product-flow fields, `verdict`, or
+`release_verdict`.
+
+The current `--image-map` validator is a focused image-map / mirror-plan
+diagnostic only. It consumes only `release_contract.deploy_image_inventory`
+from the supplied release contract and an explicit target profile. It accepts
+`existing_kubernetes/external_declared/online` and
+`existing_kubernetes/external_declared/airgap` as CLI targets.
+`kind_rehearsal/kit_installed/online` is a canonical profile tuple but out of
+scope for image-map CLI. Only canonical profile tuples are accepted in
+`release_contract.target_profiles`; non-canonical pre-GA target names and
+synonym axes fail fast. It requires airgap runs to provide
+`--target-registry <registry-host[/namespace]>`. Every inventory image must be
+digest-pinned with a matching `digest` field, and duplicate ids, images, or
+digests fail fast. It writes `image-map.json` with `schema:
+agentsmith.image-map/v1`, `readiness: false`, and `scope: image_map_only`.
+The report is a plan for source/target digest references only; it must not
+claim registry presence, deploy readiness, package readiness, release
+readiness, product-flow evidence, or registry credential handling.
 
 The current `--rollout` validator is a focused Kubernetes rollout/live digest
 diagnostic only. It consumes the release contract, an already-rendered manifest
@@ -90,7 +108,7 @@ AgentSmith-produced evidence and are rejected here.
 The current `--target-preflight` validator is a focused substrate connection
 truth intake diagnostic only. It accepts only
 `agentsmith.substrate-connection.truth/v1`, rejects Docker substrate truth and
-legacy target names, and binds the truth document to the supplied
+non-canonical pre-GA target names, and binds the truth document to the supplied
 `target_cluster/substrate_source/distribution` tuple. It writes
 `target-preflight-report.json` with `readiness: false` and
 `scope: target_preflight_intake_only`. It validates declarations for required

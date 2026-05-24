@@ -197,19 +197,19 @@ switch (label) {
     refreshContractSubjectDigest();
     refreshContractArtifactDigest();
     break;
-  case 'legacy-contract-profile-local-kind':
+  case 'noncanonical-contract-profile-local-kind':
     contract.target_profiles[2].target_cluster = 'local-kind';
     break;
-  case 'legacy-contract-profile-existing-cluster':
+  case 'noncanonical-contract-profile-existing-cluster':
     contract.target_profiles[0].target_cluster = 'existing-cluster';
     break;
-  case 'legacy-contract-profile-real-k8s':
+  case 'noncanonical-contract-profile-real-k8s':
     contract.target_profiles[0].target_cluster = 'real-k8s';
     break;
-  case 'legacy-contract-profile-substrate-cluster':
+  case 'noncanonical-contract-profile-substrate-cluster':
     contract.target_profiles[0].substrate_source = 'cluster';
     break;
-  case 'legacy-contract-profile-distribution-cluster':
+  case 'noncanonical-contract-profile-distribution-cluster':
     contract.target_profiles[0].distribution = 'cluster';
     break;
   case 'non-agentsmith-repo-provenance':
@@ -352,7 +352,7 @@ switch (label) {
       attestation_sha256: digestE
     };
     break;
-  case 'legacy-attestation-fields':
+  case 'retired-attestation-fields':
     contract.artifact_provenance.attestation = {
       artifact_uri: 'gh-artifact://agentsmith/release-contract/10001/attestation.intoto.jsonl',
       artifact_sha256: digestE
@@ -895,11 +895,11 @@ pass "valid secretRef pull_secret_ref accepted"
 expect_unsupported_required_target_profile
 expect_kind_required_target_profile
 
-expect_target_profile_fail "legacy-target-profile-local-kind" \
+expect_target_profile_fail "noncanonical-target-profile-local-kind" \
   "local-kind/external_declared/online"
-expect_target_profile_fail "legacy-target-profile-existing-cluster" \
+expect_target_profile_fail "noncanonical-target-profile-existing-cluster" \
   "existing-cluster/external_declared/online"
-expect_target_profile_fail "legacy-target-profile-real-k8s" \
+expect_target_profile_fail "noncanonical-target-profile-real-k8s" \
   "real-k8s/external_declared/online"
 expect_target_profile_fail "synonym-target-profile-kind" \
   "kind/external_declared/online"
@@ -930,11 +930,11 @@ for label in \
   target-profile-support-level-substitute \
   target-profile-support-level-present \
   duplicate-target-profile-tuple \
-  legacy-contract-profile-local-kind \
-  legacy-contract-profile-existing-cluster \
-  legacy-contract-profile-real-k8s \
-  legacy-contract-profile-substrate-cluster \
-  legacy-contract-profile-distribution-cluster \
+  noncanonical-contract-profile-local-kind \
+  noncanonical-contract-profile-existing-cluster \
+  noncanonical-contract-profile-real-k8s \
+  noncanonical-contract-profile-substrate-cluster \
+  noncanonical-contract-profile-distribution-cluster \
   non-agentsmith-repo-provenance \
   non-agentsmith-product \
   missing-openapi-digest \
@@ -969,7 +969,7 @@ for label in \
   bad-required-product-flow \
   bearer-token \
   invalid-attestation-uri \
-  legacy-attestation-fields \
+  retired-attestation-fields \
   local-source-uri \
   github-source-operator-input-uri \
   absolute-source-path \

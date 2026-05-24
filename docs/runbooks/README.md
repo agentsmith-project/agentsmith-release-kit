@@ -15,6 +15,14 @@ Expected future runbook areas:
 - Troubleshooting and rollback.
 - `kind_rehearsal` for local or CI rehearsal only.
 
+Current focused image-map runbook note: use `bash scripts/verify-release.sh
+--image-map` to produce `image-map.json` from a release contract before online
+or airgap registry work. Online can omit `--target-registry` to use source
+digest refs directly. Airgap requires `--target-registry` with
+`<registry-host[/namespace]>`; namespace components must be lowercase and must
+start and end with alphanumeric characters. The output is a mirror plan only;
+it is not evidence that images already exist in that registry.
+
 Current focused route smoke runbook note: use `bash scripts/verify-release.sh
 --smoke` only after a passing focused `rollout-report.json`. Supply an HTTPS
 URL by default; local HTTP is reserved for focused tests with explicit

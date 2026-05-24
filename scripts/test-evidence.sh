@@ -62,7 +62,7 @@ expect_target_profile_fail() {
     fail "expected invalid target profile to fail: $label"
   fi
 
-  pass "legacy or synonym target profile rejected: $label"
+  pass "canonical profiles only; non-canonical pre-GA name or synonym axis rejected: $label"
 }
 
 assert_pass_report() {
@@ -793,9 +793,9 @@ expect_fail reserved-agentsmith-adapter-schema ci_artifact reserved_agentsmith_a
 expect_fail release-identity-mismatch ci_artifact release_identity_mismatch
 expect_fail target-profile-mismatch ci_artifact target_profile_mismatch
 
-expect_target_profile_fail legacy-local-kind 'local-kind/external_declared/online'
-expect_target_profile_fail legacy-existing-cluster 'existing-cluster/external_declared/online'
-expect_target_profile_fail legacy-real-k8s 'real-k8s/external_declared/online'
+expect_target_profile_fail noncanonical-local-kind 'local-kind/external_declared/online'
+expect_target_profile_fail noncanonical-existing-cluster 'existing-cluster/external_declared/online'
+expect_target_profile_fail noncanonical-real-k8s 'real-k8s/external_declared/online'
 expect_target_profile_fail synonym-kind 'kind/external_declared/online'
 expect_target_profile_fail synonym-cluster 'existing_kubernetes/cluster/online'
 

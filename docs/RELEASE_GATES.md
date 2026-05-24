@@ -118,8 +118,8 @@ After rendering, workload images in Deployment, StatefulSet, DaemonSet,
 ReplicaSet, Job, CronJob, Pod, and List manifests must be digest-pinned and
 must match `release_contract.deploy_image_inventory` by exact image ref or
 digest. Unknown images, tag-only image refs, digest drift, secret-looking
-rendered payloads, local/source paths, legacy target profile values such as
-`local-kind`, and synonym axes such as `kind` or `cluster` are rejected.
+rendered payloads, local/source paths, non-canonical pre-GA target profile names
+such as `local-kind`, and synonym axes such as `kind` or `cluster` are rejected.
 
 The generated `manifest-render-report.json` must keep `readiness: false`,
 `scope: manifest_render_only`, and `status: pass`. It must not contain
@@ -145,15 +145,54 @@ DaemonSet, ReplicaSet, Job, CronJob, and Pod workload images under
 `containers` and `initContainers`. Every discovered workload image must be
 digest-pinned and must match `release_contract.deploy_image_inventory` by exact
 image ref or digest. It rejects unknown images, tag-only image refs, digest
-drift, legacy or synonym target values such as `local-kind`, manifest path
-escapes, external symlinks, and obvious plaintext credential or kubeconfig
-payloads.
+drift, non-canonical pre-GA target names such as `local-kind`, synonym axes,
+manifest path escapes, external symlinks, and obvious plaintext credential or
+kubeconfig payloads.
 
 The generated `render-report.json` must keep `readiness: false`,
 `scope: render_check_image_inventory_only`, and `status: pass`. It must not
 contain `verdict` or `release_verdict`. It is not release readiness, package
 readiness, render readiness, apply evidence, rollout evidence, smoke evidence,
 deploy evidence, or operator signoff.
+
+## Image-Map / Mirror-Plan Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-image-map.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh --image-map`. It
+checks only the release contract `deploy_image_inventory` and writes a
+digest-pinned source-to-target image reference map. It does not log in to a
+registry, pull images, push images, create a mirror, build an airgap bundle,
+call Kubernetes, or claim deploy, package, or release readiness.
+
+`--image-map` accepts only `existing_kubernetes/external_declared/online` and
+`existing_kubernetes/external_declared/airgap` as CLI targets.
+`kind_rehearsal/kit_installed/online` is a canonical profile tuple but out of
+scope for image-map CLI. Only canonical profile tuples are accepted in
+`release_contract.target_profiles`; non-canonical pre-GA names and synonym
+axes fail fast. The selected target profile must exist in the release
+contract. Every inventory item must have unique `id`, `image`, and `digest`
+values; each image must be digest-pinned and its `@sha256` suffix must match
+the `digest` field.
+
+For online targets without `--target-registry`, target image refs equal source
+image refs and mappings use `action: use_source`. Airgap targets require
+`--target-registry <registry-host[/namespace]>`. Whenever a target registry is
+provided, mappings use `action: mirror_required`; target refs are derived by
+stripping the source registry and tag, preserving the repository path, and
+appending the original sha256 digest under the target registry. Target
+registries must not include schemes, userinfo, whitespace, query, hash,
+localhost, 127.x, `::1`, or `host.docker.internal`. Namespace components must
+be lowercase and must start and end with alphanumeric characters.
+
+The generated `image-map.json` must keep `schema: agentsmith.image-map/v1`,
+`scope: image_map_only`, `readiness: false`, and `status: pass`. It must not
+contain `verdict`, `release_verdict`, deploy readiness, AgentSmith
+product-flow fields, raw credential payloads, or registry login material.
 
 ## Kubernetes Apply-Only Focused Diagnostic
 
@@ -170,7 +209,8 @@ smoke routes, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
 `--apply` accepts only `existing_kubernetes/external_declared/online`.
-`kind_rehearsal`, `airgap`, legacy profile names, and synonym axes fail fast.
+Canonical profiles only: `kind_rehearsal`, `airgap`, non-canonical pre-GA
+names, and synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--kubeconfig`, `--context`, `--kubectl`, and `--forbidden-source-root`.
@@ -206,7 +246,8 @@ smoke routes, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
 `--rollout` accepts only `existing_kubernetes/external_declared/online`.
-`kind_rehearsal`, `airgap`, legacy profile names, and synonym axes fail fast.
+Canonical profiles only: `kind_rehearsal`, `airgap`, non-canonical pre-GA
+names, and synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--timeout` (default `120s`), `--kubeconfig`, `--context`, `--kubectl`, and
@@ -301,11 +342,12 @@ evidence shape and must not be used for this raw envelope.
 The check verifies the release contract raw sha256, release identity, exact
 target profile axes, `passed`/`failed` status and failure-class pairing,
 the explicit `release_kit_output` mapping, `evidence.release_kit_version`
-plain semver compatibility with `release_contract.min_release_kit_version`,
+plain semver check against `release_contract.min_release_kit_version`,
 release-kit provenance, subject file digests, subject path safety, and
-redaction/source scans for the envelope and subject files. It rejects legacy or
-synonym target values, AgentSmith product-flow fields, local provenance URIs,
-absolute paths, `..` escapes, symlinks, hardlinks, and obvious secret payloads.
+redaction/source scans for the envelope and subject files. It rejects
+non-canonical pre-GA target names, synonym axes, AgentSmith product-flow
+fields, local provenance URIs, absolute paths, `..` escapes, symlinks,
+hardlinks, and obvious secret payloads.
 Accepted `release_kit_output` values are `deploy-result.json#substrate`,
 `image-map.json`, `render-report.json+rollout-report.json`, and
 `render-report.json+rollout-report.json+smoke-report.json`; `AgentSmith
@@ -343,8 +385,9 @@ apply resources, roll out workloads, smoke product endpoints, create cloud
 resources, or build an airgap bundle.
 
 The accepted truth schema is
-`agentsmith.substrate-connection.truth/v1`. Docker substrate truth, legacy
-target names such as `local-kind`, `existing-cluster`, `real-k8s`, and synonym
+`agentsmith.substrate-connection.truth/v1`. Docker substrate truth,
+non-canonical pre-GA target names such as `local-kind`, `existing-cluster`,
+`real-k8s`, and synonym
 axes such as `kind` or `cluster` are rejected. The supported focused profiles
 are `existing_kubernetes/external_declared/online` and
 `kind_rehearsal/kit_installed/online`.

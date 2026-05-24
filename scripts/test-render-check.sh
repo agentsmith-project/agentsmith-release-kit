@@ -70,7 +70,7 @@ expect_target_profile_fail() {
     fail "expected invalid target profile to fail: $label"
   fi
 
-  pass "legacy or synonym target profile rejected: $label"
+  pass "canonical profiles only; non-canonical pre-GA name or synonym axis rejected: $label"
 }
 
 expect_forbidden_root_cli_fail() {
@@ -409,7 +409,7 @@ expect_fail yaml_list_unknown_image
 expect_fail flow_style_object_unknown_image
 expect_fail flow_style_inline_list_unknown_image
 expect_fail commented_doc_separator_unknown_image
-expect_target_profile_fail legacy_local_kind "local-kind/external_declared/online"
+expect_target_profile_fail noncanonical_local_kind "local-kind/external_declared/online"
 expect_fail secret_payload
 expect_fail symlink_escape
 expect_forbidden_root_cli_fail missing_forbidden_root

@@ -14,6 +14,7 @@ bash scripts/test-inputs.sh
 bash scripts/test-template-package.sh
 bash scripts/test-render.sh
 bash scripts/test-render-check.sh
+bash scripts/test-image-map.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
@@ -77,7 +78,7 @@ render values, and operator-provided substrate truth. It renders only
 is scalar placeholder replacement with roots `values`, `images`, `target`,
 `substrate`, and `release`, such as `${{ values.namespace }}` or
 `${{ images.web.image }}`; unknown placeholders fail fast. It rejects archive
-path escapes, symlinks, hardlinks, legacy target profile values,
+path escapes, symlinks, hardlinks, non-canonical pre-GA target profile names,
 secret-looking rendered payloads, local source paths, and workload images that
 are not digest-pinned entries in `deploy_image_inventory`. It does not call
 `kubectl`, apply or dry-run manifests, roll out workloads, smoke a cluster,
@@ -89,17 +90,40 @@ Kubernetes manifest image inventory only. It consumes a release contract, an
 already-rendered manifests directory, and an explicit target profile. Its
 `render-report.json` must keep `readiness: false` and
 `scope: render_check_image_inventory_only`; it checks digest-pinned workload
-images against `deploy_image_inventory` and rejects legacy target profile
-values, path escapes, external symlinks, and obvious plaintext credential or
-kubeconfig payloads. It does not render templates, apply resources, roll out
-workloads, smoke a cluster, package artifacts, or claim deploy or release
-readiness.
+images against `deploy_image_inventory` and rejects non-canonical pre-GA target
+profile names, path escapes, external symlinks, and obvious plaintext
+credential or kubeconfig payloads. It does not render templates, apply
+resources, roll out workloads, smoke a cluster, package artifacts, or claim
+deploy or release readiness.
+
+The current `--image-map` path is a focused diagnostic for image-map /
+mirror-plan generation only. It consumes a release contract, explicit target
+profile `existing_kubernetes/external_declared/online` or
+`existing_kubernetes/external_declared/airgap`, an output directory, and an
+optional `--target-registry <registry-host[/namespace]>`. It reads only
+`release_contract.deploy_image_inventory`, requires every inventory image to
+be digest-pinned with a matching `digest` field, rejects duplicate ids, images,
+and digests, and accepts only the two existing Kubernetes profiles as CLI
+targets. `kind_rehearsal/kit_installed/online` is a canonical profile tuple
+but out of scope for image-map CLI. Only canonical profile tuples are accepted
+in `release_contract.target_profiles`; non-canonical pre-GA names and synonym
+axes fail fast.
+For online without a target registry, it maps each image to itself with
+`action: use_source`; with a target registry, and always for airgap, it writes
+digest-pinned target refs under that registry with `action: mirror_required`.
+Registry namespace components must be lowercase and must start and end with
+alphanumeric characters.
+Its `image-map.json` must keep `readiness: false` and `scope:
+image_map_only`; it does not log in to a registry, pull, push, mirror, build an
+airgap bundle, import images into kind, call Kubernetes, or claim deploy,
+package, or release readiness.
 
 The current `--apply` path is a focused diagnostic for Kubernetes apply-only
 validation. It consumes a release contract, an already-rendered manifests
 directory, explicit target profile `existing_kubernetes/external_declared/online`,
-namespace, and output directory. It rejects `kind_rehearsal`, `airgap`, legacy
-profiles, and synonym axes. It first runs the render/check image inventory
+namespace, and output directory. It accepts canonical profiles only:
+`kind_rehearsal`, `airgap`, non-canonical pre-GA names, and synonym axes fail
+fast. It first runs the render/check image inventory
 guard, then uses `kubectl` against the target API. Default mode is
 `server-dry-run`, which runs server-side dry-run apply. True apply requires
 `--mode apply`, `--confirm-apply existing_kubernetes/external_declared/online`,
@@ -114,8 +138,9 @@ The current `--rollout` path is a focused diagnostic for Kubernetes
 rollout/live digest validation. It consumes a release contract,
 already-rendered manifests, explicit target profile
 `existing_kubernetes/external_declared/online`, namespace, output directory,
-and optional Kubernetes client settings. It rejects `kind_rehearsal`, `airgap`,
-legacy profiles, synonym axes, and non-rollout workload kinds before rollout
+and optional Kubernetes client settings. It accepts canonical profiles only:
+`kind_rehearsal`, `airgap`, non-canonical pre-GA names, and synonym axes fail
+fast, and it rejects non-rollout workload kinds before rollout
 commands. It first runs the render/check image inventory guard, then runs
 `kubectl rollout status` for Deployment, StatefulSet, and DaemonSet resources
 and reads each workload's selector through `kubectl get <kind>/<name> -o json`.

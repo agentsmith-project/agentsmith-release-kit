@@ -601,7 +601,7 @@ expect_fail_case unknown-variable \
   "$VALID_VALUES" \
   "$VALID_TRUTH"
 
-expect_fail_case legacy-local-kind \
+expect_fail_case noncanonical-local-kind \
   "$VALID_CONTRACT_MATERIAL" \
   "$VALID_PACKAGE_MATERIAL" \
   "$VALID_ARCHIVE" \

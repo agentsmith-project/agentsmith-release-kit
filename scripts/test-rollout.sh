@@ -435,7 +435,7 @@ expect_profile_fail() {
 
 expect_profile_fail kind-rehearsal "kind_rehearsal/kit_installed/online"
 expect_profile_fail airgap "existing_kubernetes/external_declared/airgap"
-expect_profile_fail legacy-local-kind "local-kind/external_declared/online"
+expect_profile_fail noncanonical-local-kind "local-kind/external_declared/online"
 expect_profile_fail synonym-cluster "existing_kubernetes/cluster/online"
 
 job_manifests="$TMP_DIR/manifests-job"

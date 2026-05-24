@@ -302,7 +302,7 @@ expect_profile_fail() {
     fail "expected invalid target profile to fail: $label"
   fi
 
-  pass "legacy or synonym target profile rejected: $label"
+  pass "canonical profiles only; non-canonical pre-GA name or synonym axis rejected: $label"
 }
 
 assert_pass_report() {
@@ -360,9 +360,9 @@ run_target_preflight "$EXTERNAL_PROFILE" "$REDACTED_FINGERPRINT_TRUTH" "$REDACTE
 assert_pass_report "$REDACTED_FINGERPRINT_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
 pass "valid redacted fingerprint truth accepted"
 
-expect_profile_fail legacy-local-kind 'local-kind/external_declared/online'
-expect_profile_fail legacy-existing-cluster 'existing-cluster/external_declared/online'
-expect_profile_fail legacy-real-k8s 'real-k8s/external_declared/online'
+expect_profile_fail noncanonical-local-kind 'local-kind/external_declared/online'
+expect_profile_fail noncanonical-existing-cluster 'existing-cluster/external_declared/online'
+expect_profile_fail noncanonical-real-k8s 'real-k8s/external_declared/online'
 expect_profile_fail synonym-kind 'kind/external_declared/online'
 expect_profile_fail synonym-substrate-cluster 'existing_kubernetes/cluster/online'
 expect_profile_fail synonym-distribution-cluster 'existing_kubernetes/external_declared/cluster'

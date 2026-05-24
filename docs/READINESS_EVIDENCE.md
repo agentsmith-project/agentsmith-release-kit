@@ -14,6 +14,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Template package archive diagnostic | Focused only | `template-package-report.json` keeps `readiness: false`. |
 | Materialized template render diagnostic | Focused only | `manifest-render-report.json` keeps `readiness: false`. |
 | Render/check image inventory diagnostic | Focused only | `render-report.json` keeps `readiness: false`. |
+| Image-map / mirror-plan diagnostic | Focused only | `image-map.json` keeps `readiness: false`. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
 | Route/service smoke diagnostic | Focused only | `smoke-report.json` keeps `readiness: false`. |
@@ -51,6 +52,17 @@ credential payloads pass focused safety checks. It does not render templates,
 apply resources, deploy, package, release, roll out workloads, smoke endpoints,
 or produce operator readiness evidence.
 
+Image-map output proves only that the release contract
+`deploy_image_inventory` can be projected into digest-pinned source/target
+image references for `existing_kubernetes/external_declared/online` or
+`existing_kubernetes/external_declared/airgap`. Online without a target
+registry uses source refs directly; a provided target registry, and every
+airgap run, produces mirror-required target refs. It does not verify that
+images exist in a target registry, does not pull or push images, does not build
+an airgap bundle, and does not support local kind image import.
+`image-map.json` keeps `readiness: false`; it is not deploy, package, release,
+rollout, smoke, product-flow, or operator readiness evidence.
+
 Kubernetes apply-only output proves only that already-rendered manifests passed
 the render/check image inventory guard and were accepted by `kubectl apply`
 against `existing_kubernetes/external_declared/online`. The default path is
@@ -65,10 +77,10 @@ inventory guard, reached `kubectl rollout status`, and had every expected
 render/check image digest visible in selector-scoped live pod `imageID` values
 or, when needed, live `image` fields. It accepts only
 `existing_kubernetes/external_declared/online`, rejects kind rehearsal,
-airgap, legacy or synonym target profiles, and writes only normalized digest
-summaries. `rollout-report.json` keeps `readiness: false`; it is not deploy,
-release, route smoke, product-flow, package, full rollout, or operator
-readiness evidence.
+airgap, non-canonical pre-GA target names, and synonym axes, and writes only
+normalized digest summaries. `rollout-report.json` keeps `readiness: false`;
+it is not deploy, release, route smoke, product-flow, package, full rollout,
+or operator readiness evidence.
 
 Route/service smoke output proves only that one explicit route returned the
 expected status after the supplied rollout report was bound to the same release

@@ -5,8 +5,8 @@ Status: bootstrap-only, docs-governance-first skeleton.
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
-contains apply-only, rollout/live digest, and route smoke focused diagnostics,
-but does not contain full deploy tooling yet.
+contains image-map, apply-only, rollout/live digest, and route smoke focused
+diagnostics, but does not contain full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -134,10 +134,11 @@ conditionals and no loops. Supported placeholder roots are `values`, `images`,
 `${{ release.release_id }}`. Unknown or non-scalar placeholders fail fast.
 Rendered workload images must be digest-pinned and must come from
 `release_contract.deploy_image_inventory`. Archive path escapes, symlinks,
-hardlinks, local/source payloads, secret-looking rendered content, and legacy
-target profile names are rejected. This diagnostic does not call `kubectl`,
-apply or dry-run manifests, roll out workloads, smoke endpoints, mirror images,
-read a sibling AgentSmith checkout, or claim render/deploy/release readiness.
+hardlinks, local/source payloads, secret-looking rendered content, and
+non-canonical pre-GA target profile names are rejected. This diagnostic does
+not call `kubectl`, apply or dry-run manifests, roll out workloads, smoke
+endpoints, mirror images, read a sibling AgentSmith checkout, or claim
+render/deploy/release readiness.
 If a sibling `../agentsmith` checkout exists next to release-kit, `--render`
 rejects it as a default forbidden source root.
 
@@ -152,13 +153,43 @@ provided by an operator or earlier render step. It scans yaml, yml, and json
 workload resources for Deployment, StatefulSet, DaemonSet, ReplicaSet, Job,
 CronJob, and Pod `containers` and `initContainers` images. Every workload image
 must be digest-pinned and must match the release contract
-`deploy_image_inventory` by exact image ref or digest. It rejects legacy target
-profile names, unknown images, tag-only image refs, digest drift, manifest path
-escapes, external symlinks, and obvious plaintext credential or kubeconfig
-payloads. `render-report.json` is written with `readiness: false`,
+`deploy_image_inventory` by exact image ref or digest. It rejects
+non-canonical pre-GA target profile names, unknown images, tag-only image refs,
+digest drift, manifest path escapes, external symlinks, and obvious plaintext
+credential or kubeconfig payloads. `render-report.json` is written with `readiness: false`,
 `scope: render_check_image_inventory_only`, and `status: pass`; it is not
 render readiness, deploy readiness, release readiness, apply evidence, rollout
 evidence, smoke evidence, or operator signoff.
+
+Image-map / mirror-plan focused diagnostic:
+
+```bash
+bash scripts/test-image-map.sh
+```
+
+`--image-map` validates only the release contract
+`deploy_image_inventory` and writes a digest-pinned source-to-target image
+reference plan. It accepts only
+`existing_kubernetes/external_declared/online` and
+`existing_kubernetes/external_declared/airgap` as CLI targets.
+`kind_rehearsal/kit_installed/online` is a canonical profile tuple but out of
+scope for image-map CLI. Only canonical profile tuples are accepted in
+`release_contract.target_profiles`; non-canonical pre-GA names and synonym
+axes fail fast. For online targets without
+`--target-registry`, target refs equal source refs and the action is
+`use_source`. When `--target-registry <registry-host[/namespace]>` is
+provided, or for every airgap run where it is required, target refs are
+derived by stripping the source registry and tag, keeping the repository path,
+and appending the original sha256 digest under the target registry. Registry
+namespace components must be lowercase and must start and end with
+alphanumeric characters.
+
+This diagnostic does not log in to a registry, pull, push, mirror, build an
+airgap bundle, import images into kind, call Kubernetes, or claim deploy,
+package, or release readiness. `image-map.json` keeps `schema:
+agentsmith.image-map/v1`, `scope: image_map_only`, `readiness: false`, and
+`status: pass`; it contains only release identity, release contract digest,
+target axes, optional target registry, image count, and mappings.
 
 Kubernetes apply-only focused diagnostic:
 
@@ -167,8 +198,9 @@ bash scripts/test-apply.sh
 ```
 
 `--apply` validates already-rendered manifests against a real Kubernetes API.
-It accepts only `existing_kubernetes/external_declared/online` and rejects
-`kind_rehearsal`, `airgap`, legacy names, and synonym axes. Required inputs are
+It accepts only `existing_kubernetes/external_declared/online`; canonical
+profiles only: `kind_rehearsal`, `airgap`, non-canonical pre-GA names, and
+synonym axes fail fast. Required inputs are
 `--release-contract`, `--rendered-manifests`, `--target-profile`,
 `--namespace`, and `--output-dir`; optional inputs are `--kubeconfig`,
 `--context`, `--kubectl`, and `--forbidden-source-root`. If a sibling
@@ -194,8 +226,9 @@ bash scripts/test-rollout.sh
 `--rollout` validates only Kubernetes rollout status for already-rendered
 rollout-capable workloads and checks that live pod image digests match the
 render/check image inventory. It accepts only
-`existing_kubernetes/external_declared/online` and rejects `kind_rehearsal`,
-`airgap`, legacy names, and synonym axes. Required inputs are
+`existing_kubernetes/external_declared/online`; canonical profiles only:
+`kind_rehearsal`, `airgap`, non-canonical pre-GA names, and synonym axes fail
+fast. Required inputs are
 `--release-contract`, `--rendered-manifests`, `--target-profile`,
 `--namespace`, and `--output-dir`; optional inputs are `--timeout` (default
 `120s`), `--kubeconfig`, `--context`, `--kubectl`, and
