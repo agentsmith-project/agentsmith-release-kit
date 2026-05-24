@@ -108,6 +108,7 @@ pass "canonical repo identity"
 required_files=(
   README.md
   AGENTS.md
+  OWNERS.md
   DEVELOPMENT.md
   docs/RELEASE_GATES.md
   docs/contracts/README.md
@@ -125,6 +126,9 @@ for file in "${required_files[@]}"; do
   require_file "$file"
 done
 pass "required bootstrap files"
+
+require_text OWNERS.md "AgentSmith release-kit team"
+pass "owner metadata"
 
 require_text README.md "$EXPECTED_IDENTITY"
 require_text README.md "AgentSmith release contract"

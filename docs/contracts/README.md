@@ -9,6 +9,10 @@ The release kit consumes AgentSmith release contract artifacts and AgentSmith
 deploy template packages. It must not copy AgentSmith product contracts or
 infer product truth from source paths.
 
+The current `--inputs` validator is a focused contract intake diagnostic only.
+Its reports keep `readiness: false` and prove contract/input digest readiness,
+not deploy, package, or release readiness.
+
 Future contracts should cover:
 
 - Release contract input validation.

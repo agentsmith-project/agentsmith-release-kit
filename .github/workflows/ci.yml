@@ -16,3 +16,5 @@ jobs:
       - uses: actions/checkout@v6
       - name: Quick governance guard
         run: bash scripts/verify-release.sh --quick
+      - name: Contract intake focused guard
+        run: bash scripts/test-inputs.sh

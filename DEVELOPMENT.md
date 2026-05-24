@@ -10,6 +10,7 @@ Use:
 
 ```bash
 bash scripts/verify-release.sh --quick
+bash scripts/test-inputs.sh
 ```
 
 There is intentionally no `package.json` in this repository.
@@ -38,6 +39,11 @@ Future implementation must consume only explicit inputs:
 
 The release kit must not infer those inputs from a sibling checkout.
 
+The current `--inputs` path is a focused diagnostic for contract intake only.
+Its `intake-report.json` and `image-digest-plan.json` outputs must keep
+`readiness: false`; they prove contract/input digest readiness only and are not
+deploy, package, or release readiness evidence.
+
 ## Non-Goals
 
 This repo does not implement or validate:
@@ -62,6 +68,10 @@ separate choices:
 - `target_cluster`: `existing_kubernetes` or `kind_rehearsal`.
 - `substrate_source`: `external_declared` or `kit_installed`.
 - `distribution`: `online` or `airgap`.
+
+For `airgap`, do not download public tools, templates, artifacts, or images at
+execution time. Operators may declare a substrate endpoint that already exists
+inside the target network, but release-kit code must not create cloud resources.
 
 ## Workflow
 

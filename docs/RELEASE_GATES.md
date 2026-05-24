@@ -17,6 +17,7 @@ Current quick checks:
 
 - Canonical repo identity is `github.com/agentsmith-project/agentsmith-release-kit`.
 - Required bootstrap files exist.
+- Owner/team metadata exists.
 - Scope and non-goals are declared.
 - Release gate entry exists and states that quick is not release readiness.
 - No AgentSmith product source import or relative product source path is used.
@@ -26,6 +27,23 @@ Current quick checks:
 
 Passing the quick gate means repo-local workstreams can proceed. It does not
 approve deploy tooling, package output, evidence, publishing, or adoption.
+
+## Contract Intake Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-inputs.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh --inputs`. It
+checks release contract intake, deploy template package intake, target-profile
+selection, provenance, and digest-bound image inventory only.
+
+The generated `intake-report.json` and `image-digest-plan.json` must keep
+`readiness: false`. They prove contract/input digest readiness only. They are
+not deploy readiness, package readiness, release readiness, rollout evidence,
+or operator signoff.
 
 ## Full Release Gate
 
@@ -40,3 +58,8 @@ The future full release gate must not delegate release readiness to AgentSmith
 product gates, AFSCP gates, ASBCP gates, or kind rehearsal alone. AgentSmith
 product flows remain AgentSmith evidence; this repository owns only
 deployment, distribution, package, and operator evidence.
+
+Airgap release-kit work must use tools, templates, artifacts, and images already
+available inside the target network. Operator-declared substrate endpoints may
+be prerequisites in that network, but this repository must not create clusters,
+databases, buckets, IAM, networks, OIDC realms, or other cloud resources.
