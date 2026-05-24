@@ -15,6 +15,7 @@ bash scripts/test-template-package.sh
 bash scripts/test-render.sh
 bash scripts/test-render-check.sh
 bash scripts/test-apply.sh
+bash scripts/test-rollout.sh
 bash scripts/test-evidence.sh
 bash scripts/test-target-preflight.sh
 ```
@@ -106,6 +107,25 @@ an existing sibling `../agentsmith` checkout as a default forbidden source
 root for the render/check guard. Its `apply-report.json` must keep
 `readiness: false` and `scope: kubernetes_apply_only`; it does not roll out
 workloads, smoke routes, run product flows, provision cloud resources, or claim
+deploy or release readiness.
+
+The current `--rollout` path is a focused diagnostic for Kubernetes
+rollout/live digest validation. It consumes a release contract,
+already-rendered manifests, explicit target profile
+`existing_kubernetes/external_declared/online`, namespace, output directory,
+and optional Kubernetes client settings. It rejects `kind_rehearsal`, `airgap`,
+legacy profiles, synonym axes, and non-rollout workload kinds before rollout
+commands. It first runs the render/check image inventory guard, then runs
+`kubectl rollout status` for Deployment, StatefulSet, and DaemonSet resources
+and reads each workload's selector through `kubectl get <kind>/<name> -o json`.
+It then checks live pod `imageID` or `image` digests only from
+`kubectl get pods --selector <selector> -o json` for that workload. It accepts
+`--forbidden-source-root` and treats an existing sibling `../agentsmith`
+checkout as a default forbidden source root for the render/check guard. Its
+`rollout-report.json` must keep `readiness: false` and `scope:
+kubernetes_rollout_imageid_only`; it records
+`observed_live_image_digest_summary` rather than raw kubectl output, and does
+not smoke routes, run product flows, provision cloud resources, or claim
 deploy or release readiness.
 
 The current `--evidence` path is a focused diagnostic for release-kit evidence

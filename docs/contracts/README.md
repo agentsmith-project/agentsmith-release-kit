@@ -29,6 +29,21 @@ profile values, and writes `render-report.json` with `readiness: false` and
 `scope: render_check_image_inventory_only`. The report must not include
 AgentSmith product-flow fields, `verdict`, or `release_verdict`.
 
+The current `--rollout` validator is a focused Kubernetes rollout/live digest
+diagnostic only. It consumes the release contract, an already-rendered manifest
+directory, explicit target profile `existing_kubernetes/external_declared/online`,
+namespace, and Kubernetes client options. It first runs the render/check guard,
+then accepts only Deployment, StatefulSet, and DaemonSet workloads, runs
+`kubectl rollout status`, reads `spec.selector.matchLabels` through
+`kubectl get <kind>/<name> -o json`, and checks live pod `imageID` or `image`
+digests only from `kubectl get pods --selector <selector> -o json` for that
+workload. It writes `rollout-report.json` with `schema:
+agentsmith.kubernetes-rollout-report/v1`, `readiness: false`, and `scope:
+kubernetes_rollout_imageid_only`. The report uses
+`observed_live_image_digest_summary` and must not include AgentSmith
+product-flow fields, raw kubectl stdout/stderr, kubeconfig content, `verdict`,
+`release_verdict`, or deploy readiness fields.
+
 The current `--evidence` validator is a focused release-kit evidence envelope
 intake diagnostic only. It requires `evidence.json` and
 `evidence-subject.json`, binds them to the supplied release contract raw

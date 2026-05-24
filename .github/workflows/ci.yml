@@ -26,6 +26,8 @@ jobs:
         run: bash scripts/test-render-check.sh
       - name: Kubernetes apply-only focused guard
         run: bash scripts/test-apply.sh
+      - name: Kubernetes rollout/live imageID focused guard
+        run: bash scripts/test-rollout.sh
       - name: Evidence envelope focused guard
         run: bash scripts/test-evidence.sh
       - name: Target preflight focused guard

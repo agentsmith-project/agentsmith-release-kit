@@ -5,8 +5,8 @@ Status: bootstrap-only, docs-governance-first skeleton.
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
-contains an apply-only focused diagnostic, but does not contain rollout,
-smoke, or full deploy tooling yet.
+contains apply-only and rollout/live digest focused diagnostics, but does not
+contain smoke or full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -184,6 +184,41 @@ existing_kubernetes/external_declared/online --operator-run-id <id>`.
 kubernetes_apply_only`, and `status: pass`; it is not deploy readiness,
 release readiness, rollout evidence, route smoke evidence, product-flow
 evidence, or operator signoff.
+
+Kubernetes rollout/live digest focused diagnostic:
+
+```bash
+bash scripts/test-rollout.sh
+```
+
+`--rollout` validates only Kubernetes rollout status for already-rendered
+rollout-capable workloads and checks that live pod image digests match the
+render/check image inventory. It accepts only
+`existing_kubernetes/external_declared/online` and rejects `kind_rehearsal`,
+`airgap`, legacy names, and synonym axes. Required inputs are
+`--release-contract`, `--rendered-manifests`, `--target-profile`,
+`--namespace`, and `--output-dir`; optional inputs are `--timeout` (default
+`120s`), `--kubeconfig`, `--context`, `--kubectl`, and
+`--forbidden-source-root`. If a sibling `../agentsmith` checkout exists next to
+release-kit, `--rollout` treats it as a default forbidden source root before
+running render/check.
+
+Before any `kubectl` call, `--rollout` runs the render/check image inventory
+guard. It supports only Deployment, StatefulSet, and DaemonSet resources. List
+wrappers are flattened by render/check and judged by their inner workloads;
+Job, CronJob, Pod, ReplicaSet, and non-workload resources are not rollout
+evidence in this diagnostic. It runs `kubectl rollout status` for each
+rollout-capable resource, reads that workload's
+`spec.selector.matchLabels`, then reads only matching pods with
+`kubectl get pods --selector <selector> -o json`. Expected sha256 digests for
+that workload must appear in those selected pods, using live `imageID` first
+and falling back to `image` when needed. `rollout-report.json` keeps
+`readiness: false`, `scope: kubernetes_rollout_imageid_only`, and `status:
+pass`; it is not deploy readiness, release readiness, route smoke evidence,
+product-flow evidence, or operator signoff. The report stores
+`observed_live_image_digest_summary` with source counts, and must not contain
+raw kubectl stdout/stderr, kubeconfig content, verdict fields, deploy
+readiness fields, or AgentSmith product-flow fields.
 
 Release-kit evidence envelope focused diagnostic:
 

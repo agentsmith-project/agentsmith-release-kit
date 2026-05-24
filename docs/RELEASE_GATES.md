@@ -191,6 +191,54 @@ target axes, namespace, mode, resource refs, kubectl version, and
 `release_verdict`, deploy readiness, product-flow fields, kubeconfig content,
 or raw secret payloads.
 
+## Kubernetes Rollout/Live Digest Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-rollout.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh --rollout`. It
+checks only rollout status and live pod image digest adoption for
+already-rendered manifests. It does not render templates, apply resources,
+smoke routes, run product flows, provision cloud resources, build packages, or
+claim deploy or release readiness.
+
+`--rollout` accepts only `existing_kubernetes/external_declared/online`.
+`kind_rehearsal`, `airgap`, legacy profile names, and synonym axes fail fast.
+Required inputs are `--release-contract`, `--rendered-manifests`,
+`--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
+`--timeout` (default `120s`), `--kubeconfig`, `--context`, `--kubectl`, and
+`--forbidden-source-root`. If a sibling `../agentsmith` checkout exists next to
+release-kit, `--rollout` passes it as a default forbidden source root to
+render/check.
+
+Before any `kubectl` call, the rollout diagnostic must pass the render/check
+image inventory guard. The rendered workload set must contain only
+Deployment, StatefulSet, and DaemonSet resources. List wrappers are flattened
+by render/check and judged by their inner workloads; other workload kinds such
+as Job, CronJob, Pod, or ReplicaSet fail fast before rollout commands. For
+each rollout-capable resource, the diagnostic runs `kubectl rollout status
+<kind>/<name> --namespace <ns> --timeout <duration>`, then reads
+`kubectl get <kind>/<name> --namespace <ns> -o json`. The workload selector
+must use non-empty `spec.selector.matchLabels` with safe non-empty string keys
+and values; `matchExpressions` are not supported. The diagnostic then reads
+`kubectl get pods --namespace <ns> --selector <selector> -o json` and verifies
+that every expected render/check image digest for that workload appears in the
+selected pods, using live `imageID` values first and `image` only as a
+fallback.
+
+The generated `rollout-report.json` must keep `schema:
+agentsmith.kubernetes-rollout-report/v1`, `scope:
+kubernetes_rollout_imageid_only`, `readiness: false`, and `status: pass`. It
+records the release contract digest, target axes, namespace, timeout, rollout
+resource refs, selectors, expected image digests, selector-scoped
+`observed_live_image_digest_summary` with source counts, and render/check
+summary. It must not contain `verdict`, `release_verdict`, deploy readiness,
+product-flow fields, kubeconfig content, raw kubectl stdout/stderr, or raw
+secret payloads.
+
 ## Evidence Envelope Focused Diagnostic
 
 Run:

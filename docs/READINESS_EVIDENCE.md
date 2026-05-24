@@ -15,11 +15,12 @@ exists. During bootstrap there is no release readiness evidence.
 | Materialized template render diagnostic | Focused only | `manifest-render-report.json` keeps `readiness: false`. |
 | Render/check image inventory diagnostic | Focused only | `render-report.json` keeps `readiness: false`. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
+| Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
 | Release-kit evidence envelope diagnostic | Focused only | `evidence-validation-report.json` keeps `readiness: false`. |
 | Target preflight diagnostic | Focused only | `target-preflight-report.json` keeps `readiness: false`. |
 | Online deploy evidence | Not implemented | Future release-kit authority. |
 | Airgap package evidence | Not implemented | Future release-kit authority. |
-| Kubernetes rollout evidence | Not implemented | Future release-kit authority. |
+| Full Kubernetes rollout evidence | Not implemented | Future release-kit authority beyond the focused live digest diagnostic. |
 | Operator runbook signoff | Not implemented | Future release-kit authority. |
 
 The quick gate is not release readiness and does not produce deploy, package,
@@ -55,6 +56,17 @@ against `existing_kubernetes/external_declared/online`. The default path is
 server-side dry-run; real apply is allowed only with explicit confirm text and
 an operator run id. `apply-report.json` keeps `readiness: false`; it is not
 deploy, release, rollout, route smoke, product-flow, package, or operator
+readiness evidence.
+
+Kubernetes rollout/live digest output proves only that already-rendered
+Deployment, StatefulSet, and DaemonSet resources passed the render/check image
+inventory guard, reached `kubectl rollout status`, and had every expected
+render/check image digest visible in selector-scoped live pod `imageID` values
+or, when needed, live `image` fields. It accepts only
+`existing_kubernetes/external_declared/online`, rejects kind rehearsal,
+airgap, legacy or synonym target profiles, and writes only normalized digest
+summaries. `rollout-report.json` keeps `readiness: false`; it is not deploy,
+release, route smoke, product-flow, package, full rollout, or operator
 readiness evidence.
 
 Release-kit evidence envelope output proves only that one pre-existing evidence
