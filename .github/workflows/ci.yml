@@ -20,3 +20,5 @@ jobs:
         run: bash scripts/test-inputs.sh
       - name: Template package focused guard
         run: bash scripts/test-template-package.sh
+      - name: Evidence envelope focused guard
+        run: bash scripts/test-evidence.sh

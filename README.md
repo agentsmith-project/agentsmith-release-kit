@@ -102,6 +102,21 @@ source or plaintext credential payloads. `template-package-report.json` is
 written with `readiness: false`; it is not render, deploy, package, or release
 readiness.
 
+Release-kit evidence envelope focused diagnostic:
+
+```bash
+bash scripts/test-evidence.sh
+```
+
+`--evidence` validates only a future deployment/package evidence envelope
+already present under an evidence root. The root must contain `evidence.json`
+and `evidence-subject.json`; the check binds the envelope to the supplied
+release contract digest, release identity, target profile, provenance, subject
+files, and redaction/source-safety rules. `evidence-validation-report.json` is
+written with `readiness: false`, `scope: release_kit_evidence_intake_only`,
+and `status: pass`; it is not render, apply, smoke, package, deploy, or
+release readiness.
+
 The full release gate is a future repo-local authority. It is intentionally not
 implemented during bootstrap.
 

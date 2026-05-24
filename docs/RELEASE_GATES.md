@@ -68,6 +68,39 @@ The generated `template-package-report.json` must keep `readiness: false` and
 readiness, Kubernetes render evidence, deploy evidence, rollout evidence, smoke
 evidence, or operator signoff.
 
+## Evidence Envelope Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-evidence.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh --evidence`. It
+checks only the release-kit evidence envelope shape for an evidence root that
+already exists. The root must contain `evidence.json` and
+`evidence-subject.json`.
+
+The check verifies the release contract raw sha256, release identity, exact
+target profile axes, `passed`/`failed` status and failure-class pairing,
+release-kit provenance, subject file digests, subject path safety, and
+redaction/source scans for the envelope and subject files. It rejects legacy or
+synonym target values, AgentSmith product-flow fields, local provenance URIs,
+absolute paths, `..` escapes, symlinks, hardlinks, and obvious secret payloads.
+`evidence.git_sha` is the AgentSmith product release commit and must match the
+release contract; `artifact_provenance.commit_sha` is the release-kit producer
+commit and is validated as its own 40-character git sha.
+For `evidence-subject.json`, the listed sha256 for `evidence.json` is the
+canonical evidence body without `artifact_provenance`; every other subject file
+uses its raw file sha256. This prevents `artifact_provenance.subject_sha256`
+from self-referencing the evidence file that carries it.
+
+The generated `evidence-validation-report.json` must keep `readiness: false`,
+`scope: release_kit_evidence_intake_only`, and `status: pass`. It must not
+contain `verdict` or `release_verdict`. It is not release readiness, package
+readiness, Kubernetes render evidence, apply evidence, rollout evidence, smoke
+evidence, or operator signoff.
+
 ## Full Release Gate
 
 The full release gate is the future repo-local authority for online deploy,

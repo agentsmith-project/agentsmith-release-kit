@@ -12,6 +12,7 @@ Use:
 bash scripts/verify-release.sh --quick
 bash scripts/test-inputs.sh
 bash scripts/test-template-package.sh
+bash scripts/test-evidence.sh
 ```
 
 There is intentionally no `package.json` in this repository.
@@ -50,6 +51,13 @@ template package archive intake only. It consumes the release contract, the
 deploy template package descriptor, and the materialized `.tgz` archive; it
 does not render Kubernetes resources, apply manifests, smoke a cluster, or
 claim release readiness.
+
+The current `--evidence` path is a focused diagnostic for release-kit evidence
+envelope intake only. It consumes a release contract, an evidence root
+containing `evidence.json` and `evidence-subject.json`, and an explicit target
+profile. Its `evidence-validation-report.json` must keep `readiness: false`
+and `scope: release_kit_evidence_intake_only`; it does not claim deploy,
+package, smoke, operator, or release readiness.
 
 ## Non-Goals
 
