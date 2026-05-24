@@ -15,6 +15,7 @@ bash scripts/test-template-package.sh
 bash scripts/test-render.sh
 bash scripts/test-render-check.sh
 bash scripts/test-image-map.sh
+bash scripts/test-airgap-bundle-check.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
@@ -118,6 +119,32 @@ Its `image-map.json` must keep `readiness: false` and `scope:
 image_map_only`; it does not log in to a registry, pull, push, mirror, build an
 airgap bundle, import images into kind, call Kubernetes, or claim deploy,
 package, or release readiness.
+
+The current `--airgap-bundle-check` path is a focused diagnostic for local
+airgap bundle manifest/digest checking only. It consumes a release contract,
+deploy template package descriptor, deploy template archive `.tgz`, airgap
+`image-map`, explicit target profile
+`existing_kubernetes/external_declared/airgap`, explicit bundle root, bundle
+manifest, and output directory. The deploy template archive sha256 must match
+`deploy_template_package.package_sha256` and, when present,
+`deploy_template_package.artifact_provenance.artifact_sha256`. The bundle
+manifest `bindings` must include `deploy_template_archive_sha256` and must use
+`schema_version: agentsmith.airgap-bundle-manifest/v1`; its `components` list
+must contain exactly one component for each `kind`: `release_contract`,
+`deploy_template_package`, `deploy_template_archive`, and `image_map`. The
+image-map must be airgap, have `mirror_required: true`, and every mapping must
+use `action: mirror_required`. Image artifact declarations must match image-map
+mappings one-to-one by id. Bundle paths are relative to the bundle root only;
+absolute paths, parent segments, dot segments, empty path segments, URI paths,
+symlinks, and backslashes fail fast.
+Its `airgap-bundle-check-report.json` must keep `readiness: false` and
+`scope: airgap_bundle_manifest_check_only`; it checks only manifest bindings
+and declared file sha256 values. It is not a packager, does not parse the
+`.tgz`, does not create an airgap package, does not call Docker, skopeo, oras,
+kubectl, pull, push, mirror, save, load, or inspect image contents, and does
+not prove registry presence, image load, offline install readiness, deploy
+readiness, package readiness, or release readiness. It does not support kind or
+online targets.
 
 The current `--apply` path is a focused diagnostic for Kubernetes apply-only
 validation. It consumes a release contract, an already-rendered manifests

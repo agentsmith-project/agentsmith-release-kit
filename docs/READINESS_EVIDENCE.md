@@ -15,6 +15,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Materialized template render diagnostic | Focused only | `manifest-render-report.json` keeps `readiness: false`. |
 | Render/check image inventory diagnostic | Focused only | `render-report.json` keeps `readiness: false`. |
 | Image-map / mirror-plan diagnostic | Focused only | `image-map.json` keeps `readiness: false`. |
+| Airgap bundle manifest/digest diagnostic | Focused only | `airgap-bundle-check-report.json` keeps `readiness: false`. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
 | Route/service smoke diagnostic | Focused only | `smoke-report.json` keeps `readiness: false`. |
@@ -63,6 +64,27 @@ images exist in a target registry, does not pull or push images, does not build
 an airgap bundle, and does not support local kind image import.
 `image-map.json` keeps `readiness: false`; it is not deploy, package, release,
 rollout, smoke, product-flow, or operator readiness evidence.
+
+Airgap bundle manifest/digest output proves only that one local bundle manifest
+with `schema_version: agentsmith.airgap-bundle-manifest/v1` binds the supplied
+release contract, deploy template package descriptor, deploy template archive,
+image-map, and declared image artifact files by safe relative paths and sha256
+values. Components must be exactly one each by `kind`: `release_contract`,
+`deploy_template_package`, `deploy_template_archive`, and `image_map`.
+`bundle_manifest.bindings.deploy_template_archive_sha256` must match the
+archive sha256, and the archive sha256 must match
+`deploy_template_package.package_sha256` and, when present,
+`deploy_template_package.artifact_provenance.artifact_sha256`. Image artifact
+declarations must match airgap image-map mappings one-to-one by id. The
+image-map must have `mirror_required: true` and every mapping must use
+`action: mirror_required`. This diagnostic is manifest/digest check only: it
+is not a packager, does not parse the `.tgz`, does not create an airgap
+package, does not call Docker, skopeo, oras, kubectl, pull, push, mirror,
+save, or load images, does not inspect image artifact contents, does not verify
+registry presence or image load, does not support online or kind targets, and
+does not prove offline install readiness. `airgap-bundle-check-report.json`
+keeps `readiness: false`; it is not deploy, package, release, rollout, smoke,
+product-flow, or operator readiness evidence.
 
 Kubernetes apply-only output proves only that already-rendered manifests passed
 the render/check image inventory guard and were accepted by `kubectl apply`

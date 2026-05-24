@@ -47,6 +47,31 @@ The report is a plan for source/target digest references only; it must not
 claim registry presence, deploy readiness, package readiness, release
 readiness, product-flow evidence, or registry credential handling.
 
+The current `--airgap-bundle-check` validator is a focused local bundle
+manifest/digest diagnostic only. It consumes an explicit release contract,
+deploy template package descriptor, deploy template archive `.tgz`, airgap
+image-map, bundle root, and bundle manifest, and accepts only
+`existing_kubernetes/external_declared/airgap`. The deploy template archive
+sha256 must match `deploy_template_package.package_sha256` and, when present,
+`deploy_template_package.artifact_provenance.artifact_sha256`. The bundle
+manifest must use `schema_version:
+agentsmith.airgap-bundle-manifest/v1`; its `components` array must contain
+exactly one component of each `kind`: `release_contract`,
+`deploy_template_package`, `deploy_template_archive`, and `image_map`.
+`bundle_manifest.bindings.deploy_template_archive_sha256` must match the
+archive sha256. Component paths and image artifact paths must be POSIX-style
+relative paths under the bundle root, and sha256 values must match the
+referenced files. Image artifact declarations must match image-map mappings
+one-to-one by id. The image-map must be airgap, `mirror_required: true`, and
+every mapping must use `action: mirror_required`. It writes
+`airgap-bundle-check-report.json` with `schema:
+agentsmith.airgap-bundle-check-report/v1`, `readiness: false`, and `scope:
+airgap_bundle_manifest_check_only`. This is manifest/digest check only; it is
+not a packager, does not parse the `.tgz`, does not create an airgap package,
+does not call Docker, skopeo, oras, kubectl, pull, push, mirror, save, or load
+images, and does not prove registry presence, image load, offline install
+readiness, deploy readiness, package readiness, or release readiness.
+
 The current `--rollout` validator is a focused Kubernetes rollout/live digest
 diagnostic only. It consumes the release contract, an already-rendered manifest
 directory, explicit target profile `existing_kubernetes/external_declared/online`,

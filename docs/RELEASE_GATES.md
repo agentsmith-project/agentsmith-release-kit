@@ -194,6 +194,51 @@ The generated `image-map.json` must keep `schema: agentsmith.image-map/v1`,
 contain `verdict`, `release_verdict`, deploy readiness, AgentSmith
 product-flow fields, raw credential payloads, or registry login material.
 
+## Airgap Bundle Manifest/Digest Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-airgap-bundle-check.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--airgap-bundle-check`. It checks only a local bundle manifest, safe bundle
+paths, the deploy template archive sha256, and declared file sha256 values
+under an explicit bundle root. It does not call Docker, skopeo, oras, kubectl,
+pull images, push images, mirror images, save images, load images, create an
+airgap package, parse the `.tgz`, inspect tar or OCI contents, verify registry
+presence, or claim offline install, deploy, package, or release readiness.
+
+`--airgap-bundle-check` accepts only
+`existing_kubernetes/external_declared/airgap`. Online, kind rehearsal,
+non-canonical pre-GA target names, and synonym axes fail fast. The image-map
+must be a passing airgap `agentsmith.image-map/v1` report with `scope:
+image_map_only`, `readiness: false`, `mirror_required: true`, a target
+registry, and `action: mirror_required` on every mapping.
+
+The bundle manifest must use `schema_version:
+agentsmith.airgap-bundle-manifest/v1`. Its `components` array must contain
+exactly one component for each `kind`: `release_contract`,
+`deploy_template_package`, `deploy_template_archive`, and `image_map`; each
+component path must stay under the bundle root and its sha256 must match the
+explicit input file. `bundle_manifest.bindings.deploy_template_archive_sha256`
+must match the supplied archive sha256. The archive sha256 must also match
+`deploy_template_package.package_sha256` and, when present,
+`deploy_template_package.artifact_provenance.artifact_sha256`. Image artifact
+declarations must match image-map mappings one-to-one by id and must use
+`artifact_format: oci_layout_tar`. Bundle paths are POSIX-style relative paths
+only; absolute paths, parent segments, empty segments, dot segments,
+backslashes, URI paths, symlinks, missing files, and sha mismatches fail fast.
+
+The generated `airgap-bundle-check-report.json` must keep `schema:
+agentsmith.airgap-bundle-check-report/v1`, `scope:
+airgap_bundle_manifest_check_only`, `readiness: false`, and `status: pass`. It
+must not contain `verdict`, `release_verdict`, deploy readiness, offline
+install readiness, registry presence verification, image load verification,
+AgentSmith product-flow fields, raw credential payloads, or registry login
+material.
+
 ## Kubernetes Apply-Only Focused Diagnostic
 
 Run:

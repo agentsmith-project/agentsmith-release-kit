@@ -5,9 +5,9 @@ Status: bootstrap-only, docs-governance-first skeleton.
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
-contains image-map, apply-only, rollout/live digest, route smoke, and online
-deployment gate focused diagnostics, but does not contain full deploy tooling
-yet.
+contains image-map, airgap bundle manifest/digest, apply-only, rollout/live
+digest, route smoke, and online deployment gate focused diagnostics, but does
+not contain full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -191,6 +191,36 @@ package, or release readiness. `image-map.json` keeps `schema:
 agentsmith.image-map/v1`, `scope: image_map_only`, `readiness: false`, and
 `status: pass`; it contains only release identity, release contract digest,
 target axes, optional target registry, image count, and mappings.
+
+Airgap bundle manifest/digest focused diagnostic:
+
+```bash
+bash scripts/test-airgap-bundle-check.sh
+```
+
+`--airgap-bundle-check` validates only a local bundle manifest with
+`schema_version: agentsmith.airgap-bundle-manifest/v1` against an explicit
+bundle root, release contract, deploy template package descriptor, deploy
+template archive `.tgz`, and airgap `image-map`. It accepts only
+`existing_kubernetes/external_declared/airgap`; online, kind, and alias target
+profiles fail fast. The image-map must be a passing `agentsmith.image-map/v1`
+report with `scope: image_map_only`, `readiness: false`, `mirror_required:
+true`, a target registry, the exact airgap target profile, and `action:
+mirror_required` for every mapping.
+
+This diagnostic checks only safe relative bundle paths and sha256 bindings for
+the release contract, deploy template package descriptor, deploy template
+archive, image-map, and declared `oci_layout_tar` image artifact files. The
+bundle manifest `bindings` must include `deploy_template_archive_sha256`, and
+`components` must contain exactly one component of each `kind`:
+`release_contract`, `deploy_template_package`, `deploy_template_archive`, and
+`image_map`. It does not create an airgap package, parse the `.tgz`, inspect
+tar or OCI contents, verify registry presence, load images, deploy to
+Kubernetes, run kind, support online targets, or claim offline install,
+deploy, package, or release readiness.
+`airgap-bundle-check-report.json` keeps `schema:
+agentsmith.airgap-bundle-check-report/v1`, `scope:
+airgap_bundle_manifest_check_only`, `readiness: false`, and `status: pass`.
 
 Kubernetes apply-only focused diagnostic:
 

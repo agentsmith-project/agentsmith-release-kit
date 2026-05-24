@@ -26,6 +26,8 @@ jobs:
         run: bash scripts/test-render-check.sh
       - name: Image map focused guard
         run: bash scripts/test-image-map.sh
+      - name: Airgap bundle manifest/digest focused guard
+        run: bash scripts/test-airgap-bundle-check.sh
       - name: Kubernetes apply-only focused guard
         run: bash scripts/test-apply.sh
       - name: Kubernetes rollout/live imageID focused guard
