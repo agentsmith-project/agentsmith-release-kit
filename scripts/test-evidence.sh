@@ -144,7 +144,7 @@ function writeJson(relativePath, value) {
 }
 
 const evidence = {
-  schema_version: 'agentsmith.release-kit-evidence/v1',
+  schema_version: 'agentsmith.release-kit-evidence-envelope/v1',
   release_contract_digest: digestBuffer(contractRaw),
   release_id: contract.release_id,
   git_sha: contract.git_sha,
@@ -173,6 +173,9 @@ switch (mutation) {
     break;
   case 'missing_release_contract_digest':
     delete evidence.release_contract_digest;
+    break;
+  case 'old_raw_envelope_schema':
+    evidence.schema_version = 'agentsmith.release-kit-evidence/v1';
     break;
   case 'release_identity_mismatch':
     evidence.release_id = `${contract.release_id}-drift`;
@@ -409,6 +412,7 @@ assert_pass_report "$VALID_SECRET_REF_OUT/evidence-validation-report.json"
 pass "valid persisted secretRef evidence accepted"
 
 expect_fail missing-release-contract-digest ci_artifact missing_release_contract_digest
+expect_fail old-raw-envelope-schema ci_artifact old_raw_envelope_schema
 expect_fail release-identity-mismatch ci_artifact release_identity_mismatch
 expect_fail target-profile-mismatch ci_artifact target_profile_mismatch
 

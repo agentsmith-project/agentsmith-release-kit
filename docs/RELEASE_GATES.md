@@ -81,6 +81,11 @@ checks only the release-kit evidence envelope shape for an evidence root that
 already exists. The root must contain `evidence.json` and
 `evidence-subject.json`.
 
+The repo-local raw intake schema is
+`agentsmith.release-kit-evidence-envelope/v1`. AgentSmith's
+`agentsmith.release-kit-evidence/v1` name is reserved for its adapter/canonical
+evidence shape and must not be used for this raw envelope.
+
 The check verifies the release contract raw sha256, release identity, exact
 target profile axes, `passed`/`failed` status and failure-class pairing,
 release-kit provenance, subject file digests, subject path safety, and

@@ -10,7 +10,7 @@ const REQUIRED_ARGS = [
   'outputDir'
 ];
 const PRODUCER_REPO = 'github.com/agentsmith-project/agentsmith-release-kit';
-const EVIDENCE_SCHEMA = 'agentsmith.release-kit-evidence/v1';
+const EVIDENCE_SCHEMA = 'agentsmith.release-kit-evidence-envelope/v1';
 const EVIDENCE_SUBJECT_SCHEMA = 'agentsmith.release-kit-evidence-subject/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
 const EVIDENCE_SUBJECT_NAME = 'agentsmith-release-kit-evidence';

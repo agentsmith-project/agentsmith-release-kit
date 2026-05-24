@@ -32,8 +32,11 @@ operator readiness evidence.
 
 Release-kit evidence envelope output proves only that one pre-existing evidence
 root has the expected release-kit-owned envelope, subject, provenance, target
-profile, digest, and redaction/source-safety shape. It is not render, apply,
-deploy, package, release, rollout, smoke, or operator readiness evidence.
+profile, digest, and redaction/source-safety shape. The raw envelope schema is
+`agentsmith.release-kit-evidence-envelope/v1`, distinct from AgentSmith's
+adapter/canonical `agentsmith.release-kit-evidence/v1`. It is not render,
+apply, deploy, package, release, rollout, smoke, or operator readiness
+evidence.
 
 Target preflight output proves only that one explicit
 `agentsmith.substrate-connection.truth/v1` document matches the requested

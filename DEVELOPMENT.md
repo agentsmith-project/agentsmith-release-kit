@@ -56,9 +56,12 @@ claim release readiness.
 The current `--evidence` path is a focused diagnostic for release-kit evidence
 envelope intake only. It consumes a release contract, an evidence root
 containing `evidence.json` and `evidence-subject.json`, and an explicit target
-profile. Its `evidence-validation-report.json` must keep `readiness: false`
-and `scope: release_kit_evidence_intake_only`; it does not claim deploy,
-package, smoke, operator, or release readiness.
+profile. The raw envelope schema is
+`agentsmith.release-kit-evidence-envelope/v1`; AgentSmith
+`agentsmith.release-kit-evidence/v1` is the separate adapter/canonical shape.
+Its `evidence-validation-report.json` must keep `readiness: false` and
+`scope: release_kit_evidence_intake_only`; it does not claim deploy, package,
+smoke, operator, or release readiness.
 
 The current `--target-preflight` path is a focused diagnostic for substrate
 connection truth intake only. It consumes an explicit target profile and an

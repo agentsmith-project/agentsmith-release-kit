@@ -112,10 +112,12 @@ bash scripts/test-evidence.sh
 already present under an evidence root. The root must contain `evidence.json`
 and `evidence-subject.json`; the check binds the envelope to the supplied
 release contract digest, release identity, target profile, provenance, subject
-files, and redaction/source-safety rules. `evidence-validation-report.json` is
-written with `readiness: false`, `scope: release_kit_evidence_intake_only`,
-and `status: pass`; it is not render, apply, smoke, package, deploy, or
-release readiness.
+files, and redaction/source-safety rules. The raw envelope schema is
+`agentsmith.release-kit-evidence-envelope/v1`; AgentSmith owns the separate
+adapter/canonical `agentsmith.release-kit-evidence/v1` shape.
+`evidence-validation-report.json` is written with `readiness: false`,
+`scope: release_kit_evidence_intake_only`, and `status: pass`; it is not
+render, apply, smoke, package, deploy, or release readiness.
 
 Target preflight focused diagnostic:
 
