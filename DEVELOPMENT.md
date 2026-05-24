@@ -12,6 +12,7 @@ Use:
 bash scripts/verify-release.sh --quick
 bash scripts/test-inputs.sh
 bash scripts/test-template-package.sh
+bash scripts/test-render-check.sh
 bash scripts/test-evidence.sh
 bash scripts/test-target-preflight.sh
 ```
@@ -52,6 +53,17 @@ template package archive intake only. It consumes the release contract, the
 deploy template package descriptor, and the materialized `.tgz` archive; it
 does not render Kubernetes resources, apply manifests, smoke a cluster, or
 claim release readiness.
+
+The current `--render-check` path is a focused diagnostic for rendered
+Kubernetes manifest image inventory only. It consumes a release contract, an
+already-rendered manifests directory, and an explicit target profile. Its
+`render-report.json` must keep `readiness: false` and
+`scope: render_check_image_inventory_only`; it checks digest-pinned workload
+images against `deploy_image_inventory` and rejects legacy target profile
+values, path escapes, external symlinks, and obvious plaintext credential or
+kubeconfig payloads. It does not render templates, apply resources, roll out
+workloads, smoke a cluster, package artifacts, or claim deploy or release
+readiness.
 
 The current `--evidence` path is a focused diagnostic for release-kit evidence
 envelope intake only. It consumes a release contract, an evidence root

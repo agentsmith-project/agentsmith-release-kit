@@ -5,7 +5,7 @@ Status: bootstrap-only, docs-governance-first skeleton.
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and a quick governance guard.
-It does not contain deploy tooling yet.
+It does not contain deploy/apply tooling yet.
 
 ## Canonical Identity
 
@@ -101,6 +101,25 @@ equality, archive and manifest digests, unsafe archive paths, and obvious local
 source or plaintext credential payloads. `template-package-report.json` is
 written with `readiness: false`; it is not render, deploy, package, or release
 readiness.
+
+Render/check image inventory focused diagnostic:
+
+```bash
+bash scripts/test-render-check.sh
+```
+
+`--render-check` validates only rendered Kubernetes manifest files already
+provided by an operator or earlier render step. It scans yaml, yml, and json
+workload resources for Deployment, StatefulSet, DaemonSet, ReplicaSet, Job,
+CronJob, and Pod `containers` and `initContainers` images. Every workload image
+must be digest-pinned and must match the release contract
+`deploy_image_inventory` by exact image ref or digest. It rejects legacy target
+profile names, unknown images, tag-only image refs, digest drift, manifest path
+escapes, external symlinks, and obvious plaintext credential or kubeconfig
+payloads. `render-report.json` is written with `readiness: false`,
+`scope: render_check_image_inventory_only`, and `status: pass`; it is not
+render readiness, deploy readiness, release readiness, apply evidence, rollout
+evidence, smoke evidence, or operator signoff.
 
 Release-kit evidence envelope focused diagnostic:
 

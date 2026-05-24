@@ -19,6 +19,16 @@ matches the release contract and that the `.tgz` archive matches the declared
 package and manifest digests. Its report keeps `readiness: false` and does not
 claim render, deploy, package, or release readiness.
 
+The current `--render-check` validator is a focused rendered manifest image
+inventory diagnostic only. It consumes the release contract and an explicit
+rendered manifest directory; it does not consume AgentSmith source paths or
+declare release readiness. It binds Deployment, StatefulSet, DaemonSet,
+ReplicaSet, Job, CronJob, and Pod `containers` and `initContainers` images to
+`deploy_image_inventory` by exact image ref or digest, rejects legacy target
+profile values, and writes `render-report.json` with `readiness: false` and
+`scope: render_check_image_inventory_only`. The report must not include
+AgentSmith product-flow fields, `verdict`, or `release_verdict`.
+
 The current `--evidence` validator is a focused release-kit evidence envelope
 intake diagnostic only. It requires `evidence.json` and
 `evidence-subject.json`, binds them to the supplied release contract raw

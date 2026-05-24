@@ -68,6 +68,34 @@ The generated `template-package-report.json` must keep `readiness: false` and
 readiness, Kubernetes render evidence, deploy evidence, rollout evidence, smoke
 evidence, or operator signoff.
 
+## Render/Check Image Inventory Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-render-check.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh --render-check`.
+It checks only rendered Kubernetes manifest files supplied through
+`--rendered-manifests`; it does not render templates or read a sibling
+AgentSmith checkout.
+
+The check scans yaml, yml, and json files for Deployment, StatefulSet,
+DaemonSet, ReplicaSet, Job, CronJob, and Pod workload images under
+`containers` and `initContainers`. Every discovered workload image must be
+digest-pinned and must match `release_contract.deploy_image_inventory` by exact
+image ref or digest. It rejects unknown images, tag-only image refs, digest
+drift, legacy or synonym target values such as `local-kind`, manifest path
+escapes, external symlinks, and obvious plaintext credential or kubeconfig
+payloads.
+
+The generated `render-report.json` must keep `readiness: false`,
+`scope: render_check_image_inventory_only`, and `status: pass`. It must not
+contain `verdict` or `release_verdict`. It is not release readiness, package
+readiness, render readiness, apply evidence, rollout evidence, smoke evidence,
+deploy evidence, or operator signoff.
+
 ## Evidence Envelope Focused Diagnostic
 
 Run:

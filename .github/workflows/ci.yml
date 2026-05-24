@@ -20,6 +20,8 @@ jobs:
         run: bash scripts/test-inputs.sh
       - name: Template package focused guard
         run: bash scripts/test-template-package.sh
+      - name: Render check focused guard
+        run: bash scripts/test-render-check.sh
       - name: Evidence envelope focused guard
         run: bash scripts/test-evidence.sh
       - name: Target preflight focused guard

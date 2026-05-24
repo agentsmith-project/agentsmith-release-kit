@@ -10,6 +10,7 @@ Usage:
   bash scripts/verify-release.sh --quick
   bash scripts/verify-release.sh --inputs --release-contract <json> --deploy-template-package <json> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --template-package --release-contract <json> --deploy-template-package <json> --archive <tgz> --output-dir <dir>
+  bash scripts/verify-release.sh --render-check --release-contract <json> --rendered-manifests <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --evidence --release-contract <json> --evidence-root <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --output-dir <dir>
   bash scripts/verify-release.sh --help
@@ -18,6 +19,7 @@ Bootstrap status:
   --quick checks governance skeleton and boundary guardrails only.
   --inputs checks release contract intake only; it is not release readiness.
   --template-package checks materialized deploy template package intake only; it is not release readiness.
+  --render-check checks rendered manifest image inventory only; it is not release readiness.
   --evidence checks release-kit evidence envelope intake only; it is not release readiness.
   --target-preflight checks substrate connection truth intake only; it is not release readiness.
   The full release gate is not implemented during bootstrap.
@@ -43,6 +45,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-template-package.mjs" "$@"
     echo "template-package mode is not release readiness"
+    ;;
+  --render-check)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-render-check.mjs" "$@"
+    echo "render-check mode is not release readiness"
     ;;
   --evidence)
     shift
