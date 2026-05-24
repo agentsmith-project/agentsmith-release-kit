@@ -385,6 +385,9 @@ switch (mutation) {
   case 'evidence_target_host_docker_internal':
     evidence.target.base_url = 'https://host.docker.internal:3000';
     break;
+  case 'evidence_json_bare_host_docker_internal':
+    evidence.operator_note = 'declared by host.docker.internal';
+    break;
   case 'substrate_truth_sslmode_only':
     useSslmodeOnly();
     break;
@@ -428,6 +431,9 @@ switch (mutation) {
     break;
   case 'subject_file_host_docker_internal':
     deployResult.endpoint = 'https://host.docker.internal:20000/status';
+    break;
+  case 'subject_file_bare_host_docker_internal':
+    deployResult.operator_note = 'declared by host.docker.internal';
     break;
   case 'evidence_json_secret_payload':
     evidence['client_' + 'secret'] = 'not-real-credential-value';
@@ -692,6 +698,7 @@ expect_fail image-map-extra-subject-file ci_artifact image_map_extra_subject_fil
 expect_fail render-rollout-extra-subject-file ci_artifact render_rollout_extra_subject_file
 expect_fail substrate-truth-localhost-endpoint ci_artifact substrate_truth_localhost_endpoint
 expect_fail evidence-target-host-docker-internal ci_artifact evidence_target_host_docker_internal
+expect_fail evidence-json-bare-host-docker-internal ci_artifact evidence_json_bare_host_docker_internal
 expect_fail reserved-agentsmith-adapter-schema ci_artifact reserved_agentsmith_adapter_schema
 expect_fail release-identity-mismatch ci_artifact release_identity_mismatch
 expect_fail target-profile-mismatch ci_artifact target_profile_mismatch
@@ -730,6 +737,7 @@ expect_fail subject-hardlink ci_artifact subject_hardlink
 expect_fail subject-file-secret-payload ci_artifact subject_file_secret_payload
 expect_fail subject-file-source-payload ci_artifact subject_file_source_payload
 expect_fail subject-file-host-docker-internal ci_artifact subject_file_host_docker_internal
+expect_fail subject-file-bare-host-docker-internal ci_artifact subject_file_bare_host_docker_internal
 expect_fail evidence-json-secret-payload ci_artifact evidence_json_secret_payload
 
 if bash "$ROOT_DIR/scripts/verify-release.sh" >"$TMP_DIR/full-gate.out" 2>"$TMP_DIR/full-gate.err"; then

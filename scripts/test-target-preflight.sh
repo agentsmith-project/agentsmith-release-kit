@@ -222,6 +222,9 @@ switch (mutation) {
     truth.operator_note =
       '/home/percy/works/mbos-v1/' + 'agent' + 'smith/' + 'sr' + 'c/ap' + 'p/page.tsx';
     break;
+  case 'bare_host_docker_internal':
+    truth.operator_note = 'declared by host.docker.internal';
+    break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);
 }
@@ -369,6 +372,7 @@ expect_fail raw-token raw_token
 expect_fail raw-connection-string raw_connection_string
 expect_fail raw-kubeconfig raw_kubeconfig
 expect_fail source-path source_path
+expect_fail bare-host-docker-internal bare_host_docker_internal
 
 if bash "$ROOT_DIR/scripts/verify-release.sh" >"$TMP_DIR/full-gate.out" 2>"$TMP_DIR/full-gate.err"; then
   fail "full release gate must remain unavailable"

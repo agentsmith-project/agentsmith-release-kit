@@ -14,6 +14,7 @@ const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const LOCAL_URI_RE = /\b(?:file|local|source|git\+file):\/\//i;
 const LOCAL_SCHEME_RE = /^(?:file|local|source|git\+file):/i;
 const LOCALHOST_URI_RE = /\bhttps?:\/\/(?:localhost|127\.\d{1,3}\.\d{1,3}\.\d{1,3}|0\.\d{1,3}\.\d{1,3}\.\d{1,3}|\[?(?:::|::1)\]?|host\.docker\.internal)(?::\d+)?(?:[/?#]|$)/i;
+const HOST_DOCKER_INTERNAL_RE = /(^|[^A-Za-z0-9.-])host\.docker\.internal(?=$|[^A-Za-z0-9.-])/i;
 const RELATIVE_URI_RE = /(^|[\s"'(=])\.\.?\//;
 const ABSOLUTE_LOCAL_PATH_RE = /(^|[\s"'(=])(?:~\/|\/(?:Users|home|tmp|var|private|workspace|workspaces|mnt|opt|etc)\/|[A-Za-z]:[\\/])/;
 const AGENTSMITH_SOURCE_PATH_RE = /\/home\/[^/]+\/works\/[^/]+\/agentsmith(?:\/|$)/i;
@@ -119,6 +120,7 @@ function scanUnsafeString(value, label, issues) {
     LOCAL_SCHEME_RE.test(value) ||
     LOCAL_URI_RE.test(value) ||
     LOCALHOST_URI_RE.test(value) ||
+    HOST_DOCKER_INTERNAL_RE.test(value) ||
     ABSOLUTE_LOCAL_PATH_RE.test(value) ||
     RELATIVE_URI_RE.test(value) ||
     AGENTSMITH_SOURCE_PATH_RE.test(value) ||
