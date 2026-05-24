@@ -10,7 +10,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Governance skeleton | Present | Checked by quick gate. |
 | Canonical repo identity | Present | Remote normalizes to `github.com/agentsmith-project/agentsmith-release-kit`. |
 | Required bootstrap files | Present | Checked by quick gate. |
-| Contract intake diagnostic | Focused only | `intake-report.json` and `image-digest-plan.json` keep `readiness: false`. |
+| Contract intake diagnostic | Focused only | `intake-report.json`, `image-digest-plan.json`, and `target-profile-coverage-report.json` keep `readiness: false`. |
 | Template package archive diagnostic | Focused only | `template-package-report.json` keeps `readiness: false`. |
 | Render/check image inventory diagnostic | Focused only | `render-report.json` keeps `readiness: false`. |
 | Release-kit evidence envelope diagnostic | Focused only | `evidence-validation-report.json` keeps `readiness: false`. |
@@ -23,8 +23,10 @@ exists. During bootstrap there is no release readiness evidence.
 The quick gate is not release readiness and does not produce deploy, package,
 or operator evidence.
 
-Contract intake output proves contract/input digest readiness only. It is not
-deploy, package, release, rollout, or operator readiness evidence.
+Contract intake output proves contract/input digest readiness only. Its target
+profile coverage report is limited to required profile support coverage for the
+current focused set and never claims release readiness. It is not deploy,
+package, release, rollout, or operator readiness evidence.
 
 Template package archive output proves only that one materialized deploy
 template package archive matches the declared descriptor and path-safety
@@ -40,8 +42,8 @@ or produce operator readiness evidence.
 
 Release-kit evidence envelope output proves only that one pre-existing evidence
 root has the expected release-kit-owned envelope, subject, provenance, target
-profile, digest, and redaction/source-safety shape. The raw envelope schema is
-`agentsmith.release-kit-evidence-envelope/v1`, distinct from AgentSmith's
+profile, release-kit version, digest, and redaction/source-safety shape. The
+raw envelope schema is `agentsmith.release-kit-evidence-envelope/v1`, distinct from AgentSmith's
 adapter/canonical `agentsmith.release-kit-evidence/v1`. It is not render,
 apply, deploy, package, release, rollout, smoke, or operator readiness
 evidence. Raw envelopes explicitly name `release_kit_output`, use
@@ -53,7 +55,7 @@ Target preflight output proves only that one explicit
 `agentsmith.substrate-connection.truth/v1` document matches the requested
 target axes and contains the required service, canonical endpoint, secret
 reference, TLS or sslmode, `extensions.pgvector.status: installed`, object
-storage, OIDC `issuer_url`, and reachability status `declared_reachable` or
-`verified_by_operator`. It does not connect to Kubernetes and is not render,
-apply, deploy, package, release, rollout, smoke, or operator readiness
-evidence.
+storage, OIDC `issuer_url`, `kit_installed` release-kit version plain semver,
+and reachability status `declared_reachable` or `verified_by_operator`. It
+does not connect to Kubernetes and is not render, apply, deploy, package,
+release, rollout, smoke, or operator readiness evidence.

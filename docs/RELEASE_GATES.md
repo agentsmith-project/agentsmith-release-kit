@@ -38,12 +38,24 @@ bash scripts/test-inputs.sh
 
 This focused guard exercises `bash scripts/verify-release.sh --inputs`. It
 checks release contract intake, deploy template package intake, target-profile
-selection, provenance, and digest-bound image inventory only.
+selection, target-profile coverage, release-kit version policy, provenance, and
+digest-bound image inventory only.
 
-The generated `intake-report.json` and `image-digest-plan.json` must keep
-`readiness: false`. They prove contract/input digest readiness only. They are
-not deploy readiness, package readiness, release readiness, rollout evidence,
-or operator signoff.
+Every `release_contract.target_profiles` entry must declare
+`required: boolean`; `support_level` is not accepted as a replacement. Duplicate
+`target_cluster/substrate_source/distribution` tuples are rejected. The current
+focused supported profile set is `existing_kubernetes/external_declared/online`
+and `kind_rehearsal/kit_installed/online`; required profiles outside that set
+fail fast. `kind_rehearsal` is supported only as a focused rehearsal and must
+not be `required: true`. During this slice,
+`existing_kubernetes/external_declared/airgap` may be declared only as
+`required: false`.
+
+The generated `intake-report.json`, `image-digest-plan.json`, and
+`target-profile-coverage-report.json` must keep `readiness: false`. They prove
+contract/input digest readiness only. They are not deploy readiness, package
+readiness, release readiness, rollout evidence, or operator signoff. The
+coverage report must not contain `verdict` or `release_verdict`.
 
 ## Template Package Archive Focused Diagnostic
 
@@ -116,7 +128,9 @@ evidence shape and must not be used for this raw envelope.
 
 The check verifies the release contract raw sha256, release identity, exact
 target profile axes, `passed`/`failed` status and failure-class pairing,
-the explicit `release_kit_output` mapping, release-kit provenance, subject file digests, subject path safety, and
+the explicit `release_kit_output` mapping, `evidence.release_kit_version`
+plain semver compatibility with `release_contract.min_release_kit_version`,
+release-kit provenance, subject file digests, subject path safety, and
 redaction/source scans for the envelope and subject files. It rejects legacy or
 synonym target values, AgentSmith product-flow fields, local provenance URIs,
 absolute paths, `..` escapes, symlinks, hardlinks, and obvious secret payloads.
@@ -167,7 +181,7 @@ release kit only validates the document. Raw evidence envelopes for
 `external_declared` must include inline neutral connection truth under
 `substrate_connection_truth`. For `kit_installed`, the same neutral truth
 schema is used and the document must declare `installed_by` and
-`release_kit_version`. Both paths must include the required substrate services,
+`release_kit_version` as plain `x.y.z` semver. Both paths must include the required substrate services,
 canonical endpoint declarations (`host` for PostgreSQL/MongoDB/Redis, `url` or
 `endpoint` plus `region` and `bucket` for object storage, and `issuer_url` for
 OIDC), secret references, TLS or sslmode declarations,

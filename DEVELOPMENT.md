@@ -44,9 +44,18 @@ Future implementation must consume only explicit inputs:
 The release kit must not infer those inputs from a sibling checkout.
 
 The current `--inputs` path is a focused diagnostic for contract intake only.
-Its `intake-report.json` and `image-digest-plan.json` outputs must keep
-`readiness: false`; they prove contract/input digest readiness only and are not
-deploy, package, or release readiness evidence.
+Its `intake-report.json`, `image-digest-plan.json`, and
+`target-profile-coverage-report.json` outputs must keep `readiness: false`;
+they prove contract/input digest readiness only and are not deploy, package, or
+release readiness evidence. All target profiles must declare
+`required: boolean`; `support_level` is rejected. Required profiles must be
+covered by the current focused set
+`existing_kubernetes/external_declared/online` and
+`kind_rehearsal/kit_installed/online`, but `kind_rehearsal` is supported only
+as focused rehearsal and must not be `required: true`, so
+`existing_kubernetes/external_declared/airgap` remains declared but
+`required: false` for this slice. `min_release_kit_version` must be plain
+`x.y.z` semver and cannot exceed the current release-kit version.
 
 The current `--template-package` path is a focused diagnostic for deploy
 template package archive intake only. It consumes the release contract, the
@@ -82,7 +91,9 @@ artifact provenance `subject_name` is `release-kit-evidence-subject`.
 truth.
 Its `evidence-validation-report.json` must keep `readiness: false` and
 `scope: release_kit_evidence_intake_only`; it does not claim deploy, package,
-smoke, operator, or release readiness.
+smoke, operator, or release readiness. `evidence.release_kit_version` must be
+plain `x.y.z` semver and must be greater than or equal to
+`release_contract.min_release_kit_version`.
 
 The current `--target-preflight` path is a focused diagnostic for substrate
 connection truth intake only. It consumes an explicit target profile and an
@@ -94,7 +105,8 @@ claim deploy or release readiness.
 Accepted connection truth uses `host` for PostgreSQL/MongoDB/Redis, `url` or
 `endpoint` plus `region` and `bucket` for object storage, `issuer_url` for
 OIDC, `extensions.pgvector.status: installed`, and reachability status
-`declared_reachable` or `verified_by_operator`.
+`declared_reachable` or `verified_by_operator`. For `kit_installed`,
+`release_kit_version` must be plain `x.y.z` semver.
 
 ## Non-Goals
 

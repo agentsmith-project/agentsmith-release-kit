@@ -370,6 +370,18 @@ switch (mutation) {
   case 'missing_release_kit_output':
     delete evidence.release_kit_output;
     break;
+  case 'v_prefixed_release_kit_version':
+    evidence.release_kit_version = 'v0.1.0';
+    break;
+  case 'short_release_kit_version':
+    evidence.release_kit_version = '0.1';
+    break;
+  case 'leading_zero_release_kit_version':
+    evidence.release_kit_version = '0.01.0';
+    break;
+  case 'below_contract_release_kit_version':
+    evidence.release_kit_version = '0.0.9';
+    break;
   case 'unknown_release_kit_output':
     evidence.release_kit_output = 'unknown-output.json';
     break;
@@ -689,6 +701,10 @@ pass "valid redacted fingerprint substrate truth evidence accepted"
 
 expect_fail missing-release-contract-digest ci_artifact missing_release_contract_digest
 expect_fail missing-release-kit-output ci_artifact missing_release_kit_output
+expect_fail v-prefixed-release-kit-version ci_artifact v_prefixed_release_kit_version
+expect_fail short-release-kit-version ci_artifact short_release_kit_version
+expect_fail leading-zero-release-kit-version ci_artifact leading_zero_release_kit_version
+expect_fail below-contract-release-kit-version ci_artifact below_contract_release_kit_version
 expect_fail unknown-release-kit-output ci_artifact unknown_release_kit_output
 expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
 expect_fail missing-substrate-connection-truth ci_artifact missing_substrate_connection_truth

@@ -174,6 +174,29 @@ switch (label) {
       )
     );
     break;
+  case 'missing-target-profile-required':
+    delete contract.target_profiles[0].required;
+    break;
+  case 'target-profile-support-level-substitute':
+    delete contract.target_profiles[0].required;
+    contract.target_profiles[0].support_level = 'primary';
+    break;
+  case 'target-profile-support-level-present':
+    contract.target_profiles[0].support_level = 'primary';
+    break;
+  case 'duplicate-target-profile-tuple':
+    contract.target_profiles[2].target_cluster = contract.target_profiles[0].target_cluster;
+    contract.target_profiles[2].substrate_source = contract.target_profiles[0].substrate_source;
+    contract.target_profiles[2].distribution = contract.target_profiles[0].distribution;
+    break;
+  case 'unsupported-required-target-profile':
+    contract.target_profiles[1].required = true;
+    break;
+  case 'kind-required-target-profile':
+    contract.target_profiles[2].required = true;
+    refreshContractSubjectDigest();
+    refreshContractArtifactDigest();
+    break;
   case 'legacy-contract-profile-local-kind':
     contract.target_profiles[2].target_cluster = 'local-kind';
     break;
@@ -220,6 +243,18 @@ switch (label) {
     break;
   case 'bad-min-release-kit-version':
     contract.min_release_kit_version = 1;
+    break;
+  case 'v-prefixed-min-release-kit-version':
+    contract.min_release_kit_version = 'v0.1.0';
+    break;
+  case 'short-min-release-kit-version':
+    contract.min_release_kit_version = '0.1';
+    break;
+  case 'leading-zero-min-release-kit-version':
+    contract.min_release_kit_version = '0.01.0';
+    break;
+  case 'future-min-release-kit-version':
+    contract.min_release_kit_version = '0.2.0';
     break;
   case 'localhost-artifact-uri':
     contract.artifact_provenance.artifact_uri = 'http://localhost:8080/release-contract.json';
@@ -716,9 +751,110 @@ for (const file of ['intake-report.json', 'image-digest-plan.json']) {
 NODE
 }
 
+assert_coverage_report() {
+  local output_dir="$1"
+  local expected_status="${2:-pass}"
+  local expected_missing="${3:-}"
+
+  "$NODE_BIN" --input-type=module - "$output_dir" "$expected_status" "$expected_missing" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [outputDir, expectedStatus, expectedMissing] = process.argv.slice(2);
+const report = JSON.parse(
+  fs.readFileSync(path.join(outputDir, 'target-profile-coverage-report.json'), 'utf8')
+);
+if (report.scope !== 'target_profile_coverage_intake_only') {
+  throw new Error(`unexpected scope: ${report.scope}`);
+}
+if (report.readiness !== false) {
+  throw new Error('target profile coverage report must keep readiness=false');
+}
+if (report.status !== expectedStatus) {
+  throw new Error(`unexpected status: ${report.status}`);
+}
+if ('release_verdict' in report || 'verdict' in report) {
+  throw new Error('target profile coverage report must not claim a release verdict');
+}
+const supportedValues = new Set((report.supported_profiles || []).map((profile) => profile.value));
+for (const value of [
+  'existing_kubernetes/external_declared/online',
+  'kind_rehearsal/kit_installed/online'
+]) {
+  if (!supportedValues.has(value)) {
+    throw new Error(`supported profile missing from report: ${value}`);
+  }
+}
+if (!Array.isArray(report.required_profiles)) {
+  throw new Error('target profile coverage report must list required_profiles');
+}
+if (!Array.isArray(report.missing_profiles)) {
+  throw new Error('target profile coverage report must list missing_profiles');
+}
+if (expectedStatus === 'pass' && report.missing_profiles.length !== 0) {
+  throw new Error('passing target profile coverage report must not list missing profiles');
+}
+if (expectedStatus === 'failed') {
+  if (report.failure_class !== 'unsupported_required_target_profile') {
+    throw new Error(`unexpected failure_class: ${report.failure_class}`);
+  }
+  const missingValues = new Set(report.missing_profiles.map((profile) => profile.value));
+  if (!missingValues.has(expectedMissing)) {
+    throw new Error(`missing profile not recorded: ${expectedMissing}`);
+  }
+}
+NODE
+}
+
+expect_unsupported_required_target_profile() {
+  local contract="$TMP_DIR/unsupported-required-target-profile.release-contract.json"
+  local output_dir="$TMP_DIR/out-unsupported-required-target-profile"
+
+  mutate_contract unsupported-required-target-profile "$contract"
+
+  if run_inputs "$contract" "$VALID_DEPLOY_TEMPLATE_PACKAGE" "$output_dir" \
+    >"$TMP_DIR/unsupported-required-target-profile.out" \
+    2>"$TMP_DIR/unsupported-required-target-profile.err"; then
+    cat "$TMP_DIR/unsupported-required-target-profile.out" >&2
+    cat "$TMP_DIR/unsupported-required-target-profile.err" >&2
+    fail "expected unsupported required target profile to fail"
+  fi
+
+  assert_coverage_report \
+    "$output_dir" \
+    failed \
+    existing_kubernetes/external_declared/airgap
+  pass "unsupported required target profile rejected with coverage report"
+}
+
+expect_kind_required_target_profile() {
+  local contract="$TMP_DIR/kind-required-target-profile.release-contract.json"
+  local output_dir="$TMP_DIR/out-kind-required-target-profile"
+
+  mutate_contract kind-required-target-profile "$contract"
+
+  if run_inputs "$contract" "$VALID_DEPLOY_TEMPLATE_PACKAGE" "$output_dir" \
+    >"$TMP_DIR/kind-required-target-profile.out" \
+    2>"$TMP_DIR/kind-required-target-profile.err"; then
+    cat "$TMP_DIR/kind-required-target-profile.out" >&2
+    cat "$TMP_DIR/kind-required-target-profile.err" >&2
+    fail "expected kind required target profile to fail"
+  fi
+
+  if ! grep -q 'kind_rehearsal target profile must not be required' \
+    "$TMP_DIR/kind-required-target-profile.err"; then
+    cat "$TMP_DIR/kind-required-target-profile.out" >&2
+    cat "$TMP_DIR/kind-required-target-profile.err" >&2
+    fail "kind required target profile failure must explain rehearsal is not required"
+  fi
+
+  pass "kind rehearsal required target profile rejected"
+}
+
 VALID_OUT="$TMP_DIR/valid"
 run_inputs "$VALID_CONTRACT" "$VALID_DEPLOY_TEMPLATE_PACKAGE" "$VALID_OUT" >/dev/null
 assert_outputs "$VALID_OUT"
+assert_coverage_report "$VALID_OUT"
 pass "valid AgentSmith generated artifact fixtures accepted"
 
 ATTESTED_CONTRACT="$TMP_DIR/valid-attested.release-contract.json"
@@ -727,6 +863,7 @@ ATTESTED_OUT="$TMP_DIR/valid-attested"
 write_attested_inputs "$ATTESTED_CONTRACT" "$ATTESTED_DEPLOY_TEMPLATE_PACKAGE"
 run_inputs "$ATTESTED_CONTRACT" "$ATTESTED_DEPLOY_TEMPLATE_PACKAGE" "$ATTESTED_OUT" >/dev/null
 assert_outputs "$ATTESTED_OUT"
+assert_coverage_report "$ATTESTED_OUT"
 pass "valid AgentSmith attestation fields accepted"
 
 GITHUB_API_CONTRACT="$TMP_DIR/valid-github-actions-api.release-contract.json"
@@ -735,6 +872,7 @@ GITHUB_API_OUT="$TMP_DIR/valid-github-actions-api"
 write_github_actions_artifact_api_inputs "$GITHUB_API_CONTRACT" "$GITHUB_API_DEPLOY_TEMPLATE_PACKAGE"
 run_inputs "$GITHUB_API_CONTRACT" "$GITHUB_API_DEPLOY_TEMPLATE_PACKAGE" "$GITHUB_API_OUT" >/dev/null
 assert_outputs "$GITHUB_API_OUT"
+assert_coverage_report "$GITHUB_API_OUT"
 pass "valid GitHub Actions artifact API URIs accepted"
 
 GITHUB_RELEASE_CONTRACT="$TMP_DIR/valid-github-release-download.release-contract.json"
@@ -743,6 +881,7 @@ GITHUB_RELEASE_OUT="$TMP_DIR/valid-github-release-download"
 write_github_release_download_inputs "$GITHUB_RELEASE_CONTRACT" "$GITHUB_RELEASE_DEPLOY_TEMPLATE_PACKAGE"
 run_inputs "$GITHUB_RELEASE_CONTRACT" "$GITHUB_RELEASE_DEPLOY_TEMPLATE_PACKAGE" "$GITHUB_RELEASE_OUT" >/dev/null
 assert_outputs "$GITHUB_RELEASE_OUT"
+assert_coverage_report "$GITHUB_RELEASE_OUT"
 pass "valid GitHub releases/download artifact URIs accepted"
 
 SECRET_REF_CONTRACT="$TMP_DIR/valid-secret-ref.release-contract.json"
@@ -750,7 +889,11 @@ SECRET_REF_OUT="$TMP_DIR/valid-secret-ref"
 write_secret_ref_inputs "$SECRET_REF_CONTRACT"
 run_inputs "$SECRET_REF_CONTRACT" "$VALID_DEPLOY_TEMPLATE_PACKAGE" "$SECRET_REF_OUT" >/dev/null
 assert_outputs "$SECRET_REF_OUT"
+assert_coverage_report "$SECRET_REF_OUT"
 pass "valid secretRef pull_secret_ref accepted"
+
+expect_unsupported_required_target_profile
+expect_kind_required_target_profile
 
 expect_target_profile_fail "legacy-target-profile-local-kind" \
   "local-kind/external_declared/online"
@@ -783,6 +926,10 @@ for label in \
   template-digest-drift \
   package-provenance-artifact-drift \
   missing-target-profile \
+  missing-target-profile-required \
+  target-profile-support-level-substitute \
+  target-profile-support-level-present \
+  duplicate-target-profile-tuple \
   legacy-contract-profile-local-kind \
   legacy-contract-profile-existing-cluster \
   legacy-contract-profile-real-k8s \
@@ -797,6 +944,10 @@ for label in \
   bad-openapi-digest \
   bad-substrate-connection-schema \
   bad-min-release-kit-version \
+  v-prefixed-min-release-kit-version \
+  short-min-release-kit-version \
+  leading-zero-min-release-kit-version \
+  future-min-release-kit-version \
   localhost-artifact-uri \
   ipv4-loopback-artifact-uri \
   ipv4-unspecified-artifact-uri \

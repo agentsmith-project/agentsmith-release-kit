@@ -12,6 +12,11 @@ import {
   parseTargetProfile,
   validateSubstrateConnectionTruth
 } from './lib/substrate-truth-validation.mjs';
+import {
+  CURRENT_RELEASE_KIT_VERSION,
+  assertPlainSemverAtLeast,
+  requirePlainSemver
+} from './lib/release-kit-version-policy.mjs';
 
 const REQUIRED_ARGS = [
   'releaseContract',
@@ -768,8 +773,30 @@ function assertEvidenceShape(evidence) {
     EVIDENCE_SCHEMA,
     'evidence.schema_version'
   );
-  requireString(evidence.release_kit_version, 'evidence.release_kit_version');
   requireObject(evidence.artifact_provenance, 'evidence.artifact_provenance');
+}
+
+function assertReleaseKitVersion(evidence, releaseContractInput) {
+  const contract = requireObject(releaseContractInput.value, 'release_contract');
+  const minReleaseKitVersion = requirePlainSemver(
+    contract.min_release_kit_version,
+    'release_contract.min_release_kit_version',
+    fail
+  );
+  assertPlainSemverAtLeast(
+    CURRENT_RELEASE_KIT_VERSION,
+    minReleaseKitVersion.value,
+    'current release-kit version',
+    'release_contract.min_release_kit_version',
+    fail
+  );
+  assertPlainSemverAtLeast(
+    evidence.release_kit_version,
+    minReleaseKitVersion.value,
+    'evidence.release_kit_version',
+    'release_contract.min_release_kit_version',
+    fail
+  );
 }
 
 function buildReport({
@@ -841,6 +868,7 @@ async function main() {
   }
 
   assertEvidenceShape(evidence);
+  assertReleaseKitVersion(evidence, releaseContractInput);
   const releaseKitOutput = assertReleaseKitOutput(evidence);
   assertSchemaVersion(
     evidenceSubject.schema_version,

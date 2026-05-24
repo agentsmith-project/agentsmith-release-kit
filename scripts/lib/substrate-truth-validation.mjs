@@ -1,12 +1,13 @@
+import {
+  SUPPORTED_FOCUSED_TARGET_PROFILE_SET,
+  requirePlainSemver
+} from './release-kit-version-policy.mjs';
+
 export const SUBSTRATE_CONNECTION_SCHEMA = 'agentsmith.substrate-connection.truth/v1';
 export const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
 export const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
 export const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
 
-const SUPPORTED_TARGET_PROFILES = new Set([
-  'existing_kubernetes/external_declared/online',
-  'kind_rehearsal/kit_installed/online'
-]);
 const REQUIRED_SERVICES = ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc'];
 const SECRET_REF_PREFIX = 'secretRef:';
 const FINGERPRINT_RE = /^(?:redacted|fingerprint):sha256:[0-9a-f]{64}$/;
@@ -203,7 +204,7 @@ export function parseTargetProfile(targetProfile) {
     )
   };
 
-  if (!SUPPORTED_TARGET_PROFILES.has(value)) {
+  if (!SUPPORTED_FOCUSED_TARGET_PROFILE_SET.has(value)) {
     fail(`target_profile is not supported by target preflight: ${value}`);
   }
 
@@ -443,7 +444,11 @@ function assertTruthIdentity(truth, targetProfile, label, requiredSubstrateSourc
     if (installedBy !== 'agentsmith-release-kit') {
       fail(`${label}.installed_by must be agentsmith-release-kit`);
     }
-    requireString(truth.release_kit_version, `${label}.release_kit_version`);
+    requirePlainSemver(
+      truth.release_kit_version,
+      `${label}.release_kit_version`,
+      fail
+    );
   }
 
   return {

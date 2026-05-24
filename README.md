@@ -85,9 +85,18 @@ bash scripts/test-inputs.sh
 ```
 
 `--inputs` validates only the release contract, deploy template package, target
-profile, provenance, and digest-bound image inventory. `intake-report.json` and
-`image-digest-plan.json` are written with `readiness: false`; they prove only
-contract/input digest readiness, not deploy, package, or release readiness.
+profile, provenance, release-kit version policy, and digest-bound image
+inventory. Every declared `target_profiles` entry must carry
+`required: boolean`; `support_level` is rejected, duplicate three-axis tuples
+are rejected, and required profiles must fit the current focused support set:
+`existing_kubernetes/external_declared/online` and
+`kind_rehearsal/kit_installed/online`. The kind profile is supported only as a
+focused rehearsal and must not be `required: true`. The airgap profile
+`existing_kubernetes/external_declared/airgap` may be declared only with
+`required: false` during this bootstrap slice. `intake-report.json`,
+`image-digest-plan.json`, and `target-profile-coverage-report.json` are
+written with `readiness: false`; they prove only contract/input digest
+readiness, not deploy, package, or release readiness.
 
 Deploy template package archive focused diagnostic:
 
@@ -131,7 +140,7 @@ bash scripts/test-evidence.sh
 already present under an evidence root. The root must contain `evidence.json`
 and `evidence-subject.json`; the check binds the envelope to the supplied
 release contract digest, release identity, target profile, provenance, subject
-files, and redaction/source-safety rules. The raw envelope schema is
+files, release-kit version policy, and redaction/source-safety rules. The raw envelope schema is
 `agentsmith.release-kit-evidence-envelope/v1`; AgentSmith owns the separate
 adapter/canonical `agentsmith.release-kit-evidence/v1` shape.
 The raw envelope must set `release_kit_output` to one mapped release-kit output:
@@ -160,12 +169,13 @@ profiles, required substrate services, canonical endpoint declarations
 (`host` for PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and
 `bucket` for object storage, and `issuer_url` for OIDC), secret references, TLS
 or sslmode declarations, `extensions.pgvector.status: installed`, reachability
-statuses `declared_reachable` or `verified_by_operator`, and obvious local
-source or plaintext credential payloads. `target-preflight-report.json` is
-written with `readiness: false`, `scope: target_preflight_intake_only`, and
-`status: pass`; it is not Kubernetes connectivity evidence, render/check
-evidence, apply evidence, smoke evidence, package readiness, deploy readiness,
-or release readiness.
+statuses `declared_reachable` or `verified_by_operator`, `kit_installed`
+release-kit versions as plain `x.y.z` semver, and obvious local source or
+plaintext credential payloads. `target-preflight-report.json` is written with
+`readiness: false`, `scope: target_preflight_intake_only`, and `status: pass`;
+it is not Kubernetes connectivity evidence, render/check evidence, apply
+evidence, smoke evidence, package readiness, deploy readiness, or release
+readiness.
 
 The full release gate is a future repo-local authority. It is intentionally not
 implemented during bootstrap.

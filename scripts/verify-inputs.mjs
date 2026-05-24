@@ -3,6 +3,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  CURRENT_RELEASE_KIT_VERSION,
+  SUPPORTED_FOCUSED_TARGET_PROFILE_SET,
+  SUPPORTED_FOCUSED_TARGET_PROFILE_VALUES,
+  assertPlainSemverAtLeast,
+  requirePlainSemver
+} from './lib/release-kit-version-policy.mjs';
+
 const AGENTSMITH_REPO = 'github.com/agentsmith-project/agentsmith';
 const AGENTSMITH_PRODUCT = AGENTSMITH_REPO.slice(AGENTSMITH_REPO.lastIndexOf('/') + 1);
 const CONTRACT_SUBJECT = 'agentsmith-release-contract';
@@ -26,7 +34,6 @@ const SUBSTRATE_CONNECTION_SCHEMA = 'agentsmith.substrate-connection.truth/v1';
 const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
 const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
 const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
-const SUPPORT_LEVEL_VALUES = new Set(['primary', 'supported', 'diagnostic']);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -352,7 +359,9 @@ function parseTargetProfile(targetProfile) {
     fail('target_profile must be <target_cluster>/<substrate_source>/<distribution>');
   }
   const [targetCluster, substrateSource, distribution] = tuple;
+  const value = `${targetCluster}/${substrateSource}/${distribution}`;
   return {
+    value,
     targetCluster: requireEnumString(
       targetCluster,
       'target_profile.target_cluster',
@@ -383,62 +392,34 @@ function isAllowedPullSecretRef(value) {
   return CURRENT_LEGAL_PULL_SECRET_REFS.has(value) || isSecretRefValue(value);
 }
 
-function assertTargetProfile(contract, targetProfile) {
-  const { targetCluster, substrateSource, distribution } = parseTargetProfile(targetProfile);
-
-  const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
-  let found;
-  let foundIndex = -1;
-  for (const [index, profile] of profiles.entries()) {
-    const label = `release_contract.target_profiles[${index}]`;
-    const object = requireObject(profile, label);
-    const profileTargetCluster = requireEnumString(
-      object.target_cluster,
-      `${label}.target_cluster`,
-      TARGET_CLUSTER_VALUES
-    );
-    const profileSubstrateSource = requireEnumString(
-      object.substrate_source,
-      `${label}.substrate_source`,
-      SUBSTRATE_SOURCE_VALUES
-    );
-    const profileDistribution = requireEnumString(
-      object.distribution,
-      `${label}.distribution`,
-      DISTRIBUTION_VALUES
-    );
-    const isMatch = (
-      profileTargetCluster === targetCluster &&
-      profileSubstrateSource === substrateSource &&
-      profileDistribution === distribution
-    );
-    if (isMatch) {
-      found = object;
-      foundIndex = index;
-    }
+function normalizeTargetProfile(object, label) {
+  const targetCluster = requireEnumString(
+    object.target_cluster,
+    `${label}.target_cluster`,
+    TARGET_CLUSTER_VALUES
+  );
+  const substrateSource = requireEnumString(
+    object.substrate_source,
+    `${label}.substrate_source`,
+    SUBSTRATE_SOURCE_VALUES
+  );
+  const distribution = requireEnumString(
+    object.distribution,
+    `${label}.distribution`,
+    DISTRIBUTION_VALUES
+  );
+  const value = `${targetCluster}/${substrateSource}/${distribution}`;
+  if (Object.prototype.hasOwnProperty.call(object, 'support_level')) {
+    fail(`${label}.support_level is not allowed; use ${label}.required`);
   }
-
-  if (!found) {
-    fail(`target_profile is not declared: ${targetProfile}`);
+  if (!Object.prototype.hasOwnProperty.call(object, 'required')) {
+    fail(`${label}.required is required`);
   }
-
-  const label = `release_contract.target_profiles[${foundIndex}]`;
-  const prerequisites = requireObject(found.prerequisites, `${label}.prerequisites`);
-  const metadata = {};
-  const hasRequired = Object.prototype.hasOwnProperty.call(found, 'required');
-  if (hasRequired) {
-    metadata.required = requireBoolean(found.required, `${label}.required`);
+  const required = requireBoolean(object.required, `${label}.required`);
+  if (targetCluster === 'kind_rehearsal' && required) {
+    fail(`${label}: kind_rehearsal target profile must not be required`);
   }
-  if (Object.prototype.hasOwnProperty.call(found, 'support_level')) {
-    metadata.support_level = requireEnumString(
-      found.support_level,
-      `${label}.support_level`,
-      SUPPORT_LEVEL_VALUES
-    );
-  }
-  if (!hasRequired && !metadata.support_level) {
-    fail(`${label}.required or ${label}.support_level is required`);
-  }
+  const prerequisites = requireObject(object.prerequisites, `${label}.prerequisites`);
   const prerequisiteFields = [
     'namespace',
     'rbac',
@@ -465,13 +446,43 @@ function assertTargetProfile(contract, targetProfile) {
   }
 
   return {
-    value: targetProfile,
+    value,
     target_cluster: targetCluster,
     substrate_source: substrateSource,
     distribution,
-    ...metadata,
+    required,
     prerequisites: normalizedPrerequisites
   };
+}
+
+function assertTargetProfiles(contract) {
+  const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
+  const seen = new Map();
+  const normalized = [];
+  for (const [index, profile] of profiles.entries()) {
+    const label = `release_contract.target_profiles[${index}]`;
+    const object = requireObject(profile, label);
+    const normalizedProfile = normalizeTargetProfile(object, label);
+    if (seen.has(normalizedProfile.value)) {
+      fail(
+        `${label} duplicates target profile tuple declared at ${seen.get(normalizedProfile.value)}`
+      );
+    }
+    seen.set(normalizedProfile.value, label);
+    normalized.push(normalizedProfile);
+  }
+
+  return normalized;
+}
+
+function assertTargetProfile(targetProfiles, targetProfile) {
+  const parsed = parseTargetProfile(targetProfile);
+  const found = targetProfiles.find((profile) => profile.value === parsed.value);
+  if (!found) {
+    fail(`target_profile is not declared: ${targetProfile}`);
+  }
+
+  return found;
 }
 
 function isLoopbackHost(hostname) {
@@ -908,7 +919,18 @@ function assertReleaseIdentity(contract) {
     SUBSTRATE_CONNECTION_SCHEMA,
     'release_contract.substrate_connection_schema'
   );
-  requireString(contract.min_release_kit_version, 'release_contract.min_release_kit_version');
+  const minReleaseKitVersion = requirePlainSemver(
+    contract.min_release_kit_version,
+    'release_contract.min_release_kit_version',
+    fail
+  );
+  assertPlainSemverAtLeast(
+    CURRENT_RELEASE_KIT_VERSION,
+    minReleaseKitVersion.value,
+    'current release-kit version',
+    'release_contract.min_release_kit_version',
+    fail
+  );
   return requireGitSha(contract.git_sha, 'release_contract.git_sha');
 }
 
@@ -971,6 +993,56 @@ function buildEvidence({
   };
 }
 
+function targetProfileSummary(profile) {
+  return {
+    value: profile.value,
+    target_cluster: profile.target_cluster,
+    substrate_source: profile.substrate_source,
+    distribution: profile.distribution
+  };
+}
+
+function targetProfileFromValue(value) {
+  const [targetCluster, substrateSource, distribution] = value.split('/');
+  return {
+    value,
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution
+  };
+}
+
+function buildTargetProfileCoverageReport(targetProfiles) {
+  const requiredProfiles = targetProfiles
+    .filter((profile) => profile.required)
+    .map(targetProfileSummary);
+  const missingProfiles = requiredProfiles.filter(
+    (profile) => !SUPPORTED_FOCUSED_TARGET_PROFILE_SET.has(profile.value)
+  );
+  const report = {
+    scope: 'target_profile_coverage_intake_only',
+    readiness: false,
+    required_profiles: requiredProfiles,
+    missing_profiles: missingProfiles,
+    supported_profiles: SUPPORTED_FOCUSED_TARGET_PROFILE_VALUES.map(targetProfileFromValue),
+    status: missingProfiles.length > 0 ? 'failed' : 'pass'
+  };
+
+  if (missingProfiles.length > 0) {
+    report.failure_class = 'unsupported_required_target_profile';
+  }
+
+  return report;
+}
+
+async function writeTargetProfileCoverageReport(outputDir, report) {
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(
+    path.join(outputDir, 'target-profile-coverage-report.json'),
+    `${JSON.stringify(report, null, 2)}\n`
+  );
+}
+
 async function writeEvidence(outputDir, evidence) {
   await fs.mkdir(outputDir, { recursive: true });
   const body = `${JSON.stringify(evidence, null, 2)}\n`;
@@ -1005,7 +1077,13 @@ async function main() {
   assertTemplate(contract, deployTemplatePackage);
   const images = assertImageInventory(contract);
   assertProductFlowShape(contract);
-  const targetProfile = assertTargetProfile(contract, args.targetProfile);
+  const targetProfiles = assertTargetProfiles(contract);
+  const targetProfileCoverageReport = buildTargetProfileCoverageReport(targetProfiles);
+  await writeTargetProfileCoverageReport(args.outputDir, targetProfileCoverageReport);
+  if (targetProfileCoverageReport.status === 'failed') {
+    fail('required target_profiles include unsupported focused profiles');
+  }
+  const targetProfile = assertTargetProfile(targetProfiles, args.targetProfile);
   const provenance = assertProvenance(contract, deployTemplatePackage, releaseGitSha);
 
   await writeEvidence(

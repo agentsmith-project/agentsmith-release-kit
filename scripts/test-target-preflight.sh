@@ -225,6 +225,15 @@ switch (mutation) {
   case 'bare_host_docker_internal':
     truth.operator_note = 'declared by host.docker.internal';
     break;
+  case 'v_prefixed_release_kit_version':
+    truth.release_kit_version = 'v0.1.0';
+    break;
+  case 'short_release_kit_version':
+    truth.release_kit_version = '0.1';
+    break;
+  case 'leading_zero_release_kit_version':
+    truth.release_kit_version = '0.01.0';
+    break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);
 }
@@ -260,6 +269,23 @@ expect_fail() {
   fi
 
   pass "invalid target preflight rejected: $label"
+}
+
+expect_kit_fail() {
+  local label="$1"
+  local mutation="${2:-$label}"
+  local truth_file="$TMP_DIR/truth-kit-$label.json"
+  local output_dir="$TMP_DIR/out-kit-$label"
+
+  write_truth "$truth_file" "$KIT_PROFILE" "$mutation"
+
+  if run_target_preflight "$KIT_PROFILE" "$truth_file" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected invalid kit target preflight case to fail: $label"
+  fi
+
+  pass "invalid kit target preflight rejected: $label"
 }
 
 expect_profile_fail() {
@@ -373,6 +399,9 @@ expect_fail raw-connection-string raw_connection_string
 expect_fail raw-kubeconfig raw_kubeconfig
 expect_fail source-path source_path
 expect_fail bare-host-docker-internal bare_host_docker_internal
+expect_kit_fail v-prefixed-release-kit-version v_prefixed_release_kit_version
+expect_kit_fail short-release-kit-version short_release_kit_version
+expect_kit_fail leading-zero-release-kit-version leading_zero_release_kit_version
 
 if bash "$ROOT_DIR/scripts/verify-release.sh" >"$TMP_DIR/full-gate.out" 2>"$TMP_DIR/full-gate.err"; then
   fail "full release gate must remain unavailable"
