@@ -2,7 +2,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const REQUIRED_ARGS = [
   'releaseContract',
@@ -27,9 +26,6 @@ const WORKLOAD_KINDS = new Set([
 const MANIFEST_EXTENSIONS = new Set(['.json', '.yaml', '.yml']);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
-const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
-const RELEASE_KIT_ROOT = path.resolve(SCRIPT_DIR, '..');
-const AGENTSMITH_SOURCE_ROOT = path.join(path.dirname(RELEASE_KIT_ROOT), 'agentsmith');
 const SECRET_REF_PREFIX = 'secretRef:';
 const SECRET_KEY_RE = /(^|[_-])(password|passwd|pwd|token|secret|client_secret|private_key|kubeconfig|access_key|api_key)([_-]|$)/i;
 const YAML_IMAGE_KEY_RE = /(?:^|[{,\s\[])\s*(?:-\s*)?image\s*:\s*(?:"([^"]+)"|'([^']+)'|([^,\]}\s#]+))/g;
@@ -67,7 +63,8 @@ function usage() {
     --release-contract <json> \\
     --rendered-manifests <dir> \\
     --target-profile <target_cluster>/<substrate_source>/<distribution> \\
-    --output-dir <dir>`;
+    --output-dir <dir> \\
+    [--forbidden-source-root <dir>]`;
 }
 
 function cliFail(message) {
@@ -89,7 +86,7 @@ function parseArgs(argv) {
     const arg = argv[index];
     const nextValue = () => {
       const value = argv[index + 1];
-      if (!value || value.startsWith('--')) {
+      if (!value || value.trim() === '' || value.startsWith('--')) {
         cliFail(`missing value for ${arg}`);
       }
       index += 1;
@@ -108,6 +105,12 @@ function parseArgs(argv) {
         break;
       case '--output-dir':
         parsed.outputDir = nextValue();
+        break;
+      case '--forbidden-source-root':
+        if (!parsed.forbiddenSourceRoots) {
+          parsed.forbiddenSourceRoots = [];
+        }
+        parsed.forbiddenSourceRoots.push(nextValue());
         break;
       case '--help':
       case '-h':
@@ -161,16 +164,19 @@ function isInsidePath(rootDir, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function assertNotAgentsmithSourcePath(candidate, label) {
+function assertNotForbiddenSourcePath(candidate, label, forbiddenSourceRoots) {
   const resolved = path.resolve(candidate);
-  if (isInsidePath(AGENTSMITH_SOURCE_ROOT, resolved)) {
-    fail(`${label} must not point to the sibling AgentSmith source tree`);
+  for (const root of forbiddenSourceRoots) {
+    const forbiddenRoot = path.resolve(root);
+    if (isInsidePath(forbiddenRoot, resolved)) {
+      fail(`${label} must not point to a configured forbidden product source tree`);
+    }
   }
 }
 
-async function assertPathBoundary(input, label) {
+async function assertPathBoundary(input, label, forbiddenSourceRoots) {
   const requested = path.resolve(input);
-  assertNotAgentsmithSourcePath(requested, `${label} path`);
+  assertNotForbiddenSourcePath(requested, `${label} path`, forbiddenSourceRoots);
 
   let stat;
   try {
@@ -187,12 +193,12 @@ async function assertPathBoundary(input, label) {
       fail(`cannot read ${label} symlink: ${error.message}`);
     }
     const targetPath = path.resolve(path.dirname(requested), target);
-    assertNotAgentsmithSourcePath(targetPath, `${label} symlink target`);
+    assertNotForbiddenSourcePath(targetPath, `${label} symlink target`, forbiddenSourceRoots);
   }
 
   try {
     const real = await fs.realpath(requested);
-    assertNotAgentsmithSourcePath(real, `${label} real path`);
+    assertNotForbiddenSourcePath(real, `${label} real path`, forbiddenSourceRoots);
   } catch {
     return requested;
   }
@@ -446,8 +452,8 @@ function assertInsideRoot(rootDir, file, label) {
   }
 }
 
-async function renderedRoot(input) {
-  await assertPathBoundary(input, 'rendered manifests root');
+async function renderedRoot(input, forbiddenSourceRoots) {
+  await assertPathBoundary(input, 'rendered manifests root', forbiddenSourceRoots);
 
   let root;
   try {
@@ -892,7 +898,12 @@ async function main() {
   }
 
   const targetProfile = parseTargetProfile(args.targetProfile);
-  const releaseContractPath = await assertPathBoundary(args.releaseContract, 'release contract');
+  const forbiddenSourceRoots = args.forbiddenSourceRoots || [];
+  const releaseContractPath = await assertPathBoundary(
+    args.releaseContract,
+    'release contract',
+    forbiddenSourceRoots
+  );
   const releaseContractInput = await readJson(releaseContractPath, 'release contract');
   const contract = requireObject(releaseContractInput.value, 'release_contract');
   assertSchemaVersion(
@@ -904,7 +915,7 @@ async function main() {
   contract.git_sha = requireGitSha(contract.git_sha, 'release_contract.git_sha');
   assertContractTargetProfiles(contract, targetProfile);
   const inventory = buildInventory(contract);
-  const root = await renderedRoot(args.renderedManifests);
+  const root = await renderedRoot(args.renderedManifests, forbiddenSourceRoots);
   const manifestSummary = await validateManifests(root, inventory);
 
   await writeReport(

@@ -23,12 +23,20 @@ run_render_check() {
   local output_dir="$2"
   local target_profile="${3:-$TARGET_PROFILE}"
   local release_contract="${4:-$VALID_CONTRACT}"
+  local forbidden_source_root="${5:-}"
 
-  bash "$ROOT_DIR/scripts/verify-release.sh" --render-check \
+  local command=(
+    bash "$ROOT_DIR/scripts/verify-release.sh" --render-check
     --release-contract "$release_contract" \
     --rendered-manifests "$rendered_manifests" \
     --target-profile "$target_profile" \
     --output-dir "$output_dir"
+  )
+  if [[ -n "$forbidden_source_root" ]]; then
+    command+=(--forbidden-source-root "$forbidden_source_root")
+  fi
+
+  "${command[@]}"
 }
 
 expect_fail() {
@@ -71,25 +79,21 @@ expect_source_path_fail() {
   local rendered_manifests="$TMP_DIR/manifests-source-$label"
   local output_dir="$TMP_DIR/out-source-$label"
   local bad_contract="$VALID_CONTRACT"
+  local forbidden_source_root="$TMP_DIR/forbidden-product-source-$label"
 
   write_manifests "$rendered_manifests" valid
+  mkdir -p "$forbidden_source_root"
 
   if [[ "$mode" == "release_contract" ]]; then
-    bad_contract="$(
-      "$NODE_BIN" --input-type=module - "$ROOT_DIR" <<'NODE'
-import path from 'node:path';
-
-const [rootDir] = process.argv.slice(2);
-console.log(path.join(path.dirname(rootDir), 'agent' + 'smith', 'release-contract.json'));
-NODE
-    )"
+    bad_contract="$forbidden_source_root/release-contract.json"
   elif [[ "$mode" == "rendered_root_symlink" ]]; then
-    "$NODE_BIN" --input-type=module - "$ROOT_DIR" "$rendered_manifests" <<'NODE'
+    "$NODE_BIN" --input-type=module - "$forbidden_source_root" "$rendered_manifests" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [rootDir, renderedManifests] = process.argv.slice(2);
-const target = path.join(path.dirname(rootDir), 'agent' + 'smith', 'rendered-manifests');
+const [forbiddenSourceRoot, renderedManifests] = process.argv.slice(2);
+const target = path.join(forbiddenSourceRoot, 'rendered-manifests');
+fs.mkdirSync(target, { recursive: true });
 fs.rmSync(renderedManifests, { recursive: true, force: true });
 fs.symlinkSync(target, renderedManifests, 'dir');
 NODE
@@ -97,13 +101,13 @@ NODE
     fail "unknown source path fail mode: $mode"
   fi
 
-  if run_render_check "$rendered_manifests" "$output_dir" "$TARGET_PROFILE" "$bad_contract" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+  if run_render_check "$rendered_manifests" "$output_dir" "$TARGET_PROFILE" "$bad_contract" "$forbidden_source_root" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected source path boundary case to fail: $label"
   fi
 
-  if ! grep -Eq "AgentSmith source|source tree|sibling source" "$TMP_DIR/$label.err"; then
+  if ! grep -Eq "forbidden product source|product source tree|forbidden source" "$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected source path boundary message for: $label"

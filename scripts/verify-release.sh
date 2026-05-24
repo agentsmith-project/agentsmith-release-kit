@@ -10,7 +10,7 @@ Usage:
   bash scripts/verify-release.sh --quick
   bash scripts/verify-release.sh --inputs --release-contract <json> --deploy-template-package <json> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --template-package --release-contract <json> --deploy-template-package <json> --archive <tgz> --output-dir <dir>
-  bash scripts/verify-release.sh --render-check --release-contract <json> --rendered-manifests <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
+  bash scripts/verify-release.sh --render-check --release-contract <json> --rendered-manifests <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir> [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --evidence --release-contract <json> --evidence-root <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --output-dir <dir>
   bash scripts/verify-release.sh --help
