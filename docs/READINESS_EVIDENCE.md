@@ -12,6 +12,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Required bootstrap files | Present | Checked by quick gate. |
 | Contract intake diagnostic | Focused only | `intake-report.json`, `image-digest-plan.json`, and `target-profile-coverage-report.json` keep `readiness: false`. |
 | Template package archive diagnostic | Focused only | `template-package-report.json` keeps `readiness: false`. |
+| Materialized template render diagnostic | Focused only | `manifest-render-report.json` keeps `readiness: false`. |
 | Render/check image inventory diagnostic | Focused only | `render-report.json` keeps `readiness: false`. |
 | Release-kit evidence envelope diagnostic | Focused only | `evidence-validation-report.json` keeps `readiness: false`. |
 | Target preflight diagnostic | Focused only | `target-preflight-report.json` keeps `readiness: false`. |
@@ -32,6 +33,13 @@ Template package archive output proves only that one materialized deploy
 template package archive matches the declared descriptor and path-safety
 constraints. It is not render, deploy, package, release, rollout, smoke, or
 operator readiness evidence.
+
+Materialized template render output proves only that one descriptor-bound
+archive can render its declared Kubernetes templates from explicit render
+values, release contract image inventory, target axes, and substrate connection
+truth. Its `manifest-render-report.json` keeps `readiness: false`; it is not
+apply, deploy, package, release, rollout, smoke, or operator readiness
+evidence.
 
 Render/check output proves only that already-rendered workload manifests use
 digest-pinned images from the supplied release contract

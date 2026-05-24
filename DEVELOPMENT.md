@@ -12,6 +12,7 @@ Use:
 bash scripts/verify-release.sh --quick
 bash scripts/test-inputs.sh
 bash scripts/test-template-package.sh
+bash scripts/test-render.sh
 bash scripts/test-render-check.sh
 bash scripts/test-evidence.sh
 bash scripts/test-target-preflight.sh
@@ -62,6 +63,23 @@ template package archive intake only. It consumes the release contract, the
 deploy template package descriptor, and the materialized `.tgz` archive; it
 does not render Kubernetes resources, apply manifests, smoke a cluster, or
 claim release readiness.
+
+The current `--render` path is a focused diagnostic for repo-local materialized
+template rendering only. It consumes the release contract, deploy template
+package descriptor, matching `.tgz` archive, explicit target profile, explicit
+render values, and operator-provided substrate truth. It renders only
+`kubernetes` templates declared by archive `manifest.json` into
+`<output-dir>/rendered-manifests` and writes `manifest-render-report.json` with
+`readiness: false` and `scope: manifest_render_only`. The only template syntax
+is scalar placeholder replacement with roots `values`, `images`, `target`,
+`substrate`, and `release`, such as `${{ values.namespace }}` or
+`${{ images.web.image }}`; unknown placeholders fail fast. It rejects archive
+path escapes, symlinks, hardlinks, legacy target profile values,
+secret-looking rendered payloads, local source paths, and workload images that
+are not digest-pinned entries in `deploy_image_inventory`. It does not call
+`kubectl`, apply or dry-run manifests, roll out workloads, smoke a cluster,
+mirror images, read sibling source checkouts, or claim render, deploy, or
+release readiness.
 
 The current `--render-check` path is a focused diagnostic for rendered
 Kubernetes manifest image inventory only. It consumes a release contract, an

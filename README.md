@@ -4,8 +4,8 @@ Status: bootstrap-only, docs-governance-first skeleton.
 
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
-identity, boundary documents, handoff guidance, and a quick governance guard.
-It does not contain deploy/apply tooling yet.
+identity, boundary documents, handoff guidance, and focused diagnostics. It
+does not contain apply, rollout, smoke, or full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -110,6 +110,35 @@ equality, archive and manifest digests, unsafe archive paths, and obvious local
 source or plaintext credential payloads. `template-package-report.json` is
 written with `readiness: false`; it is not render, deploy, package, or release
 readiness.
+
+Materialized template render focused diagnostic:
+
+```bash
+bash scripts/test-render.sh
+```
+
+`--render` renders only Kubernetes template files declared in the materialized
+archive `manifest.json`. It consumes the AgentSmith release contract, the
+deploy template package descriptor, the matching `.tgz` archive, an explicit
+target profile, explicit render values, and
+`agentsmith.substrate-connection.truth/v1` substrate truth. Output goes to
+`<output-dir>/rendered-manifests`, and `manifest-render-report.json` is written
+with `readiness: false`, `scope: manifest_render_only`, and `status: pass`.
+
+The template language is intentionally tiny: scalar placeholders only, no
+conditionals and no loops. Supported placeholder roots are `values`, `images`,
+`target`, `substrate`, and `release`, for example
+`${{ values.namespace }}`, `${{ images.web.image }}`,
+`${{ target.distribution }}`, `${{ substrate.services.postgresql.host }}`, and
+`${{ release.release_id }}`. Unknown or non-scalar placeholders fail fast.
+Rendered workload images must be digest-pinned and must come from
+`release_contract.deploy_image_inventory`. Archive path escapes, symlinks,
+hardlinks, local/source payloads, secret-looking rendered content, and legacy
+target profile names are rejected. This diagnostic does not call `kubectl`,
+apply or dry-run manifests, roll out workloads, smoke endpoints, mirror images,
+read a sibling AgentSmith checkout, or claim render/deploy/release readiness.
+If a sibling `../agentsmith` checkout exists next to release-kit, `--render`
+rejects it as a default forbidden source root.
 
 Render/check image inventory focused diagnostic:
 

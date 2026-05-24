@@ -80,6 +80,53 @@ The generated `template-package-report.json` must keep `readiness: false` and
 readiness, Kubernetes render evidence, deploy evidence, rollout evidence, smoke
 evidence, or operator signoff.
 
+## Materialized Template Render Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-render.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh --render`. It
+checks only repo-local rendering from an already materialized deploy template
+package archive. It does not call `kubectl`, apply or dry-run manifests, roll
+out workloads, smoke product endpoints, mirror images, read a sibling
+AgentSmith checkout, or migrate AgentSmith unified-deploy rendering.
+When a sibling `../agentsmith` checkout exists next to release-kit, `--render`
+rejects it as a default forbidden source root.
+
+The check binds the release contract, deploy template package descriptor,
+archive sha256, archive `manifest.json` sha256, explicit target profile,
+explicit render values, and
+`agentsmith.substrate-connection.truth/v1` substrate truth. It renders only
+`kubernetes` template files declared by archive `manifest.json` into
+`<output-dir>/rendered-manifests` and keeps the archive path rules from the
+template package diagnostic: absolute paths, `..` package-root escapes,
+symlinks, hardlinks, local/source payloads, plaintext credential payloads, and
+missing declared template files fail fast.
+
+The template language is scalar placeholder replacement only. It has no
+conditionals, loops, includes, Helm, Kustomize, or profile aliases. Supported
+placeholder roots are `values`, `images`, `target`, `substrate`, and `release`;
+examples are `${{ values.namespace }}`, `${{ images.web.image }}`,
+`${{ target.distribution }}`, `${{ substrate.services.postgresql.host }}`, and
+`${{ release.release_id }}`. Unknown, malformed, unresolved, object, or array
+placeholders fail fast.
+
+After rendering, workload images in Deployment, StatefulSet, DaemonSet,
+ReplicaSet, Job, CronJob, Pod, and List manifests must be digest-pinned and
+must match `release_contract.deploy_image_inventory` by exact image ref or
+digest. Unknown images, tag-only image refs, digest drift, secret-looking
+rendered payloads, local/source paths, legacy target profile values such as
+`local-kind`, and synonym axes such as `kind` or `cluster` are rejected.
+
+The generated `manifest-render-report.json` must keep `readiness: false`,
+`scope: manifest_render_only`, and `status: pass`. It must not contain
+`verdict`, `release_verdict`, `deploy_readiness`, or AgentSmith product-flow
+fields. It is not release readiness, package readiness, apply evidence,
+rollout evidence, smoke evidence, deploy evidence, or operator signoff.
+
 ## Render/Check Image Inventory Focused Diagnostic
 
 Run:
