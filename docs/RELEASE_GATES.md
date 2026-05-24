@@ -239,6 +239,47 @@ summary. It must not contain `verdict`, `release_verdict`, deploy readiness,
 product-flow fields, kubeconfig content, raw kubectl stdout/stderr, or raw
 secret payloads.
 
+## Route/Service Smoke Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-smoke.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh --smoke`. It
+checks only one route status after a successful focused rollout report. It
+does not call Kubernetes, render templates, apply resources, roll out
+workloads, run product flows, provision cloud resources, build packages, or
+claim deploy or release readiness.
+
+`--smoke` accepts only `existing_kubernetes/external_declared/online`.
+Required inputs are `--release-contract`, `--rollout-report`,
+`--target-profile`, `--url`, and `--output-dir`. Optional inputs are
+`--expected-status` (default `200`), `--timeout-ms` (default `5000`),
+`--allow-http`, and `--allow-localhost`. Custom headers and tokens are not
+supported.
+
+Before any network request, the smoke diagnostic removes stale
+`smoke-report.json`, validates the target profile, URL, status, timeout,
+release contract, and rollout report. The rollout report must have `status:
+pass`, `readiness: false`, `scope: kubernetes_rollout_imageid_only`, and
+matching release id, git sha, release contract digest, and target profile.
+The URL must be HTTPS by default, must not include userinfo, query, or hash,
+and must not target localhost, 127.x, `::1`, or `host.docker.internal`.
+Focused tests may explicitly pass `--allow-http --allow-localhost`.
+
+The diagnostic performs one GET using built-in Node `fetch` with
+`redirect: manual`. Success requires the response status to equal the expected
+status. The generated `smoke-report.json` must keep `schema:
+agentsmith.route-smoke-report/v1`, `scope: route_smoke_only`, `readiness:
+false`, and `status: pass`. It records release identity, release contract
+digest, target axes, normalized route summary (`scheme`, `origin`, `host`,
+`path`), expected/observed status, duration, and rollout report digest/summary.
+It must not contain response body, raw headers, custom token payloads,
+kubeconfig content, product-flow fields, `verdict`, `release_verdict`, or
+deploy readiness fields.
+
 ## Evidence Envelope Focused Diagnostic
 
 Run:
@@ -266,11 +307,12 @@ redaction/source scans for the envelope and subject files. It rejects legacy or
 synonym target values, AgentSmith product-flow fields, local provenance URIs,
 absolute paths, `..` escapes, symlinks, hardlinks, and obvious secret payloads.
 Accepted `release_kit_output` values are `deploy-result.json#substrate`,
-`image-map.json`, and `render-report.json+rollout-report.json`; `AgentSmith
+`image-map.json`, `render-report.json+rollout-report.json`, and
+`render-report.json+rollout-report.json+smoke-report.json`; `AgentSmith
 product flow aggregate` is rejected. The provenance `subject_name` must be
 `release-kit-evidence-subject`. The subject file list must contain only
 `evidence.json` plus the mapped output files: `deploy-result.json`,
-`image-map.json`, or both `render-report.json` and `rollout-report.json`.
+`image-map.json`, render+rollout reports, or render+rollout+smoke reports.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.

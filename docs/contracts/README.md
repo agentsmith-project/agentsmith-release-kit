@@ -44,6 +44,21 @@ kubernetes_rollout_imageid_only`. The report uses
 product-flow fields, raw kubectl stdout/stderr, kubeconfig content, `verdict`,
 `release_verdict`, or deploy readiness fields.
 
+The current `--smoke` validator is a focused route/service smoke diagnostic
+only. It consumes the release contract, a prior rollout report, explicit target
+profile `existing_kubernetes/external_declared/online`, one URL, and an output
+directory. It does not call Kubernetes, render, apply, roll out workloads, or
+run product flows. It requires the rollout report to have `status: pass`,
+`readiness: false`, `scope: kubernetes_rollout_imageid_only`, and matching
+release id, git sha, release contract digest, and target profile. URLs are
+HTTPS-only by default and must not include userinfo, query, hash, localhost,
+127.x, `::1`, or `host.docker.internal`. It writes `smoke-report.json` with
+`schema: agentsmith.route-smoke-report/v1`, `readiness: false`, and `scope:
+route_smoke_only`. The report records only normalized route/status/duration
+and release/rollout digests; it must not include response bodies, raw headers,
+custom token payloads, product-flow fields, `verdict`, `release_verdict`, or
+deploy readiness fields.
+
 The current `--evidence` validator is a focused release-kit evidence envelope
 intake diagnostic only. It requires `evidence.json` and
 `evidence-subject.json`, binds them to the supplied release contract raw
@@ -56,10 +71,12 @@ shape. The evidence `git_sha` is the AgentSmith product release commit;
 `artifact_provenance.commit_sha` is the release-kit producer commit and is not
 required to equal it. The raw envelope must include `release_kit_output` as
 `deploy-result.json#substrate`, `image-map.json`, or
-`render-report.json+rollout-report.json`; release-kit must not output
-AgentSmith product-flow evidence. `evidence_subject.files` must contain only
-`evidence.json` plus the mapped output files: `deploy-result.json`,
-`image-map.json`, or both `render-report.json` and `rollout-report.json`.
+`render-report.json+rollout-report.json`, or
+`render-report.json+rollout-report.json+smoke-report.json`; release-kit must
+not output AgentSmith product-flow evidence. `evidence_subject.files` must
+contain only `evidence.json` plus the mapped output files:
+`deploy-result.json`, `image-map.json`, render+rollout reports, or
+render+rollout+smoke reports.
 Artifact provenance uses `subject_name: release-kit-evidence-subject`.
 `external_declared` envelopes must include inline neutral
 `substrate_connection_truth`. The subject file

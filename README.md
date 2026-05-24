@@ -5,8 +5,8 @@ Status: bootstrap-only, docs-governance-first skeleton.
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
-contains apply-only and rollout/live digest focused diagnostics, but does not
-contain smoke or full deploy tooling yet.
+contains apply-only, rollout/live digest, and route smoke focused diagnostics,
+but does not contain full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -220,6 +220,40 @@ product-flow evidence, or operator signoff. The report stores
 raw kubectl stdout/stderr, kubeconfig content, verdict fields, deploy
 readiness fields, or AgentSmith product-flow fields.
 
+Route/service smoke focused diagnostic:
+
+```bash
+bash scripts/test-smoke.sh
+```
+
+`--smoke` validates only one already-deployed route status after a bound
+rollout report. It accepts only
+`existing_kubernetes/external_declared/online`. Required inputs are
+`--release-contract`, `--rollout-report`, `--target-profile`, `--url`, and
+`--output-dir`; optional inputs are `--expected-status` (default `200`),
+`--timeout-ms` (default `5000`), `--allow-http`, and `--allow-localhost`.
+
+Before any network request, `--smoke` removes stale `smoke-report.json`,
+validates the target profile, URL, expected status, timeout, release contract,
+and rollout report binding. The rollout report must be a passing
+`kubernetes_rollout_imageid_only` report with `readiness: false`, and its
+release id, git sha, release contract digest, and target profile must match
+the supplied release contract and target profile. By default the URL must use
+HTTPS, must not include userinfo, query, or hash, and must not target
+localhost, 127.x, `::1`, or `host.docker.internal`. Local HTTP is accepted only
+for focused tests with explicit `--allow-http --allow-localhost`.
+
+The diagnostic performs one GET with built-in Node `fetch` and
+`redirect: manual`. Success means only that the response status equals the
+expected status. `smoke-report.json` keeps `schema:
+agentsmith.route-smoke-report/v1`, `scope: route_smoke_only`, `readiness:
+false`, and `status: pass`; it is not deploy readiness, release readiness,
+product-flow evidence, or operator signoff. The report stores only a
+normalized route summary, expected/observed status, duration, release contract
+digest, and rollout report digest/summary. It must not contain response body,
+raw headers, custom tokens, kubeconfig content, verdict fields, deploy
+readiness fields, or AgentSmith product-flow fields.
+
 Release-kit evidence envelope focused diagnostic:
 
 ```bash
@@ -235,10 +269,12 @@ files, release-kit version policy, and redaction/source-safety rules. The raw en
 adapter/canonical `agentsmith.release-kit-evidence/v1` shape.
 The raw envelope must set `release_kit_output` to one mapped release-kit output:
 `deploy-result.json#substrate`, `image-map.json`, or
-`render-report.json+rollout-report.json`; release-kit must not emit
-AgentSmith product-flow evidence. `evidence_subject.files` must contain only
-`evidence.json` plus the mapped output files: `deploy-result.json`,
-`image-map.json`, or both `render-report.json` and `rollout-report.json`. Its
+`render-report.json+rollout-report.json`, or
+`render-report.json+rollout-report.json+smoke-report.json`; release-kit must
+not emit AgentSmith product-flow evidence. `evidence_subject.files` must
+contain only `evidence.json` plus the mapped output files:
+`deploy-result.json`, `image-map.json`, render+rollout reports, or
+render+rollout+smoke reports. Its
 provenance `subject_name` is `release-kit-evidence-subject`. For
 `external_declared` targets, the envelope must include inline
 `agentsmith.substrate-connection.truth/v1` connection truth.

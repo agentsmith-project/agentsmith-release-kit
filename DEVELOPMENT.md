@@ -16,6 +16,7 @@ bash scripts/test-render.sh
 bash scripts/test-render-check.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
+bash scripts/test-smoke.sh
 bash scripts/test-evidence.sh
 bash scripts/test-target-preflight.sh
 ```
@@ -128,6 +129,24 @@ kubernetes_rollout_imageid_only`; it records
 not smoke routes, run product flows, provision cloud resources, or claim
 deploy or release readiness.
 
+The current `--smoke` path is a focused diagnostic for route/service smoke
+only. It consumes a release contract, a prior `rollout-report.json`, explicit
+target profile `existing_kubernetes/external_declared/online`, one URL, and an
+output directory. It does not call Kubernetes, render, apply, roll out
+workloads, run product flows, or claim deploy or release readiness. Before any
+network request, it validates the target, URL, expected status, timeout,
+release contract, and rollout binding. The rollout report must have
+`status: pass`, `readiness: false`, `scope:
+kubernetes_rollout_imageid_only`, and matching release id, git sha, release
+contract digest, and target profile. URLs are HTTPS-only by default, must not
+include userinfo, query, or hash, and must not target localhost, 127.x, `::1`,
+or `host.docker.internal` unless focused tests explicitly pass
+`--allow-http --allow-localhost`. Its `smoke-report.json` must keep
+`readiness: false` and `scope: route_smoke_only`; it records only normalized
+route/status/duration and release/rollout digests, not response bodies, raw
+headers, custom tokens, kubeconfig content, product-flow fields, verdicts, or
+deploy readiness.
+
 The current `--evidence` path is a focused diagnostic for release-kit evidence
 envelope intake only. It consumes a release contract, an evidence root
 containing `evidence.json` and `evidence-subject.json`, and an explicit target
@@ -136,10 +155,12 @@ profile. The raw envelope schema is
 `agentsmith.release-kit-evidence/v1` is the separate adapter/canonical shape.
 The raw envelope must explicitly name `release_kit_output` as
 `deploy-result.json#substrate`, `image-map.json`, or
-`render-report.json+rollout-report.json`; release-kit cannot produce
-AgentSmith product-flow evidence. `evidence_subject.files` must contain only
-`evidence.json` plus the mapped output files: `deploy-result.json`,
-`image-map.json`, or both `render-report.json` and `rollout-report.json`. Its
+`render-report.json+rollout-report.json`, or
+`render-report.json+rollout-report.json+smoke-report.json`; release-kit cannot
+produce AgentSmith product-flow evidence. `evidence_subject.files` must
+contain only `evidence.json` plus the mapped output files:
+`deploy-result.json`, `image-map.json`, render+rollout reports, or
+render+rollout+smoke reports. Its
 artifact provenance `subject_name` is `release-kit-evidence-subject`.
 `external_declared` evidence must carry inline neutral substrate connection
 truth.

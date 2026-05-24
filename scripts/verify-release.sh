@@ -15,6 +15,7 @@ Usage:
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> --mode apply --confirm-apply existing_kubernetes/external_declared/online --operator-run-id <id> [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --rollout --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--timeout <duration>] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
+  bash scripts/verify-release.sh --smoke --release-contract <json> --rollout-report <json> --target-profile existing_kubernetes/external_declared/online --url <https-url> --output-dir <dir> [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost]
   bash scripts/verify-release.sh --evidence --release-contract <json> --evidence-root <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --output-dir <dir>
   bash scripts/verify-release.sh --help
@@ -27,6 +28,7 @@ Bootstrap status:
   --render-check checks rendered manifest image inventory only; it is not release readiness.
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
   --rollout checks Kubernetes rollout status and live image digests only; it is not release readiness.
+  --smoke checks one route status after a bound rollout report only; it is not release readiness.
   --evidence checks release-kit evidence envelope intake only; it is not release readiness.
   --target-preflight checks substrate connection truth intake only; it is not release readiness.
   The full release gate is not implemented during bootstrap.
@@ -72,6 +74,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-rollout.mjs" "$@"
     echo "rollout mode is not release readiness"
+    ;;
+  --smoke)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-smoke.mjs" "$@"
+    echo "smoke mode is not release readiness"
     ;;
   --evidence)
     shift

@@ -15,5 +15,10 @@ Expected future runbook areas:
 - Troubleshooting and rollback.
 - `kind_rehearsal` for local or CI rehearsal only.
 
+Current focused route smoke runbook note: use `bash scripts/verify-release.sh
+--smoke` only after a passing focused `rollout-report.json`. Supply an HTTPS
+URL by default; local HTTP is reserved for focused tests with explicit
+`--allow-http --allow-localhost`. Do not add custom headers or tokens.
+
 Runbooks must avoid raw secrets. They should describe secret refs, redacted
 fingerprints, prerequisites, and explicit operator inputs.

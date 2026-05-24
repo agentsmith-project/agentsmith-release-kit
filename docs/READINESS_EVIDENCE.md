@@ -16,6 +16,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Render/check image inventory diagnostic | Focused only | `render-report.json` keeps `readiness: false`. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
+| Route/service smoke diagnostic | Focused only | `smoke-report.json` keeps `readiness: false`. |
 | Release-kit evidence envelope diagnostic | Focused only | `evidence-validation-report.json` keeps `readiness: false`. |
 | Target preflight diagnostic | Focused only | `target-preflight-report.json` keeps `readiness: false`. |
 | Online deploy evidence | Not implemented | Future release-kit authority. |
@@ -69,6 +70,15 @@ summaries. `rollout-report.json` keeps `readiness: false`; it is not deploy,
 release, route smoke, product-flow, package, full rollout, or operator
 readiness evidence.
 
+Route/service smoke output proves only that one explicit route returned the
+expected status after the supplied rollout report was bound to the same release
+contract and target profile. It accepts only
+`existing_kubernetes/external_declared/online`, uses HTTPS by default, rejects
+userinfo/query/hash and localhost-style URLs unless focused tests explicitly
+allow them, and records only normalized route and status summaries.
+`smoke-report.json` keeps `readiness: false`; it is not deploy, release,
+product-flow, package, full smoke, or operator readiness evidence.
+
 Release-kit evidence envelope output proves only that one pre-existing evidence
 root has the expected release-kit-owned envelope, subject, provenance, target
 profile, release-kit version, digest, and redaction/source-safety shape. The
@@ -77,8 +87,9 @@ adapter/canonical `agentsmith.release-kit-evidence/v1`. It is not render,
 apply, deploy, package, release, rollout, smoke, or operator readiness
 evidence. Raw envelopes explicitly name `release_kit_output`, use
 `release-kit-evidence-subject` provenance subjects, list only `evidence.json`
-plus the mapped output files in `evidence_subject.files`, and include inline
-neutral substrate connection truth for `external_declared`.
+plus the mapped output files in `evidence_subject.files`, including the
+render+rollout and render+rollout+smoke report combinations, and include
+inline neutral substrate connection truth for `external_declared`.
 
 Target preflight output proves only that one explicit
 `agentsmith.substrate-connection.truth/v1` document matches the requested

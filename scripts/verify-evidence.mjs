@@ -33,12 +33,17 @@ const EVIDENCE_SUBJECT_URI = 'evidence-subject.json';
 const RELEASE_KIT_OUTPUT_VALUES = new Set([
   'deploy-result.json#substrate',
   'image-map.json',
-  'render-report.json+rollout-report.json'
+  'render-report.json+rollout-report.json',
+  'render-report.json+rollout-report.json+smoke-report.json'
 ]);
 const RELEASE_KIT_OUTPUT_REQUIRED_FILES = new Map([
   ['deploy-result.json#substrate', ['deploy-result.json']],
   ['image-map.json', ['image-map.json']],
-  ['render-report.json+rollout-report.json', ['render-report.json', 'rollout-report.json']]
+  ['render-report.json+rollout-report.json', ['render-report.json', 'rollout-report.json']],
+  [
+    'render-report.json+rollout-report.json+smoke-report.json',
+    ['render-report.json', 'rollout-report.json', 'smoke-report.json']
+  ]
 ]);
 const FORBIDDEN_RELEASE_KIT_OUTPUT_VALUES = new Set([
   'AgentSmith product flow aggregate'

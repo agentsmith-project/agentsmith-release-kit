@@ -274,6 +274,20 @@ const rolloutReport = {
   readiness: false,
   status: 'passed'
 };
+const smokeReport = {
+  schema: 'agentsmith.route-smoke-report/v1',
+  scope: 'route_smoke_only',
+  readiness: false,
+  status: 'pass',
+  route: {
+    scheme: 'https',
+    origin: 'https://app.example.com',
+    host: 'app.example.com',
+    path: '/healthz'
+  },
+  expected_status: 200,
+  status_code: 200
+};
 let outputFiles = [
   {
     path: 'deploy-result.json',
@@ -334,6 +348,24 @@ switch (mutation) {
       }
     ];
     break;
+  case 'valid_render_rollout_smoke_output':
+    releaseKitOutput = 'render-report.json+rollout-report.json+smoke-report.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'render-report.json',
+        value: renderReport
+      },
+      {
+        path: 'rollout-report.json',
+        value: rolloutReport
+      },
+      {
+        path: 'smoke-report.json',
+        value: smokeReport
+      }
+    ];
+    break;
   case 'release_kit_output_extra_subject_file':
     break;
   case 'image_map_extra_subject_file':
@@ -348,6 +380,38 @@ switch (mutation) {
     break;
   case 'render_rollout_extra_subject_file':
     releaseKitOutput = 'render-report.json+rollout-report.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'render-report.json',
+        value: renderReport
+      },
+      {
+        path: 'rollout-report.json',
+        value: rolloutReport
+      }
+    ];
+    break;
+  case 'render_rollout_smoke_extra_subject_file':
+    releaseKitOutput = 'render-report.json+rollout-report.json+smoke-report.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'render-report.json',
+        value: renderReport
+      },
+      {
+        path: 'rollout-report.json',
+        value: rolloutReport
+      },
+      {
+        path: 'smoke-report.json',
+        value: smokeReport
+      }
+    ];
+    break;
+  case 'render_rollout_smoke_missing_subject_file':
+    releaseKitOutput = 'render-report.json+rollout-report.json+smoke-report.json';
     evidence.release_kit_output = releaseKitOutput;
     outputFiles = [
       {
@@ -531,7 +595,8 @@ if (
   [
     'release_kit_output_extra_subject_file',
     'image_map_extra_subject_file',
-    'render_rollout_extra_subject_file'
+    'render_rollout_extra_subject_file',
+    'render_rollout_smoke_extra_subject_file'
   ].includes(mutation)
 ) {
   const extraFile = writeJson('extra-output.json', { status: 'passed' });
@@ -678,6 +743,13 @@ run_evidence "$VALID_RENDER_ROLLOUT_ROOT" "$VALID_RENDER_ROLLOUT_OUT" >/dev/null
 assert_pass_report "$VALID_RENDER_ROLLOUT_OUT/evidence-validation-report.json" "render-report.json+rollout-report.json"
 pass "valid render+rollout release_kit_output evidence accepted"
 
+VALID_RENDER_ROLLOUT_SMOKE_ROOT="$TMP_DIR/evidence-valid-render-rollout-smoke"
+VALID_RENDER_ROLLOUT_SMOKE_OUT="$TMP_DIR/out-valid-render-rollout-smoke"
+write_evidence "$VALID_RENDER_ROLLOUT_SMOKE_ROOT" ci_artifact valid_render_rollout_smoke_output
+run_evidence "$VALID_RENDER_ROLLOUT_SMOKE_ROOT" "$VALID_RENDER_ROLLOUT_SMOKE_OUT" >/dev/null
+assert_pass_report "$VALID_RENDER_ROLLOUT_SMOKE_OUT/evidence-validation-report.json" "render-report.json+rollout-report.json+smoke-report.json"
+pass "valid render+rollout+smoke release_kit_output evidence accepted"
+
 VALID_SECRET_REF_ROOT="$TMP_DIR/evidence-valid-secret-ref"
 VALID_SECRET_REF_OUT="$TMP_DIR/out-valid-secret-ref"
 write_evidence "$VALID_SECRET_REF_ROOT" ci_artifact valid_secret_ref
@@ -712,6 +784,8 @@ expect_fail release-kit-output-missing-subject-file ci_artifact release_kit_outp
 expect_fail release-kit-output-extra-subject-file ci_artifact release_kit_output_extra_subject_file
 expect_fail image-map-extra-subject-file ci_artifact image_map_extra_subject_file
 expect_fail render-rollout-extra-subject-file ci_artifact render_rollout_extra_subject_file
+expect_fail render-rollout-smoke-extra-subject-file ci_artifact render_rollout_smoke_extra_subject_file
+expect_fail render-rollout-smoke-missing-subject-file ci_artifact render_rollout_smoke_missing_subject_file
 expect_fail substrate-truth-localhost-endpoint ci_artifact substrate_truth_localhost_endpoint
 expect_fail evidence-target-host-docker-internal ci_artifact evidence_target_host_docker_internal
 expect_fail evidence-json-bare-host-docker-internal ci_artifact evidence_json_bare_host_docker_internal
