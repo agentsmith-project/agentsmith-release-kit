@@ -11,6 +11,7 @@ Usage:
   bash scripts/verify-release.sh --inputs --release-contract <json> --deploy-template-package <json> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --template-package --release-contract <json> --deploy-template-package <json> --archive <tgz> --output-dir <dir>
   bash scripts/verify-release.sh --evidence --release-contract <json> --evidence-root <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
+  bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --output-dir <dir>
   bash scripts/verify-release.sh --help
 
 Bootstrap status:
@@ -18,6 +19,7 @@ Bootstrap status:
   --inputs checks release contract intake only; it is not release readiness.
   --template-package checks materialized deploy template package intake only; it is not release readiness.
   --evidence checks release-kit evidence envelope intake only; it is not release readiness.
+  --target-preflight checks substrate connection truth intake only; it is not release readiness.
   The full release gate is not implemented during bootstrap.
 USAGE
 }
@@ -46,6 +48,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-evidence.mjs" "$@"
     echo "evidence mode is not release readiness"
+    ;;
+  --target-preflight)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-target-preflight.mjs" "$@"
+    echo "target-preflight mode is not release readiness"
     ;;
   --help|-h)
     usage

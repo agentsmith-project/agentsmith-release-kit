@@ -13,6 +13,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Contract intake diagnostic | Focused only | `intake-report.json` and `image-digest-plan.json` keep `readiness: false`. |
 | Template package archive diagnostic | Focused only | `template-package-report.json` keeps `readiness: false`. |
 | Release-kit evidence envelope diagnostic | Focused only | `evidence-validation-report.json` keeps `readiness: false`. |
+| Target preflight diagnostic | Focused only | `target-preflight-report.json` keeps `readiness: false`. |
 | Online deploy evidence | Not implemented | Future release-kit authority. |
 | Airgap package evidence | Not implemented | Future release-kit authority. |
 | Kubernetes rollout evidence | Not implemented | Future release-kit authority. |
@@ -33,3 +34,10 @@ Release-kit evidence envelope output proves only that one pre-existing evidence
 root has the expected release-kit-owned envelope, subject, provenance, target
 profile, digest, and redaction/source-safety shape. It is not render, apply,
 deploy, package, release, rollout, smoke, or operator readiness evidence.
+
+Target preflight output proves only that one explicit
+`agentsmith.substrate-connection.truth/v1` document matches the requested
+target axes and contains the required service, secret reference, TLS or
+sslmode, vector extension, OIDC, object storage, and reachability declarations.
+It does not connect to Kubernetes and is not render, apply, deploy, package,
+release, rollout, smoke, or operator readiness evidence.

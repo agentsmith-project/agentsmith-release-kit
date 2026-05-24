@@ -117,6 +117,24 @@ written with `readiness: false`, `scope: release_kit_evidence_intake_only`,
 and `status: pass`; it is not render, apply, smoke, package, deploy, or
 release readiness.
 
+Target preflight focused diagnostic:
+
+```bash
+bash scripts/test-target-preflight.sh
+```
+
+`--target-preflight` validates only repo-local intake of
+`agentsmith.substrate-connection.truth/v1` substrate connection truth for an
+explicit target profile. It checks the three target axes, supported focused
+profiles, required substrate services, endpoint declarations, secret
+references, TLS or sslmode declarations, PostgreSQL vector extension truth,
+object storage and OIDC fields, reachability proof fields, and obvious local
+source or plaintext credential payloads. `target-preflight-report.json` is
+written with `readiness: false`, `scope: target_preflight_intake_only`, and
+`status: pass`; it is not Kubernetes connectivity evidence, render/check
+evidence, apply evidence, smoke evidence, package readiness, deploy readiness,
+or release readiness.
+
 The full release gate is a future repo-local authority. It is intentionally not
 implemented during bootstrap.
 

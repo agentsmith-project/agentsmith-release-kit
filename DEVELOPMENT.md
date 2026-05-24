@@ -13,6 +13,7 @@ bash scripts/verify-release.sh --quick
 bash scripts/test-inputs.sh
 bash scripts/test-template-package.sh
 bash scripts/test-evidence.sh
+bash scripts/test-target-preflight.sh
 ```
 
 There is intentionally no `package.json` in this repository.
@@ -58,6 +59,14 @@ containing `evidence.json` and `evidence-subject.json`, and an explicit target
 profile. Its `evidence-validation-report.json` must keep `readiness: false`
 and `scope: release_kit_evidence_intake_only`; it does not claim deploy,
 package, smoke, operator, or release readiness.
+
+The current `--target-preflight` path is a focused diagnostic for substrate
+connection truth intake only. It consumes an explicit target profile and an
+operator-provided `agentsmith.substrate-connection.truth/v1` document. Its
+`target-preflight-report.json` must keep `readiness: false` and
+`scope: target_preflight_intake_only`; it does not connect to Kubernetes,
+render manifests, apply resources, smoke a cluster, package artifacts, or
+claim deploy or release readiness.
 
 ## Non-Goals
 

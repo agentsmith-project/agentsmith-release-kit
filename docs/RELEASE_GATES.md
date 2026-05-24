@@ -101,6 +101,44 @@ contain `verdict` or `release_verdict`. It is not release readiness, package
 readiness, Kubernetes render evidence, apply evidence, rollout evidence, smoke
 evidence, or operator signoff.
 
+## Target Preflight Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-target-preflight.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--target-preflight`. It checks only repo-local intake of a substrate connection
+truth document supplied by the operator or by a release-kit adjacent substrate
+pack. It does not open a Kubernetes client, render manifests, run checks,
+apply resources, roll out workloads, smoke product endpoints, create cloud
+resources, or build an airgap bundle.
+
+The accepted truth schema is
+`agentsmith.substrate-connection.truth/v1`. Docker substrate truth, legacy
+target names such as `local-kind`, `existing-cluster`, `real-k8s`, and synonym
+axes such as `kind` or `cluster` are rejected. The supported focused profiles
+are `existing_kubernetes/external_declared/online` and
+`kind_rehearsal/kit_installed/online`.
+
+For `external_declared`, the operator provides the connection truth and the
+release kit only validates the document. For `kit_installed`, the same neutral
+truth schema is used and the document must declare `installed_by` and
+`release_kit_version`. Both paths must include the required substrate services,
+endpoint declarations, secret references, TLS or sslmode declarations,
+PostgreSQL vector extension truth, object storage and OIDC fields, and
+reachability status/proof fields. Plaintext credentials, connection strings,
+kubeconfig payloads, file or source URIs, and AgentSmith source paths are
+rejected.
+
+The generated `target-preflight-report.json` must keep `readiness: false`,
+`scope: target_preflight_intake_only`, and `status: pass`. It must not contain
+`verdict` or `release_verdict`. It is not release readiness, package readiness,
+Kubernetes connectivity evidence, render/check evidence, apply evidence,
+rollout evidence, smoke evidence, or operator signoff.
+
 ## Full Release Gate
 
 The full release gate is the future repo-local authority for online deploy,

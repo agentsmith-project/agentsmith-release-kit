@@ -34,6 +34,18 @@ self-referencing the evidence file that carries it. AgentSmith `product_flows`
 and `product_flow_results` remain AgentSmith-produced evidence and are rejected
 here.
 
+The current `--target-preflight` validator is a focused substrate connection
+truth intake diagnostic only. It accepts only
+`agentsmith.substrate-connection.truth/v1`, rejects Docker substrate truth and
+legacy target names, and binds the truth document to the supplied
+`target_cluster/substrate_source/distribution` tuple. It writes
+`target-preflight-report.json` with `readiness: false` and
+`scope: target_preflight_intake_only`. It validates declarations for required
+substrate services, endpoints, secret refs or redacted fingerprints, TLS or
+sslmode, PostgreSQL vector extension truth, OIDC, object storage, and
+reachability fields. It does not connect to Kubernetes, render, apply, smoke,
+package, deploy, or claim release readiness.
+
 Future contracts should cover:
 
 - Release contract input validation.
