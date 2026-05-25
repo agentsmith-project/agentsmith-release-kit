@@ -205,7 +205,9 @@ release id, git sha, and target profile. `image-map` evidence must keep
 `schema: agentsmith.image-map/v1`, `scope: image_map_only`, `readiness: false`,
 `status: pass`, and digest-pinned mappings matching `deploy_image_inventory`;
 it also reuses the render adoption semantics for `target_registry`,
-`use_source`, and deterministic mirrored target refs.
+`use_source`, and deterministic mirrored target refs. Standalone image-map
+evidence is accepted only for `existing_kubernetes/external_declared/online` or
+`existing_kubernetes/external_declared/airgap`.
 Online gate evidence must keep
 `schema: agentsmith.online-deployment-gate/v1`,
 `scope: online_deployment_gate_only`, `readiness: false`, `status: pass`, and

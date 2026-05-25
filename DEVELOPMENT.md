@@ -307,7 +307,9 @@ release contract:
 `image-map.json` binds schema/scope/readiness/status, release identity, target
 profile, and digest-pinned mappings to `deploy_image_inventory`, then rechecks
 the render adoption rule (`use_source` has no `target_registry` and keeps
-source refs; mirrored refs must be deterministic under `target_registry`);
+source refs; mirrored refs must be deterministic under `target_registry`) and
+is accepted only for `existing_kubernetes/external_declared/online` or
+`existing_kubernetes/external_declared/airgap`;
 `online-deployment-gate-report.json` is accepted only when it is the confirmed
 apply output for `existing_kubernetes/external_declared/online` with
 `mode: apply` and non-empty producer steps including apply and rollout; and

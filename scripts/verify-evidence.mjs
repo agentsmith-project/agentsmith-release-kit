@@ -38,6 +38,10 @@ const AIRGAP_BUNDLE_CHECK_REPORT_SCOPE = 'airgap_bundle_manifest_check_only';
 const AIRGAP_BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
 const EVIDENCE_SUBJECT_NAME = 'release-kit-evidence-subject';
 const EVIDENCE_SUBJECT_URI = 'evidence-subject.json';
+const IMAGE_MAP_TARGET_PROFILES = new Set([
+  'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/external_declared/airgap'
+]);
 const ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE = 'existing_kubernetes/external_declared/online';
 const AIRGAP_BUNDLE_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
 const AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
@@ -58,6 +62,10 @@ const RELEASE_KIT_OUTPUT_REQUIRED_FILES = new Map([
   ]
 ]);
 const RELEASE_KIT_OUTPUT_TARGET_PROFILE_VALUES = new Map([
+  [
+    'image-map.json',
+    IMAGE_MAP_TARGET_PROFILES
+  ],
   [
     'online-deployment-gate-report.json',
     new Set([ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE])

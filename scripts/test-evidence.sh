@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+KIND_PROFILE="kind_rehearsal/kit_installed/online"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 
 TMP_DIR="$(mktemp -d)"
@@ -114,6 +115,7 @@ const contract = JSON.parse(contractRaw.toString('utf8'));
 const contractDigest = digestBuffer(contractRaw);
 const ONLINE_PROFILE = 'existing_kubernetes/external_declared/online';
 const AIRGAP_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const KIND_PROFILE = 'kind_rehearsal/kit_installed/online';
 const AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
   'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json';
 const OLD_AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
@@ -723,6 +725,16 @@ switch (mutation) {
   case 'valid_image_map_output':
     useImageMapOutput();
     break;
+  case 'valid_airgap_image_map_output':
+    useTargetProfile(AIRGAP_PROFILE);
+    Object.assign(imageMap, buildImageMap(AIRGAP_PROFILE, 'registry.example.internal/releases'));
+    useImageMapOutput();
+    break;
+  case 'image_map_kind_rehearsal_output':
+    useTargetProfile(KIND_PROFILE);
+    Object.assign(imageMap, buildImageMap(KIND_PROFILE));
+    useImageMapOutput();
+    break;
   case 'image_map_mapping_missing':
     useImageMapOutput();
     imageMap.mappings.pop();
@@ -1324,6 +1336,13 @@ run_evidence "$VALID_IMAGE_MAP_ROOT" "$VALID_IMAGE_MAP_OUT" >/dev/null
 assert_pass_report "$VALID_IMAGE_MAP_OUT/evidence-validation-report.json" "image-map.json"
 pass "valid image-map release_kit_output evidence accepted"
 
+VALID_AIRGAP_IMAGE_MAP_ROOT="$TMP_DIR/evidence-valid-airgap-image-map"
+VALID_AIRGAP_IMAGE_MAP_OUT="$TMP_DIR/out-valid-airgap-image-map"
+write_evidence "$VALID_AIRGAP_IMAGE_MAP_ROOT" ci_artifact valid_airgap_image_map_output
+run_evidence "$VALID_AIRGAP_IMAGE_MAP_ROOT" "$VALID_AIRGAP_IMAGE_MAP_OUT" "$AIRGAP_PROFILE" >/dev/null
+assert_pass_report "$VALID_AIRGAP_IMAGE_MAP_OUT/evidence-validation-report.json" "image-map.json"
+pass "valid airgap image-map release_kit_output evidence accepted"
+
 VALID_ONLINE_GATE_ROOT="$TMP_DIR/evidence-valid-online-gate"
 VALID_ONLINE_GATE_OUT="$TMP_DIR/out-valid-online-gate"
 write_evidence "$VALID_ONLINE_GATE_ROOT" ci_artifact valid_online_deployment_gate_output
@@ -1386,6 +1405,7 @@ expect_fail image-map-target-registry-with-use-source ci_artifact image_map_targ
 expect_fail image-map-use-source-target-drift ci_artifact image_map_use_source_target_drift
 expect_fail image-map-mirror-target-drift ci_artifact image_map_mirror_target_drift
 expect_fail standalone-airgap-image-map-use-source ci_artifact image_map_airgap_use_source "$AIRGAP_PROFILE"
+expect_fail standalone-kind-image-map-output ci_artifact image_map_kind_rehearsal_output "$KIND_PROFILE"
 expect_fail airgap-old-two-file-pair ci_artifact airgap_old_two_file_pair "$AIRGAP_PROFILE"
 expect_fail airgap-image-map-missing ci_artifact airgap_image_map_missing "$AIRGAP_PROFILE"
 expect_fail airgap-image-map-mirror-required-false ci_artifact airgap_image_map_mirror_required_false "$AIRGAP_PROFILE"

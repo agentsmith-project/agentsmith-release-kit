@@ -572,8 +572,11 @@ producer and schema to revalidate. The image-map output is rechecked for
 `release_contract.deploy_image_inventory`; it also follows the render
 image-map adoption rule, so `use_source` cannot carry `target_registry` or drift
 from the source image, and mirrored targets must match the deterministic target
-registry ref. The online gate output is accepted only for
-`existing_kubernetes/external_declared/online` confirmed apply output:
+registry ref. The standalone image-map output is accepted only for
+`existing_kubernetes/external_declared/online` or
+`existing_kubernetes/external_declared/airgap`. The online gate output is
+accepted only for `existing_kubernetes/external_declared/online` confirmed
+apply output:
 `mode` must be `apply`, steps must be non-empty, and apply plus rollout steps
 must be present. The airgap bundle output is accepted only for
 `existing_kubernetes/external_declared/airgap` and must bind

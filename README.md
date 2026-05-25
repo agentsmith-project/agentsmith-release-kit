@@ -477,8 +477,11 @@ not emit AgentSmith product-flow evidence. Each accepted output is re-read and
 semantically checked. Image-map evidence follows the same image adoption rule as
 render: `mirror_required: false` must omit `target_registry` and keep
 `target_image === source_image`, while `mirror_required: true` must use the
-deterministic target-registry mirror ref. Online gate evidence is accepted only
-from confirmed apply output on `existing_kubernetes/external_declared/online`:
+deterministic target-registry mirror ref. Standalone image-map evidence is
+accepted only for `existing_kubernetes/external_declared/online` or
+`existing_kubernetes/external_declared/airgap`. Online gate evidence is
+accepted only from confirmed apply output on
+`existing_kubernetes/external_declared/online`:
 `mode` must be `apply`, producer steps must be non-empty and include apply plus
 rollout, and `server-dry-run` reports are rejected. Airgap bundle evidence must
 be a real bundle-check triplet: the report, `airgap-bundle-manifest.json`, and
