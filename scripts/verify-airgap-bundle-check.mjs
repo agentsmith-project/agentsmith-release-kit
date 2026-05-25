@@ -21,6 +21,15 @@ const BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
 const REPORT_SCHEMA = 'agentsmith.airgap-bundle-check-report/v1';
 const REPORT_SCOPE = 'airgap_bundle_manifest_check_only';
 const REPORT_FILE = 'airgap-bundle-check-report.json';
+const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
+const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
+const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
+const CANONICAL_TARGET_PROFILE_VALUES = [
+  'existing_kubernetes/external_declared/online',
+  AIRGAP_TARGET_PROFILE,
+  'kind_rehearsal/kit_installed/online'
+];
+const CANONICAL_TARGET_PROFILE_SET = new Set(CANONICAL_TARGET_PROFILE_VALUES);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const SAFE_COMPONENT_KINDS = new Set([
@@ -29,6 +38,41 @@ const SAFE_COMPONENT_KINDS = new Set([
   'deploy_template_archive',
   'image_map'
 ]);
+const BUNDLE_MANIFEST_KEYS = new Set([
+  'schema_version',
+  'release_id',
+  'git_sha',
+  'target_profile',
+  'bindings',
+  'components',
+  'image_artifact_declarations',
+  'substrate'
+]);
+const BUNDLE_BINDING_KEYS = new Set([
+  'release_contract_sha256',
+  'deploy_template_package_sha256',
+  'deploy_template_archive_sha256',
+  'deploy_template_manifest_sha256',
+  'image_map_sha256'
+]);
+const BUNDLE_COMPONENT_KEYS = new Set(['kind', 'path', 'sha256']);
+const IMAGE_ARTIFACT_DECLARATION_KEYS = new Set([
+  'id',
+  'source_image',
+  'source_digest',
+  'target_image',
+  'target_digest',
+  'artifact_format',
+  'path',
+  'sha256'
+]);
+const TARGET_PROFILE_KEYS = new Set([
+  'value',
+  'target_cluster',
+  'substrate_source',
+  'distribution'
+]);
+const BUNDLE_SUBSTRATE_KEYS = new Set(['mode', 'bundled']);
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 
@@ -199,6 +243,13 @@ function requireBooleanTrue(value, label) {
   return value;
 }
 
+function requireBoolean(value, label) {
+  if (typeof value !== 'boolean') {
+    fail(`${label} must be a boolean`);
+  }
+  return value;
+}
+
 function requireDigest(value, label) {
   const digest = requireString(value, label);
   if (!DIGEST_RE.test(digest)) {
@@ -223,6 +274,22 @@ function assertStringEquals(value, expected, label) {
   return actual;
 }
 
+function requireEnumString(value, label, allowedValues) {
+  const actual = requireString(value, label);
+  if (!allowedValues.has(actual)) {
+    fail(`${label} is invalid`);
+  }
+  return actual;
+}
+
+function assertAllowedKeys(object, allowedKeys, label) {
+  for (const key of Object.keys(object)) {
+    if (!allowedKeys.has(key)) {
+      fail(`${label}.${key} is not allowed`);
+    }
+  }
+}
+
 function parseTargetProfile(value) {
   if (value !== AIRGAP_TARGET_PROFILE) {
     fail(`--airgap-bundle-check only accepts ${AIRGAP_TARGET_PROFILE}`);
@@ -238,6 +305,7 @@ function parseTargetProfile(value) {
 
 function assertTargetProfileObject(value, label) {
   const profile = requireObject(value, label);
+  assertAllowedKeys(profile, TARGET_PROFILE_KEYS, label);
   assertStringEquals(profile.value, AIRGAP_TARGET_PROFILE, `${label}.value`);
   assertStringEquals(
     profile.target_cluster,
@@ -300,8 +368,64 @@ function assertReleaseContract(contract, deployTemplatePackage) {
     deployTemplatePackage,
     'release_contract.deploy_template_package'
   );
+  assertContractTargetProfiles(contract);
 
   return { releaseId, gitSha, deployTemplateDigest };
+}
+
+function assertContractTargetProfiles(contract) {
+  const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
+  const seen = new Map();
+  let hasAirgapProfile = false;
+
+  for (const [index, profileValue] of profiles.entries()) {
+    const label = `release_contract.target_profiles[${index}]`;
+    const profile = requireObject(profileValue, label);
+    const targetCluster = requireEnumString(
+      profile.target_cluster,
+      `${label}.target_cluster`,
+      TARGET_CLUSTER_VALUES
+    );
+    const substrateSource = requireEnumString(
+      profile.substrate_source,
+      `${label}.substrate_source`,
+      SUBSTRATE_SOURCE_VALUES
+    );
+    const distribution = requireEnumString(
+      profile.distribution,
+      `${label}.distribution`,
+      DISTRIBUTION_VALUES
+    );
+    const tuple = `${targetCluster}/${substrateSource}/${distribution}`;
+    if (!CANONICAL_TARGET_PROFILE_SET.has(tuple)) {
+      fail(
+        `${label} must be one of canonical profiles: ${CANONICAL_TARGET_PROFILE_VALUES.join(
+          ', '
+        )}`
+      );
+    }
+    if (Object.prototype.hasOwnProperty.call(profile, 'support_level')) {
+      fail(`${label}.support_level is not allowed; use ${label}.required`);
+    }
+    if (!Object.prototype.hasOwnProperty.call(profile, 'required')) {
+      fail(`${label}.required is required`);
+    }
+    const required = requireBoolean(profile.required, `${label}.required`);
+    if (targetCluster === 'kind_rehearsal' && required) {
+      fail(`${label}: kind_rehearsal target profile must not be required`);
+    }
+    if (seen.has(tuple)) {
+      fail(`${label} duplicates target profile tuple declared at ${seen.get(tuple)}`);
+    }
+    seen.set(tuple, label);
+    if (tuple === AIRGAP_TARGET_PROFILE) {
+      hasAirgapProfile = true;
+    }
+  }
+
+  if (!hasAirgapProfile) {
+    fail(`release_contract.target_profiles must include ${AIRGAP_TARGET_PROFILE}`);
+  }
 }
 
 function assertDeployTemplatePackage(deployTemplatePackage, archiveSha256) {
@@ -322,23 +446,19 @@ function assertDeployTemplatePackage(deployTemplatePackage, archiveSha256) {
     fail('deploy_template_package.package_sha256 must match archive sha256');
   }
 
-  if (deployTemplatePackage.artifact_provenance !== undefined) {
-    const artifactProvenance = requireObject(
-      deployTemplatePackage.artifact_provenance,
-      'deploy_template_package.artifact_provenance'
-    );
-    if (artifactProvenance.artifact_sha256 !== undefined) {
-      const artifactSha256 = requireDigest(
-        artifactProvenance.artifact_sha256,
-        'deploy_template_package.artifact_provenance.artifact_sha256'
-      );
-      if (artifactSha256 !== archiveSha256) {
-        fail('deploy_template_package.artifact_provenance.artifact_sha256 must match archive sha256');
-      }
-    }
+  const artifactProvenance = requireObject(
+    deployTemplatePackage.artifact_provenance,
+    'deploy_template_package.artifact_provenance'
+  );
+  const artifactSha256 = requireDigest(
+    artifactProvenance.artifact_sha256,
+    'deploy_template_package.artifact_provenance.artifact_sha256'
+  );
+  if (artifactSha256 !== archiveSha256) {
+    fail('deploy_template_package.artifact_provenance.artifact_sha256 must match archive sha256');
   }
 
-  return { packageSha256, manifestSha256 };
+  return { packageSha256, manifestSha256, artifactSha256 };
 }
 
 function assertReleaseAndPackageBinding(contractSummary, deployTemplateSummary) {
@@ -513,6 +633,7 @@ async function digestFile(file, label) {
 
 function assertBindings({ bindings, expected }) {
   const bindingObject = requireObject(bindings, 'bundle_manifest.bindings');
+  assertAllowedKeys(bindingObject, BUNDLE_BINDING_KEYS, 'bundle_manifest.bindings');
   for (const [key, expectedDigest] of Object.entries(expected)) {
     const actual = requireDigest(bindingObject[key], `bundle_manifest.bindings.${key}`);
     if (actual !== expectedDigest) {
@@ -531,6 +652,7 @@ async function assertComponents({ components, bundleRoot, expected }) {
   for (const [index, value] of items.entries()) {
     const label = `bundle_manifest.components[${index}]`;
     const component = requireObject(value, label);
+    assertAllowedKeys(component, BUNDLE_COMPONENT_KEYS, label);
     const kind = requireString(component.kind, `${label}.kind`);
     if (!SAFE_COMPONENT_KINDS.has(kind)) {
       fail(`${label}.kind is invalid; expected release_contract, deploy_template_package, deploy_template_archive, or image_map`);
@@ -573,6 +695,7 @@ async function assertImageArtifactDeclarations({ declarations, bundleRoot, image
   for (const [index, value] of items.entries()) {
     const label = `bundle_manifest.image_artifact_declarations[${index}]`;
     const declaration = requireObject(value, label);
+    assertAllowedKeys(declaration, IMAGE_ARTIFACT_DECLARATION_KEYS, label);
     const id = requireString(declaration.id, `${label}.id`);
     if (seen.has(id)) {
       fail(`bundle_manifest.image_artifact_declarations contains duplicate id: ${id}`);
@@ -614,6 +737,7 @@ async function assertImageArtifactDeclarations({ declarations, bundleRoot, image
 
 function assertSubstrate(value) {
   const substrate = requireObject(value, 'bundle_manifest.substrate');
+  assertAllowedKeys(substrate, BUNDLE_SUBSTRATE_KEYS, 'bundle_manifest.substrate');
   assertStringEquals(substrate.mode, 'external_declared', 'bundle_manifest.substrate.mode');
   requireBooleanFalse(substrate.bundled, 'bundle_manifest.substrate.bundled');
 }
@@ -627,6 +751,7 @@ async function assertBundleManifest({
   expectedComponentSha256,
   imageMapSummary
 }) {
+  assertAllowedKeys(manifest, BUNDLE_MANIFEST_KEYS, 'bundle_manifest');
   assertStringEquals(
     manifest.schema_version,
     BUNDLE_MANIFEST_SCHEMA,
@@ -681,7 +806,8 @@ function buildReport({
       deploy_template_package: {
         input_sha256: deployTemplatePackageInputDigest,
         package_sha256: deployTemplateSummary.packageSha256,
-        manifest_sha256: deployTemplateSummary.manifestSha256
+        manifest_sha256: deployTemplateSummary.manifestSha256,
+        artifact_sha256: deployTemplateSummary.artifactSha256
       },
       deploy_template_archive: {
         input_sha256: deployTemplateArchiveInputDigest

@@ -73,18 +73,22 @@ values. Components must be exactly one each by `kind`: `release_contract`,
 `deploy_template_package`, `deploy_template_archive`, and `image_map`.
 `bundle_manifest.bindings.deploy_template_archive_sha256` must match the
 archive sha256, and the archive sha256 must match
-`deploy_template_package.package_sha256` and, when present,
+`deploy_template_package.package_sha256` and
 `deploy_template_package.artifact_provenance.artifact_sha256`. Image artifact
-declarations must match airgap image-map mappings one-to-one by id. The
-image-map must have `mirror_required: true` and every mapping must use
-`action: mirror_required`. This diagnostic is manifest/digest check only: it
-is not a packager, does not parse the `.tgz`, does not create an airgap
-package, does not call Docker, skopeo, oras, kubectl, pull, push, mirror,
-save, or load images, does not inspect image artifact contents, does not verify
-registry presence or image load, does not support online or kind targets, and
-does not prove offline install readiness. `airgap-bundle-check-report.json`
-keeps `readiness: false`; it is not deploy, package, release, rollout, smoke,
-product-flow, or operator readiness evidence.
+declarations must match airgap image-map mappings one-to-one by id. The release
+contract must declare `existing_kubernetes/external_declared/airgap` in
+`target_profiles`, each profile entry must carry `required: boolean`, and
+`support_level` is rejected. The bundle manifest accepts only the documented
+top-level, `bindings`, `components`, `image_artifact_declarations`, and
+`substrate` fields. The image-map must have `mirror_required: true` and every
+mapping must use `action: mirror_required`. This diagnostic is manifest/digest
+check only: it is not a packager, does not parse the `.tgz`, does not create an
+airgap package, does not call Docker, skopeo, oras, kubectl, pull, push,
+mirror, save, or load images, does not inspect image artifact contents, does
+not verify registry presence or image load, does not support online or kind
+targets, and does not prove offline install readiness.
+`airgap-bundle-check-report.json` keeps `readiness: false`; it is not deploy,
+package, release, rollout, smoke, product-flow, or operator readiness evidence.
 
 Kubernetes apply-only output proves only that already-rendered manifests passed
 the render/check image inventory guard and were accepted by `kubectl apply`

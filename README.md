@@ -202,17 +202,26 @@ bash scripts/test-airgap-bundle-check.sh
 `schema_version: agentsmith.airgap-bundle-manifest/v1` against an explicit
 bundle root, release contract, deploy template package descriptor, deploy
 template archive `.tgz`, and airgap `image-map`. It accepts only
-`existing_kubernetes/external_declared/airgap`; online, kind, and alias target
-profiles fail fast. The image-map must be a passing `agentsmith.image-map/v1`
-report with `scope: image_map_only`, `readiness: false`, `mirror_required:
-true`, a target registry, the exact airgap target profile, and `action:
-mirror_required` for every mapping.
+`existing_kubernetes/external_declared/airgap`; online, kind, and
+non-canonical pre-GA target names fail fast. The release contract
+`target_profiles` value must be an array, must include
+`existing_kubernetes/external_declared/airgap`, and every entry must use a
+canonical profile tuple with `required: boolean`; `support_level` is rejected.
+The airgap profile may remain `required: false`. The image-map must be a
+passing `agentsmith.image-map/v1` report with `scope: image_map_only`,
+`readiness: false`, `mirror_required: true`, a target registry, the exact
+airgap target profile, and `action: mirror_required` for every mapping.
 
 This diagnostic checks only safe relative bundle paths and sha256 bindings for
 the release contract, deploy template package descriptor, deploy template
 archive, image-map, and declared `oci_layout_tar` image artifact files. The
-bundle manifest `bindings` must include `deploy_template_archive_sha256`, and
-`components` must contain exactly one component of each `kind`:
+deploy template archive sha256 must match
+`deploy_template_package.package_sha256`,
+`deploy_template_package.artifact_provenance.artifact_sha256`, and
+`bundle_manifest.bindings.deploy_template_archive_sha256`. The bundle manifest
+accepts only the documented top-level, `bindings`, `components`,
+`image_artifact_declarations`, and `substrate` fields. `components` must
+contain exactly one component of each `kind`:
 `release_contract`, `deploy_template_package`, `deploy_template_archive`, and
 `image_map`. It does not create an airgap package, parse the `.tgz`, inspect
 tar or OCI contents, verify registry presence, load images, deploy to

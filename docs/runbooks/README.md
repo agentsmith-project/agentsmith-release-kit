@@ -31,11 +31,15 @@ agentsmith.airgap-bundle-manifest/v1`; `components` must name exactly one
 `kind` each for `release_contract`, `deploy_template_package`,
 `deploy_template_archive`, and `image_map`. The deploy template archive sha256
 must match `deploy_template_package.package_sha256`,
-`artifact_provenance.artifact_sha256` when present, and
+`artifact_provenance.artifact_sha256`, and
 `bundle_manifest.bindings.deploy_template_archive_sha256`; image artifact
-declarations must match the airgap image-map mappings one-to-one by id. This
-check validates safe relative paths and sha256 values only. It is not a
-packager, does not parse the `.tgz`, does not create an airgap package, does
+declarations must match the airgap image-map mappings one-to-one by id. The
+release contract must include the
+`existing_kubernetes/external_declared/airgap` target profile with
+`required: boolean`, and the bundle manifest must use only the documented
+manifest fields. This check validates safe relative paths and sha256 values
+only. It is not a packager, does not parse the `.tgz`, does not create an
+airgap package, does
 not call Docker, skopeo, oras, kubectl, pull, push, mirror, save, or load
 images, does not prove registry presence, image load, offline install
 readiness, deploy readiness, package readiness, or release readiness, and does

@@ -52,7 +52,7 @@ manifest/digest diagnostic only. It consumes an explicit release contract,
 deploy template package descriptor, deploy template archive `.tgz`, airgap
 image-map, bundle root, and bundle manifest, and accepts only
 `existing_kubernetes/external_declared/airgap`. The deploy template archive
-sha256 must match `deploy_template_package.package_sha256` and, when present,
+sha256 must match `deploy_template_package.package_sha256` and
 `deploy_template_package.artifact_provenance.artifact_sha256`. The bundle
 manifest must use `schema_version:
 agentsmith.airgap-bundle-manifest/v1`; its `components` array must contain
@@ -61,9 +61,14 @@ exactly one component of each `kind`: `release_contract`,
 `bundle_manifest.bindings.deploy_template_archive_sha256` must match the
 archive sha256. Component paths and image artifact paths must be POSIX-style
 relative paths under the bundle root, and sha256 values must match the
-referenced files. Image artifact declarations must match image-map mappings
-one-to-one by id. The image-map must be airgap, `mirror_required: true`, and
-every mapping must use `action: mirror_required`. It writes
+referenced files. The release contract must declare
+`existing_kubernetes/external_declared/airgap` in `target_profiles`, each
+target profile entry must carry `required: boolean`, and `support_level` is
+rejected. The bundle manifest accepts only the documented top-level,
+`bindings`, `components`, `image_artifact_declarations`, and `substrate`
+fields. Image artifact declarations must match image-map mappings one-to-one by
+id. The image-map must be airgap, `mirror_required: true`, and every mapping
+must use `action: mirror_required`. It writes
 `airgap-bundle-check-report.json` with `schema:
 agentsmith.airgap-bundle-check-report/v1`, `readiness: false`, and `scope:
 airgap_bundle_manifest_check_only`. This is manifest/digest check only; it is

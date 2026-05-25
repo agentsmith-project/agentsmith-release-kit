@@ -127,8 +127,29 @@ if (
 switch (mutation) {
   case 'valid':
     break;
+  case 'missing_artifact_provenance':
+    delete deployTemplatePackage.artifact_provenance;
+    break;
+  case 'artifact_provenance_non_object':
+    deployTemplatePackage.artifact_provenance = 'not-an-object';
+    break;
+  case 'missing_artifact_sha256':
+    delete deployTemplatePackage.artifact_provenance.artifact_sha256;
+    break;
+  case 'artifact_sha_invalid_format':
+    deployTemplatePackage.artifact_provenance.artifact_sha256 = 'sha256:not-a-valid-digest';
+    break;
   case 'provenance_artifact_sha_mismatch':
     deployTemplatePackage.artifact_provenance.artifact_sha256 = `sha256:${'7'.repeat(64)}`;
+    break;
+  case 'target_profiles_not_array':
+  case 'target_profiles_missing_airgap':
+  case 'target_profiles_noncanonical_synonym':
+  case 'target_required_missing':
+  case 'target_required_string':
+  case 'target_support_level':
+  case 'kind_required_target_profile':
+  case 'duplicate_target_profile_tuple':
     break;
   default:
     throw new Error(`unknown material mutation: ${mutation}`);
@@ -137,6 +158,37 @@ switch (mutation) {
 const contract = JSON.parse(fs.readFileSync(fixtureContractPath, 'utf8'));
 contract.deploy_template_package = deployTemplatePackage;
 contract.deploy_template_digest = deployTemplatePackage.manifest_sha256;
+
+switch (mutation) {
+  case 'target_profiles_not_array':
+    contract.target_profiles = { value: 'existing_kubernetes/external_declared/airgap' };
+    break;
+  case 'target_profiles_missing_airgap':
+    contract.target_profiles = contract.target_profiles.filter(
+      (profile) => profile.distribution !== 'airgap'
+    );
+    break;
+  case 'target_profiles_noncanonical_synonym':
+    contract.target_profiles[1].distribution = 'offline';
+    break;
+  case 'target_required_missing':
+    delete contract.target_profiles[1].required;
+    break;
+  case 'target_required_string':
+    contract.target_profiles[1].required = 'false';
+    break;
+  case 'target_support_level':
+    contract.target_profiles[1].support_level = 'optional';
+    break;
+  case 'kind_required_target_profile':
+    contract.target_profiles[2].required = true;
+    break;
+  case 'duplicate_target_profile_tuple':
+    contract.target_profiles.push({ ...contract.target_profiles[1] });
+    break;
+  default:
+    break;
+}
 
 writeText(deployTemplatePackagePath, `${JSON.stringify(deployTemplatePackage, null, 2)}\n`);
 writeText(releaseContractPath, `${JSON.stringify(contract, null, 2)}\n`);
@@ -177,6 +229,34 @@ switch (mutation) {
 }
 
 fs.writeFileSync(output, `${JSON.stringify(imageMap, null, 2)}\n`);
+NODE
+}
+
+rebind_image_map_release_contract_digest() {
+  local image_map="$1"
+  local release_contract="$2"
+
+  "$NODE_BIN" --input-type=module - "$image_map" "$release_contract" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [imageMapPath, releaseContractPath] = process.argv.slice(2);
+
+function digestFile(file) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+}
+
+const imageMap = JSON.parse(fs.readFileSync(imageMapPath, 'utf8'));
+if (
+  !imageMap.release_contract ||
+  typeof imageMap.release_contract !== 'object' ||
+  Array.isArray(imageMap.release_contract)
+) {
+  throw new Error('image_map.release_contract must be an object');
+}
+
+imageMap.release_contract.input_sha256 = digestFile(releaseContractPath);
+fs.writeFileSync(imageMapPath, `${JSON.stringify(imageMap, null, 2)}\n`);
 NODE
 }
 
@@ -323,11 +403,26 @@ switch (mutation) {
     manifest.schema = manifest.schema_version;
     delete manifest.schema_version;
     break;
+  case 'extra_top_level_schema_with_schema_version':
+    manifest.schema = manifest.schema_version;
+    break;
   case 'component_id_instead_of_kind':
     for (const component of manifest.components) {
       component.id = component.kind;
       delete component.kind;
     }
+    break;
+  case 'component_id_with_kind':
+    manifest.components[0].id = manifest.components[0].kind;
+    break;
+  case 'unexpected_binding_field':
+    manifest.bindings.extra_sha256 = componentDigests.image_map;
+    break;
+  case 'unexpected_image_declaration_field':
+    manifest.image_artifact_declarations[0].extra_field = 'not-allowed';
+    break;
+  case 'unexpected_substrate_field':
+    manifest.substrate.extra_field = 'not-allowed';
     break;
   case 'missing_image_artifact_file':
     fs.rmSync(path.join(bundleRoot, manifest.image_artifact_declarations[0].path));
@@ -450,6 +545,7 @@ for (const [label, digest] of [
   ['deploy template package input', report.artifacts?.deploy_template_package?.input_sha256],
   ['deploy template package package', report.artifacts?.deploy_template_package?.package_sha256],
   ['deploy template package manifest', report.artifacts?.deploy_template_package?.manifest_sha256],
+  ['deploy template package artifact', report.artifacts?.deploy_template_package?.artifact_sha256],
   ['deploy template archive input', report.artifacts?.deploy_template_archive?.input_sha256],
   ['image map', report.artifacts?.image_map?.input_sha256],
   ['bundle manifest', report.artifacts?.bundle_manifest?.input_sha256]
@@ -589,6 +685,33 @@ expect_material_fail() {
   pass "invalid airgap materials rejected: $label"
 }
 
+expect_contract_fail() {
+  local label="$1"
+  local mutation="$2"
+  local release_contract="$TMP_DIR/$label.release-contract.json"
+  local deploy_template_package="$TMP_DIR/$label.deploy-template-package.json"
+  local archive="$TMP_DIR/$label.archive.tgz"
+  local image_map_dir="$TMP_DIR/image-map-$label"
+  local bundle_root="$TMP_DIR/bundle-$label"
+  local bundle_manifest="$bundle_root/airgap-bundle-manifest.json"
+  local output_dir="$TMP_DIR/out-$label"
+
+  create_materials "$release_contract" "$deploy_template_package" "$archive" "$mutation"
+  run_image_map "$image_map_dir"
+  rebind_image_map_release_contract_digest "$image_map_dir/image-map.json" "$release_contract"
+  create_bundle "$image_map_dir/image-map.json" "$bundle_root" "$bundle_manifest" valid "$release_contract" "$deploy_template_package" "$archive"
+  write_stale_report "$output_dir"
+
+  if run_airgap_bundle_check "$image_map_dir/image-map.json" "$AIRGAP_PROFILE" "$bundle_root" "$bundle_manifest" "$output_dir" "$release_contract" "$deploy_template_package" "$archive" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected invalid release contract to fail: $label"
+  fi
+
+  assert_no_report "$output_dir/$REPORT_FILE"
+  pass "invalid release contract rejected: $label"
+}
+
 valid_image_map_dir="$TMP_DIR/image-map-valid"
 valid_bundle_root="$TMP_DIR/bundle-valid"
 valid_bundle_manifest="$valid_bundle_root/airgap-bundle-manifest.json"
@@ -606,7 +729,12 @@ expect_image_map_fail image-map-not-airgap online_target_profile
 expect_image_map_fail mirror-required-false mirror_required_false
 
 expect_bundle_fail schema-field-instead-of-schema-version schema_field_instead_of_schema_version
+expect_bundle_fail extra-top-level-schema-with-schema-version extra_top_level_schema_with_schema_version
 expect_bundle_fail component-id-instead-of-kind component_id_instead_of_kind
+expect_bundle_fail component-id-with-kind component_id_with_kind
+expect_bundle_fail unexpected-binding-field unexpected_binding_field
+expect_bundle_fail unexpected-image-declaration-field unexpected_image_declaration_field
+expect_bundle_fail unexpected-substrate-field unexpected_substrate_field
 expect_bundle_fail missing-image-artifact-file missing_image_artifact_file
 expect_bundle_fail missing-component-file missing_component_file
 expect_bundle_fail missing-deploy-template-archive-component missing_deploy_template_archive_component
@@ -627,7 +755,19 @@ expect_bundle_fail duplicate-image-declaration duplicate_image_declaration
 expect_bundle_fail missing-image-declaration missing_image_declaration
 expect_bundle_fail bundle-manifest-online-target-profile bundle_manifest_online_target_profile
 expect_archive_arg_fail archive-argument-sha-mismatch
+expect_material_fail missing-artifact-provenance missing_artifact_provenance
+expect_material_fail artifact-provenance-non-object artifact_provenance_non_object
+expect_material_fail missing-artifact-sha256 missing_artifact_sha256
+expect_material_fail artifact-sha-invalid-format artifact_sha_invalid_format
 expect_material_fail provenance-artifact-sha-mismatch provenance_artifact_sha_mismatch
+expect_contract_fail target-profiles-not-array target_profiles_not_array
+expect_contract_fail contract-missing-airgap-target-profile target_profiles_missing_airgap
+expect_contract_fail contract-noncanonical-target-tuple target_profiles_noncanonical_synonym
+expect_contract_fail target-required-missing target_required_missing
+expect_contract_fail target-required-string target_required_string
+expect_contract_fail target-support-level-present target_support_level
+expect_contract_fail kind-required-target-profile kind_required_target_profile
+expect_contract_fail duplicate-target-profile-tuple duplicate_target_profile_tuple
 
 expect_profile_fail online "$ONLINE_PROFILE"
 expect_profile_fail kind-rehearsal "$KIND_PROFILE"

@@ -126,10 +126,16 @@ deploy template package descriptor, deploy template archive `.tgz`, airgap
 `image-map`, explicit target profile
 `existing_kubernetes/external_declared/airgap`, explicit bundle root, bundle
 manifest, and output directory. The deploy template archive sha256 must match
-`deploy_template_package.package_sha256` and, when present,
-`deploy_template_package.artifact_provenance.artifact_sha256`. The bundle
-manifest `bindings` must include `deploy_template_archive_sha256` and must use
-`schema_version: agentsmith.airgap-bundle-manifest/v1`; its `components` list
+`deploy_template_package.package_sha256`,
+`deploy_template_package.artifact_provenance.artifact_sha256`, and
+`bundle_manifest.bindings.deploy_template_archive_sha256`. The release
+contract `target_profiles` value must be an array and must include
+`existing_kubernetes/external_declared/airgap`; every declared profile must use
+a canonical profile tuple with `required: boolean`, and `support_level` is
+rejected. The airgap profile may remain `required: false`. The bundle manifest
+must use `schema_version: agentsmith.airgap-bundle-manifest/v1` and accepts
+only the documented top-level, `bindings`, `components`,
+`image_artifact_declarations`, and `substrate` fields. Its `components` list
 must contain exactly one component for each `kind`: `release_contract`,
 `deploy_template_package`, `deploy_template_archive`, and `image_map`. The
 image-map must be airgap, have `mirror_required: true`, and every mapping must

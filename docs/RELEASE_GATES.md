@@ -69,8 +69,8 @@ This focused guard exercises `bash scripts/verify-release.sh
 --template-package`. It checks only the materialized deploy template package
 archive against the release contract and deploy template package descriptor.
 
-The check verifies descriptor equality, archive sha256, provenance artifact
-sha256 when present, archive `manifest.json` sha256, path safety for package
+The check verifies descriptor equality, archive sha256, declared provenance
+artifact sha256, archive `manifest.json` sha256, path safety for package
 entries, and obvious local source or plaintext credential payloads. It rejects
 absolute paths, `..` package-root escapes, symlinks, and hardlinks before any
 future render/check code can consume the archive.
@@ -107,8 +107,9 @@ symlinks, hardlinks, local/source payloads, plaintext credential payloads, and
 missing declared template files fail fast.
 
 The template language is scalar placeholder replacement only. It has no
-conditionals, loops, includes, Helm, Kustomize, or profile aliases. Supported
-placeholder roots are `values`, `images`, `target`, `substrate`, and `release`;
+conditionals, loops, includes, Helm, Kustomize, or non-canonical pre-GA target
+names. Supported placeholder roots are `values`, `images`, `target`,
+`substrate`, and `release`;
 examples are `${{ values.namespace }}`, `${{ images.web.image }}`,
 `${{ target.distribution }}`, `${{ substrate.services.postgresql.host }}`, and
 `${{ release.release_id }}`. Unknown, malformed, unresolved, object, or array
@@ -217,6 +218,11 @@ must be a passing airgap `agentsmith.image-map/v1` report with `scope:
 image_map_only`, `readiness: false`, `mirror_required: true`, a target
 registry, and `action: mirror_required` on every mapping.
 
+The release contract `target_profiles` value must be an array and must declare
+`existing_kubernetes/external_declared/airgap`. Every target profile tuple must
+be canonical, every entry must carry `required: boolean`, and `support_level`
+is rejected. The airgap profile may remain `required: false`.
+
 The bundle manifest must use `schema_version:
 agentsmith.airgap-bundle-manifest/v1`. Its `components` array must contain
 exactly one component for each `kind`: `release_contract`,
@@ -224,12 +230,13 @@ exactly one component for each `kind`: `release_contract`,
 component path must stay under the bundle root and its sha256 must match the
 explicit input file. `bundle_manifest.bindings.deploy_template_archive_sha256`
 must match the supplied archive sha256. The archive sha256 must also match
-`deploy_template_package.package_sha256` and, when present,
+`deploy_template_package.package_sha256` and
 `deploy_template_package.artifact_provenance.artifact_sha256`. Image artifact
 declarations must match image-map mappings one-to-one by id and must use
 `artifact_format: oci_layout_tar`. Bundle paths are POSIX-style relative paths
 only; absolute paths, parent segments, empty segments, dot segments,
-backslashes, URI paths, symlinks, missing files, and sha mismatches fail fast.
+backslashes, URI paths, symlinks, missing files, unexpected manifest fields,
+and sha mismatches fail fast.
 
 The generated `airgap-bundle-check-report.json` must keep `schema:
 agentsmith.airgap-bundle-check-report/v1`, `scope:
