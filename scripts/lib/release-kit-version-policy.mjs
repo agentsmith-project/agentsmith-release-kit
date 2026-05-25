@@ -48,6 +48,34 @@ export const SUPPORTED_FOCUSED_TARGET_PROFILE_SET = new Set(
 
 const STRICT_SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
+export function parseCanonicalTargetProfile(value, fail, label = 'target_profile') {
+  if (typeof value !== 'string' || value.trim() === '') {
+    fail(`${label} is required`);
+  }
+
+  const tuple = value.split('/');
+  if (tuple.length !== 3 || tuple.some((part) => part.trim() === '')) {
+    fail(`${label} must be <target_cluster>/<substrate_source>/<distribution>`);
+  }
+
+  const [targetCluster, substrateSource, distribution] = tuple;
+  const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
+  if (!CANONICAL_DECLARABLE_TARGET_PROFILE_SET.has(normalized)) {
+    fail(
+      `${label} must be one of canonical profiles: ${CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.join(
+        ', '
+      )}`
+    );
+  }
+
+  return {
+    value: normalized,
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution
+  };
+}
+
 export function parsePlainSemver(value) {
   if (typeof value !== 'string') {
     return null;

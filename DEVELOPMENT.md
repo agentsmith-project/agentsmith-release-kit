@@ -56,13 +56,15 @@ Its `intake-report.json`, `image-digest-plan.json`, and
 they prove contract/input digest readiness only and are not deploy, package, or
 release readiness evidence. All target profiles must declare
 `required: boolean`; `support_level` is rejected. Required profiles must be
-covered by the current focused set
-`existing_kubernetes/external_declared/online` and
-`kind_rehearsal/kit_installed/online`, but `kind_rehearsal` is supported only
-as focused rehearsal and must not be `required: true`, so
-`existing_kubernetes/external_declared/airgap` remains declared but
-`required: false` for this slice. `min_release_kit_version` must be plain
-`x.y.z` semver and cannot exceed the current release-kit version.
+covered by the current canonical focused set:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`,
+`existing_kubernetes/kit_installed/airgap`, and
+`kind_rehearsal/kit_installed/online`. `kind_rehearsal` is supported only as
+focused rehearsal and must not be `required: true`. `min_release_kit_version`
+must be plain `x.y.z` semver and cannot exceed the current release-kit
+version.
 
 The current `--template-package` path is a focused diagnostic for deploy
 template package archive intake only. It consumes the release contract, the
@@ -80,9 +82,10 @@ render values, and operator-provided substrate truth. It renders only
 is scalar placeholder replacement with roots `values`, `images`, `target`,
 `substrate`, and `release`, such as `${{ values.namespace }}` or
 `${{ images.web.image }}`; unknown placeholders fail fast. It rejects archive
-path escapes, symlinks, hardlinks, non-canonical pre-GA target profile names,
-secret-looking rendered payloads, local source paths, and workload images that
-are not digest-pinned entries in `deploy_image_inventory`. It does not call
+path escapes, symlinks, hardlinks, non-canonical target profile tuples,
+pre-GA target profile names, secret-looking rendered payloads, local source
+paths, and workload images that are not digest-pinned entries in
+`deploy_image_inventory`. It does not call
 `kubectl`, apply or dry-run manifests, roll out workloads, smoke a cluster,
 mirror images, read sibling source checkouts, or claim render, deploy, or
 release readiness.
@@ -92,24 +95,24 @@ Kubernetes manifest image inventory only. It consumes a release contract, an
 already-rendered manifests directory, and an explicit target profile. Its
 `render-report.json` must keep `readiness: false` and
 `scope: render_check_image_inventory_only`; it checks digest-pinned workload
-images against `deploy_image_inventory` and rejects non-canonical pre-GA target
-profile names, path escapes, external symlinks, and obvious plaintext
-credential or kubeconfig payloads. It does not render templates, apply
-resources, roll out workloads, smoke a cluster, package artifacts, or claim
-deploy or release readiness.
+images against `deploy_image_inventory` and rejects non-canonical target
+profile tuples, pre-GA target profile names, path escapes, external symlinks,
+and obvious plaintext credential or kubeconfig payloads. It does not render
+templates, apply resources, roll out workloads, smoke a cluster, package
+artifacts, or claim deploy or release readiness.
 
 The current `--image-map` path is a focused diagnostic for image-map /
 mirror-plan generation only. It consumes a release contract, explicit target
-profile `existing_kubernetes/external_declared/online` or
-`existing_kubernetes/external_declared/airgap`, an output directory, and an
-optional `--target-registry <registry-host[/namespace]>`. It reads only
+profile `existing_kubernetes/<external_declared|kit_installed>/<online|airgap>`,
+an output directory, and an optional
+`--target-registry <registry-host[/namespace]>`. It reads only
 `release_contract.deploy_image_inventory`, requires every inventory image to
 be digest-pinned with a matching `digest` field, rejects duplicate ids, images,
-and digests, and accepts only the two existing Kubernetes profiles as CLI
-targets. `kind_rehearsal/kit_installed/online` is a canonical profile tuple
-but out of scope for image-map CLI. Only canonical profile tuples are accepted
-in `release_contract.target_profiles`; non-canonical pre-GA names and synonym
-axes fail fast.
+and digests, and accepts only the four existing Kubernetes canonical profiles
+as CLI targets. `kind_rehearsal/kit_installed/online` is a canonical profile
+tuple but out of scope for image-map CLI. Only canonical profile tuples are
+accepted in `release_contract.target_profiles`; non-canonical pre-GA names and
+synonym axes fail fast.
 For online without a target registry, it maps each image to itself with
 `action: use_source`; with a target registry, and always for airgap, it writes
 digest-pinned target refs under that registry with `action: mirror_required`.

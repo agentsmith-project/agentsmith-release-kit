@@ -14,10 +14,16 @@ that repository.
 
 ## Bootstrap Status
 
-Current status is bootstrap-only, docs-governance-first. The repository has
-identity, boundary docs, a quick guard, and placeholder documentation entries.
-It does not yet have deploy, package, airgap, render, apply, smoke, mirror, or
-release-readiness implementation.
+Current status is bootstrap-focused, not release-ready. The repository has
+identity and boundary docs plus focused diagnostics for inputs,
+template-package, render, render-check, image-map, airgap bundle manifest
+checking, apply, rollout, smoke, online focused chain orchestration, evidence,
+and target-preflight.
+
+These diagnostics produce `readiness: false` evidence. The repository still
+does not have full deploy readiness, package readiness, registry mirror
+execution, airgap install execution, rollback automation, or a full release
+gate.
 
 ## Scope
 
@@ -37,7 +43,7 @@ kind rehearsal evidence as different evidence lines.
 ## Governance Rules
 
 - Keep implementation KISS and fail fast.
-- Prefer bash, grep, and find for bootstrap guards.
+- Prefer existing bash and Node scripts for focused diagnostics.
 - Do not add npm, Python, Go, or other package ecosystems until a future
   implementation workstream has a concrete need.
 - Do not import or read AgentSmith product source at runtime.

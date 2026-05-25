@@ -483,6 +483,33 @@ expect_fail_case() {
   pass "invalid render rejected: $label"
 }
 
+expect_target_profile_fail() {
+  local label="$1"
+  local target_profile="$2"
+  local output_dir="$TMP_DIR/out-target-$label"
+
+  if run_render \
+    "$VALID_CONTRACT_MATERIAL" \
+    "$VALID_PACKAGE_MATERIAL" \
+    "$VALID_ARCHIVE" \
+    "$VALID_VALUES" \
+    "$VALID_TRUTH" \
+    "$output_dir" \
+    "$target_profile" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected invalid target profile to fail: $label"
+  fi
+
+  if ! grep -q "canonical profiles" "$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected canonical target profile message for: $label"
+  fi
+
+  pass "canonical profiles only; non-canonical target profile rejected: $label"
+}
+
 prepare_archive_case() {
   local label="$1"
   local create_function="$2"
@@ -601,13 +628,8 @@ expect_fail_case unknown-variable \
   "$VALID_VALUES" \
   "$VALID_TRUTH"
 
-expect_fail_case noncanonical-local-kind \
-  "$VALID_CONTRACT_MATERIAL" \
-  "$VALID_PACKAGE_MATERIAL" \
-  "$VALID_ARCHIVE" \
-  "$VALID_VALUES" \
-  "$VALID_TRUTH" \
-  "local-kind/external_declared/online"
+expect_target_profile_fail noncanonical-local-kind "local-kind/external_declared/online"
+expect_target_profile_fail noncanonical-kind-external-declared "kind_rehearsal/external_declared/online"
 
 MISSING_REQUIRED_CONTRACT="$TMP_DIR/release-contract.missing-target-required.json"
 mutate_contract_target_profile missing-required \

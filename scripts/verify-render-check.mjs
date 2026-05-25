@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { parseCanonicalTargetProfile } from './lib/release-kit-version-policy.mjs';
+
 const REQUIRED_ARGS = [
   'releaseContract',
   'renderedManifests',
@@ -284,32 +286,7 @@ function assertSchemaVersion(value, expected, label) {
 }
 
 function parseTargetProfile(targetProfile) {
-  requireString(targetProfile, 'target_profile');
-  const tuple = targetProfile.split('/');
-  if (tuple.length !== 3 || tuple.some((part) => part.trim() === '')) {
-    fail('target_profile must be <target_cluster>/<substrate_source>/<distribution>');
-  }
-
-  const [targetCluster, substrateSource, distribution] = tuple;
-  const value = `${targetCluster}/${substrateSource}/${distribution}`;
-  return {
-    value,
-    target_cluster: requireEnumString(
-      targetCluster,
-      'target_profile.target_cluster',
-      TARGET_CLUSTER_VALUES
-    ),
-    substrate_source: requireEnumString(
-      substrateSource,
-      'target_profile.substrate_source',
-      SUBSTRATE_SOURCE_VALUES
-    ),
-    distribution: requireEnumString(
-      distribution,
-      'target_profile.distribution',
-      DISTRIBUTION_VALUES
-    )
-  };
+  return parseCanonicalTargetProfile(targetProfile, fail);
 }
 
 function assertContractTargetProfiles(contract, targetProfile) {

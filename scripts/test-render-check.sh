@@ -70,6 +70,12 @@ expect_target_profile_fail() {
     fail "expected invalid target profile to fail: $label"
   fi
 
+  if ! grep -q "canonical profiles" "$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected canonical target profile message for: $label"
+  fi
+
   pass "canonical profiles only; non-canonical pre-GA name or synonym axis rejected: $label"
 }
 
@@ -410,6 +416,7 @@ expect_fail flow_style_object_unknown_image
 expect_fail flow_style_inline_list_unknown_image
 expect_fail commented_doc_separator_unknown_image
 expect_target_profile_fail noncanonical_local_kind "local-kind/external_declared/online"
+expect_target_profile_fail noncanonical_kind_external_declared "kind_rehearsal/external_declared/online"
 expect_fail secret_payload
 expect_fail symlink_escape
 expect_forbidden_root_cli_fail missing_forbidden_root
