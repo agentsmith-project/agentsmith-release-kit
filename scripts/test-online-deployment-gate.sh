@@ -129,6 +129,91 @@ write_render_values() {
 JSON
 }
 
+write_evidence_provenance() {
+  local output="$1"
+  local mutation="${2:-valid}"
+
+  "$NODE_BIN" --input-type=module - "$output" "$mutation" <<'NODE'
+import fs from 'node:fs';
+
+const [output, mutation] = process.argv.slice(2);
+
+const provenance = {
+  schema_version: 'agentsmith.artifact-provenance/v1',
+  provenance_kind: 'ci_artifact',
+  producer_repo: 'github.com/agentsmith-project/agentsmith-release-kit',
+  normalized_remote: 'github.com/agentsmith-project/agentsmith-release-kit',
+  commit_sha: 'fedcba9876543210fedcba9876543210fedcba98',
+  artifact_uri: 'gh-artifact://agentsmith-release-kit/evidence/10001/online-deployment-gate-evidence.tgz',
+  generated_at: '2026-05-23T12:00:00.000Z',
+  generator_command: 'bash scripts/verify-release.sh --online-deployment-gate --evidence-root',
+  generator_version: '0.1.0',
+  attestation: 'none',
+  workflow_name: 'online-deployment-gate-evidence',
+  run_id: '10001',
+  run_attempt: '1',
+  job: 'online-deployment-gate'
+};
+
+function useSignedOperatorRun(artifactUri) {
+  provenance.provenance_kind = 'signed_operator_run';
+  provenance.artifact_uri = artifactUri;
+  provenance.operator_run_id = 'operator-run-10001';
+  provenance.operator_identity = 'release-operator@example.com';
+  provenance.signature_uri =
+    'https://signatures.example.com/agentsmith-release-kit/operator-run-10001.sig';
+  provenance.signature_sha256 = `sha256:${'a'.repeat(64)}`;
+  delete provenance.workflow_name;
+  delete provenance.run_id;
+  delete provenance.run_attempt;
+  delete provenance.job;
+}
+
+switch (mutation) {
+  case 'valid':
+    break;
+  case 'local_uri':
+    provenance.artifact_uri = 'file:///tmp/online-deployment-gate-evidence.tgz';
+    break;
+  case 'secret_payload':
+    provenance.operator_token = 'ghp_123456789012345678901234567890123456';
+    break;
+  case 'out_of_scope_fields':
+    provenance.readiness = true;
+    provenance.verdict = 'release-ready';
+    provenance.scope = 'release_readiness';
+    provenance['product-flow'] = 'workspace_project';
+    provenance.operator_signoff = { status: 'approved' };
+    break;
+  case 'wrong_artifact_host':
+    provenance.artifact_uri =
+      'https://example.com/agentsmith-release-kit/actions/runs/10001/artifacts/evidence.zip';
+    break;
+  case 'wrong_artifact_repo':
+    provenance.artifact_uri =
+      'https://api.github.com/repos/example/not-release-kit/actions/runs/10001/artifacts/evidence.zip';
+    break;
+  case 'repo_level_artifact_uri':
+    provenance.artifact_uri =
+      'https://api.github.com/repos/agentsmith-project/agentsmith-release-kit/actions/artifacts';
+    break;
+  case 'run_id_mismatch':
+    provenance.artifact_uri =
+      'gh-artifact://agentsmith-release-kit/evidence/99999/online-deployment-gate-evidence.tgz';
+    break;
+  case 'signed_unbound_operator_run_uri':
+    useSignedOperatorRun(
+      'gh-artifact://agentsmith-release-kit/evidence/10001/online-deployment-gate-evidence.tgz'
+    );
+    break;
+  default:
+    throw new Error(`unknown provenance mutation: ${mutation}`);
+}
+
+fs.writeFileSync(output, `${JSON.stringify(provenance, null, 2)}\n`);
+NODE
+}
+
 create_archive() {
   local label="$1"
   local archive="$2"
@@ -435,6 +520,38 @@ assert_no_gate_report() {
   fi
 }
 
+write_stale_evidence_files() {
+  local evidence_root="$1"
+
+  mkdir -p "$evidence_root"
+  printf '%s\n' '{"stale":true}' >"$evidence_root/evidence.json"
+  printf '%s\n' '{"stale":true}' >"$evidence_root/evidence-subject.json"
+  printf '%s\n' '{"stale":true}' >"$evidence_root/online-deployment-gate-report.json"
+}
+
+assert_no_evidence_files() {
+  local evidence_root="$1"
+
+  for evidence_file in evidence.json evidence-subject.json online-deployment-gate-report.json; do
+    if [[ -e "$evidence_root/$evidence_file" ]]; then
+      fail "failed gate must not leave stale evidence file: $evidence_file"
+    fi
+  done
+}
+
+run_evidence() {
+  local release_contract="$1"
+  local evidence_root="$2"
+  local output_dir="$3"
+  local target_profile="${4:-$TARGET_PROFILE}"
+
+  bash "$ROOT_DIR/scripts/verify-release.sh" --evidence \
+    --release-contract "$release_contract" \
+    --evidence-root "$evidence_root" \
+    --target-profile "$target_profile" \
+    --output-dir "$output_dir"
+}
+
 run_gate() {
   local release_contract="$1"
   local deploy_template_package="$2"
@@ -491,6 +608,35 @@ if (report.mode !== expectedMode) {
 if (report.target_profile?.value !== expectedProfile) {
   throw new Error(`unexpected target profile: ${report.target_profile?.value}`);
 }
+const capabilityMap = report.capability_map;
+if (!capabilityMap || typeof capabilityMap !== 'object' || Array.isArray(capabilityMap)) {
+  throw new Error('aggregate report must include a capability map');
+}
+const capabilityProfiles = Object.keys(capabilityMap);
+if (capabilityProfiles.length !== 1 || capabilityProfiles[0] !== expectedProfile) {
+  throw new Error(`capability map must only declare the current target profile: ${capabilityProfiles.join(',')}`);
+}
+const capability = capabilityMap[expectedProfile];
+const expectedCapability = {
+  declared: 'supported',
+  intake: 'supported',
+  preflight: 'supported',
+  render: 'supported',
+  apply: 'supported',
+  rollout: 'supported',
+  smoke: 'optional',
+  evidence_envelope: 'optional'
+};
+const expectedCapabilityKeys = Object.keys(expectedCapability).sort();
+const actualCapabilityKeys = Object.keys(capability || {}).sort();
+if (JSON.stringify(actualCapabilityKeys) !== JSON.stringify(expectedCapabilityKeys)) {
+  throw new Error(`unexpected capability keys: ${actualCapabilityKeys.join(',')}`);
+}
+for (const [key, value] of Object.entries(expectedCapability)) {
+  if (capability[key] !== value) {
+    throw new Error(`unexpected capability value for ${key}: ${capability[key]}`);
+  }
+}
 if (!report.release_id || !report.git_sha) {
   throw new Error('aggregate report must include release identity');
 }
@@ -520,14 +666,101 @@ for (const [index, step] of report.steps.entries()) {
     }
   }
 }
-if ('release_verdict' in report || 'verdict' in report || 'deploy_readiness' in report) {
+if ('release_verdict' in report || 'verdict' in report || 'deploy_readiness' in report || 'readiness_verdict' in report) {
   throw new Error('aggregate report must not claim verdict or deploy readiness');
 }
 if (/required_product_flows|product_flows|product_flow_results/.test(serialized)) {
   throw new Error('aggregate report must not include AgentSmith product flow fields');
 }
+if (/cloud.?provision|registry.?login|registry.?push|registry.?mirror|airgap.?create|airgap.?load|rollback|release_readiness|deploy_readiness|release_verdict|\bverdict\b/i.test(serialized)) {
+  throw new Error('aggregate report must not include out-of-scope deploy or release capabilities');
+}
 if (/password|token=|plain-secret-value|client_secret|authorization|bearer|kubeconfig/i.test(serialized)) {
   throw new Error('aggregate report leaked secret-ish payloads or kubeconfig fields');
+}
+NODE
+}
+
+assert_generated_evidence() {
+  local evidence_root="$1"
+
+  "$NODE_BIN" --input-type=module - "$evidence_root" "$TARGET_PROFILE" "$BASE_URL" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [evidenceRoot, targetProfile, localSmokeUrl] = process.argv.slice(2);
+const evidence = JSON.parse(fs.readFileSync(path.join(evidenceRoot, 'evidence.json'), 'utf8'));
+const subject = JSON.parse(fs.readFileSync(path.join(evidenceRoot, 'evidence-subject.json'), 'utf8'));
+const gateReport = JSON.parse(fs.readFileSync(path.join(evidenceRoot, 'online-deployment-gate-report.json'), 'utf8'));
+const serialized = [
+  JSON.stringify(evidence),
+  JSON.stringify(subject),
+  JSON.stringify(gateReport)
+].join('\n');
+
+if (evidence.schema_version !== 'agentsmith.release-kit-evidence-envelope/v1') {
+  throw new Error(`unexpected evidence schema: ${evidence.schema_version}`);
+}
+if (evidence.release_kit_output !== 'online-deployment-gate-report.json') {
+  throw new Error(`unexpected release_kit_output: ${evidence.release_kit_output}`);
+}
+if (evidence.status !== 'passed' || evidence.failure_class !== 'none') {
+  throw new Error('online gate evidence must be a passed focused diagnostic');
+}
+if (evidence.target_cluster !== 'existing_kubernetes' || evidence.substrate_source !== 'external_declared' || evidence.distribution !== 'online') {
+  throw new Error('online gate evidence target axes drifted');
+}
+if (evidence.target?.namespace !== 'agentsmith') {
+  throw new Error('online gate evidence target must include namespace');
+}
+if (!evidence.release_contract_digest?.startsWith('sha256:')) {
+  throw new Error('online gate evidence must bind release contract digest');
+}
+if (evidence.artifact_provenance?.subject_name !== 'release-kit-evidence-subject') {
+  throw new Error('online gate evidence provenance subject_name must be fixed');
+}
+if (evidence.artifact_provenance?.subject_uri !== 'evidence-subject.json') {
+  throw new Error('online gate evidence provenance subject_uri must be fixed');
+}
+if (!evidence.artifact_provenance?.subject_sha256?.startsWith('sha256:')) {
+  throw new Error('online gate evidence provenance subject_sha256 must be computed');
+}
+const provenanceKind = evidence.artifact_provenance?.provenance_kind;
+const allowedProvenanceKeys = new Set([
+  'schema_version',
+  'provenance_kind',
+  'producer_repo',
+  'normalized_remote',
+  'commit_sha',
+  'artifact_uri',
+  'generated_at',
+  'generator_command',
+  'generator_version',
+  'attestation',
+  'subject_name',
+  'subject_uri',
+  'subject_sha256',
+  ...(provenanceKind === 'ci_artifact'
+    ? ['workflow_name', 'run_id', 'run_attempt', 'job']
+    : ['operator_run_id', 'operator_identity', 'signature_uri', 'signature_sha256'])
+]);
+for (const key of Object.keys(evidence.artifact_provenance || {})) {
+  if (!allowedProvenanceKeys.has(key)) {
+    throw new Error(`online gate evidence carried non-allowlisted provenance field: ${key}`);
+  }
+}
+const files = subject.files?.map((file) => file.path).sort();
+if (JSON.stringify(files) !== JSON.stringify(['evidence.json', 'online-deployment-gate-report.json'])) {
+  throw new Error(`unexpected evidence subject files: ${files}`);
+}
+if (gateReport.target_profile?.value !== targetProfile) {
+  throw new Error('evidence root gate report target profile drifted');
+}
+if (serialized.includes(localSmokeUrl)) {
+  throw new Error('evidence root must not persist local focused smoke URL');
+}
+if (/required_product_flows|product_flows|product_flow_results|cloud.?provision|release_verdict|\bverdict\b|deploy_readiness|readiness":true/i.test(serialized)) {
+  throw new Error('evidence root contains out-of-scope readiness or product-flow fields');
 }
 NODE
 }
@@ -541,13 +774,50 @@ VALID_PACKAGE_MATERIAL="$TMP_DIR/deploy-template-package.valid-material.json"
 INVALID_ARCHIVE="$TMP_DIR/invalid-render.tgz"
 INVALID_CONTRACT_MATERIAL="$TMP_DIR/release-contract.invalid-render.json"
 INVALID_PACKAGE_MATERIAL="$TMP_DIR/deploy-template-package.invalid-render.json"
+VALID_PROVENANCE="$TMP_DIR/evidence-provenance.valid.json"
+LOCAL_URI_PROVENANCE="$TMP_DIR/evidence-provenance.local-uri.json"
+SECRET_PROVENANCE="$TMP_DIR/evidence-provenance.secret.json"
+OUT_OF_SCOPE_PROVENANCE="$TMP_DIR/evidence-provenance.out-of-scope.json"
+WRONG_HOST_PROVENANCE="$TMP_DIR/evidence-provenance.wrong-host.json"
+WRONG_REPO_PROVENANCE="$TMP_DIR/evidence-provenance.wrong-repo.json"
+REPO_LEVEL_ARTIFACT_PROVENANCE="$TMP_DIR/evidence-provenance.repo-level-artifact.json"
+RUN_ID_MISMATCH_PROVENANCE="$TMP_DIR/evidence-provenance.run-id-mismatch.json"
+SIGNED_UNBOUND_OPERATOR_PROVENANCE="$TMP_DIR/evidence-provenance.signed-unbound-operator.json"
 
 write_truth "$VALID_TRUTH"
 write_render_values "$VALID_VALUES"
 prepare_archive_case valid valid "$VALID_ARCHIVE" "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL"
 prepare_archive_case invalid-render unknown_variable "$INVALID_ARCHIVE" "$INVALID_CONTRACT_MATERIAL" "$INVALID_PACKAGE_MATERIAL"
+write_evidence_provenance "$VALID_PROVENANCE" valid
+write_evidence_provenance "$LOCAL_URI_PROVENANCE" local_uri
+write_evidence_provenance "$SECRET_PROVENANCE" secret_payload
+write_evidence_provenance "$OUT_OF_SCOPE_PROVENANCE" out_of_scope_fields
+write_evidence_provenance "$WRONG_HOST_PROVENANCE" wrong_artifact_host
+write_evidence_provenance "$WRONG_REPO_PROVENANCE" wrong_artifact_repo
+write_evidence_provenance "$REPO_LEVEL_ARTIFACT_PROVENANCE" repo_level_artifact_uri
+write_evidence_provenance "$RUN_ID_MISMATCH_PROVENANCE" run_id_mismatch
+write_evidence_provenance "$SIGNED_UNBOUND_OPERATOR_PROVENANCE" signed_unbound_operator_run_uri
 start_server
 BASE_URL="http://127.0.0.1:$SERVER_PORT"
+
+parse_unknown_root="$TMP_DIR/evidence-parse-unknown"
+write_stale_evidence_files "$parse_unknown_root"
+if bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
+  --evidence-root "$parse_unknown_root" \
+  --unknown-argument >"$TMP_DIR/parse-unknown.out" 2>"$TMP_DIR/parse-unknown.err"; then
+  fail "expected unknown argument with evidence root to fail"
+fi
+assert_no_evidence_files "$parse_unknown_root"
+pass "parse-time unknown argument clears stale evidence files"
+
+parse_missing_root="$TMP_DIR/evidence-parse-missing"
+write_stale_evidence_files "$parse_missing_root"
+if bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
+  --evidence-root "$parse_missing_root" >"$TMP_DIR/parse-missing.out" 2>"$TMP_DIR/parse-missing.err"; then
+  fail "expected missing required args with evidence root to fail"
+fi
+assert_no_evidence_files "$parse_missing_root"
+pass "parse-time missing required args clear stale evidence files"
 
 dry_output="$TMP_DIR/out-dry"
 mkdir -p "$dry_output/rollout" "$dry_output/smoke"
@@ -596,6 +866,24 @@ assert_kubectl_not_called
 assert_no_gate_report "$dry_apply_only_output"
 pass "server dry-run rejects apply-only options before kubectl"
 
+dry_evidence_root="$TMP_DIR/evidence-dry"
+dry_evidence_output="$TMP_DIR/out-dry-evidence"
+mkdir -p "$dry_evidence_output"
+printf '%s\n' '{"stale":true}' >"$dry_evidence_output/online-deployment-gate-report.json"
+write_stale_evidence_files "$dry_evidence_root"
+reset_kubectl_log
+before_dry_evidence="$(hit_count)"
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$dry_evidence_output" "$TARGET_PROFILE" \
+  --evidence-root "$dry_evidence_root" --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/dry-evidence.out" 2>"$TMP_DIR/dry-evidence.err"; then
+  fail "expected server dry-run evidence request to fail"
+fi
+after_dry_evidence="$(hit_count)"
+assert_kubectl_not_called
+[[ "$before_dry_evidence" == "$after_dry_evidence" ]] || fail "server dry-run evidence rejection reached network"
+assert_no_gate_report "$dry_evidence_output"
+assert_no_evidence_files "$dry_evidence_root"
+pass "server dry-run rejects evidence output before kubectl or network and clears stale evidence"
+
 reset_kubectl_log
 if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$TMP_DIR/out-apply-missing-confirm" "$TARGET_PROFILE" \
   --mode apply --operator-run-id operator-run-1001 >"$TMP_DIR/apply-missing-confirm.out" 2>"$TMP_DIR/apply-missing-confirm.err"; then
@@ -638,6 +926,149 @@ grep -q 'get pods' "$KUBECTL_LOG" || fail "apply gate did not check live pods"
 assert_gate_report "$apply_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke"
 pass "apply mode runs rollout and optional smoke with non-readiness aggregate"
 
+apply_evidence_output="$TMP_DIR/out-apply-evidence"
+apply_evidence_root="$TMP_DIR/evidence-apply"
+apply_evidence_validation="$TMP_DIR/out-apply-evidence-validation"
+reset_kubectl_log
+before_apply_evidence="$(hit_count)"
+run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$apply_evidence_output" "$TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$TARGET_PROFILE" \
+  --operator-run-id operator-run-1003 \
+  --timeout 120s \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost \
+  --evidence-root "$apply_evidence_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >/dev/null
+after_apply_evidence="$(hit_count)"
+[[ "$after_apply_evidence" -eq $((before_apply_evidence + 1)) ]] || fail "apply evidence gate smoke should issue one request"
+[[ -f "$apply_evidence_root/evidence.json" ]] || fail "apply evidence gate did not write evidence.json"
+[[ -f "$apply_evidence_root/evidence-subject.json" ]] || fail "apply evidence gate did not write evidence-subject.json"
+[[ -f "$apply_evidence_root/online-deployment-gate-report.json" ]] || fail "apply evidence gate did not write evidence root gate report"
+assert_gate_report "$apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke"
+assert_generated_evidence "$apply_evidence_root"
+run_evidence "$VALID_CONTRACT_MATERIAL" "$apply_evidence_root" "$apply_evidence_validation" >/dev/null
+[[ -f "$apply_evidence_output/evidence-validation/evidence-validation-report.json" ]] || fail "apply evidence gate did not internally validate evidence root"
+pass "confirmed apply rollout smoke can generate validator-accepted online gate evidence root"
+
+missing_provenance_root="$TMP_DIR/evidence-missing-provenance"
+missing_provenance_output="$TMP_DIR/out-missing-provenance"
+write_stale_evidence_files "$missing_provenance_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$missing_provenance_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1004 --evidence-root "$missing_provenance_root" >"$TMP_DIR/missing-provenance.out" 2>"$TMP_DIR/missing-provenance.err"; then
+  fail "expected evidence root without provenance input to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$missing_provenance_output"
+assert_no_evidence_files "$missing_provenance_root"
+pass "evidence output requires explicit provenance before kubectl"
+
+local_provenance_root="$TMP_DIR/evidence-local-provenance"
+local_provenance_output="$TMP_DIR/out-local-provenance"
+write_stale_evidence_files "$local_provenance_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$local_provenance_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1005 --evidence-root "$local_provenance_root" --evidence-provenance "$LOCAL_URI_PROVENANCE" >"$TMP_DIR/local-provenance.out" 2>"$TMP_DIR/local-provenance.err"; then
+  fail "expected local/file provenance URI to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$local_provenance_output"
+assert_no_evidence_files "$local_provenance_root"
+pass "local/file provenance URI rejected before kubectl"
+
+secret_provenance_root="$TMP_DIR/evidence-secret-provenance"
+secret_provenance_output="$TMP_DIR/out-secret-provenance"
+write_stale_evidence_files "$secret_provenance_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$secret_provenance_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1006 --evidence-root "$secret_provenance_root" --evidence-provenance "$SECRET_PROVENANCE" >"$TMP_DIR/secret-provenance.out" 2>"$TMP_DIR/secret-provenance.err"; then
+  fail "expected secret-looking provenance to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$secret_provenance_output"
+assert_no_evidence_files "$secret_provenance_root"
+pass "secret-looking provenance rejected before kubectl"
+
+out_of_scope_provenance_root="$TMP_DIR/evidence-out-of-scope-provenance"
+out_of_scope_provenance_output="$TMP_DIR/out-out-of-scope-provenance"
+write_stale_evidence_files "$out_of_scope_provenance_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$out_of_scope_provenance_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1007 --evidence-root "$out_of_scope_provenance_root" --evidence-provenance "$OUT_OF_SCOPE_PROVENANCE" >"$TMP_DIR/out-of-scope-provenance.out" 2>"$TMP_DIR/out-of-scope-provenance.err"; then
+  fail "expected out-of-scope provenance fields to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$out_of_scope_provenance_output"
+assert_no_evidence_files "$out_of_scope_provenance_root"
+pass "out-of-scope provenance fields rejected before kubectl"
+
+wrong_host_provenance_root="$TMP_DIR/evidence-wrong-host-provenance"
+wrong_host_provenance_output="$TMP_DIR/out-wrong-host-provenance"
+write_stale_evidence_files "$wrong_host_provenance_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$wrong_host_provenance_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1008 --evidence-root "$wrong_host_provenance_root" --evidence-provenance "$WRONG_HOST_PROVENANCE" >"$TMP_DIR/wrong-host-provenance.out" 2>"$TMP_DIR/wrong-host-provenance.err"; then
+  fail "expected wrong artifact_uri host to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$wrong_host_provenance_output"
+assert_no_evidence_files "$wrong_host_provenance_root"
+pass "wrong artifact_uri host rejected before kubectl"
+
+wrong_repo_provenance_root="$TMP_DIR/evidence-wrong-repo-provenance"
+wrong_repo_provenance_output="$TMP_DIR/out-wrong-repo-provenance"
+write_stale_evidence_files "$wrong_repo_provenance_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$wrong_repo_provenance_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1009 --evidence-root "$wrong_repo_provenance_root" --evidence-provenance "$WRONG_REPO_PROVENANCE" >"$TMP_DIR/wrong-repo-provenance.out" 2>"$TMP_DIR/wrong-repo-provenance.err"; then
+  fail "expected wrong artifact_uri repo to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$wrong_repo_provenance_output"
+assert_no_evidence_files "$wrong_repo_provenance_root"
+pass "wrong artifact_uri repo rejected before kubectl"
+
+repo_level_artifact_provenance_root="$TMP_DIR/evidence-repo-level-artifact-provenance"
+repo_level_artifact_provenance_output="$TMP_DIR/out-repo-level-artifact-provenance"
+write_stale_evidence_files "$repo_level_artifact_provenance_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$repo_level_artifact_provenance_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1010 --evidence-root "$repo_level_artifact_provenance_root" --evidence-provenance "$REPO_LEVEL_ARTIFACT_PROVENANCE" >"$TMP_DIR/repo-level-artifact-provenance.out" 2>"$TMP_DIR/repo-level-artifact-provenance.err"; then
+  fail "expected repo-level artifact_uri to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$repo_level_artifact_provenance_output"
+assert_no_evidence_files "$repo_level_artifact_provenance_root"
+pass "repo-level artifact_uri rejected before kubectl"
+
+run_id_mismatch_provenance_root="$TMP_DIR/evidence-run-id-mismatch-provenance"
+run_id_mismatch_provenance_output="$TMP_DIR/out-run-id-mismatch-provenance"
+write_stale_evidence_files "$run_id_mismatch_provenance_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$run_id_mismatch_provenance_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1011 --evidence-root "$run_id_mismatch_provenance_root" --evidence-provenance "$RUN_ID_MISMATCH_PROVENANCE" >"$TMP_DIR/run-id-mismatch-provenance.out" 2>"$TMP_DIR/run-id-mismatch-provenance.err"; then
+  fail "expected artifact_uri run_id mismatch to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$run_id_mismatch_provenance_output"
+assert_no_evidence_files "$run_id_mismatch_provenance_root"
+pass "artifact_uri run_id mismatch rejected before kubectl"
+
+signed_unbound_operator_provenance_root="$TMP_DIR/evidence-signed-unbound-operator-provenance"
+signed_unbound_operator_provenance_output="$TMP_DIR/out-signed-unbound-operator-provenance"
+write_stale_evidence_files "$signed_unbound_operator_provenance_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$signed_unbound_operator_provenance_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1012 --evidence-root "$signed_unbound_operator_provenance_root" --evidence-provenance "$SIGNED_UNBOUND_OPERATOR_PROVENANCE" >"$TMP_DIR/signed-unbound-operator-provenance.out" 2>"$TMP_DIR/signed-unbound-operator-provenance.err"; then
+  fail "expected signed_operator_run artifact_uri without operator_run_id binding to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$signed_unbound_operator_provenance_output"
+assert_no_evidence_files "$signed_unbound_operator_provenance_root"
+pass "signed_operator_run artifact_uri without operator_run_id binding rejected before kubectl"
+
 reset_kubectl_log
 if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$TMP_DIR/out-unsupported-kit-online" "$KIT_ONLINE_PROFILE" >"$TMP_DIR/unsupported-kit-online.out" 2>"$TMP_DIR/unsupported-kit-online.err"; then
   fail "expected kit-installed online target profile to fail"
@@ -645,6 +1076,19 @@ fi
 assert_kubectl_not_called
 assert_no_gate_report "$TMP_DIR/out-unsupported-kit-online"
 pass "kit-installed online profile stays intake-only and is rejected before kubectl"
+
+unsupported_evidence_root="$TMP_DIR/evidence-unsupported-kit-online"
+unsupported_evidence_output="$TMP_DIR/out-unsupported-kit-online-evidence"
+write_stale_evidence_files "$unsupported_evidence_root"
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$unsupported_evidence_output" "$KIT_ONLINE_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1011 --evidence-root "$unsupported_evidence_root" --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/unsupported-kit-online-evidence.out" 2>"$TMP_DIR/unsupported-kit-online-evidence.err"; then
+  fail "expected kit-installed online evidence closure to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$unsupported_evidence_output"
+assert_no_evidence_files "$unsupported_evidence_root"
+pass "unsupported profile cannot pass online gate evidence closure"
 
 reset_kubectl_log
 if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$TMP_DIR/out-unsupported" "kind_rehearsal/kit_installed/online" >"$TMP_DIR/unsupported.out" 2>"$TMP_DIR/unsupported.err"; then

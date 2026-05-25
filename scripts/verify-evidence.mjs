@@ -61,6 +61,40 @@ const FORBIDDEN_RELEASE_KIT_OUTPUT_VALUES = new Set([
 ]);
 const STATUS_VALUES = new Set(['passed', 'failed']);
 const PROVENANCE_KINDS = new Set(['ci_artifact', 'signed_operator_run']);
+const RELEASE_KIT_GH_ARTIFACT_HOST = 'agentsmith-release-kit';
+const GITHUB_ACTIONS_API_HOST = 'api.github.com';
+const GITHUB_ACTIONS_API_OWNER = 'agentsmith-project';
+const GITHUB_ACTIONS_API_REPO = 'agentsmith-release-kit';
+const SIGNED_OPERATOR_RUN_ARTIFACT_SCHEME = 'signed-operator-run';
+const COMMON_PROVENANCE_FIELDS = [
+  'schema_version',
+  'provenance_kind',
+  'producer_repo',
+  'normalized_remote',
+  'commit_sha',
+  'artifact_uri',
+  'generated_at',
+  'generator_command',
+  'generator_version',
+  'attestation',
+  'subject_name',
+  'subject_uri',
+  'subject_sha256'
+];
+const CI_PROVENANCE_FIELDS = new Set([
+  ...COMMON_PROVENANCE_FIELDS,
+  'workflow_name',
+  'run_id',
+  'run_attempt',
+  'job'
+]);
+const SIGNED_OPERATOR_RUN_PROVENANCE_FIELDS = new Set([
+  ...COMMON_PROVENANCE_FIELDS,
+  'operator_run_id',
+  'operator_identity',
+  'signature_uri',
+  'signature_sha256'
+]);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -287,7 +321,7 @@ function isLoopbackHost(hostname) {
   );
 }
 
-function requireRemoteUri(value, label) {
+function parseRemoteUri(value, label, allowedSchemes = ['gh-artifact', 'https']) {
   const uri = requireString(value, label);
 
   if (
@@ -312,14 +346,106 @@ function requireRemoteUri(value, label) {
   }
 
   const scheme = parsed.protocol.slice(0, -1).toLowerCase();
-  if (!['gh-artifact', 'https'].includes(scheme)) {
+  if (!allowedSchemes.includes(scheme)) {
     fail(`${label} must be a remote provenance URI`);
   }
   if (isLoopbackHost(parsed.hostname)) {
     fail(`${label} must be a remote provenance URI`);
   }
 
-  return uri;
+  return { uri, parsed, scheme };
+}
+
+function requireRemoteUri(value, label) {
+  return parseRemoteUri(value, label).uri;
+}
+
+function pathSegments(parsed) {
+  return parsed.pathname
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    });
+}
+
+function hasPathSegment(parsed, expected) {
+  return pathSegments(parsed).includes(expected);
+}
+
+function isReleaseKitGhArtifactUri(parsed, runId) {
+  if (parsed.protocol.slice(0, -1).toLowerCase() !== 'gh-artifact') {
+    return false;
+  }
+  if (parsed.hostname !== RELEASE_KIT_GH_ARTIFACT_HOST) {
+    return false;
+  }
+  return Boolean(runId) && hasPathSegment(parsed, runId);
+}
+
+function isGitHubActionsArtifactApiUri(parsed, runId) {
+  if (parsed.protocol !== 'https:' || parsed.hostname !== GITHUB_ACTIONS_API_HOST) {
+    return false;
+  }
+
+  const segments = pathSegments(parsed);
+  if (
+    segments[0] !== 'repos' ||
+    segments[1] !== GITHUB_ACTIONS_API_OWNER ||
+    segments[2] !== GITHUB_ACTIONS_API_REPO ||
+    segments[3] !== 'actions'
+  ) {
+    return false;
+  }
+
+  if (segments[4] === 'runs' && segments[6] === 'artifacts') {
+    return Boolean(runId) && segments[5] === runId;
+  }
+
+  return false;
+}
+
+function isSignedOperatorRunArtifactUri(parsed, operatorRunId) {
+  if (parsed.protocol.slice(0, -1).toLowerCase() !== SIGNED_OPERATOR_RUN_ARTIFACT_SCHEME) {
+    return false;
+  }
+  if (parsed.hostname !== RELEASE_KIT_GH_ARTIFACT_HOST) {
+    return false;
+  }
+  return Boolean(operatorRunId) && hasPathSegment(parsed, operatorRunId);
+}
+
+function requireBoundArtifactUri(
+  value,
+  label,
+  { provenanceKind, runId, operatorRunId } = {}
+) {
+  const allowedSchemes =
+    provenanceKind === 'signed_operator_run'
+      ? [SIGNED_OPERATOR_RUN_ARTIFACT_SCHEME]
+      : ['gh-artifact', 'https'];
+  const { uri, parsed } = parseRemoteUri(value, label, allowedSchemes);
+
+  if (
+    provenanceKind === 'ci_artifact' &&
+    (isReleaseKitGhArtifactUri(parsed, runId) ||
+      isGitHubActionsArtifactApiUri(parsed, runId))
+  ) {
+    return uri;
+  }
+
+  if (
+    provenanceKind === 'signed_operator_run' &&
+    isSignedOperatorRunArtifactUri(parsed, operatorRunId)
+  ) {
+    return uri;
+  }
+
+  fail(`${label} must be bound to ${PRODUCER_REPO}`);
 }
 
 function isSafeSecretValue(value) {
@@ -648,6 +774,14 @@ function assertFixedString(value, expected, label) {
   return text;
 }
 
+function assertAllowedObjectFields(value, allowedFields, label) {
+  for (const field of Object.keys(value)) {
+    if (!allowedFields.has(field)) {
+      fail(`${label}.${field} is not allowed`);
+    }
+  }
+}
+
 function readAttestation(value, label) {
   if (value === 'none') {
     return 'none';
@@ -691,6 +825,13 @@ function assertProvenance(evidence, evidenceSubjectDigest) {
     'evidence.artifact_provenance.provenance_kind',
     PROVENANCE_KINDS
   );
+  assertAllowedObjectFields(
+    provenance,
+    provenanceKind === 'ci_artifact'
+      ? CI_PROVENANCE_FIELDS
+      : SIGNED_OPERATOR_RUN_PROVENANCE_FIELDS,
+    'evidence.artifact_provenance'
+  );
   const producerRepo = requireString(
     provenance.producer_repo,
     'evidence.artifact_provenance.producer_repo'
@@ -728,10 +869,6 @@ function assertProvenance(evidence, evidenceSubjectDigest) {
     fail('evidence.artifact_provenance.subject_sha256 must match evidence-subject canonical digest');
   }
 
-  requireRemoteUri(
-    provenance.artifact_uri,
-    'evidence.artifact_provenance.artifact_uri'
-  );
   requireString(provenance.generated_at, 'evidence.artifact_provenance.generated_at');
   requireString(
     provenance.generator_command,
@@ -744,26 +881,28 @@ function assertProvenance(evidence, evidenceSubjectDigest) {
   readAttestation(provenance.attestation, 'evidence.artifact_provenance.attestation');
 
   if (provenanceKind === 'ci_artifact') {
-    for (const field of ['workflow_name', 'run_id', 'run_attempt', 'job']) {
-      requireString(provenance[field], `evidence.artifact_provenance.${field}`);
-    }
+    const runId = requireString(provenance.run_id, 'evidence.artifact_provenance.run_id');
+    requireBoundArtifactUri(provenance.artifact_uri, 'evidence.artifact_provenance.artifact_uri', {
+      provenanceKind,
+      runId
+    });
+    requireString(provenance.workflow_name, 'evidence.artifact_provenance.workflow_name');
+    requireString(provenance.run_attempt, 'evidence.artifact_provenance.run_attempt');
+    requireString(provenance.job, 'evidence.artifact_provenance.job');
   }
 
   if (provenanceKind === 'signed_operator_run') {
-    for (const field of [
-      'operator_run_id',
-      'operator_identity',
-      'signature_uri',
-      'signature_sha256'
-    ]) {
-      if (field === 'signature_sha256') {
-        requireDigest(provenance[field], `evidence.artifact_provenance.${field}`);
-      } else if (field === 'signature_uri') {
-        requireRemoteUri(provenance[field], `evidence.artifact_provenance.${field}`);
-      } else {
-        requireString(provenance[field], `evidence.artifact_provenance.${field}`);
-      }
-    }
+    const operatorRunId = requireString(
+      provenance.operator_run_id,
+      'evidence.artifact_provenance.operator_run_id'
+    );
+    requireBoundArtifactUri(provenance.artifact_uri, 'evidence.artifact_provenance.artifact_uri', {
+      provenanceKind,
+      operatorRunId
+    });
+    requireString(provenance.operator_identity, 'evidence.artifact_provenance.operator_identity');
+    requireRemoteUri(provenance.signature_uri, 'evidence.artifact_provenance.signature_uri');
+    requireDigest(provenance.signature_sha256, 'evidence.artifact_provenance.signature_sha256');
   }
 
   return {

@@ -119,9 +119,17 @@ order, and writes `online-deployment-gate-report.json` with `schema:
 agentsmith.online-deployment-gate/v1`, `readiness: false`, and `scope:
 online_deployment_gate_only`. Default mode stops after server-side dry-run
 apply; confirmed apply runs rollout and optional smoke. The report lists only
-step names and relative report paths, and must not claim deploy readiness,
-release readiness, product-flow evidence, rollback, image mirroring, airgap
-packaging, or registry credential handling.
+step names, relative report paths, and a capability map keyed only by
+`existing_kubernetes/external_declared/online`. Confirmed apply may optionally
+write a release-kit evidence root from explicit remote provenance and then
+validate it through `--evidence`; this emits exactly three managed
+evidence-root files: `evidence.json`, `evidence-subject.json`, and
+`online-deployment-gate-report.json`. For this output,
+`evidence_subject.files` contains exactly two subject entries:
+`evidence.json` and `online-deployment-gate-report.json`; it does not list
+`evidence-subject.json`. It must not claim deploy readiness, release
+readiness, product-flow evidence, rollback, image mirroring, airgap packaging,
+or registry credential handling.
 
 The current `--evidence` validator is a focused release-kit evidence envelope
 intake diagnostic only. It requires `evidence.json` and
@@ -140,7 +148,7 @@ required to equal it. The raw envelope must include `release_kit_output` as
 not output AgentSmith product-flow evidence. Render, rollout, and smoke reports
 remain individual focused diagnostic files, but their combinations are not
 accepted release-kit evidence envelope outputs. `evidence_subject.files` must
-contain only `evidence.json` plus the mapped output files:
+contain only subject entries for `evidence.json` plus the mapped output files:
 `deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`, or
 `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`.
 Artifact provenance uses `subject_name: release-kit-evidence-subject`.

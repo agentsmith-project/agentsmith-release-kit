@@ -355,12 +355,23 @@ route smoke. Default `server-dry-run` mode stops after apply dry-run and
 rejects `--smoke-url`. Apply mode requires exact confirm text and an operator
 run id before Kubernetes calls.
 
+Confirmed apply mode may also take `--evidence-root <dir>` and
+`--evidence-provenance <json>`. The provenance input must be explicit remote
+release-kit provenance without local/file URIs, source paths, or
+secret-looking fields; the gate computes the evidence subject sha itself,
+writes `evidence.json`, `evidence-subject.json`, and
+`online-deployment-gate-report.json` under the evidence root, then reuses
+`--evidence` to validate the root. `server-dry-run` and unsupported profiles
+reject evidence output before Kubernetes or network calls and remove stale
+managed evidence files.
+
 This runner does not provision cloud resources, install substrates, mirror
 images, build airgap bundles, import images into kind, perform rollback, or
 claim deploy/release readiness. `online-deployment-gate-report.json` keeps `schema:
 agentsmith.online-deployment-gate/v1`, `scope:
 online_deployment_gate_only`, `readiness: false`, and `status: pass`; it lists
-only step names and relative report paths.
+only step names, relative report paths, and a small capability map for
+`existing_kubernetes/external_declared/online`.
 
 Release-kit evidence envelope focused diagnostic:
 

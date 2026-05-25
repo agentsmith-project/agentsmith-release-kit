@@ -18,7 +18,7 @@ Usage:
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> --mode apply --confirm-apply existing_kubernetes/external_declared/online --operator-run-id <id> [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --rollout --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--timeout <duration>] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --smoke --release-contract <json> --rollout-report <json> --target-profile existing_kubernetes/external_declared/online --url <https-url> --output-dir <dir> [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost]
-  bash scripts/verify-release.sh --online-deployment-gate --release-contract <json> --deploy-template-package <json> --archive <tgz> --target-profile existing_kubernetes/external_declared/online --render-values <json> --substrate-truth <json> --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--confirm-apply existing_kubernetes/external_declared/online] [--operator-run-id <id>] [--timeout <duration>] [--smoke-url <https-url>] [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost] [--forbidden-source-root <dir>]
+  bash scripts/verify-release.sh --online-deployment-gate --release-contract <json> --deploy-template-package <json> --archive <tgz> --target-profile existing_kubernetes/external_declared/online --render-values <json> --substrate-truth <json> --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--confirm-apply existing_kubernetes/external_declared/online] [--operator-run-id <id>] [--timeout <duration>] [--smoke-url <https-url>] [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost] [--evidence-root <dir> --evidence-provenance <json>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --evidence --release-contract <json> --evidence-root <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --output-dir <dir>
   bash scripts/verify-release.sh --help
@@ -34,7 +34,8 @@ Bootstrap status:
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
   --rollout checks Kubernetes rollout status and live image digests only; it is not release readiness.
   --smoke checks one route status after a bound rollout report only; it is not release readiness.
-  --online-deployment-gate runs the online focused chain in order only; it is not release readiness.
+  --online-deployment-gate runs the online focused chain in order only; optional evidence output is a validated focused envelope, not release readiness.
+  --online-deployment-gate evidence args are accepted only with --mode apply.
   --evidence checks release-kit evidence envelope intake only; it is not release readiness.
   --target-preflight checks substrate connection truth intake only; it is not release readiness.
   The full release gate is not implemented during bootstrap.

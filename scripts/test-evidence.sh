@@ -332,8 +332,11 @@ let outputFiles = [
   }
 ];
 
+const operatorRunId = 'operator-run-10001';
 let provenanceArtifactUri =
-  'gh-artifact://agentsmith-release-kit/evidence/10001/evidence-envelope.tgz';
+  kind === 'signed_operator_run'
+    ? `signed-operator-run://agentsmith-release-kit/evidence/${operatorRunId}/evidence-envelope.tgz`
+    : 'gh-artifact://agentsmith-release-kit/evidence/10001/evidence-envelope.tgz';
 
 function useSslmodeOnly() {
   for (const service of Object.values(evidence.substrate_connection_truth.services)) {
@@ -381,7 +384,7 @@ switch (mutation) {
       }
     ];
     break;
-  case 'legacy_render_rollout_output':
+  case 'removed_render_rollout_output':
     releaseKitOutput = 'render-report.json+rollout-report.json';
     evidence.release_kit_output = releaseKitOutput;
     outputFiles = [
@@ -395,7 +398,7 @@ switch (mutation) {
       }
     ];
     break;
-  case 'legacy_render_rollout_smoke_output':
+  case 'removed_render_rollout_smoke_output':
     releaseKitOutput = 'render-report.json+rollout-report.json+smoke-report.json';
     evidence.release_kit_output = releaseKitOutput;
     outputFiles = [
@@ -578,6 +581,29 @@ switch (mutation) {
   case 'local_provenance_uri':
     provenanceArtifactUri = 'file://' + path.join(evidenceRoot, 'evidence-envelope.tgz');
     break;
+  case 'github_api_provenance_uri':
+    provenanceArtifactUri =
+      'https://api.github.com/repos/agentsmith-project/agentsmith-release-kit/actions/runs/10001/artifacts';
+    break;
+  case 'wrong_artifact_uri_host':
+    provenanceArtifactUri =
+      'https://example.com/agentsmith-release-kit/actions/runs/10001/artifacts/evidence.zip';
+    break;
+  case 'wrong_artifact_uri_repo':
+    provenanceArtifactUri =
+      'https://api.github.com/repos/example/not-release-kit/actions/runs/10001/artifacts/evidence.zip';
+    break;
+  case 'repo_level_artifact_uri':
+    provenanceArtifactUri =
+      'https://api.github.com/repos/agentsmith-project/agentsmith-release-kit/actions/artifacts';
+    break;
+  case 'artifact_uri_run_id_mismatch':
+    provenanceArtifactUri = 'gh-artifact://agentsmith-release-kit/evidence/99999/evidence-envelope.tgz';
+    break;
+  case 'signed_unbound_operator_run_uri':
+    provenanceArtifactUri =
+      'gh-artifact://agentsmith-release-kit/evidence/10001/evidence-envelope.tgz';
+    break;
   case 'valid_secret_ref':
     evidence.target.pull_secret_ref = 'secretRef:release/registry-pull';
     break;
@@ -610,6 +636,7 @@ switch (mutation) {
   case 'missing_generator_command':
   case 'missing_generator_version':
   case 'bad_attestation_object':
+  case 'provenance_extra_field':
   case 'raw_evidence_file_sha':
     break;
   case 'subject_sha_mismatch':
@@ -738,9 +765,9 @@ if (kind === 'ci_artifact') {
   });
 } else if (kind === 'signed_operator_run') {
   Object.assign(provenance, {
-    operator_run_id: 'operator-run-10001',
+    operator_run_id: operatorRunId,
     operator_identity: 'release-operator@example.com',
-    signature_uri: 'https://signatures.example.com/agentsmith-release-kit/operator-run-10001.sig',
+    signature_uri: `https://signatures.example.com/agentsmith-release-kit/${operatorRunId}.sig`,
     signature_sha256: `sha256:${'a'.repeat(64)}`
   });
 } else {
@@ -787,6 +814,13 @@ if (mutation === 'bad_attestation_object') {
     attestation_sha256: 'not-a-sha256-digest'
   };
 }
+if (mutation === 'provenance_extra_field') {
+  provenance.readiness = true;
+  provenance.verdict = 'release-ready';
+  provenance.scope = 'release_readiness';
+  provenance.product_flow_results = ['workspace_project'];
+  provenance.operator_signoff = { status: 'approved' };
+}
 
 evidence.artifact_provenance = provenance;
 const evidenceFile = writeJson('evidence.json', evidence);
@@ -805,6 +839,13 @@ write_evidence "$VALID_CI_ROOT" ci_artifact valid
 run_evidence "$VALID_CI_ROOT" "$VALID_CI_OUT" >/dev/null
 assert_pass_report "$VALID_CI_OUT/evidence-validation-report.json"
 pass "valid ci_artifact evidence accepted with focused non-readiness report"
+
+VALID_GITHUB_API_ROOT="$TMP_DIR/evidence-valid-github-api"
+VALID_GITHUB_API_OUT="$TMP_DIR/out-valid-github-api"
+write_evidence "$VALID_GITHUB_API_ROOT" ci_artifact github_api_provenance_uri
+run_evidence "$VALID_GITHUB_API_ROOT" "$VALID_GITHUB_API_OUT" >/dev/null
+assert_pass_report "$VALID_GITHUB_API_OUT/evidence-validation-report.json"
+pass "valid GitHub Actions artifact API provenance URI accepted"
 
 VALID_SIGNED_ROOT="$TMP_DIR/evidence-valid-signed"
 VALID_SIGNED_OUT="$TMP_DIR/out-valid-signed"
@@ -863,8 +904,8 @@ expect_fail leading-zero-release-kit-version ci_artifact leading_zero_release_ki
 expect_fail below-contract-release-kit-version ci_artifact below_contract_release_kit_version
 expect_fail unknown-release-kit-output ci_artifact unknown_release_kit_output
 expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
-expect_fail legacy-render-rollout-output ci_artifact legacy_render_rollout_output
-expect_fail legacy-render-rollout-smoke-output ci_artifact legacy_render_rollout_smoke_output
+expect_fail removed-render-rollout-output ci_artifact removed_render_rollout_output
+expect_fail removed-render-rollout-smoke-output ci_artifact removed_render_rollout_smoke_output
 WRONG_ONLINE_GATE_PROFILE_ROOT="$TMP_DIR/evidence-online-gate-wrong-profile"
 WRONG_ONLINE_GATE_PROFILE_OUT="$TMP_DIR/out-online-gate-wrong-profile"
 write_evidence "$WRONG_ONLINE_GATE_PROFILE_ROOT" ci_artifact online_gate_output_wrong_profile
@@ -899,6 +940,11 @@ expect_fail status-failure-class-failed-wrong ci_artifact status_failure_class_f
 expect_fail product-flows-present ci_artifact product_flows_present
 expect_fail wrong-producer-repo ci_artifact wrong_producer_repo
 expect_fail local-provenance-uri ci_artifact local_provenance_uri
+expect_fail wrong-artifact-uri-host ci_artifact wrong_artifact_uri_host
+expect_fail wrong-artifact-uri-repo ci_artifact wrong_artifact_uri_repo
+expect_fail repo-level-artifact-uri ci_artifact repo_level_artifact_uri
+expect_fail artifact-uri-run-id-mismatch ci_artifact artifact_uri_run_id_mismatch
+expect_fail provenance-extra-field ci_artifact provenance_extra_field
 expect_fail missing-provenance-schema-version ci_artifact missing_provenance_schema_version
 expect_fail missing-commit-sha ci_artifact missing_commit_sha
 expect_fail bad-provenance-commit-sha ci_artifact bad_provenance_commit_sha
@@ -910,6 +956,8 @@ expect_fail missing-generator-command ci_artifact missing_generator_command
 expect_fail missing-generator-version ci_artifact missing_generator_version
 expect_fail bad-attestation-object ci_artifact bad_attestation_object
 expect_fail signed-missing-signature signed_operator_run signed_missing_signature
+expect_fail signed-wrong-artifact-host signed_operator_run wrong_artifact_uri_host
+expect_fail signed-unbound-operator-run-uri signed_operator_run signed_unbound_operator_run_uri
 expect_fail subject-sha-mismatch ci_artifact subject_sha_mismatch
 expect_fail subject-contains-artifact-provenance ci_artifact subject_contains_artifact_provenance
 expect_fail raw-evidence-file-sha ci_artifact raw_evidence_file_sha

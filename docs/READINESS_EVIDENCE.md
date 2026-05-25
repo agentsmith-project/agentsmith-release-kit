@@ -137,6 +137,11 @@ back changes, or produce product-flow evidence.
 `online-deployment-gate-report.json` keeps
 `readiness: false`; it is not deploy, release, package, airgap, kind, product
 readiness, or operator signoff evidence.
+When explicitly requested in confirmed apply mode, the online focused chain can
+also write a release-kit evidence envelope root and validate it through
+`--evidence`. That envelope is still focused diagnostic evidence with
+`release_kit_output: online-deployment-gate-report.json`; it is not online
+deploy readiness evidence or operator signoff.
 
 Release-kit evidence envelope output proves only that one pre-existing evidence
 root has the expected release-kit-owned envelope, subject, provenance, target

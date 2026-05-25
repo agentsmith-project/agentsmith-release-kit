@@ -408,13 +408,26 @@ mode requires exact `--confirm-apply
 existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
 before Kubernetes calls.
 
+Confirmed apply mode can optionally add `--evidence-root <dir>` and
+`--evidence-provenance <json>`. The provenance input must be explicit remote
+release-kit provenance; local/file URIs, source paths, and secret-looking
+fields fail before Kubernetes calls. The gate computes the fixed
+`release-kit-evidence-subject` metadata, writes `evidence.json`,
+`evidence-subject.json`, and `online-deployment-gate-report.json` under the
+evidence root, and validates that root with the existing `--evidence`
+diagnostic. `server-dry-run` evidence requests and unsupported profiles fail
+fast and remove stale managed evidence files.
+
 The generated `online-deployment-gate-report.json` must keep `schema:
 agentsmith.online-deployment-gate/v1`, `scope:
 online_deployment_gate_only`, `readiness: false`, and `status: pass`. It
 records release identity, release contract digest, target axes, mode, and
-step names with relative report paths. It must not contain raw command args,
-response bodies, kubeconfig content, secret payloads, product-flow fields,
-`verdict`, `release_verdict`, or deploy readiness fields.
+step names with relative report paths. It also contains a small capability map
+keyed only by `existing_kubernetes/external_declared/online` with
+declared/intake/preflight/render/apply/rollout/smoke/evidence envelope
+capabilities. It must not contain raw command args, response bodies,
+kubeconfig content, secret payloads, product-flow fields, `verdict`,
+`release_verdict`, or deploy readiness fields.
 
 ## Evidence Envelope Focused Diagnostic
 

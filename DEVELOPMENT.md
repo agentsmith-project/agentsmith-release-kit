@@ -219,7 +219,16 @@ Default `server-dry-run` does not run rollout or smoke and rejects
 existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
 before Kubernetes calls. Its `online-deployment-gate-report.json` must keep
 `readiness: false` and `scope: online_deployment_gate_only`; it records only
-release identity, target profile, mode, step names, and relative report paths.
+release identity, target profile, mode, step names, relative report paths, and
+a small capability map for the current online profile.
+Confirmed apply may optionally write a focused evidence root with
+`--evidence-root <dir> --evidence-provenance <json>`. The provenance JSON must
+carry explicit remote release-kit provenance; local/file URIs, source paths,
+and secret-looking fields fail before Kubernetes. The gate computes
+`subject_name`, `subject_uri`, and `subject_sha256`, writes only
+`evidence.json`, `evidence-subject.json`, and
+`online-deployment-gate-report.json` as managed evidence files, and validates
+the root through the existing `--evidence` diagnostic.
 It does not provision cloud resources, mirror images, build airgap bundles,
 import images into kind, roll back changes, run product flows, or claim deploy
 or release readiness.

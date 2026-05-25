@@ -38,6 +38,13 @@ Operators should call `bash scripts/verify-release.sh --...` directly with the
 release contract, deploy template package, explicit target profile, and output
 directory for their chosen path.
 
+For the online focused chain, confirmed apply can optionally add
+`--evidence-root <dir> --evidence-provenance <json>`. Use only remote
+release-kit provenance such as CI artifact or signed operator-run metadata.
+The gate writes a focused evidence envelope and revalidates it through
+`--evidence`; it is still `readiness=false` and is not deploy or release
+signoff.
+
 ## Current Notes
 
 Pre-GA release contracts may declare the five canonical target profiles, but
