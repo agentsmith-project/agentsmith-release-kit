@@ -681,6 +681,40 @@ if (/password|token=|plain-secret-value|client_secret|authorization|bearer|kubec
 NODE
 }
 
+assert_gate_rendered_target_registry() {
+  local output_dir="$1"
+  local expected_registry="$2"
+
+  "$NODE_BIN" --input-type=module - "$output_dir" "$expected_registry" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [outputDir, expectedRegistry] = process.argv.slice(2);
+const imageMap = JSON.parse(fs.readFileSync(path.join(outputDir, 'image-map/image-map.json'), 'utf8'));
+const rendered = fs.readFileSync(
+  path.join(outputDir, 'render/rendered-manifests/templates/workloads.yaml'),
+  'utf8'
+);
+const appMapping = imageMap.mappings.find((mapping) => mapping.id === 'agentsmith_app');
+
+if (!appMapping) {
+  throw new Error('image-map step did not include agentsmith_app');
+}
+if (imageMap.target_registry !== expectedRegistry) {
+  throw new Error(`unexpected target registry: ${imageMap.target_registry}`);
+}
+if (!appMapping.target_image.startsWith(`${expectedRegistry}/`)) {
+  throw new Error(`target image did not use expected registry: ${appMapping.target_image}`);
+}
+if (!rendered.includes(appMapping.target_image)) {
+  throw new Error('rendered manifest did not adopt image-map target image');
+}
+if (rendered.includes(appMapping.source_image)) {
+  throw new Error('rendered manifest kept source image despite target-registry image-map');
+}
+NODE
+}
+
 assert_generated_evidence() {
   local evidence_root="$1"
 
@@ -838,6 +872,38 @@ if grep -Eq 'rollout|get pods' "$KUBECTL_LOG"; then
 fi
 assert_gate_report "$dry_output/online-deployment-gate-report.json" server-dry-run "inputs,target-preflight,template-package,render,render-check,apply"
 pass "online deployment gate server dry-run writes non-readiness aggregate without rollout or smoke"
+
+target_registry="registry.release.example/agentsmith"
+target_registry_output="$TMP_DIR/out-dry-target-registry"
+reset_kubectl_log
+before_target_registry="$(hit_count)"
+run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$target_registry_output" "$TARGET_PROFILE" \
+  --target-registry "$target_registry" >/dev/null
+after_target_registry="$(hit_count)"
+[[ "$before_target_registry" == "$after_target_registry" ]] || fail "target-registry dry-run should not issue route/network smoke requests"
+[[ -f "$target_registry_output/image-map/image-map.json" ]] || fail "target-registry gate did not write image-map report"
+grep -q 'version' "$KUBECTL_LOG" || fail "target-registry dry-run did not call kubectl version"
+grep -Eq 'apply .*--dry-run=server' "$KUBECTL_LOG" || fail "target-registry dry-run did not call server dry-run apply"
+if grep -Eiq 'docker|skopeo|oras|crane|registry login|registry push|registry mirror|pull|push|mirror' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "target-registry dry-run must not run registry network operations"
+fi
+assert_gate_report "$target_registry_output/online-deployment-gate-report.json" server-dry-run "inputs,target-preflight,template-package,image-map,render,render-check,apply"
+assert_gate_rendered_target_registry "$target_registry_output" "$target_registry"
+pass "online deployment gate target-registry dry-run writes image-map step and renders target refs without registry ops"
+
+invalid_target_registry_output="$TMP_DIR/out-invalid-target-registry"
+reset_kubectl_log
+before_invalid_target_registry="$(hit_count)"
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$invalid_target_registry_output" "$TARGET_PROFILE" \
+  --target-registry "https://registry.release.example/agentsmith" >"$TMP_DIR/invalid-target-registry.out" 2>"$TMP_DIR/invalid-target-registry.err"; then
+  fail "expected invalid target registry to fail"
+fi
+after_invalid_target_registry="$(hit_count)"
+assert_kubectl_not_called
+[[ "$before_invalid_target_registry" == "$after_invalid_target_registry" ]] || fail "invalid target registry rejection reached network"
+assert_no_gate_report "$invalid_target_registry_output"
+pass "invalid target registry rejected before kubectl or network"
 
 smoke_dry_output="$TMP_DIR/out-dry-smoke"
 mkdir -p "$smoke_dry_output"

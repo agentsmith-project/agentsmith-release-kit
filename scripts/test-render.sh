@@ -444,6 +444,7 @@ run_render() {
   local output_dir="$6"
   local target_profile="${7:-$TARGET_PROFILE}"
   local forbidden_source_root="${8:-}"
+  local image_map="${9:-}"
 
   local command=(
     bash "$ROOT_DIR/scripts/verify-release.sh" --render
@@ -458,6 +459,9 @@ run_render() {
   if [[ -n "$forbidden_source_root" ]]; then
     command+=(--forbidden-source-root "$forbidden_source_root")
   fi
+  if [[ -n "$image_map" ]]; then
+    command+=(--image-map "$image_map")
+  fi
 
   "${command[@]}"
 }
@@ -471,6 +475,7 @@ expect_fail_case() {
   local substrate_truth="$6"
   local target_profile="${7:-$TARGET_PROFILE}"
   local forbidden_source_root="${8:-}"
+  local image_map="${9:-}"
   local output_dir="$TMP_DIR/out-$label"
 
   if run_render \
@@ -481,7 +486,8 @@ expect_fail_case() {
     "$substrate_truth" \
     "$output_dir" \
     "$target_profile" \
-    "$forbidden_source_root" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    "$forbidden_source_root" \
+    "$image_map" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected invalid render case to fail: $label"
@@ -613,6 +619,127 @@ if (!rendered.includes('postgresql.release.example.internal')) {
 NODE
 }
 
+write_image_map() {
+  local contract="$1"
+  local output_dir="$2"
+  local target_registry="$3"
+
+  bash "$ROOT_DIR/scripts/verify-release.sh" --image-map \
+    --release-contract "$contract" \
+    --target-profile "$TARGET_PROFILE" \
+    --output-dir "$output_dir" \
+    --target-registry "$target_registry" >/dev/null
+}
+
+mutate_image_map() {
+  local mutation="$1"
+  local input="$2"
+  local output="$3"
+  local detail="${4:-}"
+
+  "$NODE_BIN" --input-type=module - "$mutation" "$input" "$output" "$detail" <<'NODE'
+import fs from 'node:fs';
+
+const [mutation, input, output, detail = ''] = process.argv.slice(2);
+const imageMap = JSON.parse(fs.readFileSync(input, 'utf8'));
+const digest = (char) => `sha256:${char.repeat(64)}`;
+
+switch (mutation) {
+  case 'release-digest':
+    imageMap.release_contract.input_sha256 = digest('9');
+    break;
+  case 'target-profile':
+    imageMap.target_profile = {
+      value: 'existing_kubernetes/external_declared/airgap',
+      target_cluster: 'existing_kubernetes',
+      substrate_source: 'external_declared',
+      distribution: 'airgap'
+    };
+    break;
+  case 'digest-drift':
+    imageMap.mappings[0].target_image = imageMap.mappings[0].target_image.replace(
+      /@sha256:[0-9a-f]{64}$/,
+      `@${digest('2')}`
+    );
+    break;
+  case 'target-registry-mismatch':
+    imageMap.mappings[0].target_image = imageMap.mappings[0].target_image.replace(
+      /^registry\.release\.example\/agentsmith\//,
+      'attacker.example/'
+    );
+    break;
+  case 'mirror-required-source-ref':
+    imageMap.mappings[0].target_image = imageMap.mappings[0].source_image;
+    break;
+  case 'target-registry':
+    imageMap.target_registry = detail;
+    break;
+  case 'extra-mapping':
+    imageMap.mappings.push({
+      ...imageMap.mappings[0],
+      id: 'extra_image',
+      target_image: imageMap.mappings[0].target_image.replace(
+        '/agentsmith-app@',
+        '/extra-image@'
+      )
+    });
+    imageMap.image_count = imageMap.mappings.length;
+    break;
+  case 'readiness':
+    imageMap.readiness = true;
+    break;
+  case 'verdict':
+    imageMap.verdict = 'release-ready';
+    break;
+  case 'product-flow':
+    imageMap.product_flows = ['workspace_project'];
+    imageMap['product-flow'] = 'workspace_project';
+    break;
+  default:
+    throw new Error(`unknown image-map mutation: ${mutation}`);
+}
+
+fs.writeFileSync(output, `${JSON.stringify(imageMap, null, 2)}\n`);
+NODE
+}
+
+assert_rendered_image_adoption() {
+  local rendered_file="$1"
+  local image_map="$2"
+  local mode="$3"
+
+  "$NODE_BIN" --input-type=module - "$rendered_file" "$image_map" "$VALID_CONTRACT_MATERIAL" "$mode" <<'NODE'
+import fs from 'node:fs';
+
+const [renderedFile, imageMapFile, contractFile, mode] = process.argv.slice(2);
+const rendered = fs.readFileSync(renderedFile, 'utf8');
+const imageMap = JSON.parse(fs.readFileSync(imageMapFile, 'utf8'));
+const contract = JSON.parse(fs.readFileSync(contractFile, 'utf8'));
+const appSource = contract.deploy_image_inventory.find((item) => item.id === 'agentsmith_app')?.image;
+const appTarget = imageMap.mappings.find((item) => item.id === 'agentsmith_app')?.target_image;
+
+if (!appSource || !appTarget) {
+  throw new Error('fixture app image is missing');
+}
+
+if (mode === 'target') {
+  if (!rendered.includes(appTarget)) {
+    throw new Error(`rendered manifest did not adopt target image: ${appTarget}`);
+  }
+  if (rendered.includes(appSource)) {
+    throw new Error('rendered manifest should not keep the source image when image-map is provided');
+  }
+} else {
+  if (!rendered.includes(appSource)) {
+    throw new Error(`rendered manifest did not use source image: ${appSource}`);
+  }
+  if (rendered.includes('registry.release.example/agentsmith/')) {
+    throw new Error('rendered manifest should not use target registry without image-map');
+  }
+}
+NODE
+}
+
 VALID_VALUES="$TMP_DIR/render-values.valid.json"
 VALID_TRUTH="$TMP_DIR/substrate-truth.valid.json"
 write_render_values "$VALID_VALUES"
@@ -634,7 +761,81 @@ run_render \
   "$VALID_TRUTH" \
   "$VALID_OUT" >/dev/null
 assert_pass_report "$VALID_OUT/manifest-render-report.json" "$VALID_OUT/rendered-manifests"
+TARGET_REGISTRY="registry.release.example/agentsmith"
+VALID_IMAGE_MAP_DIR="$TMP_DIR/image-map-valid"
+VALID_IMAGE_MAP="$VALID_IMAGE_MAP_DIR/image-map.json"
+write_image_map "$VALID_CONTRACT_MATERIAL" "$VALID_IMAGE_MAP_DIR" "$TARGET_REGISTRY"
+assert_rendered_image_adoption \
+  "$VALID_OUT/rendered-manifests/templates/workloads.yaml" \
+  "$VALID_IMAGE_MAP" \
+  source
 pass "valid render accepted with focused non-readiness report"
+
+IMAGE_MAP_OUT="$TMP_DIR/out-valid-image-map"
+run_render \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$IMAGE_MAP_OUT" \
+  "$TARGET_PROFILE" \
+  "" \
+  "$VALID_IMAGE_MAP" >/dev/null
+assert_pass_report "$IMAGE_MAP_OUT/manifest-render-report.json" "$IMAGE_MAP_OUT/rendered-manifests"
+assert_rendered_image_adoption \
+  "$IMAGE_MAP_OUT/rendered-manifests/templates/workloads.yaml" \
+  "$VALID_IMAGE_MAP" \
+  target
+pass "valid render with image-map adopts target registry image refs"
+
+for mutation in release-digest target-profile digest-drift extra-mapping readiness verdict product-flow; do
+  bad_image_map="$TMP_DIR/image-map.$mutation.json"
+  mutate_image_map "$mutation" "$VALID_IMAGE_MAP" "$bad_image_map"
+  expect_fail_case "bad-image-map-$mutation" \
+    "$VALID_CONTRACT_MATERIAL" \
+    "$VALID_PACKAGE_MATERIAL" \
+    "$VALID_ARCHIVE" \
+    "$VALID_VALUES" \
+    "$VALID_TRUTH" \
+    "$TARGET_PROFILE" \
+    "" \
+    "$bad_image_map"
+done
+
+for mutation in target-registry-mismatch mirror-required-source-ref; do
+  bad_image_map="$TMP_DIR/image-map.$mutation.json"
+  mutate_image_map "$mutation" "$VALID_IMAGE_MAP" "$bad_image_map"
+  expect_fail_case "bad-image-map-$mutation" \
+    "$VALID_CONTRACT_MATERIAL" \
+    "$VALID_PACKAGE_MATERIAL" \
+    "$VALID_ARCHIVE" \
+    "$VALID_VALUES" \
+    "$VALID_TRUTH" \
+    "$TARGET_PROFILE" \
+    "" \
+    "$bad_image_map"
+done
+
+while IFS='|' read -r label target_registry; do
+  bad_image_map="$TMP_DIR/image-map.invalid-target-registry-$label.json"
+  mutate_image_map target-registry "$VALID_IMAGE_MAP" "$bad_image_map" "$target_registry"
+  expect_fail_case "bad-image-map-invalid-target-registry-$label" \
+    "$VALID_CONTRACT_MATERIAL" \
+    "$VALID_PACKAGE_MATERIAL" \
+    "$VALID_ARCHIVE" \
+    "$VALID_VALUES" \
+    "$VALID_TRUTH" \
+    "$TARGET_PROFILE" \
+    "" \
+    "$bad_image_map"
+done <<'CASES'
+scheme|https://registry.release.example/agentsmith
+userinfo|user@registry.release.example/agentsmith
+localhost|localhost:5000/agentsmith
+query|registry.release.example/agentsmith?pull=true
+uppercase-namespace|registry.release.example/Agentsmith
+CASES
 
 if bash "$ROOT_DIR/scripts/verify-release.sh" --render \
   --release-contract "$VALID_CONTRACT_MATERIAL" \

@@ -78,9 +78,14 @@ package descriptor, matching `.tgz` archive, explicit target profile, explicit
 render values, and operator-provided substrate truth. It renders only
 `kubernetes` templates declared by archive `manifest.json` into
 `<output-dir>/rendered-manifests` and writes `manifest-render-report.json` with
-`readiness: false` and `scope: manifest_render_only`. The only template syntax
-is scalar placeholder replacement with roots `values`, `images`, `target`,
-`substrate`, and `release`, such as `${{ values.namespace }}` or
+`readiness: false` and `scope: manifest_render_only`. Optional
+`--image-map <json>` is accepted only as image reference adoption: it must be a
+passing `agentsmith.image-map/v1` report bound to the same release contract
+digest and target profile, and render uses `mapping.target_image` for
+`${{ images.<id>.image }}` without registry login, pull, push, mirror, or
+presence checks. The only template syntax is scalar placeholder replacement
+with roots `values`, `images`, `target`, `substrate`, and `release`, such as
+`${{ values.namespace }}` or
 `${{ images.web.image }}`; unknown placeholders fail fast. It rejects archive
 path escapes, symlinks, hardlinks, non-canonical target profile tuples,
 pre-GA target profile names, secret-looking rendered payloads, local source
@@ -212,8 +217,10 @@ deploy readiness.
 The current `--online-deployment-gate` path is a KISS online focused
 orchestration runner only. It supports
 `existing_kubernetes/external_declared/online` and invokes existing diagnostics
-in order: inputs, target-preflight, template-package, render, render-check,
-apply, and, for confirmed `--mode apply` only, rollout plus optional smoke.
+in order: inputs, target-preflight, template-package, optional image-map when
+`--target-registry <registry-host[/namespace]>` is provided, render,
+render-check, apply, and, for confirmed `--mode apply` only, rollout plus
+optional smoke.
 Default `server-dry-run` does not run rollout or smoke and rejects
 `--smoke-url`. Confirmed apply requires exact `--confirm-apply
 existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
@@ -231,7 +238,9 @@ and secret-looking fields fail before Kubernetes. The gate computes
 the root through the existing `--evidence` diagnostic.
 It does not provision cloud resources, mirror images, build airgap bundles,
 import images into kind, roll back changes, run product flows, or claim deploy
-or release readiness.
+or release readiness. `--target-registry` only makes the gate generate an
+image-map and pass it into render; it is not mirror execution or registry
+readiness.
 
 The current `--evidence` path is a focused diagnostic for release-kit evidence
 envelope intake only. It consumes a release contract, an evidence root

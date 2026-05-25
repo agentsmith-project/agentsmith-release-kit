@@ -135,6 +135,11 @@ target profile, explicit render values, and
 `agentsmith.substrate-connection.truth/v1` substrate truth. Output goes to
 `<output-dir>/rendered-manifests`, and `manifest-render-report.json` is written
 with `readiness: false`, `scope: manifest_render_only`, and `status: pass`.
+When `--image-map <json>` is supplied, render first validates that it is a
+passing `agentsmith.image-map/v1` report bound to the same release contract
+digest and target profile, then uses `mapping.target_image` for
+`${{ images.<id>.image }}` while keeping `${{ images.<id>.digest }}` digest
+bound to the release inventory digest.
 
 The template language is intentionally tiny: scalar placeholders only, no
 conditionals and no loops. Supported placeholder roots are `values`, `images`,
@@ -350,10 +355,13 @@ bash scripts/test-online-deployment-gate.sh
 `--online-deployment-gate` is a KISS runner for the online focused chain on
 `existing_kubernetes/external_declared/online` only. It invokes existing
 focused diagnostics in order: inputs, target-preflight, template-package,
-render, render-check, apply, and, in `--mode apply` only, rollout plus optional
-route smoke. Default `server-dry-run` mode stops after apply dry-run and
-rejects `--smoke-url`. Apply mode requires exact confirm text and an operator
-run id before Kubernetes calls.
+optional image-map when `--target-registry <registry-host[/namespace]>` is
+provided, render, render-check, apply, and, in `--mode apply` only, rollout
+plus optional route smoke. Default `server-dry-run` mode stops after apply
+dry-run and rejects `--smoke-url`. Apply mode requires exact confirm text and
+an operator run id before Kubernetes calls. The target registry option adopts
+image-map target refs for rendering only; it does not log in, pull, push,
+mirror, or prove registry presence.
 
 Confirmed apply mode may also take `--evidence-root <dir>` and
 `--evidence-provenance <json>`. The provenance input must be explicit remote

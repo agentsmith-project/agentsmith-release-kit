@@ -94,6 +94,7 @@ const MANAGED_OUTPUT_ENTRIES = [
   'inputs',
   'target-preflight',
   'template-package',
+  'image-map',
   'render',
   'render-check',
   'apply',
@@ -151,6 +152,7 @@ function usage() {
     [--timeout-ms <ms>] \\
     [--allow-http] \\
     [--allow-localhost] \\
+    [--target-registry <registry-host[/namespace]>] \\
     [--evidence-root <dir> --evidence-provenance <json>] \\
     [--forbidden-source-root <dir>]`;
 }
@@ -293,6 +295,9 @@ function parseArgs(argv) {
         break;
       case '--allow-localhost':
         parsed.allowLocalhost = true;
+        break;
+      case '--target-registry':
+        parsed.targetRegistry = nextValue();
         break;
       case '--forbidden-source-root':
         parsed.forbiddenSourceRoots.push(nextValue());
@@ -1174,6 +1179,27 @@ async function main(argv) {
     ]
   });
 
+  const imageMapPath = path.join(outputSubdir(args, 'image-map'), 'image-map.json');
+  if (args.targetRegistry) {
+    runStep({
+      args,
+      steps,
+      name: 'image-map',
+      mode: '--image-map',
+      argv: [
+        '--release-contract',
+        args.releaseContract,
+        '--target-profile',
+        targetProfile,
+        '--output-dir',
+        outputSubdir(args, 'image-map'),
+        '--target-registry',
+        args.targetRegistry
+      ],
+      reportPaths: [imageMapPath]
+    });
+  }
+
   const renderArgv = [
     '--release-contract',
     args.releaseContract,
@@ -1190,6 +1216,9 @@ async function main(argv) {
     '--output-dir',
     outputSubdir(args, 'render')
   ];
+  if (args.targetRegistry) {
+    renderArgv.push('--image-map', imageMapPath);
+  }
   appendForbiddenRoots(renderArgv, args);
   runStep({
     args,

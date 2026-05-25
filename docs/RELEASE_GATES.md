@@ -111,6 +111,13 @@ explicit render values, and
 template package diagnostic: absolute paths, `..` package-root escapes,
 symlinks, hardlinks, local/source payloads, plaintext credential payloads, and
 missing declared template files fail fast.
+If `--image-map <json>` is supplied, render validates a passing
+`agentsmith.image-map/v1` report with `scope: image_map_only`,
+`readiness: false`, matching release identity, release contract digest, target
+profile axes, and one mapping per `deploy_image_inventory` item. It adopts
+`mapping.target_image` for template image refs while keeping the expected digest
+bound to the release inventory. It does not log in to a registry, pull, push,
+mirror, or check registry presence.
 
 The template language is scalar placeholder replacement only. It has no
 conditionals, loops, includes, Helm, Kustomize, or non-canonical pre-GA target
@@ -401,12 +408,15 @@ mirroring, airgap bundle creation, kind image import, rollback, product-flow
 checks, or full release readiness.
 
 The runner calls existing focused diagnostics in order: inputs,
-target-preflight, template-package, render, render-check, apply, and, for
-confirmed `--mode apply` only, rollout plus optional route smoke. Default
-`server-dry-run` stops after apply dry-run and rejects `--smoke-url`. Apply
-mode requires exact `--confirm-apply
+target-preflight, template-package, optional image-map when
+`--target-registry <registry-host[/namespace]>` is provided, render,
+render-check, apply, and, for confirmed `--mode apply` only, rollout plus
+optional route smoke. Default `server-dry-run` stops after apply dry-run and
+rejects `--smoke-url`. Apply mode requires exact `--confirm-apply
 existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
-before Kubernetes calls.
+before Kubernetes calls. Target-registry mode only adopts image refs through
+the generated image-map; it is not mirror execution, registry login, or
+registry presence evidence.
 
 Confirmed apply mode can optionally add `--evidence-root <dir>` and
 `--evidence-provenance <json>`. The provenance input must be explicit remote

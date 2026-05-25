@@ -19,6 +19,14 @@ matches the release contract and that the `.tgz` archive matches the declared
 package and manifest digests. Its report keeps `readiness: false` and does not
 claim render, deploy, package, or release readiness.
 
+The current `--render` validator is a focused materialized template render
+diagnostic only. Optional `--image-map <json>` must be a passing
+`agentsmith.image-map/v1` report with `scope: image_map_only`,
+`readiness: false`, matching release contract digest and target profile axes,
+and one valid mapping per `deploy_image_inventory` item. Render adopts
+`mapping.target_image` for image placeholders only; it does not mirror images,
+handle registry credentials, or prove registry presence.
+
 The current `--render-check` validator is a focused rendered manifest image
 inventory diagnostic only. It consumes the release contract and an explicit
 rendered manifest directory; it does not consume AgentSmith source paths or
@@ -118,11 +126,13 @@ orchestration runner only. It accepts only
 order, and writes `online-deployment-gate-report.json` with `schema:
 agentsmith.online-deployment-gate/v1`, `readiness: false`, and `scope:
 online_deployment_gate_only`. Default mode stops after server-side dry-run
-apply; confirmed apply runs rollout and optional smoke. The report lists only
-step names, relative report paths, and a capability map keyed only by
-`existing_kubernetes/external_declared/online`. Confirmed apply may optionally
-write a release-kit evidence root from explicit remote provenance and then
-validate it through `--evidence`; this emits exactly three managed
+apply; confirmed apply runs rollout and optional smoke. When
+`--target-registry <registry-host[/namespace]>` is supplied, it first generates
+an image-map and passes it to render for image reference adoption only. The
+report lists only step names, relative report paths, and a capability map keyed
+only by `existing_kubernetes/external_declared/online`. Confirmed apply may
+optionally write a release-kit evidence root from explicit remote provenance
+and then validate it through `--evidence`; this emits exactly three managed
 evidence-root files: `evidence.json`, `evidence-subject.json`, and
 `online-deployment-gate-report.json`. For this output,
 `evidence_subject.files` contains exactly two subject entries:

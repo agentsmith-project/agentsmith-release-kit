@@ -26,6 +26,8 @@ const REQUIRED_ARGS = [
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_PACKAGE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const DEPLOY_TEMPLATE_MANIFEST_SCHEMA = 'agentsmith.deploy-template-manifest/v1';
+const IMAGE_MAP_SCHEMA = 'agentsmith.image-map/v1';
+const IMAGE_MAP_SCOPE = 'image_map_only';
 const REPORT_SCHEMA = 'agentsmith.manifest-render-report/v1';
 const WORKLOAD_KINDS = new Set([
   'Deployment',
@@ -37,11 +39,14 @@ const WORKLOAD_KINDS = new Set([
   'Pod'
 ]);
 const MANIFEST_EXTENSIONS = new Set(['.json', '.yaml', '.yml']);
+const IMAGE_MAP_ACTIONS = new Set(['use_source', 'mirror_required']);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const TEMPLATE_EXPR_RE = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_-]+)*$/;
 const TEMPLATE_PLACEHOLDER_RE = /\$\{\{([\s\S]*?)\}\}/g;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+const DNS_HOST_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+const TARGET_NAMESPACE_COMPONENT_RE = /^[a-z0-9]+(?:(?:[._-]|__)[a-z0-9]+)*$/;
 const LOCAL_URI_RE = /\b(?:file|local|source|git\+file):\/\//i;
 const LOCALHOST_URI_RE = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?|host\.docker\.internal)(?::\d+)?(?:[/?#]|$)/i;
 const RELATIVE_URI_RE = /(^|[\s"'(=])\.\.?\//;
@@ -69,6 +74,39 @@ const SAFE_SECRET_REF_VALUE_RE = /^[A-Za-z0-9_.-]*secret_ref$/;
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 const DEFAULT_FORBIDDEN_SOURCE_ROOTS = [path.resolve(REPO_ROOT, '..', 'agentsmith')];
+const IMAGE_MAP_FIELDS = new Set([
+  'schema',
+  'scope',
+  'readiness',
+  'status',
+  'release_id',
+  'git_sha',
+  'release_contract',
+  'target_profile',
+  'mirror_required',
+  'target_registry',
+  'image_count',
+  'mappings'
+]);
+const IMAGE_MAP_RELEASE_CONTRACT_FIELDS = new Set([
+  'input_sha256',
+  'deploy_image_inventory_count'
+]);
+const TARGET_PROFILE_FIELDS = new Set([
+  'value',
+  'target_cluster',
+  'substrate_source',
+  'distribution'
+]);
+const IMAGE_MAP_MAPPING_FIELDS = new Set([
+  'id',
+  'source',
+  'source_image',
+  'source_digest',
+  'target_image',
+  'target_digest',
+  'action'
+]);
 
 class CliError extends Error {
   constructor(message) {
@@ -94,6 +132,7 @@ function usage() {
     --render-values <json> \\
     --substrate-truth <json> \\
     --output-dir <dir> \\
+    [--image-map <json>] \\
     [--forbidden-source-root <dir>]`;
 }
 
@@ -144,6 +183,9 @@ function parseArgs(argv) {
         break;
       case '--output-dir':
         parsed.outputDir = nextValue();
+        break;
+      case '--image-map':
+        parsed.imageMap = nextValue();
         break;
       case '--forbidden-source-root':
         if (!parsed.forbiddenSourceRoots) {
@@ -321,6 +363,20 @@ function requireString(value, label) {
   return value;
 }
 
+function requireBoolean(value, label) {
+  if (typeof value !== 'boolean') {
+    fail(`${label} must be a boolean`);
+  }
+  return value;
+}
+
+function requireInteger(value, label) {
+  if (!Number.isInteger(value)) {
+    fail(`${label} must be an integer`);
+  }
+  return value;
+}
+
 function requireDigest(value, label) {
   const digest = requireString(value, label);
   if (!DIGEST_RE.test(digest)) {
@@ -341,6 +397,14 @@ function assertSchemaVersion(value, expected, label) {
   const schemaVersion = requireString(value, label);
   if (schemaVersion !== expected) {
     fail(`${label} must be ${expected}`);
+  }
+}
+
+function assertAllowedObjectFields(value, allowedFields, label) {
+  for (const field of Object.keys(value)) {
+    if (!allowedFields.has(field)) {
+      fail(`${label}.${field} is not allowed`);
+    }
   }
 }
 
@@ -745,17 +809,34 @@ function assertArchiveDigests(deployTemplatePackage, archiveSha256) {
 }
 
 function imageDigestSuffix(image, label) {
+  if (/\s/.test(image)) {
+    fail(`${label} must not contain whitespace`);
+  }
+  if (URI_SCHEME_RE.test(image)) {
+    fail(`${label} must be an image reference, not a URI`);
+  }
+  if (/[?#]/.test(image)) {
+    fail(`${label} must not contain query or hash text`);
+  }
+
   const marker = '@sha256:';
   const index = image.lastIndexOf(marker);
   if (index < 0) {
     fail(`${label} must be digest-pinned with @sha256`);
+  }
+  const imageWithoutDigest = image.slice(0, index);
+  if (imageWithoutDigest === '') {
+    fail(`${label} must include an image repository`);
+  }
+  if (imageWithoutDigest.includes('@')) {
+    fail(`${label} must contain only one digest separator`);
   }
 
   const digest = `sha256:${image.slice(index + marker.length)}`;
   if (!DIGEST_RE.test(digest)) {
     fail(`${label} has invalid sha256 suffix`);
   }
-  return { digest, image_without_digest: image.slice(0, index) };
+  return { digest, image_without_digest: imageWithoutDigest };
 }
 
 function buildInventory(contract) {
@@ -792,6 +873,7 @@ function buildInventory(contract) {
       id,
       image,
       digest,
+      image_without_digest: imageWithoutDigest,
       source: typeof item.source === 'string' ? item.source : undefined
     };
     byExact.set(image, normalized);
@@ -813,18 +895,353 @@ function buildInventory(contract) {
   return { byExact, byDigest, byImageWithoutDigest, byId };
 }
 
+function parseRegistryHostPort(hostPort, label) {
+  if (hostPort.startsWith('[') || hostPort.includes(']')) {
+    fail(`${label} must use a DNS host or IPv4 address, not an IPv6 literal`);
+  }
+
+  const colonParts = hostPort.split(':');
+  if (colonParts.length > 2) {
+    fail(`${label} must use a DNS host or IPv4 address with optional port`);
+  }
+
+  const [host, port] = colonParts;
+  if (!host) {
+    fail(`${label} host is required`);
+  }
+  if (port !== undefined) {
+    if (!/^[0-9]+$/.test(port)) {
+      fail(`${label} port must be numeric`);
+    }
+    const portNumber = Number(port);
+    if (portNumber < 1 || portNumber > 65535) {
+      fail(`${label} port must be between 1 and 65535`);
+    }
+  }
+
+  return host;
+}
+
+function isIpv4Address(host) {
+  const parts = host.split('.');
+  return (
+    parts.length === 4 &&
+    parts.every((part) => /^[0-9]+$/.test(part) && Number(part) >= 0 && Number(part) <= 255)
+  );
+}
+
+function isLocalRegistryHost(host) {
+  const normalized = host.toLowerCase();
+  return (
+    normalized === 'localhost' ||
+    normalized === 'host.docker.internal' ||
+    normalized === '::1' ||
+    normalized === '0.0.0.0' ||
+    /^127\./.test(normalized)
+  );
+}
+
+function validateTargetRegistry(input) {
+  const value = requireString(input, 'image_map.target_registry');
+  if (value.trim() !== value || /\s/.test(value)) {
+    fail('image_map.target_registry must not contain whitespace');
+  }
+  if (URI_SCHEME_RE.test(value)) {
+    fail('image_map.target_registry must not include a URI scheme');
+  }
+  if (value.includes('@')) {
+    fail('image_map.target_registry must not include userinfo');
+  }
+  if (/[?#]/.test(value)) {
+    fail('image_map.target_registry must not include query or hash text');
+  }
+  if (value.includes('\\') || value.startsWith('/') || value.endsWith('/') || value.includes('//')) {
+    fail('image_map.target_registry must be <registry-host[/namespace]>');
+  }
+
+  const parts = value.split('/');
+  const host = parseRegistryHostPort(parts[0], 'image_map.target_registry');
+  const hostName = host.toLowerCase();
+
+  if (isLocalRegistryHost(hostName)) {
+    fail('image_map.target_registry must not point at localhost, loopback, or host.docker.internal');
+  }
+  if (!isIpv4Address(hostName) && !DNS_HOST_RE.test(hostName)) {
+    fail('image_map.target_registry host must be a DNS name or IPv4 address');
+  }
+
+  for (const [index, component] of parts.slice(1).entries()) {
+    if (!TARGET_NAMESPACE_COMPONENT_RE.test(component)) {
+      fail(`image_map.target_registry namespace component ${index + 1} is invalid`);
+    }
+  }
+
+  return value;
+}
+
+function stripTag(imageWithoutDigest) {
+  const lastSlash = imageWithoutDigest.lastIndexOf('/');
+  const lastColon = imageWithoutDigest.lastIndexOf(':');
+  if (lastColon > lastSlash) {
+    return imageWithoutDigest.slice(0, lastColon);
+  }
+  return imageWithoutDigest;
+}
+
+function firstPathComponentLooksLikeRegistry(component) {
+  return (
+    component.includes('.') ||
+    component.includes(':') ||
+    component === 'localhost' ||
+    component === 'host.docker.internal'
+  );
+}
+
+function sourceRepositoryPath(imageWithoutDigest, label) {
+  const withoutTag = stripTag(imageWithoutDigest);
+  const parts = withoutTag.split('/');
+  if (parts.some((part) => part === '')) {
+    fail(`${label} must not contain empty repository path components`);
+  }
+  if (parts.length > 1 && firstPathComponentLooksLikeRegistry(parts[0])) {
+    return parts.slice(1).join('/');
+  }
+  return withoutTag;
+}
+
+function targetImageFor(inventoryItem, targetRegistry) {
+  const repositoryPath = sourceRepositoryPath(
+    inventoryItem.image_without_digest,
+    `image ${inventoryItem.id}`
+  );
+  return `${targetRegistry}/${repositoryPath}@${inventoryItem.digest}`;
+}
+
+function assertImageMapTargetProfile(imageMapTargetProfile, targetProfile) {
+  const profile = requireObject(imageMapTargetProfile, 'image_map.target_profile');
+  assertAllowedObjectFields(profile, TARGET_PROFILE_FIELDS, 'image_map.target_profile');
+
+  if (requireString(profile.value, 'image_map.target_profile.value') !== targetProfile.value) {
+    fail('image_map.target_profile.value must match --target-profile');
+  }
+  if (
+    requireString(profile.target_cluster, 'image_map.target_profile.target_cluster') !==
+    targetProfile.target_cluster
+  ) {
+    fail('image_map.target_profile.target_cluster must match --target-profile');
+  }
+  if (
+    requireString(profile.substrate_source, 'image_map.target_profile.substrate_source') !==
+    targetProfile.substrate_source
+  ) {
+    fail('image_map.target_profile.substrate_source must match --target-profile');
+  }
+  if (
+    requireString(profile.distribution, 'image_map.target_profile.distribution') !==
+    targetProfile.distribution
+  ) {
+    fail('image_map.target_profile.distribution must match --target-profile');
+  }
+}
+
+function validateImageMapMapping({
+  mappingValue,
+  index,
+  inventoryItem,
+  mirrorRequired,
+  targetRegistry
+}) {
+  const label = `image_map.mappings[${index}]`;
+  const mapping = requireObject(mappingValue, label);
+  assertAllowedObjectFields(mapping, IMAGE_MAP_MAPPING_FIELDS, label);
+
+  const id = requireString(mapping.id, `${label}.id`);
+  if (id !== inventoryItem.id) {
+    fail(`${label}.id must match release_contract.deploy_image_inventory`);
+  }
+
+  const source = requireString(mapping.source, `${label}.source`);
+  if (source !== inventoryItem.source) {
+    fail(`${label}.source must match release_contract.deploy_image_inventory`);
+  }
+
+  const sourceImage = requireString(mapping.source_image, `${label}.source_image`);
+  if (sourceImage !== inventoryItem.image) {
+    fail(`${label}.source_image must match release_contract.deploy_image_inventory`);
+  }
+
+  const sourceDigest = requireDigest(mapping.source_digest, `${label}.source_digest`);
+  if (sourceDigest !== inventoryItem.digest) {
+    fail(`${label}.source_digest must match release_contract.deploy_image_inventory`);
+  }
+
+  const targetDigest = requireDigest(mapping.target_digest, `${label}.target_digest`);
+  if (targetDigest !== sourceDigest) {
+    fail(`${label}.target_digest must match ${label}.source_digest`);
+  }
+
+  const targetImage = requireString(mapping.target_image, `${label}.target_image`);
+  const { digest: targetImageDigest } = imageDigestSuffix(targetImage, `${label}.target_image`);
+  if (targetImageDigest !== targetDigest) {
+    fail(`${label}.target_image digest must match ${label}.target_digest`);
+  }
+
+  const action = requireString(mapping.action, `${label}.action`);
+  if (!IMAGE_MAP_ACTIONS.has(action)) {
+    fail(`${label}.action must be use_source or mirror_required`);
+  }
+  if (mirrorRequired && action !== 'mirror_required') {
+    fail(`${label}.action must be mirror_required when image_map.mirror_required is true`);
+  }
+  if (!mirrorRequired && action !== 'use_source') {
+    fail(`${label}.action must be use_source when image_map.mirror_required is false`);
+  }
+  if (!mirrorRequired && targetImage !== sourceImage) {
+    fail(`${label}.target_image must match source_image when image_map.mirror_required is false`);
+  }
+  if (mirrorRequired) {
+    const expectedTargetImage = targetImageFor(inventoryItem, targetRegistry);
+    if (targetImage !== expectedTargetImage) {
+      fail(`${label}.target_image must match deterministic image_map.target_registry mirror ref`);
+    }
+  }
+
+  return {
+    id,
+    image: targetImage,
+    digest: targetDigest,
+    source
+  };
+}
+
+function validateImageMap({
+  imageMap,
+  contract,
+  releaseContractInputDigest,
+  inventory,
+  targetProfile
+}) {
+  const report = requireObject(imageMap, 'image_map');
+  assertAllowedObjectFields(report, IMAGE_MAP_FIELDS, 'image_map');
+  assertSchemaVersion(report.schema, IMAGE_MAP_SCHEMA, 'image_map.schema');
+
+  if (requireString(report.scope, 'image_map.scope') !== IMAGE_MAP_SCOPE) {
+    fail(`image_map.scope must be ${IMAGE_MAP_SCOPE}`);
+  }
+  if (report.readiness !== false) {
+    fail('image_map.readiness must be false');
+  }
+  if (requireString(report.status, 'image_map.status') !== 'pass') {
+    fail('image_map.status must be pass');
+  }
+  if (requireString(report.release_id, 'image_map.release_id') !== contract.release_id) {
+    fail('image_map.release_id must match release_contract.release_id');
+  }
+  if (requireGitSha(report.git_sha, 'image_map.git_sha') !== contract.git_sha) {
+    fail('image_map.git_sha must match release_contract.git_sha');
+  }
+
+  const releaseContract = requireObject(
+    report.release_contract,
+    'image_map.release_contract'
+  );
+  assertAllowedObjectFields(
+    releaseContract,
+    IMAGE_MAP_RELEASE_CONTRACT_FIELDS,
+    'image_map.release_contract'
+  );
+  if (
+    requireDigest(
+      releaseContract.input_sha256,
+      'image_map.release_contract.input_sha256'
+    ) !== releaseContractInputDigest
+  ) {
+    fail('image_map.release_contract.input_sha256 must match release contract input sha256');
+  }
+  if (
+    requireInteger(
+      releaseContract.deploy_image_inventory_count,
+      'image_map.release_contract.deploy_image_inventory_count'
+    ) !== inventory.byId.size
+  ) {
+    fail('image_map.release_contract.deploy_image_inventory_count must match release_contract.deploy_image_inventory');
+  }
+
+  assertImageMapTargetProfile(report.target_profile, targetProfile);
+
+  const mirrorRequired = requireBoolean(report.mirror_required, 'image_map.mirror_required');
+  const hasTargetRegistry = Object.prototype.hasOwnProperty.call(report, 'target_registry');
+  let targetRegistry;
+  if (mirrorRequired && !hasTargetRegistry) {
+    fail('image_map.target_registry is required when image_map.mirror_required is true');
+  }
+  if (!mirrorRequired && hasTargetRegistry) {
+    fail('image_map.target_registry is only allowed when image_map.mirror_required is true');
+  }
+  if (mirrorRequired) {
+    targetRegistry = validateTargetRegistry(report.target_registry);
+  }
+
+  const mappings = requireArray(report.mappings, 'image_map.mappings');
+  const imageCount = requireInteger(report.image_count, 'image_map.image_count');
+  if (imageCount !== mappings.length) {
+    fail('image_map.image_count must match image_map.mappings length');
+  }
+  if (mappings.length !== inventory.byId.size) {
+    fail('image_map.mappings must match release_contract.deploy_image_inventory one-to-one');
+  }
+
+  const seenIds = new Set();
+  const imagesById = new Map();
+
+  for (const [index, mappingValue] of mappings.entries()) {
+    const mapping = requireObject(mappingValue, `image_map.mappings[${index}]`);
+    const id = requireString(mapping.id, `image_map.mappings[${index}].id`);
+    if (seenIds.has(id)) {
+      fail(`image_map.mappings contains duplicate id: ${id}`);
+    }
+    seenIds.add(id);
+
+    const inventoryItem = inventory.byId.get(id);
+    if (!inventoryItem) {
+      fail(`image_map.mappings[${index}].id is not listed in release_contract.deploy_image_inventory`);
+    }
+
+    imagesById.set(
+      id,
+      validateImageMapMapping({
+        mappingValue,
+        index,
+        inventoryItem,
+        mirrorRequired,
+        targetRegistry
+      })
+    );
+  }
+
+  for (const id of inventory.byId.keys()) {
+    if (!seenIds.has(id)) {
+      fail(`image_map.mappings missing release_contract.deploy_image_inventory id: ${id}`);
+    }
+  }
+
+  return imagesById;
+}
+
 function buildRenderContext({
   contract,
   inventory,
   targetProfile,
   renderValues,
-  substrateTruth
+  substrateTruth,
+  imageMapImages
 }) {
   const images = {};
   for (const [id, item] of inventory.byId.entries()) {
+    const mappedImage = imageMapImages?.get(id);
     images[id] = {
-      image: item.image,
-      digest: item.digest,
+      image: mappedImage?.image || item.image,
+      digest: mappedImage?.digest || item.digest,
       source: item.source
     };
   }
@@ -1414,6 +1831,9 @@ async function main() {
     'substrate truth',
     forbiddenSourceRoots
   );
+  const imageMapPath = args.imageMap
+    ? await assertPathBoundary(args.imageMap, 'image map', forbiddenSourceRoots)
+    : undefined;
 
   const releaseContractInput = await readJson(releaseContractPath, 'release contract');
   const deployTemplatePackageInput = await readJson(
@@ -1422,6 +1842,9 @@ async function main() {
   );
   const renderValuesInput = await readJson(renderValuesPath, 'render values');
   const substrateTruthInput = await readJson(substrateTruthPath, 'substrate truth');
+  const imageMapInput = imageMapPath
+    ? await readJson(imageMapPath, 'image map')
+    : undefined;
   const archiveBuffer = await readArchive(archivePath);
   const archiveSha256 = digestBuffer(archiveBuffer);
 
@@ -1468,13 +1891,23 @@ async function main() {
   }
 
   const inventory = buildInventory(contract);
+  const imageMapImages = imageMapInput
+    ? validateImageMap({
+        imageMap: imageMapInput.value,
+        contract,
+        releaseContractInputDigest: releaseContractInput.inputDigest,
+        inventory,
+        targetProfile
+      })
+    : undefined;
   const entries = templateEntries(archive);
   const context = buildRenderContext({
     contract,
     inventory,
     targetProfile,
     renderValues,
-    substrateTruth
+    substrateTruth,
+    imageMapImages
   });
   const renderedRoot = await prepareRenderedRoot(args.outputDir, forbiddenSourceRoots);
   const renderedFiles = await writeRenderedTemplates({
