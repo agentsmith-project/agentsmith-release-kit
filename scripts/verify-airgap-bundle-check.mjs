@@ -45,6 +45,8 @@ const BUNDLE_MANIFEST_KEYS = new Set([
   'bindings',
   'components',
   'image_artifact_declarations',
+  'payload_artifacts',
+  'operator_prerequisites',
   'substrate'
 ]);
 const BUNDLE_BINDING_KEYS = new Set([
@@ -65,6 +67,33 @@ const IMAGE_ARTIFACT_DECLARATION_KEYS = new Set([
   'path',
   'sha256'
 ]);
+const PAYLOAD_ARTIFACT_KEYS = new Set(['id', 'kind', 'path', 'sha256']);
+const PAYLOAD_ARTIFACT_KINDS = new Set([
+  'runbook',
+  'script',
+  'profile_values_schema',
+  'profile_values_example',
+  'checksums'
+]);
+const REQUIRED_PAYLOAD_ARTIFACT_KINDS = new Set([
+  'runbook',
+  'script',
+  'profile_values_schema',
+  'checksums'
+]);
+const OPERATOR_PREREQUISITES_KEYS = new Set([
+  'substrate_connection_truth_ref',
+  'target_registry_proof_ref',
+  'tools'
+]);
+const BUNDLED_TOOL_KEYS = new Set(['name', 'version', 'source', 'path', 'sha256']);
+const OPERATOR_PREREQUISITE_TOOL_KEYS = new Set([
+  'name',
+  'version',
+  'source',
+  'location',
+  'proof'
+]);
 const TARGET_PROFILE_KEYS = new Set([
   'value',
   'target_cluster',
@@ -74,6 +103,22 @@ const TARGET_PROFILE_KEYS = new Set([
 const BUNDLE_SUBSTRATE_KEYS = new Set(['mode', 'bundled']);
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+const OPERATOR_REF_URI_SCHEME_RE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/i;
+const SECRET_VALUE_RE = [
+  /sk-[A-Za-z0-9]{12,}/,
+  /AKIA[0-9A-Z]{16}/,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}/,
+  /github_pat_[A-Za-z0-9_]{20,}/,
+  /\bAIza[0-9A-Za-z_-]{20,}/,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/i,
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+  /\b(?:postgres|mongodb|redis):\/\/[^:\s]+:[^@\s]+@/i,
+  /\b(?:password|token|secret|client_secret)\s*[:=]\s*["']?[^"'\s]{8,}/i,
+  /\bexecution[_ -]?ticket\b/i,
+  /\bmanaged_credentials\b/i,
+  /\bkubeconfig\b/i
+];
+const DOWNLOAD_SEMANTICS_RE = /\b(?:public\s+download|public\s+url|https?\s+url|curl|wget|docker\s+pull|oras\s+pull|skopeo\s+copy)\b/i;
 
 class CliError extends Error {
   constructor(message) {
@@ -346,6 +391,70 @@ function assertSameJson(left, right, label) {
   }
 }
 
+function imageDigestSuffix(image, label) {
+  if (/\s/.test(image)) {
+    fail(`${label} must not contain whitespace`);
+  }
+  if (URI_SCHEME_RE.test(image)) {
+    fail(`${label} must be an image reference, not a URI`);
+  }
+  if (/[?#]/.test(image)) {
+    fail(`${label} must not contain query or hash text`);
+  }
+
+  const marker = '@sha256:';
+  const index = image.lastIndexOf(marker);
+  if (index < 0) {
+    fail(`${label} must be digest-pinned with @sha256`);
+  }
+  const imageWithoutDigest = image.slice(0, index);
+  if (imageWithoutDigest === '') {
+    fail(`${label} must include an image repository`);
+  }
+  if (imageWithoutDigest.includes('@')) {
+    fail(`${label} must contain only one digest separator`);
+  }
+
+  const digest = `sha256:${image.slice(index + marker.length)}`;
+  if (!DIGEST_RE.test(digest)) {
+    fail(`${label} has invalid sha256 suffix`);
+  }
+  return { digest, imageWithoutDigest };
+}
+
+function buildDeployImageInventory(contract) {
+  const items = requireArray(
+    contract.deploy_image_inventory,
+    'release_contract.deploy_image_inventory'
+  );
+  if (items.length === 0) {
+    fail('release_contract.deploy_image_inventory must not be empty');
+  }
+
+  const byId = new Map();
+  for (const [index, itemValue] of items.entries()) {
+    const label = `release_contract.deploy_image_inventory[${index}]`;
+    const item = requireObject(itemValue, label);
+    const id = requireString(item.id, `${label}.id`);
+    if (byId.has(id)) {
+      fail(`release_contract.deploy_image_inventory contains duplicate image id: ${id}`);
+    }
+    const sourceImage = requireString(item.image, `${label}.image`);
+    const declaredDigest = requireDigest(item.digest, `${label}.digest`);
+    const { digest } = imageDigestSuffix(sourceImage, `${label}.image`);
+    if (digest !== declaredDigest) {
+      fail(`${label}.digest must match image digest suffix`);
+    }
+    byId.set(id, {
+      id,
+      source_image: sourceImage,
+      source_digest: declaredDigest
+    });
+  }
+
+  return byId;
+}
+
 function assertReleaseContract(contract, deployTemplatePackage) {
   assertStringEquals(
     contract.schema_version,
@@ -368,8 +477,9 @@ function assertReleaseContract(contract, deployTemplatePackage) {
     'release_contract.deploy_template_package'
   );
   assertContractTargetProfiles(contract);
+  const deployImageInventoryById = buildDeployImageInventory(contract);
 
-  return { releaseId, gitSha, deployTemplateDigest };
+  return { releaseId, gitSha, deployTemplateDigest, deployImageInventoryById };
 }
 
 function assertContractTargetProfiles(contract) {
@@ -471,7 +581,8 @@ function assertImageMap({
   imageMapInputDigest,
   releaseContractInputDigest,
   releaseId,
-  gitSha
+  gitSha,
+  deployImageInventoryById
 }) {
   assertStringEquals(imageMap.schema, IMAGE_MAP_SCHEMA, 'image_map.schema');
   assertStringEquals(imageMap.scope, 'image_map_only', 'image_map.scope');
@@ -481,7 +592,7 @@ function assertImageMap({
   assertStringEquals(imageMap.git_sha, gitSha, 'image_map.git_sha');
   assertTargetProfileObject(imageMap.target_profile, 'image_map.target_profile');
   requireBooleanTrue(imageMap.mirror_required, 'image_map.mirror_required');
-  requireString(imageMap.target_registry, 'image_map.target_registry');
+  const targetRegistry = requireString(imageMap.target_registry, 'image_map.target_registry');
 
   const releaseContract = requireObject(
     imageMap.release_contract,
@@ -499,6 +610,9 @@ function assertImageMap({
   if (mappings.length === 0) {
     fail('image_map.mappings must not be empty');
   }
+  if (mappings.length !== deployImageInventoryById.size) {
+    fail('image_map.mappings must match release_contract.deploy_image_inventory length');
+  }
   if (imageMap.image_count !== mappings.length) {
     fail('image_map.image_count must match image_map.mappings length');
   }
@@ -511,12 +625,32 @@ function assertImageMap({
     if (byId.has(id)) {
       fail(`image_map.mappings contains duplicate id: ${id}`);
     }
+    const inventoryItem = deployImageInventoryById.get(id);
+    if (!inventoryItem) {
+      fail(`${label}.id must exist in release_contract.deploy_image_inventory`);
+    }
     const sourceImage = requireString(mapping.source_image, `${label}.source_image`);
+    if (sourceImage !== inventoryItem.source_image) {
+      fail(`${label}.source_image must match release_contract.deploy_image_inventory`);
+    }
     const sourceDigest = requireDigest(mapping.source_digest, `${label}.source_digest`);
+    if (sourceDigest !== inventoryItem.source_digest) {
+      fail(`${label}.source_digest must match release_contract.deploy_image_inventory`);
+    }
     const targetImage = requireString(mapping.target_image, `${label}.target_image`);
     const targetDigest = requireDigest(mapping.target_digest, `${label}.target_digest`);
     if (targetDigest !== sourceDigest) {
       fail(`${label}.target_digest must match source_digest`);
+    }
+    const { digest: targetImageDigest } = imageDigestSuffix(
+      targetImage,
+      `${label}.target_image`
+    );
+    if (!targetImage.startsWith(`${targetRegistry}/`)) {
+      fail(`${label}.target_image must be under image_map.target_registry`);
+    }
+    if (targetImageDigest !== targetDigest) {
+      fail(`${label}.target_image must be digest-pinned with target_digest`);
     }
     assertStringEquals(mapping.action, 'mirror_required', `${label}.action`);
 
@@ -527,6 +661,12 @@ function assertImageMap({
       target_image: targetImage,
       target_digest: targetDigest
     });
+  }
+
+  for (const id of deployImageInventoryById.keys()) {
+    if (!byId.has(id)) {
+      fail(`image_map.mappings is missing release_contract.deploy_image_inventory id: ${id}`);
+    }
   }
 
   return {
@@ -628,6 +768,14 @@ async function digestFile(file, label) {
     fail(`cannot read ${label}: ${error.message}`);
   }
   return digestBuffer(buffer);
+}
+
+async function assertBundleFileSha({ bundleRoot, relativePath, declaredSha256, label }) {
+  const file = await resolveBundleFile(bundleRoot, relativePath, `${label}.path`);
+  const actualSha256 = await digestFile(file, `${label}.path`);
+  if (actualSha256 !== declaredSha256) {
+    fail(`${label}.sha256 must match bundle file sha256`);
+  }
 }
 
 function assertBindings({ bindings, expected }) {
@@ -734,6 +882,128 @@ async function assertImageArtifactDeclarations({ declarations, bundleRoot, image
   return items.length;
 }
 
+async function assertPayloadArtifacts({ artifacts, bundleRoot }) {
+  const items = requireArray(artifacts, 'bundle_manifest.payload_artifacts');
+  const seenIds = new Set();
+  const seenRequiredKinds = new Set();
+
+  for (const [index, value] of items.entries()) {
+    const label = `bundle_manifest.payload_artifacts[${index}]`;
+    const artifact = requireObject(value, label);
+    assertAllowedKeys(artifact, PAYLOAD_ARTIFACT_KEYS, label);
+    const id = requireString(artifact.id, `${label}.id`);
+    if (seenIds.has(id)) {
+      fail(`bundle_manifest.payload_artifacts contains duplicate id: ${id}`);
+    }
+    seenIds.add(id);
+
+    const kind = requireString(artifact.kind, `${label}.kind`);
+    if (!PAYLOAD_ARTIFACT_KINDS.has(kind)) {
+      fail(`${label}.kind is invalid`);
+    }
+    if (REQUIRED_PAYLOAD_ARTIFACT_KINDS.has(kind)) {
+      seenRequiredKinds.add(kind);
+    }
+
+    const declaredSha256 = requireDigest(artifact.sha256, `${label}.sha256`);
+    await assertBundleFileSha({
+      bundleRoot,
+      relativePath: artifact.path,
+      declaredSha256,
+      label
+    });
+  }
+
+  for (const kind of REQUIRED_PAYLOAD_ARTIFACT_KINDS) {
+    if (!seenRequiredKinds.has(kind)) {
+      fail(`bundle_manifest.payload_artifacts is missing required payload type: ${kind}`);
+    }
+  }
+
+  return items.length;
+}
+
+function assertOperatorRef(value, label) {
+  const ref = requireString(value, label);
+  if (ref.trim() !== ref) {
+    fail(`${label} must not have leading or trailing whitespace`);
+  }
+  if (OPERATOR_REF_URI_SCHEME_RE.test(ref)) {
+    fail(`${label} must be an operator-held reference, not a URI`);
+  }
+  if (DOWNLOAD_SEMANTICS_RE.test(ref)) {
+    fail(`${label} must not describe public download semantics`);
+  }
+  if (SECRET_VALUE_RE.some((pattern) => pattern.test(ref))) {
+    fail(`${label} must not contain secret-looking content`);
+  }
+  return ref;
+}
+
+async function assertOperatorPrerequisites({ prerequisites, bundleRoot }) {
+  const object = requireObject(
+    prerequisites,
+    'bundle_manifest.operator_prerequisites'
+  );
+  assertAllowedKeys(
+    object,
+    OPERATOR_PREREQUISITES_KEYS,
+    'bundle_manifest.operator_prerequisites'
+  );
+  assertOperatorRef(
+    object.substrate_connection_truth_ref,
+    'bundle_manifest.operator_prerequisites.substrate_connection_truth_ref'
+  );
+  assertOperatorRef(
+    object.target_registry_proof_ref,
+    'bundle_manifest.operator_prerequisites.target_registry_proof_ref'
+  );
+
+  const tools = requireArray(
+    object.tools,
+    'bundle_manifest.operator_prerequisites.tools'
+  );
+  if (tools.length === 0) {
+    fail('bundle_manifest.operator_prerequisites.tools must not be empty');
+  }
+
+  let bundledToolCount = 0;
+  let operatorPrerequisiteToolCount = 0;
+  for (const [index, value] of tools.entries()) {
+    const label = `bundle_manifest.operator_prerequisites.tools[${index}]`;
+    const tool = requireObject(value, label);
+    const source = requireString(tool.source, `${label}.source`);
+    if (source === 'bundled') {
+      assertAllowedKeys(tool, BUNDLED_TOOL_KEYS, label);
+      requireString(tool.name, `${label}.name`);
+      requireString(tool.version, `${label}.version`);
+      const declaredSha256 = requireDigest(tool.sha256, `${label}.sha256`);
+      await assertBundleFileSha({
+        bundleRoot,
+        relativePath: tool.path,
+        declaredSha256,
+        label
+      });
+      bundledToolCount += 1;
+    } else if (source === 'operator_prerequisite') {
+      assertAllowedKeys(tool, OPERATOR_PREREQUISITE_TOOL_KEYS, label);
+      requireString(tool.name, `${label}.name`);
+      requireString(tool.version, `${label}.version`);
+      assertOperatorRef(tool.location, `${label}.location`);
+      assertOperatorRef(tool.proof, `${label}.proof`);
+      operatorPrerequisiteToolCount += 1;
+    } else {
+      fail(`${label}.source is invalid`);
+    }
+  }
+
+  return {
+    toolCount: tools.length,
+    bundledToolCount,
+    operatorPrerequisiteToolCount
+  };
+}
+
 function assertSubstrate(value) {
   const substrate = requireObject(value, 'bundle_manifest.substrate');
   assertAllowedKeys(substrate, BUNDLE_SUBSTRATE_KEYS, 'bundle_manifest.substrate');
@@ -770,11 +1040,21 @@ async function assertBundleManifest({
     bundleRoot,
     imageMapSummary
   });
+  const payloadArtifactCount = await assertPayloadArtifacts({
+    artifacts: manifest.payload_artifacts,
+    bundleRoot
+  });
+  const operatorPrerequisiteSummary = await assertOperatorPrerequisites({
+    prerequisites: manifest.operator_prerequisites,
+    bundleRoot
+  });
   assertSubstrate(manifest.substrate);
 
   return {
     componentsCount,
-    imageArtifactDeclarationCount
+    imageArtifactDeclarationCount,
+    payloadArtifactCount,
+    ...operatorPrerequisiteSummary
   };
 }
 
@@ -821,7 +1101,11 @@ function buildReport({
       }
     },
     components_count: bundleSummary.componentsCount,
-    image_artifact_declaration_count: bundleSummary.imageArtifactDeclarationCount
+    image_artifact_declaration_count: bundleSummary.imageArtifactDeclarationCount,
+    payload_artifact_count: bundleSummary.payloadArtifactCount,
+    tool_count: bundleSummary.toolCount,
+    bundled_tool_count: bundleSummary.bundledToolCount,
+    operator_prerequisite_tool_count: bundleSummary.operatorPrerequisiteToolCount
   };
 }
 
@@ -874,7 +1158,8 @@ async function main() {
     imageMapInputDigest: imageMapInput.inputDigest,
     releaseContractInputDigest: releaseContractInput.inputDigest,
     releaseId: contractSummary.releaseId,
-    gitSha: contractSummary.gitSha
+    gitSha: contractSummary.gitSha,
+    deployImageInventoryById: contractSummary.deployImageInventoryById
   });
 
   const bundleManifest = requireObject(bundleManifestInput.value, 'bundle_manifest');

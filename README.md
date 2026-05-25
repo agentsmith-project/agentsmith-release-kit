@@ -229,26 +229,45 @@ canonical profile tuple with `required: boolean`; `support_level` is rejected.
 The airgap profile may remain `required: false`. The image-map must be a
 passing `agentsmith.image-map/v1` report with `scope: image_map_only`,
 `readiness: false`, `mirror_required: true`, a target registry, the exact
-airgap target profile, and `action: mirror_required` for every mapping.
+airgap target profile, and `action: mirror_required` for every mapping. Each
+mapping id must exist in `release_contract.deploy_image_inventory`;
+`source_image` and `source_digest` must match the inventory, `target_digest`
+must equal `source_digest`, and `target_image` must sit under
+`image_map.target_registry` with `@<target_digest>`.
 
 This diagnostic checks only safe relative bundle paths and sha256 bindings for
 the release contract, deploy template package descriptor, deploy template
-archive, image-map, and declared `oci_layout_tar` image artifact files. The
-deploy template archive sha256 must match
+archive, image-map, declared `oci_layout_tar` image artifact files, bundled
+payload files, and bundled tool files. The deploy template archive sha256 must match
 `deploy_template_package.package_sha256`,
 `deploy_template_package.artifact_provenance.artifact_sha256`, and
 `bundle_manifest.bindings.deploy_template_archive_sha256`. The bundle manifest
 accepts only the documented top-level, `bindings`, `components`,
-`image_artifact_declarations`, and `substrate` fields. `components` must
-contain exactly one component of each `kind`:
+`image_artifact_declarations`, `payload_artifacts`,
+`operator_prerequisites`, and `substrate` fields. `components` must contain
+exactly one component of each `kind`:
 `release_contract`, `deploy_template_package`, `deploy_template_archive`, and
-`image_map`. It does not create an airgap package, parse the `.tgz`, inspect
+`image_map`. `payload_artifacts[]` allows only `id`, `kind`, `path`, and
+`sha256`; allowed kinds are `runbook`, `script`, `profile_values_schema`,
+`profile_values_example`, and `checksums`, with `runbook`, `script`,
+`profile_values_schema`, and `checksums` required. Duplicate payload ids,
+unknown fields or kinds, unsafe paths, missing files, and sha mismatches fail
+fast. `operator_prerequisites` allows only
+`substrate_connection_truth_ref`, `target_registry_proof_ref`, and `tools`.
+The two refs and `operator_prerequisite` tool `location`/`proof` values are
+operator-held strings, not bundle files; URI schemes, public-download
+semantics, and secret-looking content fail fast. Bundled tools use only
+`name`, `version`, `source`, `path`, and `sha256`, with path/sha checked under
+the bundle root. Operator prerequisite tools use only `name`, `version`,
+`source`, `location`, and `proof`. It does not create an airgap package, parse the `.tgz`, inspect
 tar or OCI contents, verify registry presence, load images, deploy to
 Kubernetes, run kind, support online targets, or claim offline install,
 deploy, package, or release readiness.
 `airgap-bundle-check-report.json` keeps `schema:
 agentsmith.airgap-bundle-check-report/v1`, `scope:
 airgap_bundle_manifest_check_only`, `readiness: false`, and `status: pass`.
+It may include only non-sensitive counts for payload artifacts and tools, not
+raw paths, proof strings, locations, or refs.
 
 Kubernetes apply-only focused diagnostic:
 

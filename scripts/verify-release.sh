@@ -30,7 +30,7 @@ Bootstrap status:
   --render renders repo-local materialized deploy templates only; it is not release readiness.
   --render-check checks rendered manifest image inventory only; it is not release readiness.
   --image-map writes digest-pinned source/target image reference mapping only; it is not release readiness.
-  --airgap-bundle-check checks an airgap bundle manifest, deploy template archive digest, and declared file digests only; it is not release readiness.
+  --airgap-bundle-check checks an airgap bundle manifest, deploy template archive digest, payload/tool declarations, and declared file digests only; it is not release readiness.
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
   --rollout checks Kubernetes rollout status and live image digests only; it is not release readiness.
   --smoke checks one route status after a bound rollout report only; it is not release readiness.

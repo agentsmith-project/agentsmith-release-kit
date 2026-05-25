@@ -233,7 +233,11 @@ presence, or claim offline install, deploy, package, or release readiness.
 The image-map
 must be a passing airgap `agentsmith.image-map/v1` report with `scope:
 image_map_only`, `readiness: false`, `mirror_required: true`, a target
-registry, and `action: mirror_required` on every mapping.
+registry, and `action: mirror_required` on every mapping. The bundle check
+binds those mappings back to `release_contract.deploy_image_inventory`: ids
+must exist, source image and digest must match inventory, target digest must
+equal source digest, and target image must be under `image_map.target_registry`
+with `@<target_digest>`.
 
 The release contract `target_profiles` value must be an array and must declare
 `existing_kubernetes/external_declared/airgap`. Every target profile tuple must
@@ -256,13 +260,31 @@ only; absolute paths, parent segments, empty segments, dot segments,
 backslashes, URI paths, symlinks, missing files, unexpected manifest fields,
 and sha mismatches fail fast.
 
+The manifest also requires `payload_artifacts` and
+`operator_prerequisites` at the top level. `payload_artifacts[]` allows only
+`id`, `kind`, `path`, and `sha256`; allowed kinds are `runbook`, `script`,
+`profile_values_schema`, `profile_values_example`, and `checksums`, with
+`runbook`, `script`, `profile_values_schema`, and `checksums` required.
+Payload paths reuse the safe bundle-root relative file check and sha256 must
+match the file. Duplicate payload ids, unknown fields, unknown kinds, unsafe
+paths, missing files, and sha mismatches fail fast. `operator_prerequisites`
+allows only `substrate_connection_truth_ref`, `target_registry_proof_ref`, and
+`tools`; refs are non-empty operator-held strings and are not read as bundle
+files. Tools are source-discriminated: `source: "bundled"` allows only `name`,
+`version`, `source`, `path`, and `sha256`, with path/sha checked under the
+bundle root; `source: "operator_prerequisite"` allows only `name`, `version`,
+`source`, `location`, and `proof`, and those strings are not read as files.
+Missing source, unknown source, field mixing, missing required fields, URI
+schemes, public-download semantics, and secret-looking content fail fast.
+
 The generated `airgap-bundle-check-report.json` must keep `schema:
 agentsmith.airgap-bundle-check-report/v1`, `scope:
 airgap_bundle_manifest_check_only`, `readiness: false`, and `status: pass`. It
 must not contain `verdict`, `release_verdict`, deploy readiness, offline
 install readiness, registry presence verification, image load verification,
 AgentSmith product-flow fields, raw credential payloads, or registry login
-material.
+material. It may include only non-sensitive counts for payload artifacts and
+tools, not raw paths, refs, locations, or proof strings.
 
 ## Kubernetes Apply-Only Focused Diagnostic
 

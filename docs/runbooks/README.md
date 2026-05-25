@@ -62,7 +62,13 @@ lowercase and start and end with alphanumeric characters.
 
 For airgap bundle checks, the bundle manifest must use
 `schema_version: agentsmith.airgap-bundle-manifest/v1`. The check validates
-safe relative paths and sha256 bindings only, and its stdout ends with
+safe relative paths and sha256 bindings only. It now requires
+`payload_artifacts` for runbook/script/profile-values schema/checksums payloads
+and `operator_prerequisites` for operator-held substrate truth, registry proof,
+and tool prerequisites. Bundled tool files are checked by path/sha under the
+bundle root; operator prerequisite locations/proofs are strings and must not be
+URLs, download instructions, or secret-looking content. The airgap image-map is
+also rebound to `release_contract.deploy_image_inventory`. Stdout ends with
 `readiness=false`.
 
 For route smoke, use `bash scripts/verify-release.sh --smoke` only after a

@@ -77,14 +77,32 @@ relative paths under the bundle root, and sha256 values must match the
 referenced files. The release contract must declare
 `existing_kubernetes/external_declared/airgap` in `target_profiles`, each
 target profile entry must carry `required: false` during pre-GA, and
-`support_level` is rejected. The bundle manifest accepts only the documented top-level,
-`bindings`, `components`, `image_artifact_declarations`, and `substrate`
-fields. Image artifact declarations must match image-map mappings one-to-one by
-id. The image-map must be airgap, `mirror_required: true`, and every mapping
-must use `action: mirror_required`. It writes
+`support_level` is rejected. The bundle manifest accepts only the documented
+top-level, `bindings`, `components`, `image_artifact_declarations`,
+`payload_artifacts`, `operator_prerequisites`, and `substrate` fields. Image
+artifact declarations must match image-map mappings one-to-one by id. The
+image-map must be airgap, `mirror_required: true`, and every mapping must use
+`action: mirror_required`; mapping ids, source images, and source digests must
+match `release_contract.deploy_image_inventory`, target digests must equal
+source digests, and target images must be under `image_map.target_registry`
+with `@<target_digest>`.
+
+`payload_artifacts[]` allows only `id`, `kind`, `path`, and `sha256`. Allowed
+kinds are `runbook`, `script`, `profile_values_schema`,
+`profile_values_example`, and `checksums`; `runbook`, `script`,
+`profile_values_schema`, and `checksums` are required. Payload paths use the
+same safe bundle-root relative file and sha256 checks. `operator_prerequisites`
+allows only `substrate_connection_truth_ref`, `target_registry_proof_ref`, and
+`tools`. Bundled tools allow only `name`, `version`, `source`, `path`, and
+`sha256`; operator prerequisite tools allow only `name`, `version`, `source`,
+`location`, and `proof`. Operator refs, locations, and proofs are strings, not
+bundle files, and URI schemes, public-download semantics, and secret-looking
+content are rejected. It writes
 `airgap-bundle-check-report.json` with `schema:
 agentsmith.airgap-bundle-check-report/v1`, `readiness: false`, and `scope:
-airgap_bundle_manifest_check_only`. This is manifest/digest check only; it is
+airgap_bundle_manifest_check_only`. The report may include only non-sensitive
+payload/tool counts, not raw paths, refs, locations, or proofs. This is
+manifest/digest check only; it is
 not a packager, does not parse the `.tgz`, does not create an airgap package,
 does not call Docker, skopeo, oras, kubectl, pull, push, mirror, save, or load
 images, and does not prove registry presence, image load, offline install

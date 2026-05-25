@@ -143,17 +143,33 @@ a canonical profile tuple with `required: boolean`, and `support_level` is
 rejected. The airgap profile may remain `required: false`. The bundle manifest
 must use `schema_version: agentsmith.airgap-bundle-manifest/v1` and accepts
 only the documented top-level, `bindings`, `components`,
-`image_artifact_declarations`, and `substrate` fields. Its `components` list
-must contain exactly one component for each `kind`: `release_contract`,
+`image_artifact_declarations`, `payload_artifacts`,
+`operator_prerequisites`, and `substrate` fields. Its `components` list must
+contain exactly one component for each `kind`: `release_contract`,
 `deploy_template_package`, `deploy_template_archive`, and `image_map`. The
 image-map must be airgap, have `mirror_required: true`, and every mapping must
-use `action: mirror_required`. Image artifact declarations must match image-map
-mappings one-to-one by id. Bundle paths are relative to the bundle root only;
-absolute paths, parent segments, dot segments, empty path segments, URI paths,
-symlinks, and backslashes fail fast.
+use `action: mirror_required`. Its mappings are rebound to
+`release_contract.deploy_image_inventory`: ids must exist, source image and
+digest must match inventory, target digest must equal source digest, and target
+image must be under `image_map.target_registry` with `@<target_digest>`. Image
+artifact declarations must match image-map mappings one-to-one by id. The
+manifest also requires `payload_artifacts` and `operator_prerequisites`.
+`payload_artifacts[]` only allows `id`, `kind`, `path`, and `sha256`; allowed
+kinds are `runbook`, `script`, `profile_values_schema`,
+`profile_values_example`, and `checksums`, and the check requires at least
+`runbook`, `script`, `profile_values_schema`, and `checksums`. Operator
+prerequisites require operator-held substrate and registry proof refs plus a
+non-empty `tools` array. Bundled tools require `path`/`sha256` under the bundle
+root; operator prerequisite tools require `location` and `proof` strings. URI
+schemes, public-download wording, secret-looking content, field mixing, missing
+fields, unsafe paths, missing files, duplicate payload ids, unknown payload
+kinds, and sha mismatches fail fast. Bundle paths are relative to the bundle
+root only; absolute paths, parent segments, dot segments, empty path segments,
+URI paths, symlinks, and backslashes fail fast.
 Its `airgap-bundle-check-report.json` must keep `readiness: false` and
 `scope: airgap_bundle_manifest_check_only`; it checks only manifest bindings
-and declared file sha256 values. It is not a packager, does not parse the
+and declared file sha256 values. The report may include only non-sensitive
+payload/tool counts, not raw paths, refs, locations, or proof strings. It is not a packager, does not parse the
 `.tgz`, does not create an airgap package, does not call Docker, skopeo, oras,
 kubectl, pull, push, mirror, save, load, or inspect image contents, and does
 not prove registry presence, image load, offline install readiness, deploy

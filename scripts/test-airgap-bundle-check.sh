@@ -229,6 +229,47 @@ switch (mutation) {
       mapping.action = 'use_source';
     }
     break;
+  case 'mapping_source_image_mismatch':
+    imageMap.mappings[0].source_image = imageMap.mappings[0].source_image.replace(
+      'agentsmith-app',
+      'agentsmith-app-drift'
+    );
+    break;
+  case 'mapping_source_digest_mismatch':
+    imageMap.mappings[0].source_digest = `sha256:${'5'.repeat(64)}`;
+    break;
+  case 'mapping_id_missing':
+    imageMap.mappings[0].id = `${imageMap.mappings[0].id}-missing`;
+    break;
+  case 'duplicate_mapping_id':
+    imageMap.mappings[1].id = imageMap.mappings[0].id;
+    break;
+  case 'image_count_mismatch':
+    imageMap.image_count += 1;
+    break;
+  case 'mapping_target_digest_mismatch':
+    imageMap.mappings[0].target_digest = `sha256:${'2'.repeat(64)}`;
+    imageMap.mappings[0].target_image = imageMap.mappings[0].target_image.replace(
+      /@sha256:[0-9a-f]{64}$/,
+      `@${imageMap.mappings[0].target_digest}`
+    );
+    break;
+  case 'target_image_digest_suffix_mismatch':
+    imageMap.mappings[0].target_image = imageMap.mappings[0].target_image.replace(
+      /@sha256:[0-9a-f]{64}$/,
+      `@sha256:${'6'.repeat(64)}`
+    );
+    break;
+  case 'target_image_outside_registry':
+    imageMap.mappings[0].target_image =
+      `registry.evil.example/releases/${imageMap.mappings[0].id}@${imageMap.mappings[0].target_digest}`;
+    break;
+  case 'target_image_missing_digest':
+    imageMap.mappings[0].target_image = imageMap.mappings[0].target_image.replace(
+      /@sha256:[0-9a-f]{64}$/,
+      ''
+    );
+    break;
   default:
     throw new Error(`unknown image-map mutation: ${mutation}`);
 }
@@ -360,6 +401,73 @@ const imageArtifactDeclarations = imageMap.mappings.map((mapping) => {
   };
 });
 
+function writeBundleText(relativePath, value) {
+  const file = path.join(bundleRoot, relativePath);
+  writeText(file, value);
+  return {
+    path: relativePath,
+    sha256: digestFile(file)
+  };
+}
+
+const runbookArtifact = writeBundleText(
+  'payload/runbook.md',
+  '# AgentSmith airgap operator runbook\n\nFollow the approved local install procedure.\n'
+);
+const scriptArtifact = writeBundleText(
+  'payload/install.sh',
+  '#!/usr/bin/env sh\nset -eu\nprintf "%s\\n" "operator-reviewed local script placeholder"\n'
+);
+const schemaArtifact = writeBundleText(
+  'payload/profile-values.schema.json',
+  JSON.stringify({ type: 'object', additionalProperties: false }, null, 2) + '\n'
+);
+const exampleArtifact = writeBundleText(
+  'payload/profile-values.example.yaml',
+  'namespace: agentsmith\n'
+);
+const checksumsArtifact = writeBundleText(
+  'payload/checksums.txt',
+  'checksums are bound by airgap-bundle-manifest sha256 declarations\n'
+);
+const bundledToolArtifact = writeBundleText(
+  'tools/kubectl-placeholder.txt',
+  'bundled tool placeholder; this diagnostic only checks file sha256\n'
+);
+
+const payloadArtifacts = [
+  {
+    id: 'operator_runbook',
+    kind: 'runbook',
+    path: runbookArtifact.path,
+    sha256: runbookArtifact.sha256
+  },
+  {
+    id: 'install_script',
+    kind: 'script',
+    path: scriptArtifact.path,
+    sha256: scriptArtifact.sha256
+  },
+  {
+    id: 'profile_values_schema',
+    kind: 'profile_values_schema',
+    path: schemaArtifact.path,
+    sha256: schemaArtifact.sha256
+  },
+  {
+    id: 'profile_values_example',
+    kind: 'profile_values_example',
+    path: exampleArtifact.path,
+    sha256: exampleArtifact.sha256
+  },
+  {
+    id: 'bundle_checksums',
+    kind: 'checksums',
+    path: checksumsArtifact.path,
+    sha256: checksumsArtifact.sha256
+  }
+];
+
 const manifest = {
   schema_version: 'agentsmith.airgap-bundle-manifest/v1',
   release_id: contract.release_id,
@@ -395,6 +503,27 @@ const manifest = {
     }
   ],
   image_artifact_declarations: imageArtifactDeclarations,
+  payload_artifacts: payloadArtifacts,
+  operator_prerequisites: {
+    substrate_connection_truth_ref: 'operator note: substrate truth evidence in internal record',
+    target_registry_proof_ref: 'operator note: target registry proof in internal record',
+    tools: [
+      {
+        name: 'kubectl',
+        version: '1.30.0',
+        source: 'bundled',
+        path: bundledToolArtifact.path,
+        sha256: bundledToolArtifact.sha256
+      },
+      {
+        name: 'skopeo',
+        version: '1.16.0',
+        source: 'operator_prerequisite',
+        location: 'operator provided workstation inventory: skopeo',
+        proof: 'signed operator prerequisite proof: skopeo'
+      }
+    ]
+  },
   substrate: {
     mode: 'external_declared',
     bundled: false
@@ -428,6 +557,120 @@ switch (mutation) {
     break;
   case 'unexpected_substrate_field':
     manifest.substrate.extra_field = 'not-allowed';
+    break;
+  case 'missing_payload_artifacts':
+    delete manifest.payload_artifacts;
+    break;
+  case 'missing_required_payload_kind':
+    manifest.payload_artifacts = manifest.payload_artifacts.filter(
+      (artifact) => artifact.kind !== 'checksums'
+    );
+    break;
+  case 'payload_sha_mismatch':
+    manifest.payload_artifacts[0].sha256 = `sha256:${'3'.repeat(64)}`;
+    break;
+  case 'unexpected_payload_field':
+    manifest.payload_artifacts[0].extra_field = 'not-allowed';
+    break;
+  case 'payload_unknown_kind':
+    manifest.payload_artifacts[0].kind = 'readme';
+    break;
+  case 'missing_payload_file':
+    fs.rmSync(path.join(bundleRoot, manifest.payload_artifacts[0].path));
+    break;
+  case 'payload_path_traversal':
+    manifest.payload_artifacts[0].path = '../runbook.md';
+    break;
+  case 'duplicate_payload_id':
+    manifest.payload_artifacts[1].id = manifest.payload_artifacts[0].id;
+    break;
+  case 'unexpected_operator_field':
+    manifest.operator_prerequisites.extra_field = 'not-allowed';
+    break;
+  case 'missing_operator_prerequisites':
+    delete manifest.operator_prerequisites;
+    break;
+  case 'operator_tools_empty':
+    manifest.operator_prerequisites.tools = [];
+    break;
+  case 'operator_ref_empty':
+    manifest.operator_prerequisites.substrate_connection_truth_ref = ' ';
+    break;
+  case 'unexpected_tool_field':
+    manifest.operator_prerequisites.tools[0].extra_field = 'not-allowed';
+    break;
+  case 'bundled_tool_sha_mismatch':
+    manifest.operator_prerequisites.tools[0].sha256 = `sha256:${'4'.repeat(64)}`;
+    break;
+  case 'operator_tool_missing_proof':
+    delete manifest.operator_prerequisites.tools[1].proof;
+    break;
+  case 'tool_source_unknown':
+    manifest.operator_prerequisites.tools[0].source = 'download';
+    break;
+  case 'tool_source_missing':
+    delete manifest.operator_prerequisites.tools[0].source;
+    break;
+  case 'tool_field_mixing':
+    manifest.operator_prerequisites.tools[0].location = 'operator provided workstation inventory kubectl';
+    break;
+  case 'bundled_tool_missing_path':
+    delete manifest.operator_prerequisites.tools[0].path;
+    break;
+  case 'bundled_tool_missing_sha':
+    delete manifest.operator_prerequisites.tools[0].sha256;
+    break;
+  case 'operator_tool_missing_version':
+    delete manifest.operator_prerequisites.tools[1].version;
+    break;
+  case 'operator_ref_https':
+    manifest.operator_prerequisites.substrate_connection_truth_ref =
+      'https://example.invalid/substrate-truth.json';
+    break;
+  case 'operator_ref_embedded_https':
+    manifest.operator_prerequisites.target_registry_proof_ref =
+      'operator proof at https://example.invalid/proof';
+    break;
+  case 'operator_ref_token':
+    manifest.operator_prerequisites.target_registry_proof_ref =
+      'token=abcdefghijklmnop';
+    break;
+  case 'operator_ref_public_download':
+    manifest.operator_prerequisites.substrate_connection_truth_ref =
+      'operator public download evidence record';
+    break;
+  case 'operator_ref_wget':
+    manifest.operator_prerequisites.target_registry_proof_ref =
+      'operator evidence: wget example.invalid/proof';
+    break;
+  case 'operator_tool_location_https':
+    manifest.operator_prerequisites.tools[1].location = 'https://example.invalid/skopeo';
+    break;
+  case 'operator_tool_location_embedded_oras':
+    manifest.operator_prerequisites.tools[1].location =
+      'location see oras://registry.invalid/tool';
+    break;
+  case 'operator_tool_location_wget':
+    manifest.operator_prerequisites.tools[1].location =
+      'operator location: wget example.invalid/skopeo';
+    break;
+  case 'operator_tool_proof_https':
+    manifest.operator_prerequisites.tools[1].proof = 'https://example.invalid/proof';
+    break;
+  case 'operator_tool_proof_embedded_https':
+    manifest.operator_prerequisites.tools[1].proof =
+      'operator proof at https://example.invalid/proof';
+    break;
+  case 'operator_tool_proof_docker_pull':
+    manifest.operator_prerequisites.tools[1].proof =
+      'operator proof: docker pull registry.invalid/skopeo:1.16';
+    break;
+  case 'operator_tool_proof_skopeo_copy':
+    manifest.operator_prerequisites.tools[1].proof =
+      'operator proof: skopeo copy source image into offline archive';
+    break;
+  case 'operator_tool_proof_token':
+    manifest.operator_prerequisites.tools[1].proof = 'Bearer abcdefghijklmnop';
     break;
   case 'missing_image_artifact_file':
     fs.rmSync(path.join(bundleRoot, manifest.image_artifact_declarations[0].path));
@@ -521,6 +764,25 @@ const [reportFile] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
 
+function assertNoLeakKeys(value, path = 'report') {
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      assertNoLeakKeys(item, `${path}[${index}]`);
+    }
+    return;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'path' || key === 'location' || key === 'proof' || key.endsWith('_ref')) {
+      throw new Error(`report must not include leak-prone key: ${path}.${key}`);
+    }
+    assertNoLeakKeys(item, `${path}.${key}`);
+  }
+}
+
 if (report.schema !== 'agentsmith.airgap-bundle-check-report/v1') {
   throw new Error(`unexpected schema: ${report.schema}`);
 }
@@ -546,6 +808,21 @@ if (!Number.isInteger(imageMapCount) || imageMapCount < 1) {
 if (report.image_artifact_declaration_count !== imageMapCount) {
   throw new Error(`unexpected image artifact count: ${report.image_artifact_declaration_count}`);
 }
+if (report.payload_artifact_count !== 5) {
+  throw new Error(`unexpected payload artifact count: ${report.payload_artifact_count}`);
+}
+if (report.tool_count !== 2) {
+  throw new Error(`unexpected tool count: ${report.tool_count}`);
+}
+if (report.bundled_tool_count !== 1) {
+  throw new Error(`unexpected bundled tool count: ${report.bundled_tool_count}`);
+}
+if (report.operator_prerequisite_tool_count !== 1) {
+  throw new Error(
+    `unexpected operator prerequisite tool count: ${report.operator_prerequisite_tool_count}`
+  );
+}
+assertNoLeakKeys(report);
 for (const [label, digest] of [
   ['release contract', report.artifacts?.release_contract?.input_sha256],
   ['deploy template package input', report.artifacts?.deploy_template_package?.input_sha256],
@@ -561,7 +838,9 @@ for (const [label, digest] of [
   }
 }
 if (
-  /release_verdict|verdict|deploy_readiness|release_readiness|package_readiness|offline_install_readiness|offline_install_ready|registry_presence|image_load|docker|skopeo|oras|kubectl|pull|push|mirror|save|load/.test(serialized)
+  /\b(?:release_verdict|verdict|deploy_readiness|release_readiness|package_readiness|offline_install_readiness|offline_install_ready|registry_presence|image_load|docker|skopeo|oras|kubectl|pull|push|mirror|save|load)\b/.test(
+    serialized
+  )
 ) {
   throw new Error('report must not claim readiness or verification verdict fields');
 }
@@ -570,6 +849,13 @@ if (/required_product_flows|product_flows|product_flow_results/.test(serialized)
 }
 if (/password|token|secret|client_secret|kubeconfig|authorization|bearer/i.test(serialized)) {
   throw new Error('report must not include raw secret-ish payloads');
+}
+if (
+  /payload\/|tools\/|operator note:|operator provided workstation|signed operator prerequisite/.test(
+    serialized
+  )
+) {
+  throw new Error('report must not include raw payload paths or operator proof/location refs');
 }
 NODE
 }
@@ -737,6 +1023,15 @@ pass "valid airgap bundle manifest accepted with focused non-readiness report"
 expect_image_map_fail missing-target-registry missing_target_registry
 expect_image_map_fail image-map-not-airgap online_target_profile
 expect_image_map_fail mirror-required-false mirror_required_false
+expect_image_map_fail image-map-inventory-source-mismatch mapping_source_image_mismatch
+expect_image_map_fail image-map-source-digest-mismatch mapping_source_digest_mismatch
+expect_image_map_fail image-map-mapping-id-missing mapping_id_missing
+expect_image_map_fail image-map-duplicate-mapping-id duplicate_mapping_id
+expect_image_map_fail image-map-image-count-mismatch image_count_mismatch
+expect_image_map_fail image-map-target-digest-mismatch mapping_target_digest_mismatch
+expect_image_map_fail image-map-target-image-digest-suffix-mismatch target_image_digest_suffix_mismatch
+expect_image_map_fail target-image-outside-registry target_image_outside_registry
+expect_image_map_fail target-image-missing-digest target_image_missing_digest
 
 expect_bundle_fail schema-field-instead-of-schema-version schema_field_instead_of_schema_version
 expect_bundle_fail extra-top-level-schema-with-schema-version extra_top_level_schema_with_schema_version
@@ -745,6 +1040,40 @@ expect_bundle_fail component-id-with-kind component_id_with_kind
 expect_bundle_fail unexpected-binding-field unexpected_binding_field
 expect_bundle_fail unexpected-image-declaration-field unexpected_image_declaration_field
 expect_bundle_fail unexpected-substrate-field unexpected_substrate_field
+expect_bundle_fail missing-payload-artifacts missing_payload_artifacts
+expect_bundle_fail missing-required-payload-kind missing_required_payload_kind
+expect_bundle_fail payload-sha-mismatch payload_sha_mismatch
+expect_bundle_fail unexpected-payload-field unexpected_payload_field
+expect_bundle_fail payload-unknown-kind payload_unknown_kind
+expect_bundle_fail missing-payload-file missing_payload_file
+expect_bundle_fail payload-path-traversal payload_path_traversal
+expect_bundle_fail duplicate-payload-id duplicate_payload_id
+expect_bundle_fail unexpected-operator-field unexpected_operator_field
+expect_bundle_fail missing-operator-prerequisites missing_operator_prerequisites
+expect_bundle_fail operator-tools-empty operator_tools_empty
+expect_bundle_fail operator-ref-empty operator_ref_empty
+expect_bundle_fail unexpected-tool-field unexpected_tool_field
+expect_bundle_fail bundled-tool-sha-mismatch bundled_tool_sha_mismatch
+expect_bundle_fail operator-tool-missing-proof operator_tool_missing_proof
+expect_bundle_fail tool-source-unknown tool_source_unknown
+expect_bundle_fail tool-source-missing tool_source_missing
+expect_bundle_fail tool-field-mixing tool_field_mixing
+expect_bundle_fail bundled-tool-missing-path bundled_tool_missing_path
+expect_bundle_fail bundled-tool-missing-sha bundled_tool_missing_sha
+expect_bundle_fail operator-tool-missing-version operator_tool_missing_version
+expect_bundle_fail operator-ref-https operator_ref_https
+expect_bundle_fail operator-ref-embedded-https operator_ref_embedded_https
+expect_bundle_fail operator-ref-token operator_ref_token
+expect_bundle_fail operator-ref-public-download operator_ref_public_download
+expect_bundle_fail operator-ref-wget operator_ref_wget
+expect_bundle_fail operator-tool-location-https operator_tool_location_https
+expect_bundle_fail operator-tool-location-embedded-oras operator_tool_location_embedded_oras
+expect_bundle_fail operator-tool-location-wget operator_tool_location_wget
+expect_bundle_fail operator-tool-proof-https operator_tool_proof_https
+expect_bundle_fail operator-tool-proof-embedded-https operator_tool_proof_embedded_https
+expect_bundle_fail operator-tool-proof-docker-pull operator_tool_proof_docker_pull
+expect_bundle_fail operator-tool-proof-skopeo-copy operator_tool_proof_skopeo_copy
+expect_bundle_fail operator-tool-proof-token operator_tool_proof_token
 expect_bundle_fail missing-image-artifact-file missing_image_artifact_file
 expect_bundle_fail missing-component-file missing_component_file
 expect_bundle_fail missing-deploy-template-archive-component missing_deploy_template_archive_component

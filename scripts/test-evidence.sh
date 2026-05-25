@@ -303,7 +303,11 @@ const airgapBundleCheckReport = {
   schema: 'agentsmith.airgap-bundle-check-report/v1',
   scope: 'airgap_bundle_manifest_check_only',
   readiness: false,
-  status: 'pass'
+  status: 'pass',
+  payload_artifact_count: 4,
+  tool_count: 2,
+  bundled_tool_count: 1,
+  operator_prerequisite_tool_count: 1
 };
 const airgapBundleManifest = {
   schema_version: 'agentsmith.airgap-bundle-manifest/v1',
@@ -320,6 +324,52 @@ const airgapBundleManifest = {
   },
   components: [],
   image_artifact_declarations: [],
+  payload_artifacts: [
+    {
+      id: 'operator_runbook',
+      kind: 'runbook',
+      path: 'payload/runbook.md',
+      sha256: `sha256:${'1'.repeat(64)}`
+    },
+    {
+      id: 'install_script',
+      kind: 'script',
+      path: 'payload/install.sh',
+      sha256: `sha256:${'2'.repeat(64)}`
+    },
+    {
+      id: 'profile_values_schema',
+      kind: 'profile_values_schema',
+      path: 'payload/profile-values.schema.json',
+      sha256: `sha256:${'3'.repeat(64)}`
+    },
+    {
+      id: 'bundle_checksums',
+      kind: 'checksums',
+      path: 'payload/checksums.txt',
+      sha256: `sha256:${'4'.repeat(64)}`
+    }
+  ],
+  operator_prerequisites: {
+    substrate_connection_truth_ref: 'operator-substrate-truth-evidence-ref',
+    target_registry_proof_ref: 'operator-target-registry-proof-ref',
+    tools: [
+      {
+        name: 'kubectl',
+        version: '1.30.0',
+        source: 'bundled',
+        path: 'tools/kubectl-placeholder.txt',
+        sha256: `sha256:${'5'.repeat(64)}`
+      },
+      {
+        name: 'skopeo',
+        version: '1.16.0',
+        source: 'operator_prerequisite',
+        location: 'operator provided workstation inventory skopeo',
+        proof: 'signed operator prerequisite proof skopeo'
+      }
+    ]
+  },
   substrate: {
     mode: 'external_declared',
     bundled: false
