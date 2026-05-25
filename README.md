@@ -376,13 +376,15 @@ files, release-kit version policy, and redaction/source-safety rules. The raw en
 `agentsmith.release-kit-evidence-envelope/v1`; AgentSmith owns the separate
 adapter/canonical `agentsmith.release-kit-evidence/v1` shape.
 The raw envelope must set `release_kit_output` to one mapped release-kit output:
-`deploy-result.json#substrate`, `image-map.json`, or
-`render-report.json+rollout-report.json`, or
-`render-report.json+rollout-report.json+smoke-report.json`; release-kit must
-not emit AgentSmith product-flow evidence. `evidence_subject.files` must
+`deploy-result.json#substrate`, `image-map.json`,
+`online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json+airgap-bundle-manifest.json`; release-kit must
+not emit AgentSmith product-flow evidence. Render, rollout, and smoke reports
+remain individual focused diagnostic files, but their combinations are not
+accepted release-kit evidence envelope outputs. `evidence_subject.files` must
 contain only `evidence.json` plus the mapped output files:
-`deploy-result.json`, `image-map.json`, render+rollout reports, or
-render+rollout+smoke reports. Its
+`deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`,
+or `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`. Its
 provenance `subject_name` is `release-kit-evidence-subject`. For
 `external_declared` targets, the envelope must include inline
 `agentsmith.substrate-connection.truth/v1` connection truth.

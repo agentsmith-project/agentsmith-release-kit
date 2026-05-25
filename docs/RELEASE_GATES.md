@@ -444,18 +444,18 @@ non-canonical pre-GA target names, synonym axes, AgentSmith product-flow
 fields, local provenance URIs, absolute paths, `..` escapes, symlinks,
 hardlinks, and obvious secret payloads.
 Accepted `release_kit_output` values are `deploy-result.json#substrate`,
-`image-map.json`, `render-report.json+rollout-report.json`,
-`render-report.json+rollout-report.json+smoke-report.json`,
-`online-deployment-gate-report.json`, and
+`image-map.json`, `online-deployment-gate-report.json`, and
 `airgap-bundle-check-report.json+airgap-bundle-manifest.json`; `AgentSmith
 product flow aggregate` is rejected. The online gate output is accepted only
 for `existing_kubernetes/external_declared/online`; the airgap bundle output is
 accepted only for `existing_kubernetes/external_declared/airgap`. The
 provenance `subject_name` must be `release-kit-evidence-subject`. The subject
 file list must contain only `evidence.json` plus the mapped output files:
-`deploy-result.json`, `image-map.json`, render+rollout reports,
-render+rollout+smoke reports, `online-deployment-gate-report.json`, or
+`deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`, or
 `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`.
+Render, rollout, and smoke reports remain individual focused diagnostic
+outputs, but render+rollout combinations are not accepted release-kit evidence
+envelope outputs.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.

@@ -381,7 +381,7 @@ switch (mutation) {
       }
     ];
     break;
-  case 'valid_render_rollout_output':
+  case 'legacy_render_rollout_output':
     releaseKitOutput = 'render-report.json+rollout-report.json';
     evidence.release_kit_output = releaseKitOutput;
     outputFiles = [
@@ -395,7 +395,7 @@ switch (mutation) {
       }
     ];
     break;
-  case 'valid_render_rollout_smoke_output':
+  case 'legacy_render_rollout_smoke_output':
     releaseKitOutput = 'render-report.json+rollout-report.json+smoke-report.json';
     evidence.release_kit_output = releaseKitOutput;
     outputFiles = [
@@ -820,20 +820,6 @@ run_evidence "$VALID_IMAGE_MAP_ROOT" "$VALID_IMAGE_MAP_OUT" >/dev/null
 assert_pass_report "$VALID_IMAGE_MAP_OUT/evidence-validation-report.json" "image-map.json"
 pass "valid image-map release_kit_output evidence accepted"
 
-VALID_RENDER_ROLLOUT_ROOT="$TMP_DIR/evidence-valid-render-rollout"
-VALID_RENDER_ROLLOUT_OUT="$TMP_DIR/out-valid-render-rollout"
-write_evidence "$VALID_RENDER_ROLLOUT_ROOT" ci_artifact valid_render_rollout_output
-run_evidence "$VALID_RENDER_ROLLOUT_ROOT" "$VALID_RENDER_ROLLOUT_OUT" >/dev/null
-assert_pass_report "$VALID_RENDER_ROLLOUT_OUT/evidence-validation-report.json" "render-report.json+rollout-report.json"
-pass "valid render+rollout release_kit_output evidence accepted"
-
-VALID_RENDER_ROLLOUT_SMOKE_ROOT="$TMP_DIR/evidence-valid-render-rollout-smoke"
-VALID_RENDER_ROLLOUT_SMOKE_OUT="$TMP_DIR/out-valid-render-rollout-smoke"
-write_evidence "$VALID_RENDER_ROLLOUT_SMOKE_ROOT" ci_artifact valid_render_rollout_smoke_output
-run_evidence "$VALID_RENDER_ROLLOUT_SMOKE_ROOT" "$VALID_RENDER_ROLLOUT_SMOKE_OUT" >/dev/null
-assert_pass_report "$VALID_RENDER_ROLLOUT_SMOKE_OUT/evidence-validation-report.json" "render-report.json+rollout-report.json+smoke-report.json"
-pass "valid render+rollout+smoke release_kit_output evidence accepted"
-
 VALID_ONLINE_GATE_ROOT="$TMP_DIR/evidence-valid-online-gate"
 VALID_ONLINE_GATE_OUT="$TMP_DIR/out-valid-online-gate"
 write_evidence "$VALID_ONLINE_GATE_ROOT" ci_artifact valid_online_deployment_gate_output
@@ -877,6 +863,8 @@ expect_fail leading-zero-release-kit-version ci_artifact leading_zero_release_ki
 expect_fail below-contract-release-kit-version ci_artifact below_contract_release_kit_version
 expect_fail unknown-release-kit-output ci_artifact unknown_release_kit_output
 expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
+expect_fail legacy-render-rollout-output ci_artifact legacy_render_rollout_output
+expect_fail legacy-render-rollout-smoke-output ci_artifact legacy_render_rollout_smoke_output
 WRONG_ONLINE_GATE_PROFILE_ROOT="$TMP_DIR/evidence-online-gate-wrong-profile"
 WRONG_ONLINE_GATE_PROFILE_OUT="$TMP_DIR/out-online-gate-wrong-profile"
 write_evidence "$WRONG_ONLINE_GATE_PROFILE_ROOT" ci_artifact online_gate_output_wrong_profile

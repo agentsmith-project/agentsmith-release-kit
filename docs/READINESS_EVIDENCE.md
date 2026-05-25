@@ -145,11 +145,16 @@ raw envelope schema is `agentsmith.release-kit-evidence-envelope/v1`, distinct f
 adapter/canonical `agentsmith.release-kit-evidence/v1`. It is not render,
 apply, deploy, package, release, rollout, smoke, or operator readiness
 evidence. Raw envelopes explicitly name `release_kit_output`, use
-`release-kit-evidence-subject` provenance subjects, list only `evidence.json`
-plus the mapped output files in `evidence_subject.files`, including the
-render+rollout and render+rollout+smoke report combinations,
-`online-deployment-gate-report.json`, and the airgap bundle check report plus
-bundle manifest. Online gate evidence is accepted only for
+`release-kit-evidence-subject` provenance subjects, and list only
+`evidence.json` plus the mapped output files in `evidence_subject.files`.
+Accepted `release_kit_output` values are `deploy-result.json#substrate`,
+`image-map.json`, `online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json+airgap-bundle-manifest.json`. The mapped files
+are `deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`,
+or `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`. Render,
+rollout, and smoke reports remain individual focused diagnostic files, but
+their combinations are not accepted release-kit evidence envelope outputs.
+Online gate evidence is accepted only for
 `existing_kubernetes/external_declared/online`; airgap bundle check evidence is
 accepted only for `existing_kubernetes/external_declared/airgap`. Raw
 envelopes include inline neutral substrate connection truth for

@@ -231,13 +231,15 @@ profile. The raw envelope schema is
 `agentsmith.release-kit-evidence-envelope/v1`; AgentSmith
 `agentsmith.release-kit-evidence/v1` is the separate adapter/canonical shape.
 The raw envelope must explicitly name `release_kit_output` as
-`deploy-result.json#substrate`, `image-map.json`, or
-`render-report.json+rollout-report.json`, or
-`render-report.json+rollout-report.json+smoke-report.json`; release-kit cannot
-produce AgentSmith product-flow evidence. `evidence_subject.files` must
+`deploy-result.json#substrate`, `image-map.json`,
+`online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json+airgap-bundle-manifest.json`; release-kit cannot
+produce AgentSmith product-flow evidence. Render, rollout, and smoke reports
+remain individual focused diagnostic files, but their combinations are not
+accepted release-kit evidence envelope outputs. `evidence_subject.files` must
 contain only `evidence.json` plus the mapped output files:
-`deploy-result.json`, `image-map.json`, render+rollout reports, or
-render+rollout+smoke reports. Its
+`deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`. Its
 artifact provenance `subject_name` is `release-kit-evidence-subject`.
 `external_declared` evidence must carry inline neutral substrate connection
 truth.

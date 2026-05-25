@@ -34,19 +34,12 @@ const EVIDENCE_SUBJECT_URI = 'evidence-subject.json';
 const RELEASE_KIT_OUTPUT_VALUES = new Set([
   'deploy-result.json#substrate',
   'image-map.json',
-  'render-report.json+rollout-report.json',
-  'render-report.json+rollout-report.json+smoke-report.json',
   'online-deployment-gate-report.json',
   'airgap-bundle-check-report.json+airgap-bundle-manifest.json'
 ]);
 const RELEASE_KIT_OUTPUT_REQUIRED_FILES = new Map([
   ['deploy-result.json#substrate', ['deploy-result.json']],
   ['image-map.json', ['image-map.json']],
-  ['render-report.json+rollout-report.json', ['render-report.json', 'rollout-report.json']],
-  [
-    'render-report.json+rollout-report.json+smoke-report.json',
-    ['render-report.json', 'rollout-report.json', 'smoke-report.json']
-  ],
   ['online-deployment-gate-report.json', ['online-deployment-gate-report.json']],
   [
     'airgap-bundle-check-report.json+airgap-bundle-manifest.json',
@@ -54,14 +47,6 @@ const RELEASE_KIT_OUTPUT_REQUIRED_FILES = new Map([
   ]
 ]);
 const RELEASE_KIT_OUTPUT_TARGET_PROFILE_VALUES = new Map([
-  [
-    'render-report.json+rollout-report.json',
-    new Set(['existing_kubernetes/external_declared/online'])
-  ],
-  [
-    'render-report.json+rollout-report.json+smoke-report.json',
-    new Set(['existing_kubernetes/external_declared/online'])
-  ],
   [
     'online-deployment-gate-report.json',
     new Set(['existing_kubernetes/external_declared/online'])

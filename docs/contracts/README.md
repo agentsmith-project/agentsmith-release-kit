@@ -134,13 +134,15 @@ sha256, release id, git sha, and explicit target profile, and writes
 shape. The evidence `git_sha` is the AgentSmith product release commit;
 `artifact_provenance.commit_sha` is the release-kit producer commit and is not
 required to equal it. The raw envelope must include `release_kit_output` as
-`deploy-result.json#substrate`, `image-map.json`, or
-`render-report.json+rollout-report.json`, or
-`render-report.json+rollout-report.json+smoke-report.json`; release-kit must
-not output AgentSmith product-flow evidence. `evidence_subject.files` must
+`deploy-result.json#substrate`, `image-map.json`,
+`online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json+airgap-bundle-manifest.json`; release-kit must
+not output AgentSmith product-flow evidence. Render, rollout, and smoke reports
+remain individual focused diagnostic files, but their combinations are not
+accepted release-kit evidence envelope outputs. `evidence_subject.files` must
 contain only `evidence.json` plus the mapped output files:
-`deploy-result.json`, `image-map.json`, render+rollout reports, or
-render+rollout+smoke reports.
+`deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`.
 Artifact provenance uses `subject_name: release-kit-evidence-subject`.
 `external_declared` envelopes must include inline neutral
 `substrate_connection_truth`. The subject file
