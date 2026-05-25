@@ -48,6 +48,27 @@ export const SUPPORTED_FOCUSED_TARGET_PROFILE_SET = new Set(
 
 const STRICT_SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
+function requireProfileObject(value, label, fail) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail(`${label} must be an object`);
+  }
+  return value;
+}
+
+function requireProfileString(value, label, fail) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    fail(`${label} is required`);
+  }
+  return value;
+}
+
+function requireProfileBoolean(value, label, fail) {
+  if (typeof value !== 'boolean') {
+    fail(`${label} must be a boolean`);
+  }
+  return value;
+}
+
 export function parseCanonicalTargetProfile(value, fail, label = 'target_profile') {
   if (typeof value !== 'string' || value.trim() === '') {
     fail(`${label} is required`);
@@ -73,6 +94,49 @@ export function parseCanonicalTargetProfile(value, fail, label = 'target_profile
     target_cluster: targetCluster,
     substrate_source: substrateSource,
     distribution
+  };
+}
+
+export function validateContractTargetProfileEntry(value, fail, label) {
+  const profile = requireProfileObject(value, label, fail);
+  const targetCluster = requireProfileString(
+    profile.target_cluster,
+    `${label}.target_cluster`,
+    fail
+  );
+  const substrateSource = requireProfileString(
+    profile.substrate_source,
+    `${label}.substrate_source`,
+    fail
+  );
+  const distribution = requireProfileString(profile.distribution, `${label}.distribution`, fail);
+  const profileTuple = `${targetCluster}/${substrateSource}/${distribution}`;
+
+  if (!CANONICAL_DECLARABLE_TARGET_PROFILE_SET.has(profileTuple)) {
+    fail(
+      `${label} must be one of canonical profiles: ${CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.join(
+        ', '
+      )}`
+    );
+  }
+
+  if (Object.prototype.hasOwnProperty.call(profile, 'support_level')) {
+    fail(`${label}.support_level is not allowed; use ${label}.required`);
+  }
+  if (!Object.prototype.hasOwnProperty.call(profile, 'required')) {
+    fail(`${label}.required is required`);
+  }
+  const required = requireProfileBoolean(profile.required, `${label}.required`, fail);
+  if (targetCluster === 'kind_rehearsal' && required) {
+    fail(`${label}: kind_rehearsal target profile must not be required`);
+  }
+
+  return {
+    value: profileTuple,
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution,
+    required
   };
 }
 

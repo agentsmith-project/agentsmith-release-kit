@@ -3,7 +3,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { parseCanonicalTargetProfile } from './lib/release-kit-version-policy.mjs';
+import {
+  parseCanonicalTargetProfile,
+  validateContractTargetProfileEntry
+} from './lib/release-kit-version-policy.mjs';
 
 const REQUIRED_ARGS = [
   'releaseContract',
@@ -13,9 +16,6 @@ const REQUIRED_ARGS = [
 ];
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const REPORT_SCHEMA = 'agentsmith.render-check-report/v1';
-const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
-const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
-const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
 const WORKLOAD_KINDS = new Set([
   'Deployment',
   'StatefulSet',
@@ -270,14 +270,6 @@ function requireGitSha(value, label) {
   return gitSha;
 }
 
-function requireEnumString(value, label, allowedValues) {
-  const text = requireString(value, label);
-  if (!allowedValues.has(text)) {
-    fail(`${label} must be one of: ${[...allowedValues].join(', ')}`);
-  }
-  return text;
-}
-
 function assertSchemaVersion(value, expected, label) {
   const schemaVersion = requireString(value, label);
   if (schemaVersion !== expected) {
@@ -291,30 +283,19 @@ function parseTargetProfile(targetProfile) {
 
 function assertContractTargetProfiles(contract, targetProfile) {
   const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
+  const seen = new Map();
   let matched = false;
 
   for (const [index, profileValue] of profiles.entries()) {
-    const profile = requireObject(profileValue, `release_contract.target_profiles[${index}]`);
-    const targetCluster = requireEnumString(
-      profile.target_cluster,
-      `release_contract.target_profiles[${index}].target_cluster`,
-      TARGET_CLUSTER_VALUES
-    );
-    const substrateSource = requireEnumString(
-      profile.substrate_source,
-      `release_contract.target_profiles[${index}].substrate_source`,
-      SUBSTRATE_SOURCE_VALUES
-    );
-    const distribution = requireEnumString(
-      profile.distribution,
-      `release_contract.target_profiles[${index}].distribution`,
-      DISTRIBUTION_VALUES
-    );
-    if (
-      targetCluster === targetProfile.target_cluster &&
-      substrateSource === targetProfile.substrate_source &&
-      distribution === targetProfile.distribution
-    ) {
+    const label = `release_contract.target_profiles[${index}]`;
+    const profile = validateContractTargetProfileEntry(profileValue, fail, label);
+
+    if (seen.has(profile.value)) {
+      fail(`${label} duplicates target profile tuple declared at ${seen.get(profile.value)}`);
+    }
+    seen.set(profile.value, label);
+
+    if (profile.value === targetProfile.value) {
       matched = true;
     }
   }

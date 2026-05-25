@@ -420,6 +420,13 @@ switch (mutation) {
   case 'kind-required':
     contract.target_profiles[2].required = true;
     break;
+  case 'noncanonical-extra-kind-external-declared':
+    contract.target_profiles.push({
+      ...contract.target_profiles[2],
+      substrate_source: 'external_declared',
+      required: false
+    });
+    break;
   default:
     throw new Error(`unknown target profile mutation: ${mutation}`);
 }
@@ -508,6 +515,35 @@ expect_target_profile_fail() {
   fi
 
   pass "canonical profiles only; non-canonical target profile rejected: $label"
+}
+
+expect_contract_target_profile_fail() {
+  local label="$1"
+  local mutation="$2"
+  local contract="$TMP_DIR/release-contract.$label.json"
+  local output_dir="$TMP_DIR/out-contract-target-$label"
+
+  mutate_contract_target_profile "$mutation" "$VALID_CONTRACT_MATERIAL" "$contract"
+
+  if run_render \
+    "$contract" \
+    "$VALID_PACKAGE_MATERIAL" \
+    "$VALID_ARCHIVE" \
+    "$VALID_VALUES" \
+    "$VALID_TRUTH" \
+    "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected invalid release contract target profile to fail: $label"
+  fi
+
+  if ! grep -q "canonical profiles" "$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected canonical release contract target profile message for: $label"
+  fi
+
+  pass "release contract canonical target profiles enforced: $label"
 }
 
 prepare_archive_case() {
@@ -630,6 +666,9 @@ expect_fail_case unknown-variable \
 
 expect_target_profile_fail noncanonical-local-kind "local-kind/external_declared/online"
 expect_target_profile_fail noncanonical-kind-external-declared "kind_rehearsal/external_declared/online"
+expect_contract_target_profile_fail \
+  contract-noncanonical-extra-kind-external-declared \
+  noncanonical-extra-kind-external-declared
 
 MISSING_REQUIRED_CONTRACT="$TMP_DIR/release-contract.missing-target-required.json"
 mutate_contract_target_profile missing-required \

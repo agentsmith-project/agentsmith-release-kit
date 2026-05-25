@@ -79,6 +79,61 @@ expect_target_profile_fail() {
   pass "canonical profiles only; non-canonical pre-GA name or synonym axis rejected: $label"
 }
 
+mutate_contract_target_profile() {
+  local mutation="$1"
+  local contract_output="$2"
+
+  "$NODE_BIN" --input-type=module - "$mutation" "$VALID_CONTRACT" "$contract_output" <<'NODE'
+import fs from 'node:fs';
+
+const [mutation, contractInput, contractOutput] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+
+switch (mutation) {
+  case 'noncanonical-extra-kind-external-declared':
+    contract.target_profiles.push({
+      ...contract.target_profiles[2],
+      substrate_source: 'external_declared',
+      required: false
+    });
+    break;
+  default:
+    throw new Error(`unknown target profile mutation: ${mutation}`);
+}
+
+fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
+expect_contract_target_profile_fail() {
+  local label="$1"
+  local mutation="$2"
+  local rendered_manifests="$TMP_DIR/manifests-contract-target-$label"
+  local output_dir="$TMP_DIR/out-contract-target-$label"
+  local contract="$TMP_DIR/release-contract.$label.json"
+
+  write_manifests "$rendered_manifests" valid
+  mutate_contract_target_profile "$mutation" "$contract"
+
+  if run_render_check \
+    "$rendered_manifests" \
+    "$output_dir" \
+    "$TARGET_PROFILE" \
+    "$contract" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected invalid release contract target profile to fail: $label"
+  fi
+
+  if ! grep -q "canonical profiles" "$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected canonical release contract target profile message for: $label"
+  fi
+
+  pass "release contract canonical target profiles enforced: $label"
+}
+
 expect_forbidden_root_cli_fail() {
   local label="$1"
   local rendered_manifests="$TMP_DIR/manifests-forbidden-root-$label"
@@ -417,6 +472,9 @@ expect_fail flow_style_inline_list_unknown_image
 expect_fail commented_doc_separator_unknown_image
 expect_target_profile_fail noncanonical_local_kind "local-kind/external_declared/online"
 expect_target_profile_fail noncanonical_kind_external_declared "kind_rehearsal/external_declared/online"
+expect_contract_target_profile_fail \
+  contract_noncanonical_extra_kind_external_declared \
+  noncanonical-extra-kind-external-declared
 expect_fail secret_payload
 expect_fail symlink_escape
 expect_forbidden_root_cli_fail missing_forbidden_root

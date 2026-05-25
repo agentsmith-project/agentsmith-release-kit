@@ -9,7 +9,10 @@ import {
   assertNoUnsafeSubstratePayload,
   validateSubstrateConnectionTruth
 } from './lib/substrate-truth-validation.mjs';
-import { parseCanonicalTargetProfile } from './lib/release-kit-version-policy.mjs';
+import {
+  parseCanonicalTargetProfile,
+  validateContractTargetProfileEntry
+} from './lib/release-kit-version-policy.mjs';
 
 const REQUIRED_ARGS = [
   'releaseContract',
@@ -24,9 +27,6 @@ const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_PACKAGE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const DEPLOY_TEMPLATE_MANIFEST_SCHEMA = 'agentsmith.deploy-template-manifest/v1';
 const REPORT_SCHEMA = 'agentsmith.manifest-render-report/v1';
-const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
-const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
-const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
 const WORKLOAD_KINDS = new Set([
   'Deployment',
   'StatefulSet',
@@ -321,13 +321,6 @@ function requireString(value, label) {
   return value;
 }
 
-function requireBoolean(value, label) {
-  if (typeof value !== 'boolean') {
-    fail(`${label} must be a boolean`);
-  }
-  return value;
-}
-
 function requireDigest(value, label) {
   const digest = requireString(value, label);
   if (!DIGEST_RE.test(digest)) {
@@ -342,14 +335,6 @@ function requireGitSha(value, label) {
     fail(`${label} must be a 40-character git sha`);
   }
   return gitSha;
-}
-
-function requireEnumString(value, label, allowedValues) {
-  const text = requireString(value, label);
-  if (!allowedValues.has(text)) {
-    fail(`${label} must be one of: ${[...allowedValues].join(', ')}`);
-  }
-  return text;
 }
 
 function assertSchemaVersion(value, expected, label) {
@@ -387,43 +372,19 @@ function parseTargetProfile(targetProfile) {
 
 function assertContractTargetProfiles(contract, targetProfile) {
   const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
+  const seen = new Map();
   let matched = false;
 
   for (const [index, profileValue] of profiles.entries()) {
-    const profile = requireObject(profileValue, `release_contract.target_profiles[${index}]`);
-    const targetCluster = requireEnumString(
-      profile.target_cluster,
-      `release_contract.target_profiles[${index}].target_cluster`,
-      TARGET_CLUSTER_VALUES
-    );
-    const substrateSource = requireEnumString(
-      profile.substrate_source,
-      `release_contract.target_profiles[${index}].substrate_source`,
-      SUBSTRATE_SOURCE_VALUES
-    );
-    const distribution = requireEnumString(
-      profile.distribution,
-      `release_contract.target_profiles[${index}].distribution`,
-      DISTRIBUTION_VALUES
-    );
-    if (Object.prototype.hasOwnProperty.call(profile, 'support_level')) {
-      fail(`release_contract.target_profiles[${index}].support_level is not allowed; use release_contract.target_profiles[${index}].required`);
+    const label = `release_contract.target_profiles[${index}]`;
+    const profile = validateContractTargetProfileEntry(profileValue, fail, label);
+
+    if (seen.has(profile.value)) {
+      fail(`${label} duplicates target profile tuple declared at ${seen.get(profile.value)}`);
     }
-    if (!Object.prototype.hasOwnProperty.call(profile, 'required')) {
-      fail(`release_contract.target_profiles[${index}].required is required`);
-    }
-    const required = requireBoolean(
-      profile.required,
-      `release_contract.target_profiles[${index}].required`
-    );
-    if (targetCluster === 'kind_rehearsal' && required) {
-      fail(`release_contract.target_profiles[${index}]: kind_rehearsal target profile must not be required`);
-    }
-    if (
-      targetCluster === targetProfile.target_cluster &&
-      substrateSource === targetProfile.substrate_source &&
-      distribution === targetProfile.distribution
-    ) {
+    seen.set(profile.value, label);
+
+    if (profile.value === targetProfile.value) {
       matched = true;
     }
   }
