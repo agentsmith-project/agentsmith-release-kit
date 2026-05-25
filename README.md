@@ -242,7 +242,7 @@ count/digest summaries. It does not log in to a registry, pull, push, mirror,
 save, load, parse OCI tar contents, prove registry presence, install offline,
 deploy, package, or claim release readiness. `bundle-create-report.json` is
 not an accepted release-kit evidence envelope output; evidence remains limited
-to the existing airgap bundle check report plus manifest pair.
+to the existing airgap bundle check report plus manifest plus image-map set.
 
 Airgap bundle manifest/digest focused diagnostic:
 
@@ -461,24 +461,37 @@ Release-kit evidence envelope focused diagnostic:
 bash scripts/test-evidence.sh
 ```
 
-`--evidence` validates only a future deployment/package evidence envelope
-already present under an evidence root. The root must contain `evidence.json`
-and `evidence-subject.json`; the check binds the envelope to the supplied
-release contract digest, release identity, target profile, provenance, subject
-files, release-kit version policy, and redaction/source-safety rules. The raw envelope schema is
+`--evidence` validates only a focused release-kit evidence envelope already
+present under an evidence root. The root must contain `evidence.json` and
+`evidence-subject.json`; the check binds the envelope to the supplied release
+contract digest, release identity, target profile, provenance, subject files,
+release-kit version policy, output-specific semantics, and
+redaction/source-safety rules. The raw envelope schema is
 `agentsmith.release-kit-evidence-envelope/v1`; AgentSmith owns the separate
 adapter/canonical `agentsmith.release-kit-evidence/v1` shape.
 The raw envelope must set `release_kit_output` to one mapped release-kit output:
-`deploy-result.json#substrate`, `image-map.json`,
-`online-deployment-gate-report.json`, or
-`airgap-bundle-check-report.json+airgap-bundle-manifest.json`; release-kit must
-not emit AgentSmith product-flow evidence. Render, rollout, and smoke reports
+`image-map.json`, `online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json`;
+release-kit must
+not emit AgentSmith product-flow evidence. Each accepted output is re-read and
+semantically checked. Image-map evidence follows the same image adoption rule as
+render: `mirror_required: false` must omit `target_registry` and keep
+`target_image === source_image`, while `mirror_required: true` must use the
+deterministic target-registry mirror ref. Online gate evidence is accepted only
+from confirmed apply output on `existing_kubernetes/external_declared/online`:
+`mode` must be `apply`, producer steps must be non-empty and include apply plus
+rollout, and `server-dry-run` reports are rejected. Airgap bundle evidence must
+be a real bundle-check triplet: the report, `airgap-bundle-manifest.json`, and
+`image-map.json` must agree on required component, image artifact, payload/tool
+count, and digest bindings; `components: []` is invalid. The old two-file
+airgap output value is rejected. `deploy-result.json#substrate` is future
+reserved and is not accepted during pre-GA. Render, rollout, and smoke reports
 remain individual focused diagnostic files, but their combinations are not
 accepted release-kit evidence envelope outputs. `evidence_subject.files` must
-contain only `evidence.json` plus the mapped output files:
-`deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`,
-or `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`. Its
-provenance `subject_name` is `release-kit-evidence-subject`. For
+contain only `evidence.json` plus the mapped output files: `image-map.json`,
+`online-deployment-gate-report.json`, or `airgap-bundle-check-report.json` plus
+`airgap-bundle-manifest.json` plus `image-map.json`. Its provenance
+`subject_name` is `release-kit-evidence-subject`. For
 `external_declared` targets, the envelope must include inline
 `agentsmith.substrate-connection.truth/v1` connection truth.
 `evidence-validation-report.json` is written with `readiness: false`,

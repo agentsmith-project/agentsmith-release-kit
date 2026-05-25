@@ -556,21 +556,37 @@ The check verifies the release contract raw sha256, release identity, exact
 target profile axes, `passed`/`failed` status and failure-class pairing,
 the explicit `release_kit_output` mapping, `evidence.release_kit_version`
 plain semver check against `release_contract.min_release_kit_version`,
-release-kit provenance, subject file digests, subject path safety, and
-redaction/source scans for the envelope and subject files. It rejects
-non-canonical pre-GA target names, synonym axes, AgentSmith product-flow
-fields, local provenance URIs, absolute paths, `..` escapes, symlinks,
-hardlinks, and obvious secret payloads.
-Accepted `release_kit_output` values are `deploy-result.json#substrate`,
-`image-map.json`, `online-deployment-gate-report.json`, and
-`airgap-bundle-check-report.json+airgap-bundle-manifest.json`; `AgentSmith
-product flow aggregate` is rejected. The online gate output is accepted only
-for `existing_kubernetes/external_declared/online`; the airgap bundle output is
-accepted only for `existing_kubernetes/external_declared/airgap`. The
-provenance `subject_name` must be `release-kit-evidence-subject`. The subject
-file list must contain only `evidence.json` plus the mapped output files:
-`deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`, or
-`airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`.
+release-kit provenance, subject file digests, subject path safety,
+output-specific semantics, and redaction/source scans for the envelope and
+subject files. It rejects non-canonical pre-GA target names, synonym axes,
+AgentSmith product-flow fields, local provenance URIs, absolute paths, `..`
+escapes, symlinks, hardlinks, and obvious secret payloads.
+Accepted `release_kit_output` values are `image-map.json`,
+`online-deployment-gate-report.json`, and
+`airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json`;
+`AgentSmith product flow aggregate` is rejected. `deploy-result.json#substrate`
+is future reserved and is rejected during pre-GA until there is a current
+producer and schema to revalidate. The image-map output is rechecked for
+`agentsmith.image-map/v1`, `scope: image_map_only`, `readiness: false`,
+`status: pass`, release/target binding, and digest-pinned mappings against
+`release_contract.deploy_image_inventory`; it also follows the render
+image-map adoption rule, so `use_source` cannot carry `target_registry` or drift
+from the source image, and mirrored targets must match the deterministic target
+registry ref. The online gate output is accepted only for
+`existing_kubernetes/external_declared/online` confirmed apply output:
+`mode` must be `apply`, steps must be non-empty, and apply plus rollout steps
+must be present. The airgap bundle output is accepted only for
+`existing_kubernetes/external_declared/airgap` and must bind
+`airgap-bundle-check-report.json` to a bundle-check-compatible
+`airgap-bundle-manifest.json` and a re-read `image-map.json`: required four
+components, image artifact declarations, mandatory payload/tool categories and
+counts, report counts, image-map mappings, and artifact/binding digests must
+agree. The old two-file airgap output value is rejected. The provenance
+`subject_name` must be `release-kit-evidence-subject`. The subject file list
+must contain only `evidence.json` plus the mapped output files:
+`image-map.json`, `online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json` plus
+`image-map.json`.
 Render, rollout, and smoke reports remain individual focused diagnostic
 outputs, but render+rollout combinations are not accepted release-kit evidence
 envelope outputs. `airgap-bundle-load-plan-report.json` is also intentionally

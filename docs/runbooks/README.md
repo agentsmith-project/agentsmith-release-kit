@@ -43,7 +43,8 @@ For the online focused chain, confirmed apply can optionally add
 release-kit provenance such as CI artifact or signed operator-run metadata.
 The gate writes a focused evidence envelope and revalidates it through
 `--evidence`; it is still `readiness=false` and is not deploy or release
-signoff.
+signoff. Evidence intake accepts only this confirmed-apply envelope; server
+dry-run reports and empty-step online gate reports are rejected.
 Online `--target-registry <registry-host[/namespace]>` only asks the gate to
 generate an image-map and render target image references. It does not perform
 registry login, pull, push, mirror, or registry presence checks.
@@ -59,6 +60,9 @@ For image-map, online targets may omit `--target-registry` to use source
 digest refs directly. Airgap targets require
 `--target-registry <registry-host[/namespace]>`; namespace components must be
 lowercase and start and end with alphanumeric characters.
+Evidence intake rechecks the same adoption rule as render: source-use plans
+cannot carry `target_registry`, and mirrored targets must match the
+deterministic target registry ref.
 
 For airgap bundle create, provide exactly one local
 `--image-archive <image_id=file>` for each image-map mapping plus local
@@ -76,7 +80,10 @@ and tool prerequisites. Bundled tool files are checked by path/sha under the
 bundle root; operator prerequisite locations/proofs are strings and must not be
 URLs, download instructions, or secret-looking content. The airgap image-map is
 also rebound to `release_contract.deploy_image_inventory`. Stdout ends with
-`readiness=false`.
+`readiness=false`. Evidence intake accepts only a real check report +
+manifest + `image-map.json` triplet with bundle-check-compatible components,
+image declarations, payload/tool counts, and digests; empty fake manifests are
+rejected.
 
 For airgap bundle load plans, use `--bundle-load-plan` only after a bundle has
 already been assembled. The command reuses `--airgap-bundle-check`, accepts

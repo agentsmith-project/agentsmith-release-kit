@@ -35,12 +35,13 @@ expect_fail() {
   local label="$1"
   local kind="${2:-ci_artifact}"
   local mutation="${3:-$label}"
+  local target_profile="${4:-$TARGET_PROFILE}"
   local evidence_root="$TMP_DIR/evidence-$label"
   local output_dir="$TMP_DIR/out-$label"
 
   write_evidence "$evidence_root" "$kind" "$mutation"
 
-  if run_evidence "$evidence_root" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+  if run_evidence "$evidence_root" "$output_dir" "$target_profile" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected invalid evidence case to fail: $label"
@@ -68,7 +69,7 @@ expect_target_profile_fail() {
 
 assert_pass_report() {
   local report_file="$1"
-  local expected_release_kit_output="${2:-deploy-result.json#substrate}"
+  local expected_release_kit_output="${2:-online-deployment-gate-report.json}"
   "$NODE_BIN" --input-type=module - "$report_file" "$expected_release_kit_output" <<'NODE'
 import fs from 'node:fs';
 
@@ -110,7 +111,14 @@ const producerRepo = 'github.com/agentsmith-project/agentsmith-release-kit';
 const releaseKitCommitSha = 'fedcba9876543210fedcba9876543210fedcba98';
 const contractRaw = fs.readFileSync(contractInput);
 const contract = JSON.parse(contractRaw.toString('utf8'));
-let releaseKitOutput = 'deploy-result.json#substrate';
+const contractDigest = digestBuffer(contractRaw);
+const ONLINE_PROFILE = 'existing_kubernetes/external_declared/online';
+const AIRGAP_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
+  'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json';
+const OLD_AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
+  'airgap-bundle-check-report.json+airgap-bundle-manifest.json';
+let releaseKitOutput = 'online-deployment-gate-report.json';
 
 fs.mkdirSync(evidenceRoot, { recursive: true });
 
@@ -140,6 +148,121 @@ function canonicalDigest(value) {
   return digestBuffer(Buffer.from(JSON.stringify(stableJson(value))));
 }
 
+function jsonDigest(value) {
+  return digestBuffer(Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
+}
+
+function fixtureDigest(char) {
+  return `sha256:${char.repeat(64)}`;
+}
+
+function targetProfileObject(profile) {
+  const [targetCluster, substrateSource, distribution] = profile.split('/');
+  return {
+    value: profile,
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution
+  };
+}
+
+function stripTag(imageWithoutDigest) {
+  const lastSlash = imageWithoutDigest.lastIndexOf('/');
+  const lastColon = imageWithoutDigest.lastIndexOf(':');
+  if (lastColon > lastSlash) {
+    return imageWithoutDigest.slice(0, lastColon);
+  }
+  return imageWithoutDigest;
+}
+
+function firstPathComponentLooksLikeRegistry(component) {
+  return (
+    component.includes('.') ||
+    component.includes(':') ||
+    component === 'localhost' ||
+    component === 'host.docker.internal'
+  );
+}
+
+function sourceRepositoryPath(imageWithoutDigest) {
+  const withoutTag = stripTag(imageWithoutDigest);
+  const parts = withoutTag.split('/');
+  if (parts.length > 1 && firstPathComponentLooksLikeRegistry(parts[0])) {
+    return parts.slice(1).join('/');
+  }
+  return withoutTag;
+}
+
+function targetImageFor(item, targetRegistry) {
+  if (!targetRegistry) {
+    return item.image;
+  }
+  const imageWithoutDigest = item.image.replace(/@sha256:[0-9a-f]{64}$/, '');
+  const repositoryPath = sourceRepositoryPath(imageWithoutDigest);
+  return `${targetRegistry}/${repositoryPath}@${item.digest}`;
+}
+
+function buildImageMap(profile = ONLINE_PROFILE, targetRegistry) {
+  const mirrorRequired = Boolean(targetRegistry);
+  const mappings = contract.deploy_image_inventory.map((item) => ({
+    id: item.id,
+    source: item.source,
+    source_image: item.image,
+    source_digest: item.digest,
+    target_image: targetImageFor(item, targetRegistry),
+    target_digest: item.digest,
+    action: mirrorRequired ? 'mirror_required' : 'use_source'
+  }));
+  const report = {
+    schema: 'agentsmith.image-map/v1',
+    scope: 'image_map_only',
+    readiness: false,
+    status: 'pass',
+    release_id: contract.release_id,
+    git_sha: contract.git_sha,
+    release_contract: {
+      input_sha256: contractDigest,
+      deploy_image_inventory_count: contract.deploy_image_inventory.length
+    },
+    target_profile: targetProfileObject(profile),
+    mirror_required: mirrorRequired,
+    image_count: mappings.length,
+    mappings
+  };
+  if (targetRegistry) {
+    report.target_registry = targetRegistry;
+  }
+  return report;
+}
+
+function buildGateSteps(includeSmoke = true) {
+  const names = [
+    'inputs',
+    'target-preflight',
+    'template-package',
+    'render',
+    'render-check',
+    'apply',
+    'rollout',
+    ...(includeSmoke ? ['smoke'] : [])
+  ];
+  const reportByStep = {
+    inputs: 'inputs/target-profile-coverage-report.json',
+    'target-preflight': 'target-preflight/target-preflight-report.json',
+    'template-package': 'template-package/template-package-report.json',
+    render: 'render/manifest-render-report.json',
+    'render-check': 'render-check/render-report.json',
+    apply: 'apply/apply-report.json',
+    rollout: 'rollout/rollout-report.json',
+    smoke: 'smoke/smoke-report.json'
+  };
+  return names.map((name) => ({
+    name,
+    status: 'pass',
+    report_paths: [reportByStep[name]]
+  }));
+}
+
 function withoutArtifactProvenance(value) {
   const { artifact_provenance: _artifactProvenance, ...subject } = value;
   return subject;
@@ -155,7 +278,7 @@ function writeJson(relativePath, value) {
 const evidence = {
   schema_version: 'agentsmith.release-kit-evidence-envelope/v1',
   release_kit_output: releaseKitOutput,
-  release_contract_digest: digestBuffer(contractRaw),
+  release_contract_digest: contractDigest,
   release_id: contract.release_id,
   git_sha: contract.git_sha,
   release_kit_version: '0.1.0',
@@ -259,15 +382,7 @@ const deployResult = {
   status: 'passed',
   namespace: 'service-ns'
 };
-const imageMap = {
-  status: 'passed',
-  images: [
-    {
-      name: 'agentsmith-web',
-      digest: `sha256:${'1'.repeat(64)}`
-    }
-  ]
-};
+const imageMap = buildImageMap();
 const renderReport = {
   scope: 'render_check_intake_only',
   readiness: false,
@@ -297,90 +412,188 @@ const onlineDeploymentGateReport = {
   scope: 'online_deployment_gate_only',
   readiness: false,
   status: 'pass',
-  mode: 'server-dry-run'
+  mode: 'apply',
+  release_id: contract.release_id,
+  git_sha: contract.git_sha,
+  release_contract: {
+    input_sha256: contractDigest
+  },
+  target_profile: targetProfileObject(ONLINE_PROFILE),
+  capability_map: {
+    [ONLINE_PROFILE]: {
+      declared: 'supported',
+      intake: 'supported',
+      preflight: 'supported',
+      render: 'supported',
+      apply: 'supported',
+      rollout: 'supported',
+      smoke: 'optional',
+      evidence_envelope: 'optional'
+    }
+  },
+  steps: buildGateSteps(),
+  generated_at: '2026-05-23T12:00:00.000Z'
 };
-const airgapBundleCheckReport = {
-  schema: 'agentsmith.airgap-bundle-check-report/v1',
-  scope: 'airgap_bundle_manifest_check_only',
-  readiness: false,
-  status: 'pass',
-  payload_artifact_count: 4,
-  tool_count: 2,
-  bundled_tool_count: 1,
-  operator_prerequisite_tool_count: 1
+const airgapImageMap = buildImageMap(AIRGAP_PROFILE, 'registry.example.internal/releases');
+const airgapImageMapDigest = jsonDigest(airgapImageMap);
+const deployTemplatePackageInputDigest = fixtureDigest('a');
+const deployTemplateArchiveDigest = fixtureDigest('b');
+const deployTemplateManifestDigest = fixtureDigest('c');
+const componentPaths = {
+  release_contract: 'components/release-contract.json',
+  deploy_template_package: 'components/deploy-template-package.json',
+  deploy_template_archive: 'components/agentsmith-deploy-template-package.tgz',
+  image_map: 'components/image-map.json'
 };
+const imageArtifactDeclarations = airgapImageMap.mappings.map((mapping, index) => ({
+  id: mapping.id,
+  source_image: mapping.source_image,
+  source_digest: mapping.source_digest,
+  target_image: mapping.target_image,
+  target_digest: mapping.target_digest,
+  artifact_format: 'oci_layout_tar',
+  path: `images/${mapping.id}.oci-layout.tar`,
+  sha256: fixtureDigest(String(index + 1))
+}));
+const airgapPayloadArtifacts = [
+  {
+    id: 'operator_runbook',
+    kind: 'runbook',
+    path: 'payload/runbook.md',
+    sha256: fixtureDigest('d')
+  },
+  {
+    id: 'install_script',
+    kind: 'script',
+    path: 'payload/install.sh',
+    sha256: fixtureDigest('e')
+  },
+  {
+    id: 'profile_values_schema',
+    kind: 'profile_values_schema',
+    path: 'payload/profile-values.schema.json',
+    sha256: fixtureDigest('f')
+  },
+  {
+    id: 'profile_values_example',
+    kind: 'profile_values_example',
+    path: 'payload/profile-values.example.yaml',
+    sha256: fixtureDigest('0')
+  },
+  {
+    id: 'bundle_checksums',
+    kind: 'checksums',
+    path: 'payload/checksums.txt',
+    sha256: fixtureDigest('2')
+  }
+];
+const airgapOperatorTools = [
+  {
+    name: 'kubectl',
+    version: '1.30.0',
+    source: 'bundled',
+    path: 'tools/kubectl-placeholder.txt',
+    sha256: fixtureDigest('3')
+  },
+  {
+    name: 'skopeo',
+    version: '1.16.0',
+    source: 'operator_prerequisite',
+    location: 'operator provided workstation inventory skopeo',
+    proof: 'signed operator prerequisite proof skopeo'
+  }
+];
 const airgapBundleManifest = {
   schema_version: 'agentsmith.airgap-bundle-manifest/v1',
   release_id: contract.release_id,
   git_sha: contract.git_sha,
-  target_profile: {
-    value: 'existing_kubernetes/external_declared/airgap',
-    target_cluster: 'existing_kubernetes',
-    substrate_source: 'external_declared',
-    distribution: 'airgap'
-  },
+  target_profile: targetProfileObject(AIRGAP_PROFILE),
   bindings: {
-    release_contract_sha256: digestBuffer(contractRaw)
+    release_contract_sha256: contractDigest,
+    deploy_template_package_sha256: deployTemplatePackageInputDigest,
+    deploy_template_archive_sha256: deployTemplateArchiveDigest,
+    deploy_template_manifest_sha256: deployTemplateManifestDigest,
+    image_map_sha256: airgapImageMapDigest
   },
-  components: [],
-  image_artifact_declarations: [],
-  payload_artifacts: [
+  components: [
     {
-      id: 'operator_runbook',
-      kind: 'runbook',
-      path: 'payload/runbook.md',
-      sha256: `sha256:${'1'.repeat(64)}`
+      kind: 'release_contract',
+      path: componentPaths.release_contract,
+      sha256: contractDigest
     },
     {
-      id: 'install_script',
-      kind: 'script',
-      path: 'payload/install.sh',
-      sha256: `sha256:${'2'.repeat(64)}`
+      kind: 'deploy_template_package',
+      path: componentPaths.deploy_template_package,
+      sha256: deployTemplatePackageInputDigest
     },
     {
-      id: 'profile_values_schema',
-      kind: 'profile_values_schema',
-      path: 'payload/profile-values.schema.json',
-      sha256: `sha256:${'3'.repeat(64)}`
+      kind: 'deploy_template_archive',
+      path: componentPaths.deploy_template_archive,
+      sha256: deployTemplateArchiveDigest
     },
     {
-      id: 'bundle_checksums',
-      kind: 'checksums',
-      path: 'payload/checksums.txt',
-      sha256: `sha256:${'4'.repeat(64)}`
+      kind: 'image_map',
+      path: componentPaths.image_map,
+      sha256: airgapImageMapDigest
     }
   ],
+  image_artifact_declarations: imageArtifactDeclarations,
+  payload_artifacts: airgapPayloadArtifacts,
   operator_prerequisites: {
     substrate_connection_truth_ref: 'operator-substrate-truth-evidence-ref',
     target_registry_proof_ref: 'operator-target-registry-proof-ref',
-    tools: [
-      {
-        name: 'kubectl',
-        version: '1.30.0',
-        source: 'bundled',
-        path: 'tools/kubectl-placeholder.txt',
-        sha256: `sha256:${'5'.repeat(64)}`
-      },
-      {
-        name: 'skopeo',
-        version: '1.16.0',
-        source: 'operator_prerequisite',
-        location: 'operator provided workstation inventory skopeo',
-        proof: 'signed operator prerequisite proof skopeo'
-      }
-    ]
+    tools: airgapOperatorTools
   },
   substrate: {
     mode: 'external_declared',
     bundled: false
   }
 };
+const airgapBundleCheckReport = {
+  schema: 'agentsmith.airgap-bundle-check-report/v1',
+  scope: 'airgap_bundle_manifest_check_only',
+  readiness: false,
+  status: 'pass',
+  release_id: contract.release_id,
+  git_sha: contract.git_sha,
+  target_profile: targetProfileObject(AIRGAP_PROFILE),
+  artifacts: {
+    release_contract: {
+      input_sha256: contractDigest
+    },
+    deploy_template_package: {
+      input_sha256: deployTemplatePackageInputDigest,
+      package_sha256: deployTemplateArchiveDigest,
+      manifest_sha256: deployTemplateManifestDigest,
+      artifact_sha256: deployTemplateArchiveDigest
+    },
+    deploy_template_archive: {
+      input_sha256: deployTemplateArchiveDigest
+    },
+    image_map: {
+      input_sha256: airgapImageMapDigest,
+      image_count: imageArtifactDeclarations.length
+    },
+    bundle_manifest: {
+      input_sha256: fixtureDigest('4'),
+      image_artifact_declaration_count: imageArtifactDeclarations.length
+    }
+  },
+  components_count: 4,
+  image_artifact_declaration_count: imageArtifactDeclarations.length,
+  payload_artifact_count: airgapPayloadArtifacts.length,
+  tool_count: airgapOperatorTools.length,
+  bundled_tool_count: 1,
+  operator_prerequisite_tool_count: 1
+};
 let outputFiles = [
   {
-    path: 'deploy-result.json',
-    value: deployResult
+    path: 'online-deployment-gate-report.json',
+    value: onlineDeploymentGateReport
   }
 ];
+let syncAirgapReportManifestDigest = true;
+let syncAirgapImageMapDigest = true;
 
 const operatorRunId = 'operator-run-10001';
 let provenanceArtifactUri =
@@ -421,18 +634,129 @@ function useTargetProfile(profile) {
   evidence.substrate_connection_truth.distribution = distribution;
 }
 
+function useOnlineGateOutput() {
+  releaseKitOutput = 'online-deployment-gate-report.json';
+  evidence.release_kit_output = releaseKitOutput;
+  outputFiles = [
+    {
+      path: 'online-deployment-gate-report.json',
+      value: onlineDeploymentGateReport
+    }
+  ];
+}
+
+function useImageMapOutput() {
+  releaseKitOutput = 'image-map.json';
+  evidence.release_kit_output = releaseKitOutput;
+  outputFiles = [
+    {
+      path: 'image-map.json',
+      value: imageMap
+    }
+  ];
+}
+
+function useAirgapBundleOutput() {
+  useTargetProfile(AIRGAP_PROFILE);
+  releaseKitOutput = AIRGAP_BUNDLE_EVIDENCE_OUTPUT;
+  evidence.release_kit_output = releaseKitOutput;
+  outputFiles = [
+    {
+      path: 'airgap-bundle-check-report.json',
+      value: airgapBundleCheckReport
+    },
+    {
+      path: 'airgap-bundle-manifest.json',
+      value: airgapBundleManifest
+    },
+    {
+      path: 'image-map.json',
+      value: airgapImageMap
+    }
+  ];
+}
+
 switch (mutation) {
   case 'valid':
     break;
-  case 'valid_image_map_output':
-    releaseKitOutput = 'image-map.json';
+  case 'future_deploy_result_output':
+    releaseKitOutput = 'deploy-result.json#substrate';
     evidence.release_kit_output = releaseKitOutput;
     outputFiles = [
       {
-        path: 'image-map.json',
-        value: imageMap
+        path: 'deploy-result.json',
+        value: deployResult
       }
     ];
+    break;
+  case 'online_gate_wrong_schema':
+    onlineDeploymentGateReport.schema = 'agentsmith.deploy-result/v1';
+    break;
+  case 'online_gate_wrong_scope':
+    onlineDeploymentGateReport.scope = 'release_readiness';
+    break;
+  case 'online_gate_wrong_readiness':
+    onlineDeploymentGateReport.readiness = true;
+    break;
+  case 'online_gate_wrong_status':
+    onlineDeploymentGateReport.status = 'passed';
+    break;
+  case 'online_gate_release_digest_mismatch':
+    onlineDeploymentGateReport.release_contract.input_sha256 = `sha256:${'e'.repeat(64)}`;
+    break;
+  case 'online_gate_report_target_profile_mismatch':
+    onlineDeploymentGateReport.target_profile = targetProfileObject(AIRGAP_PROFILE);
+    break;
+  case 'online_gate_stale_release_id':
+    onlineDeploymentGateReport.release_id = `${contract.release_id}-stale`;
+    break;
+  case 'online_gate_stale_git_sha':
+    onlineDeploymentGateReport.git_sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    break;
+  case 'online_gate_dry_run':
+    onlineDeploymentGateReport.mode = 'server-dry-run';
+    onlineDeploymentGateReport.steps = buildGateSteps(false).filter((step) => step.name !== 'rollout');
+    break;
+  case 'online_gate_empty_steps':
+    onlineDeploymentGateReport.steps = [];
+    break;
+  case 'valid_image_map_output':
+    useImageMapOutput();
+    break;
+  case 'image_map_mapping_missing':
+    useImageMapOutput();
+    imageMap.mappings.pop();
+    imageMap.image_count = imageMap.mappings.length;
+    break;
+  case 'image_map_digest_drift':
+    useImageMapOutput();
+    imageMap.mappings[0].source_digest = `sha256:${'9'.repeat(64)}`;
+    break;
+  case 'image_map_target_registry_with_use_source':
+    useImageMapOutput();
+    imageMap.target_registry = 'registry.example.internal/releases';
+    break;
+  case 'image_map_use_source_target_drift':
+    useImageMapOutput();
+    imageMap.mappings[0].target_image = imageMap.mappings[0].target_image.replace(
+      'ghcr.io',
+      'registry.example.internal'
+    );
+    break;
+  case 'image_map_mirror_target_drift': {
+    useImageMapOutput();
+    const mirroredImageMap = buildImageMap(ONLINE_PROFILE, 'registry.example.internal/releases');
+    Object.assign(imageMap, mirroredImageMap);
+    imageMap.mappings[0].target_image = imageMap.mappings[0].target_image.replace(
+      'registry.example.internal',
+      'registry-drift.example.internal'
+    );
+    break;
+  }
+  case 'image_map_airgap_use_source':
+    useTargetProfile(AIRGAP_PROFILE);
+    Object.assign(imageMap, buildImageMap(AIRGAP_PROFILE));
+    useImageMapOutput();
     break;
   case 'removed_render_rollout_output':
     releaseKitOutput = 'render-report.json+rollout-report.json';
@@ -467,53 +791,102 @@ switch (mutation) {
     ];
     break;
   case 'valid_online_deployment_gate_output':
-    releaseKitOutput = 'online-deployment-gate-report.json';
-    evidence.release_kit_output = releaseKitOutput;
-    outputFiles = [
-      {
-        path: 'online-deployment-gate-report.json',
-        value: onlineDeploymentGateReport
-      }
-    ];
+    useOnlineGateOutput();
     break;
   case 'valid_airgap_bundle_output':
-    useTargetProfile('existing_kubernetes/external_declared/airgap');
-    releaseKitOutput = 'airgap-bundle-check-report.json+airgap-bundle-manifest.json';
+    useAirgapBundleOutput();
+    break;
+  case 'airgap_old_two_file_pair':
+    useAirgapBundleOutput();
+    releaseKitOutput = OLD_AIRGAP_BUNDLE_EVIDENCE_OUTPUT;
     evidence.release_kit_output = releaseKitOutput;
-    outputFiles = [
-      {
-        path: 'airgap-bundle-check-report.json',
-        value: airgapBundleCheckReport
-      },
-      {
-        path: 'airgap-bundle-manifest.json',
-        value: airgapBundleManifest
-      }
-    ];
+    outputFiles = outputFiles.filter((outputFile) => outputFile.path !== 'image-map.json');
+    break;
+  case 'airgap_image_map_missing':
+    useAirgapBundleOutput();
+    outputFiles = outputFiles.filter((outputFile) => outputFile.path !== 'image-map.json');
+    break;
+  case 'airgap_image_map_mirror_required_false':
+    useAirgapBundleOutput();
+    Object.assign(airgapImageMap, buildImageMap(AIRGAP_PROFILE));
+    break;
+  case 'airgap_manifest_target_image_drift':
+    useAirgapBundleOutput();
+    airgapBundleManifest.image_artifact_declarations[0].target_image =
+      airgapBundleManifest.image_artifact_declarations[0].target_image.replace(
+        'registry.example.internal',
+        'registry-drift.example.internal'
+      );
+    break;
+  case 'airgap_tools_empty':
+    useAirgapBundleOutput();
+    airgapBundleManifest.operator_prerequisites.tools = [];
+    airgapBundleCheckReport.tool_count = 0;
+    airgapBundleCheckReport.bundled_tool_count = 0;
+    airgapBundleCheckReport.operator_prerequisite_tool_count = 0;
+    break;
+  case 'airgap_manifest_release_digest_mismatch':
+    useAirgapBundleOutput();
+    airgapBundleManifest.bindings.release_contract_sha256 = `sha256:${'8'.repeat(64)}`;
+    break;
+  case 'airgap_report_manifest_sha_mismatch':
+    useAirgapBundleOutput();
+    syncAirgapReportManifestDigest = false;
+    airgapBundleCheckReport.artifacts.bundle_manifest.input_sha256 = `sha256:${'7'.repeat(64)}`;
+    break;
+  case 'airgap_manifest_target_profile_mismatch':
+    useAirgapBundleOutput();
+    airgapBundleManifest.target_profile = targetProfileObject(ONLINE_PROFILE);
+    break;
+  case 'airgap_manifest_components_empty':
+    useAirgapBundleOutput();
+    airgapBundleManifest.components = [];
+    airgapBundleCheckReport.components_count = 0;
+    break;
+  case 'airgap_image_artifact_declaration_missing':
+    useAirgapBundleOutput();
+    airgapBundleManifest.image_artifact_declarations.pop();
+    break;
+  case 'airgap_missing_required_payload_kind':
+    useAirgapBundleOutput();
+    airgapBundleManifest.payload_artifacts = airgapBundleManifest.payload_artifacts.filter(
+      (artifact) => artifact.kind !== 'checksums'
+    );
+    airgapBundleCheckReport.payload_artifact_count = airgapBundleManifest.payload_artifacts.length;
+    break;
+  case 'airgap_report_payload_count_mismatch':
+    useAirgapBundleOutput();
+    airgapBundleCheckReport.payload_artifact_count += 1;
+    break;
+  case 'airgap_missing_image_map_artifact_digest':
+    useAirgapBundleOutput();
+    delete airgapBundleCheckReport.artifacts.image_map.input_sha256;
+    break;
+  case 'airgap_component_sha_mismatch':
+    useAirgapBundleOutput();
+    syncAirgapImageMapDigest = false;
+    airgapBundleManifest.components.find((component) => component.kind === 'image_map').sha256 =
+      fixtureDigest('6');
+    break;
+  case 'airgap_operator_ref_wget':
+    useAirgapBundleOutput();
+    airgapBundleManifest.operator_prerequisites.target_registry_proof_ref =
+      'operator evidence: wget example.invalid/proof';
+    break;
+  case 'airgap_operator_tool_proof_docker_pull':
+    useAirgapBundleOutput();
+    airgapBundleManifest.operator_prerequisites.tools[1].proof =
+      'operator proof: docker pull registry.invalid/skopeo:1.16';
     break;
   case 'online_gate_output_wrong_profile':
     useTargetProfile('existing_kubernetes/kit_installed/online');
     delete evidence.substrate_connection_truth;
-    releaseKitOutput = 'online-deployment-gate-report.json';
-    evidence.release_kit_output = releaseKitOutput;
-    outputFiles = [
-      {
-        path: 'online-deployment-gate-report.json',
-        value: onlineDeploymentGateReport
-      }
-    ];
+    useOnlineGateOutput();
     break;
   case 'release_kit_output_extra_subject_file':
     break;
   case 'image_map_extra_subject_file':
-    releaseKitOutput = 'image-map.json';
-    evidence.release_kit_output = releaseKitOutput;
-    outputFiles = [
-      {
-        path: 'image-map.json',
-        value: imageMap
-      }
-    ];
+    useImageMapOutput();
     break;
   case 'render_rollout_extra_subject_file':
     releaseKitOutput = 'render-report.json+rollout-report.json';
@@ -664,18 +1037,18 @@ switch (mutation) {
     evidence.target.pull_secret_ref = 'secretRef:release/registry-pull';
     break;
   case 'subject_file_secret_payload':
-    deployResult.database =
+    onlineDeploymentGateReport.database =
       'postgres' + '://user:' + 'password' + '@db.example.internal:5432/appdb';
     break;
   case 'subject_file_source_payload':
-    deployResult.source_path =
+    onlineDeploymentGateReport.source_path =
       '/home/percy/works/mbos-v1/' + 'agent' + 'smith/' + 'sr' + 'c/' + 'ap' + 'p/page.tsx';
     break;
   case 'subject_file_host_docker_internal':
-    deployResult.endpoint = 'https://host.docker.internal:20000/status';
+    onlineDeploymentGateReport.endpoint = 'https://host.docker.internal:20000/status';
     break;
   case 'subject_file_bare_host_docker_internal':
-    deployResult.operator_note = 'declared by host.docker.internal';
+    onlineDeploymentGateReport.operator_note = 'declared by host.docker.internal';
     break;
   case 'evidence_json_secret_payload':
     evidence['client_' + 'secret'] = 'not-real-credential-value';
@@ -708,6 +1081,39 @@ switch (mutation) {
     throw new Error(`unknown mutation: ${mutation}`);
 }
 
+if (
+  outputFiles.some((outputFile) => outputFile.path === 'image-map.json') &&
+  syncAirgapImageMapDigest
+) {
+  const imageMapDigest = jsonDigest(airgapImageMap);
+  if (
+    airgapBundleCheckReport.artifacts?.image_map &&
+    Object.prototype.hasOwnProperty.call(
+      airgapBundleCheckReport.artifacts.image_map,
+      'input_sha256'
+    )
+  ) {
+    airgapBundleCheckReport.artifacts.image_map.input_sha256 = imageMapDigest;
+  }
+  if (airgapBundleManifest.bindings) {
+    airgapBundleManifest.bindings.image_map_sha256 = imageMapDigest;
+  }
+  const imageMapComponent = airgapBundleManifest.components?.find(
+    (component) => component.kind === 'image_map'
+  );
+  if (imageMapComponent) {
+    imageMapComponent.sha256 = imageMapDigest;
+  }
+}
+
+if (
+  outputFiles.some((outputFile) => outputFile.path === 'airgap-bundle-check-report.json') &&
+  syncAirgapReportManifestDigest
+) {
+  airgapBundleCheckReport.artifacts.bundle_manifest.input_sha256 =
+    jsonDigest(airgapBundleManifest);
+}
+
 const outputFilePaths = new Map();
 const subjectEntries = [];
 for (const outputFile of outputFiles) {
@@ -720,6 +1126,7 @@ for (const outputFile of outputFiles) {
 }
 const firstSubjectFile = outputFilePaths.get(subjectEntries[0].path);
 const deployResultFile = outputFilePaths.get('deploy-result.json') || firstSubjectFile;
+const firstSubjectPath = subjectEntries[0].path;
 
 if (mutation === 'subject_missing_file') {
   subjectEntries.push({
@@ -743,9 +1150,9 @@ if (mutation === 'subject_absolute_path') {
   });
 }
 if (mutation === 'subject_symlink') {
-  fs.symlinkSync('deploy-result.json', path.join(evidenceRoot, 'deploy-result-link.json'));
+  fs.symlinkSync(firstSubjectPath, path.join(evidenceRoot, 'output-link.json'));
   subjectEntries.push({
-    path: 'deploy-result-link.json',
+    path: 'output-link.json',
     sha256: digestFile(deployResultFile)
   });
 }
@@ -928,7 +1335,7 @@ VALID_AIRGAP_BUNDLE_ROOT="$TMP_DIR/evidence-valid-airgap-bundle"
 VALID_AIRGAP_BUNDLE_OUT="$TMP_DIR/out-valid-airgap-bundle"
 write_evidence "$VALID_AIRGAP_BUNDLE_ROOT" ci_artifact valid_airgap_bundle_output
 run_evidence "$VALID_AIRGAP_BUNDLE_ROOT" "$VALID_AIRGAP_BUNDLE_OUT" "$AIRGAP_PROFILE" >/dev/null
-assert_pass_report "$VALID_AIRGAP_BUNDLE_OUT/evidence-validation-report.json" "airgap-bundle-check-report.json+airgap-bundle-manifest.json"
+assert_pass_report "$VALID_AIRGAP_BUNDLE_OUT/evidence-validation-report.json" "airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json"
 pass "valid airgap bundle check release_kit_output evidence accepted"
 
 VALID_SECRET_REF_ROOT="$TMP_DIR/evidence-valid-secret-ref"
@@ -959,9 +1366,42 @@ expect_fail short-release-kit-version ci_artifact short_release_kit_version
 expect_fail leading-zero-release-kit-version ci_artifact leading_zero_release_kit_version
 expect_fail below-contract-release-kit-version ci_artifact below_contract_release_kit_version
 expect_fail unknown-release-kit-output ci_artifact unknown_release_kit_output
+expect_fail future-deploy-result-output ci_artifact future_deploy_result_output
 expect_fail bundle-create-report-release-kit-output ci_artifact bundle_create_report_release_kit_output
 expect_fail airgap-bundle-load-plan-report-release-kit-output ci_artifact airgap_bundle_load_plan_report_release_kit_output
 expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
+expect_fail online-gate-wrong-schema ci_artifact online_gate_wrong_schema
+expect_fail online-gate-wrong-scope ci_artifact online_gate_wrong_scope
+expect_fail online-gate-wrong-readiness ci_artifact online_gate_wrong_readiness
+expect_fail online-gate-wrong-status ci_artifact online_gate_wrong_status
+expect_fail online-gate-release-digest-mismatch ci_artifact online_gate_release_digest_mismatch
+expect_fail online-gate-report-target-profile-mismatch ci_artifact online_gate_report_target_profile_mismatch
+expect_fail online-gate-stale-release-id ci_artifact online_gate_stale_release_id
+expect_fail online-gate-stale-git-sha ci_artifact online_gate_stale_git_sha
+expect_fail online-gate-dry-run ci_artifact online_gate_dry_run
+expect_fail online-gate-empty-steps ci_artifact online_gate_empty_steps
+expect_fail image-map-mapping-missing ci_artifact image_map_mapping_missing
+expect_fail image-map-digest-drift ci_artifact image_map_digest_drift
+expect_fail image-map-target-registry-with-use-source ci_artifact image_map_target_registry_with_use_source
+expect_fail image-map-use-source-target-drift ci_artifact image_map_use_source_target_drift
+expect_fail image-map-mirror-target-drift ci_artifact image_map_mirror_target_drift
+expect_fail standalone-airgap-image-map-use-source ci_artifact image_map_airgap_use_source "$AIRGAP_PROFILE"
+expect_fail airgap-old-two-file-pair ci_artifact airgap_old_two_file_pair "$AIRGAP_PROFILE"
+expect_fail airgap-image-map-missing ci_artifact airgap_image_map_missing "$AIRGAP_PROFILE"
+expect_fail airgap-image-map-mirror-required-false ci_artifact airgap_image_map_mirror_required_false "$AIRGAP_PROFILE"
+expect_fail airgap-manifest-target-image-drift ci_artifact airgap_manifest_target_image_drift "$AIRGAP_PROFILE"
+expect_fail airgap-tools-empty ci_artifact airgap_tools_empty "$AIRGAP_PROFILE"
+expect_fail airgap-manifest-release-digest-mismatch ci_artifact airgap_manifest_release_digest_mismatch "$AIRGAP_PROFILE"
+expect_fail airgap-report-manifest-sha-mismatch ci_artifact airgap_report_manifest_sha_mismatch "$AIRGAP_PROFILE"
+expect_fail airgap-manifest-target-profile-mismatch ci_artifact airgap_manifest_target_profile_mismatch "$AIRGAP_PROFILE"
+expect_fail airgap-manifest-components-empty ci_artifact airgap_manifest_components_empty "$AIRGAP_PROFILE"
+expect_fail airgap-image-artifact-declaration-missing ci_artifact airgap_image_artifact_declaration_missing "$AIRGAP_PROFILE"
+expect_fail airgap-missing-required-payload-kind ci_artifact airgap_missing_required_payload_kind "$AIRGAP_PROFILE"
+expect_fail airgap-report-payload-count-mismatch ci_artifact airgap_report_payload_count_mismatch "$AIRGAP_PROFILE"
+expect_fail airgap-missing-image-map-artifact-digest ci_artifact airgap_missing_image_map_artifact_digest "$AIRGAP_PROFILE"
+expect_fail airgap-component-sha-mismatch ci_artifact airgap_component_sha_mismatch "$AIRGAP_PROFILE"
+expect_fail airgap-operator-ref-wget ci_artifact airgap_operator_ref_wget "$AIRGAP_PROFILE"
+expect_fail airgap-operator-tool-proof-docker-pull ci_artifact airgap_operator_tool_proof_docker_pull "$AIRGAP_PROFILE"
 expect_fail removed-render-rollout-output ci_artifact removed_render_rollout_output
 expect_fail removed-render-rollout-smoke-output ci_artifact removed_render_rollout_smoke_output
 WRONG_ONLINE_GATE_PROFILE_ROOT="$TMP_DIR/evidence-online-gate-wrong-profile"

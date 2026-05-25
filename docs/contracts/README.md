@@ -199,15 +199,28 @@ sha256, release id, git sha, and explicit target profile, and writes
 shape. The evidence `git_sha` is the AgentSmith product release commit;
 `artifact_provenance.commit_sha` is the release-kit producer commit and is not
 required to equal it. The raw envelope must include `release_kit_output` as
-`deploy-result.json#substrate`, `image-map.json`,
-`online-deployment-gate-report.json`, or
-`airgap-bundle-check-report.json+airgap-bundle-manifest.json`; release-kit must
-not output AgentSmith product-flow evidence. Render, rollout, and smoke reports
-remain individual focused diagnostic files, but their combinations are not
-accepted release-kit evidence envelope outputs. `evidence_subject.files` must
-contain only subject entries for `evidence.json` plus the mapped output files:
-`deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`, or
-`airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`.
+`image-map.json`, `online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json`;
+release-kit must not output AgentSmith product-flow evidence. Evidence intake accepts only
+outputs that can be re-read and semantically checked: image-map reports bind
+schema/scope/readiness/status, release identity, target profile, and
+digest-pinned mappings to `deploy_image_inventory` and follow the same
+`target_registry`/`use_source`/deterministic mirror ref rule as render;
+online gate reports are accepted only from confirmed apply output for
+`existing_kubernetes/external_declared/online` with `mode: apply` and
+non-empty producer steps including apply and rollout; and the airgap triplet
+must be compatible with `--airgap-bundle-check`, binding the check report to an
+`agentsmith.airgap-bundle-manifest/v1` manifest and re-read `image-map.json`
+with required components, image artifact declarations, mandatory payload/tool
+categories and counts, report counts, mapping alignment, and artifact digests
+aligned. The old two-file airgap output value is rejected.
+`deploy-result.json#substrate` is future reserved and is not accepted during
+pre-GA. Render, rollout, and smoke reports remain individual focused diagnostic
+files, but their combinations are not accepted release-kit evidence envelope
+outputs. `evidence_subject.files` must contain only subject entries for
+`evidence.json` plus the mapped output files: `image-map.json`,
+`online-deployment-gate-report.json`, or `airgap-bundle-check-report.json` plus
+`airgap-bundle-manifest.json` plus `image-map.json`.
 Artifact provenance uses `subject_name: release-kit-evidence-subject`.
 `external_declared` envelopes must include inline neutral
 `substrate_connection_truth`. The subject file
