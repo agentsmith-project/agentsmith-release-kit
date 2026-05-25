@@ -15,6 +15,7 @@ bash scripts/test-template-package.sh
 bash scripts/test-render.sh
 bash scripts/test-render-check.sh
 bash scripts/test-image-map.sh
+bash scripts/test-bundle-create.sh
 bash scripts/test-airgap-bundle-check.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
@@ -127,6 +128,23 @@ Its `image-map.json` must keep `readiness: false` and `scope:
 image_map_only`; it does not log in to a registry, pull, push, mirror, build an
 airgap bundle, import images into kind, call Kubernetes, or claim deploy,
 package, or release readiness.
+
+The current `--bundle-create` path is a focused diagnostic for local airgap
+bundle assembly plus immediate self-check only. It supports only
+`existing_kubernetes/external_declared/airgap`. It consumes the release
+contract, deploy template package descriptor, matching `.tgz` archive, target
+registry, one local image archive per generated image-map mapping, required
+payload files, operator prerequisites, an absent-or-empty bundle root, and an
+output directory. It first reuses `--inputs`, `--template-package`, and
+`--image-map --target-registry`; then it copies local files into `components/`,
+`images/`, `payload/`, optional `tools/`, writes
+`airgap-bundle-manifest.json`, and runs `--airgap-bundle-check` against that
+bundle. `bundle-create-report.json` must keep `readiness: false` and `scope:
+airgap_bundle_create_only`; it records only non-sensitive count/digest
+summaries and is not an accepted evidence envelope output. It does not pull,
+push, mirror, save, load, parse OCI tar contents, log in to registries, call
+Docker, skopeo, oras, kubectl, curl, or wget, deploy, prove registry presence,
+or claim package/release readiness.
 
 The current `--airgap-bundle-check` path is a focused diagnostic for local
 airgap bundle manifest/digest checking only. It consumes a release contract,

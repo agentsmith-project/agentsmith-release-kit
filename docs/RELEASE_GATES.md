@@ -211,6 +211,42 @@ The generated `image-map.json` must keep `schema: agentsmith.image-map/v1`,
 contain `verdict`, `release_verdict`, deploy readiness, AgentSmith
 product-flow fields, raw credential payloads, or registry login material.
 
+## Airgap Bundle Create Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-bundle-create.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh --bundle-create`.
+It is a KISS local assembler plus self-check for
+`existing_kubernetes/external_declared/airgap` only. It does not log in to a
+registry, pull, push, mirror, save, load, call Docker, skopeo, oras, kubectl,
+curl, or wget, inspect OCI tar contents, deploy workloads, or claim offline
+install, package, deploy, or release readiness.
+
+The guard requires explicit local inputs: release contract, deploy template
+package descriptor, matching `.tgz` archive, target registry, repeated
+`--image-archive <image_id=local-file>` entries matching the generated
+image-map one-to-one, runbook, script, profile-values schema, optional
+profile-values example, operator prerequisites JSON, an absent-or-empty bundle
+root, and output directory. It rejects online, kind, `kit_installed/airgap`,
+and synonym axes. Image archives, payloads, and bundled tools must be local
+regular files, not URIs, directories, or symlinks; secret-looking payloads and
+operator URL/download/secret proofs fail fast.
+
+The generated bundle contains fixed local paths under `components/`, `images/`,
+`payload/`, optional `tools/`, and root `airgap-bundle-manifest.json`. The
+assembler immediately runs the existing airgap bundle check against that
+manifest. Only after self-check passes does it write
+`bundle-create-report.json` with `schema:
+agentsmith.airgap-bundle-create-report/v1`, `scope:
+airgap_bundle_create_only`, `readiness: false`, and non-sensitive count/digest
+summaries. The report must not contain raw local paths, bundle root, operator
+refs, locations, proofs, verdicts, registry presence, image-load claims, or
+readiness claims. It is not an accepted release-kit evidence envelope output.
+
 ## Airgap Bundle Manifest/Digest Focused Diagnostic
 
 Run:

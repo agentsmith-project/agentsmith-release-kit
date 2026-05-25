@@ -15,6 +15,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Materialized template render diagnostic | Focused only | `manifest-render-report.json` keeps `readiness: false`. |
 | Render/check image inventory diagnostic | Focused only | `render-report.json` keeps `readiness: false`. |
 | Image-map / mirror-plan diagnostic | Focused only | `image-map.json` keeps `readiness: false`. |
+| Airgap bundle create diagnostic | Focused only | `bundle-create-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle manifest/digest diagnostic | Focused only | `airgap-bundle-check-report.json` keeps `readiness: false`. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
@@ -70,6 +71,22 @@ images exist in a target registry, does not pull or push images, does not build
 an airgap bundle, and does not support local kind image import.
 `image-map.json` keeps `readiness: false`; it is not deploy, package, release,
 rollout, smoke, product-flow, or operator readiness evidence.
+
+Airgap bundle create output proves only that one local bundle root was
+assembled from explicit local inputs and immediately accepted by the existing
+airgap bundle manifest/digest diagnostic. It accepts only
+`existing_kubernetes/external_declared/airgap`, rejects online, kind,
+`kit_installed/airgap`, and synonym axes, and requires repeated local
+`--image-archive <image_id=file>` inputs to match the generated image-map
+mappings one-to-one. It copies local files into a fixed bundle shape, writes
+`airgap-bundle-manifest.json`, generates `payload/checksums.txt`, and can copy
+bundled tool inputs under `tools/<name>`. It does not pull, push, mirror,
+save, load, log in to registries, call Docker, skopeo, oras, kubectl, curl, or
+wget, parse OCI tar contents, verify registry presence, load images, install
+offline, deploy, or prove package/release readiness.
+`bundle-create-report.json` keeps `readiness: false`; it contains only
+non-sensitive count/digest summaries and is not accepted by the release-kit
+evidence envelope validator.
 
 Airgap bundle manifest/digest output proves only that one local bundle manifest
 with `schema_version: agentsmith.airgap-bundle-manifest/v1` binds the supplied
@@ -169,6 +186,9 @@ are `deploy-result.json`, `image-map.json`, `online-deployment-gate-report.json`
 or `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`. Render,
 rollout, and smoke reports remain individual focused diagnostic files, but
 their combinations are not accepted release-kit evidence envelope outputs.
+`bundle-create-report.json` is also intentionally not accepted; use the
+generated airgap bundle check report plus manifest pair for focused airgap
+evidence intake.
 Online gate evidence is accepted only for
 `existing_kubernetes/external_declared/online`; airgap bundle check evidence is
 accepted only for `existing_kubernetes/external_declared/airgap`. Raw

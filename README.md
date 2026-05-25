@@ -5,9 +5,9 @@ Status: bootstrap-only, docs-governance-first skeleton.
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
-contains image-map, airgap bundle manifest/digest, apply-only, rollout/live
-digest, route smoke, and online focused chain orchestration diagnostics, but
-does not contain full deploy tooling yet.
+contains image-map, airgap bundle create, airgap bundle manifest/digest,
+apply-only, rollout/live digest, route smoke, and online focused chain
+orchestration diagnostics, but does not contain full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -208,6 +208,40 @@ package, or release readiness. `image-map.json` keeps `schema:
 agentsmith.image-map/v1`, `scope: image_map_only`, `readiness: false`, and
 `status: pass`; it contains only release identity, release contract digest,
 target axes, optional target registry, image count, and mappings.
+
+Airgap bundle create focused diagnostic:
+
+```bash
+bash scripts/test-bundle-create.sh
+```
+
+`--bundle-create` is a local airgap bundle assembler plus immediate
+self-check. It accepts only `existing_kubernetes/external_declared/airgap`.
+Inputs are the release contract, deploy template package descriptor, matching
+`.tgz` archive, target registry, one local `--image-archive
+<image_id=file>` per generated image-map mapping, runbook, install script,
+profile-values schema, optional profile-values example, operator
+prerequisites JSON, empty-or-absent bundle root, and output directory.
+
+The assembler first reuses `--inputs`, `--template-package`, and `--image-map
+--target-registry`; then it copies only local files into a fixed bundle shape:
+`components/`, `images/`, `payload/`, optional `tools/`, and root
+`airgap-bundle-manifest.json`. Image archive ids must match the generated
+image-map one-to-one. Input image archives and bundled tools must be local
+regular files, not URIs, directories, or symlinks. Payload files are lightly
+scanned for obvious secret-looking content. Bundled tool inputs are copied
+under `tools/<name>` and the manifest records the copied file sha.
+
+After assembly, `--bundle-create` immediately runs `--airgap-bundle-check`
+against the generated bundle. Only after that passes it writes
+`bundle-create-report.json` with `schema:
+agentsmith.airgap-bundle-create-report/v1`, `scope:
+airgap_bundle_create_only`, `readiness: false`, and non-sensitive
+count/digest summaries. It does not log in to a registry, pull, push, mirror,
+save, load, parse OCI tar contents, prove registry presence, install offline,
+deploy, package, or claim release readiness. `bundle-create-report.json` is
+not an accepted release-kit evidence envelope output; evidence remains limited
+to the existing airgap bundle check report plus manifest pair.
 
 Airgap bundle manifest/digest focused diagnostic:
 

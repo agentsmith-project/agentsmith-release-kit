@@ -58,6 +58,20 @@ The report is a plan for source/target digest references only; it must not
 claim registry presence, deploy readiness, package readiness, release
 readiness, product-flow evidence, or registry credential handling.
 
+The current `--bundle-create` validator is a focused local airgap assembler
+and self-check only. It accepts only
+`existing_kubernetes/external_declared/airgap`, reuses the existing inputs,
+template-package, image-map, and airgap bundle-check validators, and writes a
+bundle manifest matching `agentsmith.airgap-bundle-manifest/v1`. It creates a
+fixed local structure under `components/`, `images/`, `payload/`, optional
+`tools/`, and root `airgap-bundle-manifest.json`; image archive ids must match
+the generated image-map mappings one-to-one. Its
+`bundle-create-report.json` uses `schema:
+agentsmith.airgap-bundle-create-report/v1`, `readiness: false`, and `scope:
+airgap_bundle_create_only`, and contains only count/digest summaries. It is
+not a release-kit evidence envelope output and must not claim registry
+presence, image load, offline install, deploy, package, or release readiness.
+
 The current `--airgap-bundle-check` validator is a focused local bundle
 manifest/digest diagnostic only. It consumes an explicit release contract,
 deploy template package descriptor, deploy template archive `.tgz`, airgap

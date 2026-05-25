@@ -586,6 +586,9 @@ switch (mutation) {
   case 'unknown_release_kit_output':
     evidence.release_kit_output = 'unknown-output.json';
     break;
+  case 'bundle_create_report_release_kit_output':
+    evidence.release_kit_output = 'bundle-create-report.json';
+    break;
   case 'product_flow_release_kit_output':
     evidence.release_kit_output = 'AgentSmith product flow aggregate';
     break;
@@ -953,6 +956,7 @@ expect_fail short-release-kit-version ci_artifact short_release_kit_version
 expect_fail leading-zero-release-kit-version ci_artifact leading_zero_release_kit_version
 expect_fail below-contract-release-kit-version ci_artifact below_contract_release_kit_version
 expect_fail unknown-release-kit-output ci_artifact unknown_release_kit_output
+expect_fail bundle-create-report-release-kit-output ci_artifact bundle_create_report_release_kit_output
 expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
 expect_fail removed-render-rollout-output ci_artifact removed_render_rollout_output
 expect_fail removed-render-rollout-smoke-output ci_artifact removed_render_rollout_smoke_output
