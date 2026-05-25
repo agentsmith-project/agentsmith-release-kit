@@ -16,8 +16,31 @@ export const CANONICAL_DECLARABLE_TARGET_PROFILE_SET = new Set(
   CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES
 );
 
-export const REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES =
+export const INTAKE_SUPPORTED_TARGET_PROFILE_VALUES =
   CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES;
+
+export const INTAKE_SUPPORTED_TARGET_PROFILE_SET = new Set(
+  INTAKE_SUPPORTED_TARGET_PROFILE_VALUES
+);
+
+export const EXECUTABLE_TARGET_PROFILE_VALUES = [
+  'existing_kubernetes/external_declared/online'
+];
+
+export const EXECUTABLE_TARGET_PROFILE_SET = new Set(EXECUTABLE_TARGET_PROFILE_VALUES);
+
+export const EVIDENCE_SUPPORTED_TARGET_PROFILE_VALUES = [
+  'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/external_declared/airgap'
+];
+
+export const EVIDENCE_SUPPORTED_TARGET_PROFILE_SET = new Set(
+  EVIDENCE_SUPPORTED_TARGET_PROFILE_VALUES
+);
+
+// Pre-GA contracts may declare canonical targets, but no target is mandatory
+// until the executable/evidence gates for that path exist.
+export const REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES = [];
 
 export const REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_SET = new Set(
   REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES
@@ -40,7 +63,7 @@ export const IMAGE_MAP_TARGET_PROFILE_VALUES = [
 export const IMAGE_MAP_TARGET_PROFILE_SET = new Set(IMAGE_MAP_TARGET_PROFILE_VALUES);
 
 export const SUPPORTED_FOCUSED_TARGET_PROFILE_VALUES =
-  REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES;
+  EVIDENCE_SUPPORTED_TARGET_PROFILE_VALUES;
 
 export const SUPPORTED_FOCUSED_TARGET_PROFILE_SET = new Set(
   SUPPORTED_FOCUSED_TARGET_PROFILE_VALUES
@@ -127,8 +150,8 @@ export function validateContractTargetProfileEntry(value, fail, label) {
     fail(`${label}.required is required`);
   }
   const required = requireProfileBoolean(profile.required, `${label}.required`, fail);
-  if (targetCluster === 'kind_rehearsal' && required) {
-    fail(`${label}: kind_rehearsal target profile must not be required`);
+  if (required) {
+    fail(`${label}.required must be false during pre-GA`);
   }
 
   return {

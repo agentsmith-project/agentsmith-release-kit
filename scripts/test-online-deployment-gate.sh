@@ -170,10 +170,10 @@ spec:
     spec:
       initContainers:
         - name: schema
-          image: ${{ images.product_schema_bootstrap.image }}
+          image: ${{ images.agentsmith_app.image }}
       containers:
         - name: web
-          image: ${{ images.web.image }}
+          image: ${{ images.agentsmith_app.image }}
           env:
             - name: POSTGRES_HOST
               value: ${{ substrate.services.postgresql.host }}
@@ -190,7 +190,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ${{ images.web.image }}
+          image: ${{ images.agentsmith_app.image }}
           env:
             - name: MISSING
               value: ${{ values.not_declared }}
@@ -343,7 +343,7 @@ JSON
 
   if [[ "$get_target" == "pods" ]]; then
     cat <<'JSON'
-{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-product-schema-bootstrap:2026.05.23-p0@sha256:3333333333333333333333333333333333333333333333333333333333333333","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-product-schema-bootstrap@sha256:3333333333333333333333333333333333333333333333333333333333333333"}],"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-web:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-web@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}],"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
 JSON
     exit 0
   fi
@@ -532,6 +532,7 @@ if (/password|token=|plain-secret-value|client_secret|authorization|bearer|kubec
 NODE
 }
 
+KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
 VALID_TRUTH="$TMP_DIR/substrate-truth.valid.json"
 VALID_VALUES="$TMP_DIR/render-values.valid.json"
 VALID_ARCHIVE="$TMP_DIR/valid.tgz"
@@ -636,6 +637,14 @@ grep -q 'get pods' "$KUBECTL_LOG" || fail "apply gate did not check live pods"
 [[ -f "$apply_output/smoke/smoke-report.json" ]] || fail "apply gate did not write smoke report"
 assert_gate_report "$apply_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke"
 pass "apply mode runs rollout and optional smoke with non-readiness aggregate"
+
+reset_kubectl_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$TMP_DIR/out-unsupported-kit-online" "$KIT_ONLINE_PROFILE" >"$TMP_DIR/unsupported-kit-online.out" 2>"$TMP_DIR/unsupported-kit-online.err"; then
+  fail "expected kit-installed online target profile to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$TMP_DIR/out-unsupported-kit-online"
+pass "kit-installed online profile stays intake-only and is rejected before kubectl"
 
 reset_kubectl_log
 if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$TMP_DIR/out-unsupported" "kind_rehearsal/kit_installed/online" >"$TMP_DIR/unsupported.out" 2>"$TMP_DIR/unsupported.err"; then

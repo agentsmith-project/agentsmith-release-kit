@@ -233,8 +233,8 @@ if ('release_verdict' in report || 'verdict' in report || 'deploy_readiness' in 
 if (/required_product_flows|product_flows|product_flow_results/.test(serialized)) {
   throw new Error('render/check report must not include AgentSmith product flow fields');
 }
-if (!Array.isArray(report.images) || report.images.length !== 5) {
-  throw new Error('render/check report must list the five workload images used by the fixture');
+if (!Array.isArray(report.images) || report.images.length !== 3) {
+  throw new Error('render/check report must list the three unique workload images used by the fixture');
 }
 if (!Array.isArray(report.manifests) || report.manifests.length !== 3) {
   throw new Error('render/check report must list the three workload manifests used by the fixture');
@@ -263,15 +263,15 @@ const image = (id) => {
 
 fs.mkdirSync(renderedManifests, { recursive: true });
 
-let webImage = image('web');
+let appImage = image('agentsmith_app');
 if (mutation === 'unknown_image') {
-  webImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@sha256:${'9'.repeat(64)}`;
+  appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@sha256:${'9'.repeat(64)}`;
 }
 if (mutation === 'tag_only_image') {
-  webImage = webImage.replace(/@sha256:[0-9a-f]{64}$/, '');
+  appImage = appImage.replace(/@sha256:[0-9a-f]{64}$/, '');
 }
 if (mutation === 'digest_mismatch') {
-  webImage = webImage.replace(/@sha256:[0-9a-f]{64}$/, `@sha256:${'9'.repeat(64)}`);
+  appImage = appImage.replace(/@sha256:[0-9a-f]{64}$/, `@sha256:${'9'.repeat(64)}`);
 }
 
 const deployment = `apiVersion: apps/v1
@@ -283,10 +283,10 @@ spec:
     spec:
       initContainers:
         - name: schema
-          image: ${image('product_schema_bootstrap')}
+          image: ${image('agentsmith_app')}
       containers:
         - name: web
-          image: ${webImage}
+          image: ${appImage}
 `;
 
 const job = {
@@ -301,7 +301,7 @@ const job = {
         containers: [
           {
             name: 'api',
-            image: image('api')
+            image: image('agentsmith_app')
           }
         ],
         initContainers: []
@@ -392,7 +392,7 @@ spec:
     spec:
       initContainers:
         - name: schema
-          image: ${image('product_schema_bootstrap')}
+          image: ${image('agentsmith_app')}
       containers:
         - { name: hidden, image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@sha256:${'9'.repeat(64)} }
 `
@@ -411,7 +411,7 @@ spec:
     spec:
       initContainers:
         - name: schema
-          image: ${image('product_schema_bootstrap')}
+          image: ${image('agentsmith_app')}
       containers: [{ name: hidden, image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@sha256:${'9'.repeat(64)} }]
 `
   );

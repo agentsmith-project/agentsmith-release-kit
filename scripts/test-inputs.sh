@@ -111,9 +111,9 @@ function refreshContractArtifactDigest() {
   contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
 }
 
-switch (label) {
+  switch (label) {
   case 'tag-only-image':
-    contract.product_images[0].image = 'ghcr.io/agentsmith-project/agentsmith-web:2026.05.23-p0';
+    contract.product_images[0].image = 'ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0';
     break;
   case 'digest-mismatch':
     contract.product_images[0].digest = digestE;
@@ -192,8 +192,8 @@ switch (label) {
     contract.target_profiles[2].substrate_source = contract.target_profiles[0].substrate_source;
     contract.target_profiles[2].distribution = contract.target_profiles[0].distribution;
     break;
-  case 'unsupported-required-target-profile':
-    contract.target_profiles[1].required = true;
+  case 'pre-ga-required-target-profile':
+    contract.target_profiles[0].required = true;
     break;
   case 'kind-required-target-profile':
     contract.target_profiles[2].required = true;
@@ -322,12 +322,14 @@ switch (label) {
     refreshContractArtifactDigest();
     break;
   case 'duplicate-image-id':
-    contract.product_images[1].id = contract.product_images[0].id;
+    contract.adopted_provider_images[0].id = contract.product_images[0].id;
     contract.deploy_image_inventory[1].id = contract.deploy_image_inventory[0].id;
     break;
   case 'uppercase-image-digest':
-    contract.product_images[0].image =
-      `ghcr.io/agentsmith-project/agentsmith-web:2026.05.23-p0@${digestUpperA}`;
+    contract.product_images[0].image = contract.product_images[0].image.replace(
+      /@sha256:[0-9a-f]{64}$/,
+      `@${digestUpperA}`
+    );
     contract.product_images[0].digest = digestUpperA;
     contract.deploy_image_inventory[0].image = contract.product_images[0].image;
     contract.deploy_image_inventory[0].digest = digestUpperA;
@@ -681,7 +683,7 @@ NODE
 assert_outputs() {
   local output_dir="$1"
   local expected_profile="${2:-$TARGET_PROFILE}"
-  local expected_required="${3:-true}"
+  local expected_required="${3:-false}"
 
   "$NODE_BIN" --input-type=module - "$output_dir" "$expected_profile" "$expected_required" <<'NODE'
 import fs from 'node:fs';
@@ -743,10 +745,10 @@ for (const file of ['intake-report.json', 'image-digest-plan.json']) {
   if (payload.target_profile?.required !== expectedRequired) {
     throw new Error(`${file} did not preserve target profile required metadata`);
   }
-  if (!Array.isArray(payload.images) || payload.images.length !== 5) {
+  if (!Array.isArray(payload.images) || payload.images.length < 1) {
     throw new Error(`${file} did not include expected image inventory`);
   }
-  if (!Array.isArray(payload.digests) || payload.digests.length !== 5) {
+  if (!Array.isArray(payload.digests) || payload.digests.length !== payload.images.length) {
     throw new Error(`${file} did not include expected digest plan`);
   }
   if (!payload.images.every((item) => typeof item.id === 'string')) {
@@ -784,7 +786,8 @@ if (report.status !== expectedStatus) {
 if ('release_verdict' in report || 'verdict' in report) {
   throw new Error('target profile coverage report must not claim a release verdict');
 }
-const supportedValues = new Set((report.supported_profiles || []).map((profile) => profile.value));
+const declarableValues = new Set((report.declarable_profiles || []).map((profile) => profile.value));
+const intakeValues = new Set((report.intake_supported_profiles || []).map((profile) => profile.value));
 for (const value of [
   'existing_kubernetes/external_declared/online',
   'existing_kubernetes/external_declared/airgap',
@@ -792,50 +795,91 @@ for (const value of [
   'existing_kubernetes/kit_installed/airgap',
   'kind_rehearsal/kit_installed/online'
 ]) {
-  if (!supportedValues.has(value)) {
-    throw new Error(`supported profile missing from report: ${value}`);
+  if (!declarableValues.has(value)) {
+    throw new Error(`declarable profile missing from report: ${value}`);
+  }
+  if (!intakeValues.has(value)) {
+    throw new Error(`intake-supported profile missing from report: ${value}`);
+  }
+}
+const executableValues = new Set((report.executable_profiles || []).map((profile) => profile.value));
+if (
+  executableValues.size !== 1 ||
+  !executableValues.has('existing_kubernetes/external_declared/online')
+) {
+  throw new Error('external-declared online profile must be the only executable profile in pre-GA');
+}
+for (const value of [
+  'existing_kubernetes/external_declared/airgap',
+  'existing_kubernetes/kit_installed/online',
+  'existing_kubernetes/kit_installed/airgap',
+  'kind_rehearsal/kit_installed/online'
+]) {
+  if (executableValues.has(value)) {
+    throw new Error(`non-executable profile incorrectly listed as executable: ${value}`);
+  }
+}
+const evidenceValues = new Set((report.evidence_supported_profiles || []).map((profile) => profile.value));
+if (evidenceValues.size !== 2) {
+  throw new Error('pre-GA evidence-supported profile set must stay narrow');
+}
+for (const value of [
+  'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/external_declared/airgap'
+]) {
+  if (!evidenceValues.has(value)) {
+    throw new Error(`evidence-supported profile missing from report: ${value}`);
+  }
+}
+for (const value of [
+  'existing_kubernetes/kit_installed/online',
+  'existing_kubernetes/kit_installed/airgap',
+  'kind_rehearsal/kit_installed/online'
+]) {
+  if (evidenceValues.has(value)) {
+    throw new Error(`intake-only profile incorrectly listed as evidence-supported: ${value}`);
   }
 }
 if (!Array.isArray(report.required_profiles)) {
   throw new Error('target profile coverage report must list required_profiles');
 }
-if (!Array.isArray(report.missing_profiles)) {
-  throw new Error('target profile coverage report must list missing_profiles');
+if (!Array.isArray(report.forbidden_required_profiles)) {
+  throw new Error('target profile coverage report must list forbidden_required_profiles');
 }
-if (expectedStatus === 'pass' && report.missing_profiles.length !== 0) {
-  throw new Error('passing target profile coverage report must not list missing profiles');
+if (expectedStatus === 'pass' && report.forbidden_required_profiles.length !== 0) {
+  throw new Error('passing target profile coverage report must not list forbidden required profiles');
 }
 if (expectedStatus === 'failed') {
-  if (report.failure_class !== 'unsupported_required_target_profile') {
+  if (report.failure_class !== 'pre_ga_required_target_profile') {
     throw new Error(`unexpected failure_class: ${report.failure_class}`);
   }
-  const missingValues = new Set(report.missing_profiles.map((profile) => profile.value));
-  if (!missingValues.has(expectedMissing)) {
-    throw new Error(`missing profile not recorded: ${expectedMissing}`);
+  const forbiddenValues = new Set(report.forbidden_required_profiles.map((profile) => profile.value));
+  if (!forbiddenValues.has(expectedMissing)) {
+    throw new Error(`forbidden required profile not recorded: ${expectedMissing}`);
   }
 }
 NODE
 }
 
-expect_unsupported_required_target_profile() {
-  local contract="$TMP_DIR/unsupported-required-target-profile.release-contract.json"
-  local output_dir="$TMP_DIR/out-unsupported-required-target-profile"
+expect_pre_ga_required_target_profile() {
+  local contract="$TMP_DIR/pre-ga-required-target-profile.release-contract.json"
+  local output_dir="$TMP_DIR/out-pre-ga-required-target-profile"
 
-  mutate_contract unsupported-required-target-profile "$contract"
+  mutate_contract pre-ga-required-target-profile "$contract"
 
   if run_inputs "$contract" "$VALID_DEPLOY_TEMPLATE_PACKAGE" "$output_dir" \
-    >"$TMP_DIR/unsupported-required-target-profile.out" \
-    2>"$TMP_DIR/unsupported-required-target-profile.err"; then
-    cat "$TMP_DIR/unsupported-required-target-profile.out" >&2
-    cat "$TMP_DIR/unsupported-required-target-profile.err" >&2
-    fail "expected unsupported required target profile to fail"
+    >"$TMP_DIR/pre-ga-required-target-profile.out" \
+    2>"$TMP_DIR/pre-ga-required-target-profile.err"; then
+    cat "$TMP_DIR/pre-ga-required-target-profile.out" >&2
+    cat "$TMP_DIR/pre-ga-required-target-profile.err" >&2
+    fail "expected pre-GA required target profile to fail"
   fi
 
   assert_coverage_report \
     "$output_dir" \
     failed \
-    existing_kubernetes/external_declared/airgap
-  pass "unsupported required target profile rejected with coverage report"
+    existing_kubernetes/external_declared/online
+  pass "pre-GA required target profile rejected with coverage report"
 }
 
 expect_kind_required_target_profile() {
@@ -852,14 +896,14 @@ expect_kind_required_target_profile() {
     fail "expected kind required target profile to fail"
   fi
 
-  if ! grep -q 'kind_rehearsal target profile must not be required' \
+  if ! grep -q 'target_profiles.required must be false during pre-GA' \
     "$TMP_DIR/kind-required-target-profile.err"; then
     cat "$TMP_DIR/kind-required-target-profile.out" >&2
     cat "$TMP_DIR/kind-required-target-profile.err" >&2
-    fail "kind required target profile failure must explain rehearsal is not required"
+    fail "kind required target profile failure must explain pre-GA required policy"
   fi
 
-  pass "kind rehearsal required target profile rejected"
+  pass "kind rehearsal required target profile rejected by pre-GA policy"
 }
 
 VALID_OUT="$TMP_DIR/valid"
@@ -933,6 +977,7 @@ assert_outputs "$SECRET_REF_OUT"
 assert_coverage_report "$SECRET_REF_OUT"
 pass "valid secretRef pull_secret_ref accepted"
 
+expect_pre_ga_required_target_profile
 expect_kind_required_target_profile
 
 expect_target_profile_fail "noncanonical-target-profile-local-kind" \

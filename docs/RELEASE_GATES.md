@@ -49,14 +49,19 @@ must use one of the canonical declarable profiles:
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`,
 `existing_kubernetes/kit_installed/airgap`, or
-`kind_rehearsal/kit_installed/online`. `kind_rehearsal/kit_installed/online`
-is intake-only rehearsal and must not be `required: true`.
+`kind_rehearsal/kit_installed/online`. During pre-GA every canonical profile
+is declarable/intake-supported only for contract purposes, and every entry must
+use `required: false`; any `required: true` target fails fast.
 
 The generated `intake-report.json`, `image-digest-plan.json`, and
-`target-profile-coverage-report.json` must keep `readiness: false`. They prove
-contract/input digest readiness only. They are not deploy readiness, package
-readiness, release readiness, rollout evidence, or operator signoff. The
-coverage report must not contain `verdict` or `release_verdict`.
+`target-profile-coverage-report.json` must keep `readiness: false`. The
+coverage report separates `declarable_profiles`,
+`intake_supported_profiles`, `executable_profiles`, and
+`evidence_supported_profiles`; `kit_installed` remains intake-only in this
+slice. They prove contract/input digest readiness only. They are not deploy
+readiness, package readiness, release readiness, rollout evidence, or operator
+signoff. The coverage report must not contain `verdict` or
+`release_verdict`.
 
 ## Template Package Archive Focused Diagnostic
 
@@ -111,7 +116,7 @@ The template language is scalar placeholder replacement only. It has no
 conditionals, loops, includes, Helm, Kustomize, or non-canonical pre-GA target
 names. Supported placeholder roots are `values`, `images`, `target`,
 `substrate`, and `release`;
-examples are `${{ values.namespace }}`, `${{ images.web.image }}`,
+examples are `${{ values.namespace }}`, `${{ images.agentsmith_app.image }}`,
 `${{ target.distribution }}`, `${{ substrate.services.postgresql.host }}`, and
 `${{ release.release_id }}`. Unknown, malformed, unresolved, object, or array
 placeholders fail fast.
@@ -225,9 +230,9 @@ registry, and `action: mirror_required` on every mapping.
 
 The release contract `target_profiles` value must be an array and must declare
 `existing_kubernetes/external_declared/airgap`. Every target profile tuple must
-be canonical, every entry must carry `required: boolean`, and `support_level`
-is rejected. `existing_kubernetes/kit_installed/airgap` may be declared in the
-contract, but this check does not deploy it.
+be canonical, every entry must carry `required: false` during pre-GA, and
+`support_level` is rejected. `existing_kubernetes/kit_installed/airgap` may be
+declared in the contract, but this check does not deploy it.
 
 The bundle manifest must use `schema_version:
 agentsmith.airgap-bundle-manifest/v1`. Its `components` array must contain
@@ -439,12 +444,18 @@ non-canonical pre-GA target names, synonym axes, AgentSmith product-flow
 fields, local provenance URIs, absolute paths, `..` escapes, symlinks,
 hardlinks, and obvious secret payloads.
 Accepted `release_kit_output` values are `deploy-result.json#substrate`,
-`image-map.json`, `render-report.json+rollout-report.json`, and
-`render-report.json+rollout-report.json+smoke-report.json`; `AgentSmith
-product flow aggregate` is rejected. The provenance `subject_name` must be
-`release-kit-evidence-subject`. The subject file list must contain only
-`evidence.json` plus the mapped output files: `deploy-result.json`,
-`image-map.json`, render+rollout reports, or render+rollout+smoke reports.
+`image-map.json`, `render-report.json+rollout-report.json`,
+`render-report.json+rollout-report.json+smoke-report.json`,
+`online-deployment-gate-report.json`, and
+`airgap-bundle-check-report.json+airgap-bundle-manifest.json`; `AgentSmith
+product flow aggregate` is rejected. The online gate output is accepted only
+for `existing_kubernetes/external_declared/online`; the airgap bundle output is
+accepted only for `existing_kubernetes/external_declared/airgap`. The
+provenance `subject_name` must be `release-kit-evidence-subject`. The subject
+file list must contain only `evidence.json` plus the mapped output files:
+`deploy-result.json`, `image-map.json`, render+rollout reports,
+render+rollout+smoke reports, `online-deployment-gate-report.json`, or
+`airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.

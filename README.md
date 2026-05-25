@@ -102,8 +102,9 @@ inventory. Every declared `target_profiles` entry must carry
 are rejected, and every entry must use a canonical declarable profile. Existing
 Kubernetes profiles can be declared for both `external_declared` and
 `kit_installed` substrate choices across online and airgap distributions.
-`kind_rehearsal/kit_installed/online` is intake-only rehearsal and must not be
-`required: true`. `intake-report.json`, `image-digest-plan.json`, and
+During pre-GA every target profile must use `required: false`; `required:
+true` fails fast because full deploy/package evidence is not implemented for
+every path. `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` are written with `readiness: false`;
 they prove only contract/input digest readiness, not deploy, package, or
 release readiness.
@@ -138,7 +139,7 @@ with `readiness: false`, `scope: manifest_render_only`, and `status: pass`.
 The template language is intentionally tiny: scalar placeholders only, no
 conditionals and no loops. Supported placeholder roots are `values`, `images`,
 `target`, `substrate`, and `release`, for example
-`${{ values.namespace }}`, `${{ images.web.image }}`,
+`${{ values.namespace }}`, `${{ images.agentsmith_app.image }}`,
 `${{ target.distribution }}`, `${{ substrate.services.postgresql.host }}`, and
 `${{ release.release_id }}`. Unknown or non-scalar placeholders fail fast.
 Rendered workload images must be digest-pinned and must come from

@@ -8,8 +8,9 @@ import {
   CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES,
   CURRENT_RELEASE_KIT_VERSION,
   DISTRIBUTION_VALUES,
-  REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_SET,
-  REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES,
+  EVIDENCE_SUPPORTED_TARGET_PROFILE_VALUES,
+  EXECUTABLE_TARGET_PROFILE_VALUES,
+  INTAKE_SUPPORTED_TARGET_PROFILE_VALUES,
   SUBSTRATE_SOURCE_VALUES,
   TARGET_CLUSTER_VALUES,
   assertPlainSemverAtLeast,
@@ -432,9 +433,6 @@ function normalizeTargetProfile(object, label) {
     fail(`${label}.required is required`);
   }
   const required = requireBoolean(object.required, `${label}.required`);
-  if (targetCluster === 'kind_rehearsal' && required) {
-    fail(`${label}: kind_rehearsal target profile must not be required`);
-  }
   const prerequisites = requireObject(object.prerequisites, `${label}.prerequisites`);
   const prerequisiteFields = [
     'namespace',
@@ -1032,22 +1030,28 @@ function buildTargetProfileCoverageReport(targetProfiles) {
   const requiredProfiles = targetProfiles
     .filter((profile) => profile.required)
     .map(targetProfileSummary);
-  const missingProfiles = requiredProfiles.filter(
-    (profile) => !REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_SET.has(profile.value)
-  );
+  const forbiddenRequiredProfiles = requiredProfiles;
   const report = {
     scope: 'target_profile_coverage_intake_only',
     readiness: false,
-    required_profiles: requiredProfiles,
-    missing_profiles: missingProfiles,
-    supported_profiles: REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES.map(
+    required_policy: 'pre_ga_no_required_target_profiles',
+    declarable_profiles: CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.map(
       targetProfileFromValue
     ),
-    status: missingProfiles.length > 0 ? 'failed' : 'pass'
+    intake_supported_profiles: INTAKE_SUPPORTED_TARGET_PROFILE_VALUES.map(
+      targetProfileFromValue
+    ),
+    executable_profiles: EXECUTABLE_TARGET_PROFILE_VALUES.map(targetProfileFromValue),
+    evidence_supported_profiles: EVIDENCE_SUPPORTED_TARGET_PROFILE_VALUES.map(
+      targetProfileFromValue
+    ),
+    required_profiles: requiredProfiles,
+    forbidden_required_profiles: forbiddenRequiredProfiles,
+    status: forbiddenRequiredProfiles.length > 0 ? 'failed' : 'pass'
   };
 
-  if (missingProfiles.length > 0) {
-    report.failure_class = 'unsupported_required_target_profile';
+  if (forbiddenRequiredProfiles.length > 0) {
+    report.failure_class = 'pre_ga_required_target_profile';
   }
 
   return report;
@@ -1099,7 +1103,7 @@ async function main() {
   const targetProfileCoverageReport = buildTargetProfileCoverageReport(targetProfiles);
   await writeTargetProfileCoverageReport(args.outputDir, targetProfileCoverageReport);
   if (targetProfileCoverageReport.status === 'failed') {
-    fail('required target_profiles include unsupported profiles');
+    fail('target_profiles.required must be false during pre-GA');
   }
   const targetProfile = assertTargetProfile(targetProfiles, args.targetProfile);
   const provenance = assertProvenance(contract, deployTemplatePackage, releaseGitSha);

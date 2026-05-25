@@ -410,8 +410,8 @@ function assertContractTargetProfiles(contract) {
       fail(`${label}.required is required`);
     }
     const required = requireBoolean(profile.required, `${label}.required`);
-    if (targetCluster === 'kind_rehearsal' && required) {
-      fail(`${label}: kind_rehearsal target profile must not be required`);
+    if (required) {
+      fail(`${label}.required must be false during pre-GA`);
     }
     if (seen.has(tuple)) {
       fail(`${label} duplicates target profile tuple declared at ${seen.get(tuple)}`);

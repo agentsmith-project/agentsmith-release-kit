@@ -247,9 +247,9 @@ function assertContractTargetProfile(contract, targetProfile) {
       profile.required,
       `release_contract.target_profiles[${index}].required`
     );
-    if (targetCluster === 'kind_rehearsal' && required) {
+    if (required) {
       fail(
-        `release_contract.target_profiles[${index}]: kind_rehearsal target profile must not be required`
+        `release_contract.target_profiles[${index}].required must be false during pre-GA`
       );
     }
     if (seen.has(profileTuple)) {

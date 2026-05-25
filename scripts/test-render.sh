@@ -168,10 +168,10 @@ spec:
     spec:
       initContainers:
         - name: schema
-          image: ${{ images.product_schema_bootstrap.image }}
+          image: ${{ images.agentsmith_app.image }}
       containers:
         - name: web
-          image: ${{ images.web.image }}
+          image: ${{ images.agentsmith_app.image }}
           env:
             - name: POSTGRES_HOST
               value: ${{ substrate.services.postgresql.host }}
@@ -186,7 +186,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: ${{ images.api.image }}
+          image: ${{ images.agentsmith_app.image }}
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -216,7 +216,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ${{ images.web.image }}
+          image: ${{ images.agentsmith_app.image }}
           env:
             - name: MISSING
               value: ${{ values.not_declared }}
@@ -247,7 +247,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ghcr.io/agentsmith-project/agentsmith-web:2026.05.23-p0
+          image: ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0
 YAML
       ;;
     secret_payload)
@@ -268,7 +268,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ${{ images.web.image }}
+          image: ${{ images.agentsmith_app.image }}
 YAML
       ;;
     *)

@@ -29,14 +29,14 @@ import path from 'node:path';
 const [contractInput, renderedManifests, mutation] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const inventory = new Map(contract.deploy_image_inventory.map((item) => [item.id, item.image]));
-let webImage = inventory.get('web');
+let appImage = inventory.get('agentsmith_app');
 
-if (!webImage) {
-  throw new Error('missing fixture web image');
+if (!appImage) {
+  throw new Error('missing fixture app image');
 }
 
 if (mutation === 'unknown_image') {
-  webImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@sha256:${'9'.repeat(64)}`;
+  appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@sha256:${'9'.repeat(64)}`;
 }
 
 fs.mkdirSync(renderedManifests, { recursive: true });
@@ -51,7 +51,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: ${webImage}
+          image: ${appImage}
 `
 );
 NODE

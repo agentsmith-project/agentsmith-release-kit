@@ -15,7 +15,8 @@ import {
 import {
   CURRENT_RELEASE_KIT_VERSION,
   assertPlainSemverAtLeast,
-  requirePlainSemver
+  requirePlainSemver,
+  validateContractTargetProfileEntry
 } from './lib/release-kit-version-policy.mjs';
 
 const REQUIRED_ARGS = [
@@ -34,7 +35,9 @@ const RELEASE_KIT_OUTPUT_VALUES = new Set([
   'deploy-result.json#substrate',
   'image-map.json',
   'render-report.json+rollout-report.json',
-  'render-report.json+rollout-report.json+smoke-report.json'
+  'render-report.json+rollout-report.json+smoke-report.json',
+  'online-deployment-gate-report.json',
+  'airgap-bundle-check-report.json+airgap-bundle-manifest.json'
 ]);
 const RELEASE_KIT_OUTPUT_REQUIRED_FILES = new Map([
   ['deploy-result.json#substrate', ['deploy-result.json']],
@@ -43,6 +46,29 @@ const RELEASE_KIT_OUTPUT_REQUIRED_FILES = new Map([
   [
     'render-report.json+rollout-report.json+smoke-report.json',
     ['render-report.json', 'rollout-report.json', 'smoke-report.json']
+  ],
+  ['online-deployment-gate-report.json', ['online-deployment-gate-report.json']],
+  [
+    'airgap-bundle-check-report.json+airgap-bundle-manifest.json',
+    ['airgap-bundle-check-report.json', 'airgap-bundle-manifest.json']
+  ]
+]);
+const RELEASE_KIT_OUTPUT_TARGET_PROFILE_VALUES = new Map([
+  [
+    'render-report.json+rollout-report.json',
+    new Set(['existing_kubernetes/external_declared/online'])
+  ],
+  [
+    'render-report.json+rollout-report.json+smoke-report.json',
+    new Set(['existing_kubernetes/external_declared/online'])
+  ],
+  [
+    'online-deployment-gate-report.json',
+    new Set(['existing_kubernetes/external_declared/online'])
+  ],
+  [
+    'airgap-bundle-check-report.json+airgap-bundle-manifest.json',
+    new Set(['existing_kubernetes/external_declared/airgap'])
   ]
 ]);
 const FORBIDDEN_RELEASE_KIT_OUTPUT_VALUES = new Set([
@@ -586,6 +612,18 @@ function assertReleaseKitOutput(evidence) {
   return releaseKitOutput;
 }
 
+function assertReleaseKitOutputTarget(releaseKitOutput, targetProfile) {
+  const acceptedProfiles = RELEASE_KIT_OUTPUT_TARGET_PROFILE_VALUES.get(releaseKitOutput);
+  if (!acceptedProfiles || acceptedProfiles.has(targetProfile.value)) {
+    return;
+  }
+  fail(
+    `evidence.release_kit_output ${releaseKitOutput} only accepts target_profile: ${[
+      ...acceptedProfiles
+    ].join(', ')}`
+  );
+}
+
 function assertExternalDeclaredSubstrateConnectionTruth(evidence, targetProfile) {
   if (evidence.substrate_source !== 'external_declared') {
     return;
@@ -770,6 +808,21 @@ function assertReleaseIdentity(evidence, releaseContractInput) {
   if (evidenceGitSha !== contractGitSha) {
     fail('evidence.git_sha must match release contract git_sha');
   }
+
+  assertReleaseContractTargetProfiles(contract);
+}
+
+function assertReleaseContractTargetProfiles(contract) {
+  const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
+  const seen = new Map();
+  for (const [index, value] of profiles.entries()) {
+    const label = `release_contract.target_profiles[${index}]`;
+    const profile = validateContractTargetProfileEntry(value, fail, label);
+    if (seen.has(profile.value)) {
+      fail(`${label} duplicates target profile tuple declared at ${seen.get(profile.value)}`);
+    }
+    seen.set(profile.value, label);
+  }
 }
 
 function assertEvidenceShape(evidence) {
@@ -827,7 +880,8 @@ function buildReport({
         schema_version: evidence.schema_version,
         provenance_kind: provenance.provenance_kind,
         subject_sha256: provenance.subject_sha256,
-        files_count: subjectFiles.files_count
+        files_count: subjectFiles.files_count,
+        files: subjectFiles.files
       }
     },
     status: 'pass'
@@ -882,6 +936,7 @@ async function main() {
   );
   assertReleaseIdentity(evidence, releaseContractInput);
   assertTarget(evidence, targetProfile);
+  assertReleaseKitOutputTarget(releaseKitOutput, targetProfile);
   assertExternalDeclaredSubstrateConnectionTruth(evidence, targetProfile);
   assertStatus(evidence);
 

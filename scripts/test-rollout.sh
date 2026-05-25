@@ -29,16 +29,14 @@ import path from 'node:path';
 const [contractInput, renderedManifests, mutation] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const inventory = new Map(contract.deploy_image_inventory.map((item) => [item.id, item.image]));
-let webImage = inventory.get('web');
-const schemaImage = inventory.get('product_schema_bootstrap');
-const apiImage = inventory.get('api');
+let appImage = inventory.get('agentsmith_app');
 
-if (!webImage || !schemaImage || !apiImage) {
+if (!appImage) {
   throw new Error('missing fixture image inventory');
 }
 
 if (mutation === 'unknown_image') {
-  webImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@sha256:${'9'.repeat(64)}`;
+  appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@sha256:${'9'.repeat(64)}`;
 }
 
 fs.mkdirSync(renderedManifests, { recursive: true });
@@ -56,7 +54,7 @@ if (mutation === 'job') {
           containers: [
             {
               name: 'api',
-              image: apiImage
+              image: appImage
             }
           ]
         }
@@ -78,10 +76,10 @@ spec:
     spec:
       initContainers:
         - name: schema
-          image: ${schemaImage}
+          image: ${appImage}
       containers:
         - name: web
-          image: ${webImage}
+          image: ${appImage}
 `
 );
 NODE
@@ -144,24 +142,24 @@ JSON
     if [[ "\${FAKE_KUBECTL_PODS_MODE:-full}" == "stale_unrelated_digest" ]]; then
       if [[ "$selector" == "$expected_selector" ]]; then
         cat <<'JSON'
-{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-web:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-web@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:9999999999999999999999999999999999999999999999999999999999999999","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:9999999999999999999999999999999999999999999999999999999999999999"}]}}]}
 JSON
         exit 0
       fi
       cat <<'JSON'
-{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-web:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-web@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}},{"metadata":{"name":"unrelated-stale-pod"},"status":{"containerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-product-schema-bootstrap:2026.05.23-p0@sha256:3333333333333333333333333333333333333333333333333333333333333333","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-product-schema-bootstrap@sha256:3333333333333333333333333333333333333333333333333333333333333333"}]}}]}
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:9999999999999999999999999999999999999999999999999999999999999999","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:9999999999999999999999999999999999999999999999999999999999999999"}]}},{"metadata":{"name":"unrelated-stale-pod"},"status":{"containerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
 JSON
       exit 0
     fi
 
     if [[ "\${FAKE_KUBECTL_PODS_MODE:-full}" == "missing_digest" ]]; then
     cat <<'JSON'
-{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-web:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-web@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0","imageID":""}]}}]}
 JSON
       exit 0
     fi
     cat <<'JSON'
-{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-product-schema-bootstrap:2026.05.23-p0@sha256:3333333333333333333333333333333333333333333333333333333333333333","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-product-schema-bootstrap@sha256:3333333333333333333333333333333333333333333333333333333333333333"}],"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-web:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":""}]}}]}
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}],"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":""}]}}]}
 JSON
     exit 0
   fi
@@ -302,17 +300,13 @@ if (report.rollout_resource_refs[0].kind !== 'Deployment' || report.rollout_reso
 if (report.rollout_resource_refs[0].selector !== 'app.kubernetes.io/name=agentsmith-web,app.kubernetes.io/part=web') {
   throw new Error(`unexpected rollout selector: ${report.rollout_resource_refs[0].selector}`);
 }
-if (!Array.isArray(report.expected_image_digests) || report.expected_image_digests.length !== 2) {
-  throw new Error('rollout report must include the two fixture image digests');
+if (!Array.isArray(report.expected_image_digests) || report.expected_image_digests.length !== 1) {
+  throw new Error('rollout report must include the fixture image digest');
 }
 const expected = new Set(report.expected_image_digests.map((entry) => entry.digest));
-for (const digest of [
-  `sha256:${'1'.repeat(64)}`,
-  `sha256:${'3'.repeat(64)}`
-]) {
-  if (!expected.has(digest)) {
-    throw new Error(`missing expected digest: ${digest}`);
-  }
+const fixtureDigest = `sha256:${'1'.repeat(64)}`;
+if (!expected.has(fixtureDigest)) {
+  throw new Error(`missing expected digest: ${fixtureDigest}`);
 }
 if ('observed_live_image_ids_summary' in report) {
   throw new Error('rollout report must use observed_live_image_digest_summary');
@@ -324,8 +318,8 @@ if (observed?.pods_count !== 1 || observed?.status_entries_count !== 2) {
 if (observed.image_id_count !== 1 || observed.image_field_fallback_count !== 1 || observed.missing_digest_count !== 0) {
   throw new Error('live digest summary must include source breakdown');
 }
-if (!Array.isArray(observed.matched_expected_digests) || observed.matched_expected_digests.length !== 2) {
-  throw new Error('live digest summary must match both expected digests');
+if (!Array.isArray(observed.matched_expected_digests) || observed.matched_expected_digests.length !== 1) {
+  throw new Error('live digest summary must match the expected digest');
 }
 if (!Array.isArray(report.workload_summaries) || report.workload_summaries.length !== 1) {
   throw new Error('rollout report must include one workload summary');

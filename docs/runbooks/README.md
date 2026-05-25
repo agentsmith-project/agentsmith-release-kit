@@ -40,6 +40,11 @@ directory for their chosen path.
 
 ## Current Notes
 
+Pre-GA release contracts may declare the five canonical target profiles, but
+none may be marked required. Keep every `target_profiles[].required` value
+`false`; `required: true` fails fast because release-kit does not yet have full
+deploy/package evidence for every path.
+
 For image-map, online targets may omit `--target-registry` to use source
 digest refs directly. Airgap targets require
 `--target-registry <registry-host[/namespace]>`; namespace components must be

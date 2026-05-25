@@ -85,6 +85,9 @@ switch (mutation) {
   case 'noncanonical_contract_target_tuple':
     contract.target_profiles[0].substrate_source = 'cluster';
     break;
+  case 'required_target_profile':
+    contract.target_profiles[0].required = true;
+    break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);
 }
@@ -136,8 +139,13 @@ if (expectedRegistry) {
 } else if ('target_registry' in report) {
   throw new Error('target_registry must be omitted when source images are used directly');
 }
-if (report.image_count !== 5 || !Array.isArray(report.mappings) || report.mappings.length !== 5) {
-  throw new Error('image-map report must contain the five fixture image mappings');
+if (
+  !Number.isInteger(report.image_count) ||
+  report.image_count < 1 ||
+  !Array.isArray(report.mappings) ||
+  report.mappings.length !== report.image_count
+) {
+  throw new Error('image-map report must contain the fixture image mappings');
 }
 if ('release_verdict' in report || 'verdict' in report || 'deploy_readiness' in report) {
   throw new Error('image-map report must not claim verdict or deploy readiness');
@@ -149,7 +157,6 @@ if (/password|token|secret|client_secret|kubeconfig|authorization|bearer/i.test(
   throw new Error('image-map report must not include raw secret-ish payloads');
 }
 
-const byId = new Map(report.mappings.map((mapping) => [mapping.id, mapping]));
 for (const mapping of report.mappings) {
   if (!mapping.source || !mapping.source_image || !mapping.source_digest) {
     throw new Error('mapping must include source identity and digest');
@@ -177,22 +184,6 @@ for (const mapping of report.mappings) {
   }
 }
 
-if (expectedMirrorRequired) {
-  const web = byId.get('web');
-  const ingress = byId.get('ingress_nginx_controller');
-  if (
-    web?.target_image !==
-    `${expectedRegistry}/agentsmith-project/agentsmith-web@${web?.source_digest}`
-  ) {
-    throw new Error(`unexpected web target image: ${web?.target_image}`);
-  }
-  if (
-    ingress?.target_image !==
-    `${expectedRegistry}/ingress-nginx/controller@${ingress?.source_digest}`
-  ) {
-    throw new Error(`unexpected ingress target image: ${ingress?.target_image}`);
-  }
-}
 NODE
 }
 
@@ -309,6 +300,7 @@ expect_registry_fail trailing-separator-namespace "registry.example.internal/rel
 
 expect_contract_fail noncanonical-target-profile noncanonical_contract_target_profile
 expect_contract_fail noncanonical-target-tuple noncanonical_contract_target_tuple
+expect_contract_fail required-target-profile required_target_profile
 expect_contract_fail tag-only-image tag_only_image
 expect_contract_fail digest-mismatch digest_mismatch
 expect_contract_fail duplicate-id duplicate_id

@@ -148,6 +148,7 @@ switch (mutation) {
   case 'target_profiles_noncanonical_synonym':
   case 'target_required_missing':
   case 'target_required_string':
+  case 'target_required_true':
   case 'target_support_level':
   case 'kind_required_target_profile':
   case 'duplicate_target_profile_tuple':
@@ -177,6 +178,9 @@ switch (mutation) {
     break;
   case 'target_required_string':
     contract.target_profiles[1].required = 'false';
+    break;
+  case 'target_required_true':
+    contract.target_profiles[1].required = true;
     break;
   case 'target_support_level':
     contract.target_profiles[1].support_level = 'optional';
@@ -535,11 +539,12 @@ if (report.target_profile?.value !== 'existing_kubernetes/external_declared/airg
 if (report.components_count !== 4) {
   throw new Error(`unexpected components count: ${report.components_count}`);
 }
-if (report.image_artifact_declaration_count !== 5) {
-  throw new Error(`unexpected image artifact count: ${report.image_artifact_declaration_count}`);
-}
-if (report.artifacts?.image_map?.image_count !== 5) {
+const imageMapCount = report.artifacts?.image_map?.image_count;
+if (!Number.isInteger(imageMapCount) || imageMapCount < 1) {
   throw new Error('image-map image count is missing');
+}
+if (report.image_artifact_declaration_count !== imageMapCount) {
+  throw new Error(`unexpected image artifact count: ${report.image_artifact_declaration_count}`);
 }
 for (const [label, digest] of [
   ['release contract', report.artifacts?.release_contract?.input_sha256],
@@ -770,6 +775,7 @@ expect_contract_fail contract-missing-airgap-target-profile target_profiles_miss
 expect_contract_fail contract-noncanonical-target-tuple target_profiles_noncanonical_synonym
 expect_contract_fail target-required-missing target_required_missing
 expect_contract_fail target-required-string target_required_string
+expect_contract_fail target-required-true target_required_true
 expect_contract_fail target-support-level-present target_support_level
 expect_contract_fail kind-required-target-profile kind_required_target_profile
 expect_contract_fail duplicate-target-profile-tuple duplicate_target_profile_tuple

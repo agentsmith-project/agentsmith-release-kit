@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
+AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 
 TMP_DIR="$(mktemp -d)"
@@ -84,6 +85,9 @@ if (report.status !== 'pass') {
 }
 if (report.release_kit_output !== expectedReleaseKitOutput) {
   throw new Error(`unexpected release_kit_output: ${report.release_kit_output}`);
+}
+if (!Array.isArray(report.artifacts?.evidence?.files)) {
+  throw new Error('evidence validation report must list mapped evidence files');
 }
 if ('release_verdict' in report || 'verdict' in report) {
   throw new Error('evidence validation report must not claim a release verdict');
@@ -288,6 +292,39 @@ const smokeReport = {
   expected_status: 200,
   status_code: 200
 };
+const onlineDeploymentGateReport = {
+  schema: 'agentsmith.online-deployment-gate/v1',
+  scope: 'online_deployment_gate_only',
+  readiness: false,
+  status: 'pass',
+  mode: 'server-dry-run'
+};
+const airgapBundleCheckReport = {
+  schema: 'agentsmith.airgap-bundle-check-report/v1',
+  scope: 'airgap_bundle_manifest_check_only',
+  readiness: false,
+  status: 'pass'
+};
+const airgapBundleManifest = {
+  schema_version: 'agentsmith.airgap-bundle-manifest/v1',
+  release_id: contract.release_id,
+  git_sha: contract.git_sha,
+  target_profile: {
+    value: 'existing_kubernetes/external_declared/airgap',
+    target_cluster: 'existing_kubernetes',
+    substrate_source: 'external_declared',
+    distribution: 'airgap'
+  },
+  bindings: {
+    release_contract_sha256: digestBuffer(contractRaw)
+  },
+  components: [],
+  image_artifact_declarations: [],
+  substrate: {
+    mode: 'external_declared',
+    bundled: false
+  }
+};
 let outputFiles = [
   {
     path: 'deploy-result.json',
@@ -319,6 +356,16 @@ function useRedactedFingerprints() {
   services.object_storage.tls.ca_secret_ref = fingerprint;
   services.oidc.client_secret_ref = fingerprint;
   services.oidc.tls.ca_secret_ref = fingerprint;
+}
+
+function useTargetProfile(profile) {
+  const [targetCluster, substrateSource, distribution] = profile.split('/');
+  evidence.target_cluster = targetCluster;
+  evidence.substrate_source = substrateSource;
+  evidence.distribution = distribution;
+  evidence.substrate_connection_truth.target_cluster = targetCluster;
+  evidence.substrate_connection_truth.substrate_source = substrateSource;
+  evidence.substrate_connection_truth.distribution = distribution;
 }
 
 switch (mutation) {
@@ -363,6 +410,43 @@ switch (mutation) {
       {
         path: 'smoke-report.json',
         value: smokeReport
+      }
+    ];
+    break;
+  case 'valid_online_deployment_gate_output':
+    releaseKitOutput = 'online-deployment-gate-report.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'online-deployment-gate-report.json',
+        value: onlineDeploymentGateReport
+      }
+    ];
+    break;
+  case 'valid_airgap_bundle_output':
+    useTargetProfile('existing_kubernetes/external_declared/airgap');
+    releaseKitOutput = 'airgap-bundle-check-report.json+airgap-bundle-manifest.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'airgap-bundle-check-report.json',
+        value: airgapBundleCheckReport
+      },
+      {
+        path: 'airgap-bundle-manifest.json',
+        value: airgapBundleManifest
+      }
+    ];
+    break;
+  case 'online_gate_output_wrong_profile':
+    useTargetProfile('existing_kubernetes/kit_installed/online');
+    delete evidence.substrate_connection_truth;
+    releaseKitOutput = 'online-deployment-gate-report.json';
+    evidence.release_kit_output = releaseKitOutput;
+    outputFiles = [
+      {
+        path: 'online-deployment-gate-report.json',
+        value: onlineDeploymentGateReport
       }
     ];
     break;
@@ -750,6 +834,20 @@ run_evidence "$VALID_RENDER_ROLLOUT_SMOKE_ROOT" "$VALID_RENDER_ROLLOUT_SMOKE_OUT
 assert_pass_report "$VALID_RENDER_ROLLOUT_SMOKE_OUT/evidence-validation-report.json" "render-report.json+rollout-report.json+smoke-report.json"
 pass "valid render+rollout+smoke release_kit_output evidence accepted"
 
+VALID_ONLINE_GATE_ROOT="$TMP_DIR/evidence-valid-online-gate"
+VALID_ONLINE_GATE_OUT="$TMP_DIR/out-valid-online-gate"
+write_evidence "$VALID_ONLINE_GATE_ROOT" ci_artifact valid_online_deployment_gate_output
+run_evidence "$VALID_ONLINE_GATE_ROOT" "$VALID_ONLINE_GATE_OUT" >/dev/null
+assert_pass_report "$VALID_ONLINE_GATE_OUT/evidence-validation-report.json" "online-deployment-gate-report.json"
+pass "valid online deployment gate release_kit_output evidence accepted"
+
+VALID_AIRGAP_BUNDLE_ROOT="$TMP_DIR/evidence-valid-airgap-bundle"
+VALID_AIRGAP_BUNDLE_OUT="$TMP_DIR/out-valid-airgap-bundle"
+write_evidence "$VALID_AIRGAP_BUNDLE_ROOT" ci_artifact valid_airgap_bundle_output
+run_evidence "$VALID_AIRGAP_BUNDLE_ROOT" "$VALID_AIRGAP_BUNDLE_OUT" "$AIRGAP_PROFILE" >/dev/null
+assert_pass_report "$VALID_AIRGAP_BUNDLE_OUT/evidence-validation-report.json" "airgap-bundle-check-report.json+airgap-bundle-manifest.json"
+pass "valid airgap bundle check release_kit_output evidence accepted"
+
 VALID_SECRET_REF_ROOT="$TMP_DIR/evidence-valid-secret-ref"
 VALID_SECRET_REF_OUT="$TMP_DIR/out-valid-secret-ref"
 write_evidence "$VALID_SECRET_REF_ROOT" ci_artifact valid_secret_ref
@@ -779,6 +877,15 @@ expect_fail leading-zero-release-kit-version ci_artifact leading_zero_release_ki
 expect_fail below-contract-release-kit-version ci_artifact below_contract_release_kit_version
 expect_fail unknown-release-kit-output ci_artifact unknown_release_kit_output
 expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
+WRONG_ONLINE_GATE_PROFILE_ROOT="$TMP_DIR/evidence-online-gate-wrong-profile"
+WRONG_ONLINE_GATE_PROFILE_OUT="$TMP_DIR/out-online-gate-wrong-profile"
+write_evidence "$WRONG_ONLINE_GATE_PROFILE_ROOT" ci_artifact online_gate_output_wrong_profile
+if run_evidence "$WRONG_ONLINE_GATE_PROFILE_ROOT" "$WRONG_ONLINE_GATE_PROFILE_OUT" "existing_kubernetes/kit_installed/online" >"$TMP_DIR/online-gate-wrong-profile.out" 2>"$TMP_DIR/online-gate-wrong-profile.err"; then
+  cat "$TMP_DIR/online-gate-wrong-profile.out" >&2
+  cat "$TMP_DIR/online-gate-wrong-profile.err" >&2
+  fail "expected online gate output on kit-installed profile to fail"
+fi
+pass "online gate evidence output rejects kit-installed profile"
 expect_fail missing-substrate-connection-truth ci_artifact missing_substrate_connection_truth
 expect_fail release-kit-output-missing-subject-file ci_artifact release_kit_output_missing_subject_file
 expect_fail release-kit-output-extra-subject-file ci_artifact release_kit_output_extra_subject_file

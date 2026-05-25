@@ -68,8 +68,8 @@ archive sha256. Component paths and image artifact paths must be POSIX-style
 relative paths under the bundle root, and sha256 values must match the
 referenced files. The release contract must declare
 `existing_kubernetes/external_declared/airgap` in `target_profiles`, each
-target profile entry must carry `required: boolean`, and `support_level` is
-rejected. The bundle manifest accepts only the documented top-level,
+target profile entry must carry `required: false` during pre-GA, and
+`support_level` is rejected. The bundle manifest accepts only the documented top-level,
 `bindings`, `components`, `image_artifact_declarations`, and `substrate`
 fields. Image artifact declarations must match image-map mappings one-to-one by
 id. The image-map must be airgap, `mirror_required: true`, and every mapping

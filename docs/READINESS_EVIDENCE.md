@@ -31,9 +31,12 @@ The quick gate is not release readiness and does not produce deploy, package,
 or operator evidence.
 
 Contract intake output proves contract/input digest readiness only. Its target
-profile coverage report is limited to canonical required profile coverage and
-never claims release readiness. It is not deploy, package, release, rollout,
-or operator readiness evidence.
+profile coverage report separates canonical declarable profiles,
+intake-supported profiles, executable profiles, and evidence-supported focused
+profiles. During pre-GA all `target_profiles.required` values must be `false`;
+`required: true` fails fast instead of implying support. It never claims
+release readiness. It is not deploy, package, release, rollout, or operator
+readiness evidence.
 
 Template package archive output proves only that one materialized deploy
 template package archive matches the declared descriptor and path-safety
@@ -80,9 +83,10 @@ archive sha256, and the archive sha256 must match
 `deploy_template_package.artifact_provenance.artifact_sha256`. Image artifact
 declarations must match airgap image-map mappings one-to-one by id. The release
 contract must declare `existing_kubernetes/external_declared/airgap` in
-`target_profiles`, each profile entry must carry `required: boolean`, and
-`support_level` is rejected. `existing_kubernetes/kit_installed/airgap` may be
-declared in the contract, but this diagnostic does not deploy it. The bundle
+`target_profiles`, each profile entry must carry `required: false` during
+pre-GA, and `support_level` is rejected.
+`existing_kubernetes/kit_installed/airgap` may be declared in the contract, but
+this diagnostic does not deploy it. The bundle
 manifest accepts only the documented
 top-level, `bindings`, `components`, `image_artifact_declarations`, and
 `substrate` fields. The image-map must have `mirror_required: true` and every
@@ -143,8 +147,13 @@ apply, deploy, package, release, rollout, smoke, or operator readiness
 evidence. Raw envelopes explicitly name `release_kit_output`, use
 `release-kit-evidence-subject` provenance subjects, list only `evidence.json`
 plus the mapped output files in `evidence_subject.files`, including the
-render+rollout and render+rollout+smoke report combinations, and include
-inline neutral substrate connection truth for `external_declared`.
+render+rollout and render+rollout+smoke report combinations,
+`online-deployment-gate-report.json`, and the airgap bundle check report plus
+bundle manifest. Online gate evidence is accepted only for
+`existing_kubernetes/external_declared/online`; airgap bundle check evidence is
+accepted only for `existing_kubernetes/external_declared/airgap`. Raw
+envelopes include inline neutral substrate connection truth for
+`external_declared`.
 
 Target preflight output proves only that one explicit
 `agentsmith.substrate-connection.truth/v1` document matches the requested
