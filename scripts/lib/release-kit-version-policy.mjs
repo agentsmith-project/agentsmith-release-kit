@@ -1,9 +1,46 @@
 export const CURRENT_RELEASE_KIT_VERSION = '0.1.0';
 
-export const SUPPORTED_FOCUSED_TARGET_PROFILE_VALUES = [
+export const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
+export const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
+export const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
+
+export const CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES = [
   'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/external_declared/airgap',
+  'existing_kubernetes/kit_installed/online',
+  'existing_kubernetes/kit_installed/airgap',
   'kind_rehearsal/kit_installed/online'
 ];
+
+export const CANONICAL_DECLARABLE_TARGET_PROFILE_SET = new Set(
+  CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES
+);
+
+export const REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES =
+  CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES;
+
+export const REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_SET = new Set(
+  REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES
+);
+
+export const TARGET_PREFLIGHT_INTAKE_TARGET_PROFILE_VALUES =
+  CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES;
+
+export const TARGET_PREFLIGHT_INTAKE_TARGET_PROFILE_SET = new Set(
+  TARGET_PREFLIGHT_INTAKE_TARGET_PROFILE_VALUES
+);
+
+export const IMAGE_MAP_TARGET_PROFILE_VALUES = [
+  'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/external_declared/airgap',
+  'existing_kubernetes/kit_installed/online',
+  'existing_kubernetes/kit_installed/airgap'
+];
+
+export const IMAGE_MAP_TARGET_PROFILE_SET = new Set(IMAGE_MAP_TARGET_PROFILE_VALUES);
+
+export const SUPPORTED_FOCUSED_TARGET_PROFILE_VALUES =
+  REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES;
 
 export const SUPPORTED_FOCUSED_TARGET_PROFILE_SET = new Set(
   SUPPORTED_FOCUSED_TARGET_PROFILE_VALUES

@@ -3,6 +3,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  CANONICAL_DECLARABLE_TARGET_PROFILE_SET,
+  CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES,
+  DISTRIBUTION_VALUES,
+  SUBSTRATE_SOURCE_VALUES,
+  TARGET_CLUSTER_VALUES
+} from './lib/release-kit-version-policy.mjs';
+
 const REQUIRED_ARGS = [
   'releaseContract',
   'deployTemplatePackage',
@@ -21,15 +29,6 @@ const BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
 const REPORT_SCHEMA = 'agentsmith.airgap-bundle-check-report/v1';
 const REPORT_SCOPE = 'airgap_bundle_manifest_check_only';
 const REPORT_FILE = 'airgap-bundle-check-report.json';
-const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
-const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
-const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
-const CANONICAL_TARGET_PROFILE_VALUES = [
-  'existing_kubernetes/external_declared/online',
-  AIRGAP_TARGET_PROFILE,
-  'kind_rehearsal/kit_installed/online'
-];
-const CANONICAL_TARGET_PROFILE_SET = new Set(CANONICAL_TARGET_PROFILE_VALUES);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const SAFE_COMPONENT_KINDS = new Set([
@@ -397,9 +396,9 @@ function assertContractTargetProfiles(contract) {
       DISTRIBUTION_VALUES
     );
     const tuple = `${targetCluster}/${substrateSource}/${distribution}`;
-    if (!CANONICAL_TARGET_PROFILE_SET.has(tuple)) {
+    if (!CANONICAL_DECLARABLE_TARGET_PROFILE_SET.has(tuple)) {
       fail(
-        `${label} must be one of canonical profiles: ${CANONICAL_TARGET_PROFILE_VALUES.join(
+        `${label} must be one of canonical profiles: ${CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.join(
           ', '
         )}`
       );
@@ -916,7 +915,7 @@ async function main() {
     })
   );
 
-  console.log('PASS: airgap bundle manifest/digest check accepted');
+  console.log('PASS: airgap bundle manifest/digest check accepted readiness=false');
 }
 
 main().catch((error) => {

@@ -33,8 +33,11 @@ must not include AgentSmith product-flow fields, `verdict`, or
 The current `--image-map` validator is a focused image-map / mirror-plan
 diagnostic only. It consumes only `release_contract.deploy_image_inventory`
 from the supplied release contract and an explicit target profile. It accepts
-`existing_kubernetes/external_declared/online` and
-`existing_kubernetes/external_declared/airgap` as CLI targets.
+existing Kubernetes canonical profiles as CLI targets:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`.
 `kind_rehearsal/kit_installed/online` is a canonical profile tuple but out of
 scope for image-map CLI. Only canonical profile tuples are accepted in
 `release_contract.target_profiles`; non-canonical pre-GA target names and
@@ -51,7 +54,9 @@ The current `--airgap-bundle-check` validator is a focused local bundle
 manifest/digest diagnostic only. It consumes an explicit release contract,
 deploy template package descriptor, deploy template archive `.tgz`, airgap
 image-map, bundle root, and bundle manifest, and accepts only
-`existing_kubernetes/external_declared/airgap`. The deploy template archive
+`existing_kubernetes/external_declared/airgap`. `kit_installed` airgap profiles
+may be declared in the release contract but are not bundle-check CLI targets in
+this slice. The deploy template archive
 sha256 must match `deploy_template_package.package_sha256` and
 `deploy_template_package.artifact_provenance.artifact_sha256`. The bundle
 manifest must use `schema_version:

@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
+EXTERNAL_AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
+KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 VALID_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-package.valid.json"
 # Repo-local fixture snapshots are copied from AgentSmith generated release-boundary
@@ -677,12 +680,17 @@ NODE
 
 assert_outputs() {
   local output_dir="$1"
+  local expected_profile="${2:-$TARGET_PROFILE}"
+  local expected_required="${3:-true}"
 
-  "$NODE_BIN" --input-type=module - "$output_dir" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$output_dir" "$expected_profile" "$expected_required" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [outputDir] = process.argv.slice(2);
+const [outputDir, expectedProfile, expectedRequiredText] = process.argv.slice(2);
+const [expectedTargetCluster, expectedSubstrateSource, expectedDistribution] =
+  expectedProfile.split('/');
+const expectedRequired = expectedRequiredText === 'true';
 const allowedKeys = [
   'artifacts',
   'digests',
@@ -723,16 +731,16 @@ for (const file of ['intake-report.json', 'image-digest-plan.json']) {
   if (!payload.artifacts?.deploy_template_package?.manifest_sha256) {
     throw new Error(`${file} did not include manifest_sha256`);
   }
-  if (payload.target_profile?.target_cluster !== 'existing_kubernetes') {
+  if (payload.target_profile?.target_cluster !== expectedTargetCluster) {
     throw new Error(`${file} did not split target profile fields`);
   }
-  if (payload.target_profile?.substrate_source !== 'external_declared') {
+  if (payload.target_profile?.substrate_source !== expectedSubstrateSource) {
     throw new Error(`${file} did not split target profile fields`);
   }
-  if (payload.target_profile?.distribution !== 'online') {
+  if (payload.target_profile?.distribution !== expectedDistribution) {
     throw new Error(`${file} did not split target profile fields`);
   }
-  if (payload.target_profile?.required !== true) {
+  if (payload.target_profile?.required !== expectedRequired) {
     throw new Error(`${file} did not preserve target profile required metadata`);
   }
   if (!Array.isArray(payload.images) || payload.images.length !== 5) {
@@ -779,6 +787,9 @@ if ('release_verdict' in report || 'verdict' in report) {
 const supportedValues = new Set((report.supported_profiles || []).map((profile) => profile.value));
 for (const value of [
   'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/external_declared/airgap',
+  'existing_kubernetes/kit_installed/online',
+  'existing_kubernetes/kit_installed/airgap',
   'kind_rehearsal/kit_installed/online'
 ]) {
   if (!supportedValues.has(value)) {
@@ -857,6 +868,36 @@ assert_outputs "$VALID_OUT"
 assert_coverage_report "$VALID_OUT"
 pass "valid AgentSmith generated artifact fixtures accepted"
 
+EXTERNAL_AIRGAP_OUT="$TMP_DIR/valid-external-airgap"
+run_inputs \
+  "$VALID_CONTRACT" \
+  "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+  "$EXTERNAL_AIRGAP_OUT" \
+  "$EXTERNAL_AIRGAP_PROFILE" >/dev/null
+assert_outputs "$EXTERNAL_AIRGAP_OUT" "$EXTERNAL_AIRGAP_PROFILE" false
+assert_coverage_report "$EXTERNAL_AIRGAP_OUT"
+pass "external-declared airgap intake profile accepted"
+
+KIT_ONLINE_OUT="$TMP_DIR/valid-kit-online"
+run_inputs \
+  "$VALID_CONTRACT" \
+  "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+  "$KIT_ONLINE_OUT" \
+  "$KIT_ONLINE_PROFILE" >/dev/null
+assert_outputs "$KIT_ONLINE_OUT" "$KIT_ONLINE_PROFILE" false
+assert_coverage_report "$KIT_ONLINE_OUT"
+pass "kit-installed online intake profile accepted"
+
+KIT_AIRGAP_OUT="$TMP_DIR/valid-kit-airgap"
+run_inputs \
+  "$VALID_CONTRACT" \
+  "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+  "$KIT_AIRGAP_OUT" \
+  "$KIT_AIRGAP_PROFILE" >/dev/null
+assert_outputs "$KIT_AIRGAP_OUT" "$KIT_AIRGAP_PROFILE" false
+assert_coverage_report "$KIT_AIRGAP_OUT"
+pass "kit-installed airgap intake profile accepted"
+
 ATTESTED_CONTRACT="$TMP_DIR/valid-attested.release-contract.json"
 ATTESTED_DEPLOY_TEMPLATE_PACKAGE="$TMP_DIR/valid-attested.deploy-template-package.json"
 ATTESTED_OUT="$TMP_DIR/valid-attested"
@@ -892,7 +933,6 @@ assert_outputs "$SECRET_REF_OUT"
 assert_coverage_report "$SECRET_REF_OUT"
 pass "valid secretRef pull_secret_ref accepted"
 
-expect_unsupported_required_target_profile
 expect_kind_required_target_profile
 
 expect_target_profile_fail "noncanonical-target-profile-local-kind" \

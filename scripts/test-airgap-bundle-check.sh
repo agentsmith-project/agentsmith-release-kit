@@ -8,6 +8,7 @@ FIXTURE_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-packag
 ONLINE_PROFILE="existing_kubernetes/external_declared/online"
 AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
 KIND_PROFILE="kind_rehearsal/kit_installed/online"
+KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="airgap-bundle-check-report.json"
 
@@ -720,8 +721,12 @@ valid_output_dir="$TMP_DIR/out-valid"
 create_materials "$VALID_CONTRACT" "$VALID_DEPLOY_TEMPLATE_PACKAGE" "$VALID_ARCHIVE"
 run_image_map "$valid_image_map_dir"
 create_bundle "$valid_image_map_dir/image-map.json" "$valid_bundle_root" "$valid_bundle_manifest"
-run_airgap_bundle_check "$valid_image_map_dir/image-map.json" "$AIRGAP_PROFILE" "$valid_bundle_root" "$valid_bundle_manifest" "$valid_output_dir" >/dev/null
+run_airgap_bundle_check "$valid_image_map_dir/image-map.json" "$AIRGAP_PROFILE" "$valid_bundle_root" "$valid_bundle_manifest" "$valid_output_dir" >"$TMP_DIR/valid-airgap.out"
 assert_report "$valid_output_dir/$REPORT_FILE"
+if ! tail -n 1 "$TMP_DIR/valid-airgap.out" | grep -q 'readiness=false'; then
+  cat "$TMP_DIR/valid-airgap.out" >&2
+  fail "airgap bundle check stdout must end with readiness=false"
+fi
 pass "valid airgap bundle manifest accepted with focused non-readiness report"
 
 expect_image_map_fail missing-target-registry missing_target_registry
@@ -771,6 +776,7 @@ expect_contract_fail duplicate-target-profile-tuple duplicate_target_profile_tup
 
 expect_profile_fail online "$ONLINE_PROFILE"
 expect_profile_fail kind-rehearsal "$KIND_PROFILE"
+expect_profile_fail kit-installed-airgap "$KIT_AIRGAP_PROFILE"
 expect_profile_fail alias-offline "existing_kubernetes/external_declared/offline"
 expect_profile_fail alias-air-gapped "existing_kubernetes/external_declared/air-gapped"
 

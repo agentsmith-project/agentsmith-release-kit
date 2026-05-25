@@ -4,9 +4,14 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  CANONICAL_DECLARABLE_TARGET_PROFILE_SET,
+  CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES,
   CURRENT_RELEASE_KIT_VERSION,
-  SUPPORTED_FOCUSED_TARGET_PROFILE_SET,
-  SUPPORTED_FOCUSED_TARGET_PROFILE_VALUES,
+  DISTRIBUTION_VALUES,
+  REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_SET,
+  REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES,
+  SUBSTRATE_SOURCE_VALUES,
+  TARGET_CLUSTER_VALUES,
   assertPlainSemverAtLeast,
   requirePlainSemver
 } from './lib/release-kit-version-policy.mjs';
@@ -31,9 +36,6 @@ const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_PACKAGE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
 const SUBSTRATE_CONNECTION_SCHEMA = 'agentsmith.substrate-connection.truth/v1';
-const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
-const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
-const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -360,6 +362,13 @@ function parseTargetProfile(targetProfile) {
   }
   const [targetCluster, substrateSource, distribution] = tuple;
   const value = `${targetCluster}/${substrateSource}/${distribution}`;
+  if (!CANONICAL_DECLARABLE_TARGET_PROFILE_SET.has(value)) {
+    fail(
+      `target_profile must be one of canonical profiles: ${CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.join(
+        ', '
+      )}`
+    );
+  }
   return {
     value,
     targetCluster: requireEnumString(
@@ -409,6 +418,13 @@ function normalizeTargetProfile(object, label) {
     DISTRIBUTION_VALUES
   );
   const value = `${targetCluster}/${substrateSource}/${distribution}`;
+  if (!CANONICAL_DECLARABLE_TARGET_PROFILE_SET.has(value)) {
+    fail(
+      `${label} must be one of canonical profiles: ${CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.join(
+        ', '
+      )}`
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(object, 'support_level')) {
     fail(`${label}.support_level is not allowed; use ${label}.required`);
   }
@@ -1017,14 +1033,16 @@ function buildTargetProfileCoverageReport(targetProfiles) {
     .filter((profile) => profile.required)
     .map(targetProfileSummary);
   const missingProfiles = requiredProfiles.filter(
-    (profile) => !SUPPORTED_FOCUSED_TARGET_PROFILE_SET.has(profile.value)
+    (profile) => !REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_SET.has(profile.value)
   );
   const report = {
     scope: 'target_profile_coverage_intake_only',
     readiness: false,
     required_profiles: requiredProfiles,
     missing_profiles: missingProfiles,
-    supported_profiles: SUPPORTED_FOCUSED_TARGET_PROFILE_VALUES.map(targetProfileFromValue),
+    supported_profiles: REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES.map(
+      targetProfileFromValue
+    ),
     status: missingProfiles.length > 0 ? 'failed' : 'pass'
   };
 
@@ -1081,7 +1099,7 @@ async function main() {
   const targetProfileCoverageReport = buildTargetProfileCoverageReport(targetProfiles);
   await writeTargetProfileCoverageReport(args.outputDir, targetProfileCoverageReport);
   if (targetProfileCoverageReport.status === 'failed') {
-    fail('required target_profiles include unsupported focused profiles');
+    fail('required target_profiles include unsupported profiles');
   }
   const targetProfile = assertTargetProfile(targetProfiles, args.targetProfile);
   const provenance = assertProvenance(contract, deployTemplatePackage, releaseGitSha);

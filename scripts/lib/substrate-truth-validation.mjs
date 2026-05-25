@@ -1,12 +1,15 @@
 import {
-  SUPPORTED_FOCUSED_TARGET_PROFILE_SET,
+  DISTRIBUTION_VALUES,
+  SUBSTRATE_SOURCE_VALUES,
+  TARGET_CLUSTER_VALUES,
+  TARGET_PREFLIGHT_INTAKE_TARGET_PROFILE_SET,
+  TARGET_PREFLIGHT_INTAKE_TARGET_PROFILE_VALUES,
   requirePlainSemver
 } from './release-kit-version-policy.mjs';
 
+export { DISTRIBUTION_VALUES, SUBSTRATE_SOURCE_VALUES, TARGET_CLUSTER_VALUES };
+
 export const SUBSTRATE_CONNECTION_SCHEMA = 'agentsmith.substrate-connection.truth/v1';
-export const TARGET_CLUSTER_VALUES = new Set(['existing_kubernetes', 'kind_rehearsal']);
-export const SUBSTRATE_SOURCE_VALUES = new Set(['external_declared', 'kit_installed']);
-export const DISTRIBUTION_VALUES = new Set(['online', 'airgap']);
 
 const REQUIRED_SERVICES = ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc'];
 const SECRET_REF_PREFIX = 'secretRef:';
@@ -204,8 +207,12 @@ export function parseTargetProfile(targetProfile) {
     )
   };
 
-  if (!SUPPORTED_FOCUSED_TARGET_PROFILE_SET.has(value)) {
-    fail(`target_profile is not supported by target preflight: ${value}`);
+  if (!TARGET_PREFLIGHT_INTAKE_TARGET_PROFILE_SET.has(value)) {
+    fail(
+      `target_profile must be one of canonical target preflight profiles: ${TARGET_PREFLIGHT_INTAKE_TARGET_PROFILE_VALUES.join(
+        ', '
+      )}`
+    );
   }
 
   return parsed;

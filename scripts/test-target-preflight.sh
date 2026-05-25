@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 EXTERNAL_PROFILE="existing_kubernetes/external_declared/online"
+EXTERNAL_AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+EXISTING_KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
+EXISTING_KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 KIT_PROFILE="kind_rehearsal/kit_installed/online"
 
 TMP_DIR="$(mktemp -d)"
@@ -338,6 +341,31 @@ write_truth "$EXTERNAL_TRUTH" "$EXTERNAL_PROFILE" valid
 run_target_preflight "$EXTERNAL_PROFILE" "$EXTERNAL_TRUTH" "$EXTERNAL_OUT" >/dev/null
 assert_pass_report "$EXTERNAL_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
 pass "valid existing_kubernetes/external_declared/online truth accepted with focused non-readiness report"
+
+EXTERNAL_AIRGAP_TRUTH="$TMP_DIR/external-airgap-valid.json"
+EXTERNAL_AIRGAP_OUT="$TMP_DIR/out-external-airgap-valid"
+write_truth "$EXTERNAL_AIRGAP_TRUTH" "$EXTERNAL_AIRGAP_PROFILE" valid
+run_target_preflight "$EXTERNAL_AIRGAP_PROFILE" "$EXTERNAL_AIRGAP_TRUTH" "$EXTERNAL_AIRGAP_OUT" >/dev/null
+assert_pass_report "$EXTERNAL_AIRGAP_OUT/target-preflight-report.json" "$EXTERNAL_AIRGAP_PROFILE"
+pass "valid existing_kubernetes/external_declared/airgap truth accepted"
+
+EXISTING_KIT_ONLINE_TRUTH="$TMP_DIR/existing-kit-online-valid.json"
+EXISTING_KIT_ONLINE_OUT="$TMP_DIR/out-existing-kit-online-valid"
+write_truth "$EXISTING_KIT_ONLINE_TRUTH" "$EXISTING_KIT_ONLINE_PROFILE" valid
+run_target_preflight "$EXISTING_KIT_ONLINE_PROFILE" "$EXISTING_KIT_ONLINE_TRUTH" "$EXISTING_KIT_ONLINE_OUT" >/dev/null
+assert_pass_report \
+  "$EXISTING_KIT_ONLINE_OUT/target-preflight-report.json" \
+  "$EXISTING_KIT_ONLINE_PROFILE"
+pass "valid existing_kubernetes/kit_installed/online truth accepted"
+
+EXISTING_KIT_AIRGAP_TRUTH="$TMP_DIR/existing-kit-airgap-valid.json"
+EXISTING_KIT_AIRGAP_OUT="$TMP_DIR/out-existing-kit-airgap-valid"
+write_truth "$EXISTING_KIT_AIRGAP_TRUTH" "$EXISTING_KIT_AIRGAP_PROFILE" valid
+run_target_preflight "$EXISTING_KIT_AIRGAP_PROFILE" "$EXISTING_KIT_AIRGAP_TRUTH" "$EXISTING_KIT_AIRGAP_OUT" >/dev/null
+assert_pass_report \
+  "$EXISTING_KIT_AIRGAP_OUT/target-preflight-report.json" \
+  "$EXISTING_KIT_AIRGAP_PROFILE"
+pass "valid existing_kubernetes/kit_installed/airgap truth accepted"
 
 KIT_TRUTH="$TMP_DIR/kit-valid.json"
 KIT_OUT="$TMP_DIR/out-kit-valid"

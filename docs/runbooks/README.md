@@ -1,62 +1,59 @@
 # Runbooks
 
-Status: bootstrap placeholder.
+Status: operator decision index for the current bootstrap diagnostics.
 
-This directory is the future home for operator runbooks.
+Use this page to choose the target path before running repo-local checks. The
+scripts here produce focused evidence with `readiness: false`; they do not
+sign off deploy, package, offline install, or release readiness.
 
-Expected future runbook areas:
+## Default Operator Paths
 
-- Existing Kubernetes online deployment.
-- Existing Kubernetes airgap deployment.
-- Airgap bundle verification and load.
-- Image mirror and digest adoption checks.
-- Substrate connection truth validation.
-- Rollout, route smoke, and evidence collection.
-- Troubleshooting and rollback.
-- `kind_rehearsal` for local or CI rehearsal only.
+| Path | Target profile | Operator command entry | Current result |
+| --- | --- | --- | --- |
+| Real or cloud Kubernetes, existing substrates, online | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ...` | Runs the online focused chain for existing substrate endpoints. |
+| Real or cloud Kubernetes, existing substrates, airgap | `existing_kubernetes/external_declared/airgap` | `bash scripts/verify-release.sh --image-map ... --target-registry ...`, then `bash scripts/verify-release.sh --airgap-bundle-check ...` | Produces a mirror plan and checks an already assembled bundle manifest/digests. |
+| Real or cloud Kubernetes, kit-installed substrates, online or airgap | `existing_kubernetes/kit_installed/online` or `existing_kubernetes/kit_installed/airgap` | `bash scripts/verify-release.sh --inputs ...`, `--target-preflight ...`, and `--image-map ...` | Accepts the declaration, substrate truth intake, and image plan only. |
 
-Current focused image-map runbook note: use `bash scripts/verify-release.sh
---image-map` to produce `image-map.json` from a release contract before online
-or airgap registry work. Online can omit `--target-registry` to use source
-digest refs directly. Airgap requires `--target-registry` with
-`<registry-host[/namespace]>`; namespace components must be lowercase and must
-start and end with alphanumeric characters. The output is a mirror plan only;
-it is not evidence that images already exist in that registry.
+Optional rehearsal path:
 
-Current focused airgap bundle check runbook note: use `bash
-scripts/verify-release.sh --airgap-bundle-check` only for a local
-manifest/digest check of an already assembled bundle directory. The bundle
-manifest must use `schema_version:
-agentsmith.airgap-bundle-manifest/v1`; `components` must name exactly one
-`kind` each for `release_contract`, `deploy_template_package`,
-`deploy_template_archive`, and `image_map`. The deploy template archive sha256
-must match `deploy_template_package.package_sha256`,
-`artifact_provenance.artifact_sha256`, and
-`bundle_manifest.bindings.deploy_template_archive_sha256`; image artifact
-declarations must match the airgap image-map mappings one-to-one by id. The
-release contract must include the
-`existing_kubernetes/external_declared/airgap` target profile with
-`required: boolean`, and the bundle manifest must use only the documented
-manifest fields. This check validates safe relative paths and sha256 values
-only. It is not a packager, does not parse the `.tgz`, does not create an
-airgap package, does
-not call Docker, skopeo, oras, kubectl, pull, push, mirror, save, or load
-images, does not prove registry presence, image load, offline install
-readiness, deploy readiness, package readiness, or release readiness, and does
-not support online or kind targets.
+| Path | Target profile | Operator command entry | Current result |
+| --- | --- | --- | --- |
+| Kind rehearsal, kit-installed substrates, online | `kind_rehearsal/kit_installed/online` | `bash scripts/verify-release.sh --inputs ...` and `--target-preflight ...` | Accepts rehearsal intake only. It is not a prerequisite for real Kubernetes. |
 
-Current focused route smoke runbook note: use `bash scripts/verify-release.sh
---smoke` only after a passing focused `rollout-report.json`. Supply an HTTPS
-URL by default; local HTTP is reserved for focused tests with explicit
-`--allow-http --allow-localhost`. Do not add custom headers or tokens.
+## Implemented Now / Not Yet
 
-Current focused online deployment gate note: use `bash scripts/verify-release.sh
---online-deployment-gate` when an operator wants one KISS command to run the
-online focused chain. Default mode is server-side dry-run and does not run
-rollout or smoke. Confirmed apply requires exact confirm text and an operator
-run id; smoke is optional and only runs after rollout. This is not airgap,
-kind rehearsal, image mirroring, rollback, deploy readiness, or release
-readiness.
+| Path | Implemented now | Not yet |
+| --- | --- | --- |
+| Real or cloud Kubernetes + existing substrates + online | Inputs, target-preflight, template-package, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, rollback, product-flow checks, deploy readiness, release readiness. |
+| Real or cloud Kubernetes + existing substrates + airgap | Image-map mirror plan and airgap bundle manifest/digest check for `existing_kubernetes/external_declared/airgap`. | Bundle creation, registry mirroring, image load/import, offline install, airgap deploy gate, deploy readiness, package readiness. |
+| Real or cloud Kubernetes + kit-installed substrates + online/airgap | Contract declaration, target-preflight substrate truth intake, and image-map planning for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`. | Substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
+| Kind rehearsal + kit-installed substrates + online | Contract declaration and target-preflight truth intake for `kind_rehearsal/kit_installed/online`. | Real deployment evidence, release readiness, mandatory pre-deploy rehearsal. |
+
+## Command Roles
+
+`scripts/test-*.sh` files are maintainer self-tests for this repository. They
+exercise failure cases and fixture behavior while changing release-kit code.
+
+Operators should call `bash scripts/verify-release.sh --...` directly with the
+release contract, deploy template package, explicit target profile, and output
+directory for their chosen path.
+
+## Current Notes
+
+For image-map, online targets may omit `--target-registry` to use source
+digest refs directly. Airgap targets require
+`--target-registry <registry-host[/namespace]>`; namespace components must be
+lowercase and start and end with alphanumeric characters.
+
+For airgap bundle checks, the bundle manifest must use
+`schema_version: agentsmith.airgap-bundle-manifest/v1`. The check validates
+safe relative paths and sha256 bindings only, and its stdout ends with
+`readiness=false`.
+
+For route smoke, use `bash scripts/verify-release.sh --smoke` only after a
+passing focused `rollout-report.json`. Supply an HTTPS URL by default; local
+HTTP is reserved for focused tests with explicit `--allow-http
+--allow-localhost`.
 
 Runbooks must avoid raw secrets. They should describe secret refs, redacted
 fingerprints, prerequisites, and explicit operator inputs.

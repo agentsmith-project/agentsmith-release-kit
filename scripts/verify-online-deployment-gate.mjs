@@ -51,7 +51,7 @@ class ValidationError extends Error {
 
 class StepError extends Error {
   constructor(step, status, message) {
-    super(message || `online deployment gate step failed: ${step}`);
+    super(message || `online focused chain step failed: ${step}`);
     this.exitCode = status || 1;
   }
 }
@@ -360,10 +360,10 @@ function runStep({ args, steps, name, mode, argv, reportPaths }) {
     try {
       stat = statSync(reportPath);
     } catch {
-      throw new StepError(name, 1, `online deployment gate step report missing: ${name}`);
+      throw new StepError(name, 1, `online focused chain step report missing: ${name}`);
     }
     if (!stat.isFile()) {
-      throw new StepError(name, 1, `online deployment gate step report is not a file: ${name}`);
+      throw new StepError(name, 1, `online focused chain step report is not a file: ${name}`);
     }
   }
   steps.push({
@@ -622,7 +622,7 @@ async function main() {
     })
   );
 
-  console.log('PASS: online deployment gate completed focused diagnostics');
+  console.log('PASS: online focused chain completed focused diagnostics');
 }
 
 main().catch((error) => {

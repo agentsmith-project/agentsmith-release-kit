@@ -43,13 +43,14 @@ digest-bound image inventory only.
 
 Every `release_contract.target_profiles` entry must declare
 `required: boolean`; `support_level` is not accepted as a replacement. Duplicate
-`target_cluster/substrate_source/distribution` tuples are rejected. The current
-focused supported profile set is `existing_kubernetes/external_declared/online`
-and `kind_rehearsal/kit_installed/online`; required profiles outside that set
-fail fast. `kind_rehearsal` is supported only as a focused rehearsal and must
-not be `required: true`. During this slice,
-`existing_kubernetes/external_declared/airgap` may be declared only as
-`required: false`.
+`target_cluster/substrate_source/distribution` tuples are rejected. Every entry
+must use one of the canonical declarable profiles:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`,
+`existing_kubernetes/kit_installed/airgap`, or
+`kind_rehearsal/kit_installed/online`. `kind_rehearsal/kit_installed/online`
+is intake-only rehearsal and must not be `required: true`.
 
 The generated `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` must keep `readiness: false`. They prove
@@ -170,8 +171,11 @@ digest-pinned source-to-target image reference map. It does not log in to a
 registry, pull images, push images, create a mirror, build an airgap bundle,
 call Kubernetes, or claim deploy, package, or release readiness.
 
-`--image-map` accepts only `existing_kubernetes/external_declared/online` and
-`existing_kubernetes/external_declared/airgap` as CLI targets.
+`--image-map` accepts existing Kubernetes canonical profiles as CLI targets:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`.
 `kind_rehearsal/kit_installed/online` is a canonical profile tuple but out of
 scope for image-map CLI. Only canonical profile tuples are accepted in
 `release_contract.target_profiles`; non-canonical pre-GA names and synonym
@@ -213,7 +217,8 @@ presence, or claim offline install, deploy, package, or release readiness.
 
 `--airgap-bundle-check` accepts only
 `existing_kubernetes/external_declared/airgap`. Online, kind rehearsal,
-non-canonical pre-GA target names, and synonym axes fail fast. The image-map
+`kit_installed`, non-canonical pre-GA target names, and synonym axes fail fast.
+The image-map
 must be a passing airgap `agentsmith.image-map/v1` report with `scope:
 image_map_only`, `readiness: false`, `mirror_required: true`, a target
 registry, and `action: mirror_required` on every mapping.
@@ -221,7 +226,8 @@ registry, and `action: mirror_required` on every mapping.
 The release contract `target_profiles` value must be an array and must declare
 `existing_kubernetes/external_declared/airgap`. Every target profile tuple must
 be canonical, every entry must carry `required: boolean`, and `support_level`
-is rejected. The airgap profile may remain `required: false`.
+is rejected. `existing_kubernetes/kit_installed/airgap` may be declared in the
+contract, but this check does not deploy it.
 
 The bundle manifest must use `schema_version:
 agentsmith.airgap-bundle-manifest/v1`. Its `components` array must contain
@@ -373,7 +379,7 @@ It must not contain response body, raw headers, custom token payloads,
 kubeconfig content, product-flow fields, `verdict`, `release_verdict`, or
 deploy readiness fields.
 
-## Online Deployment Gate Focused Orchestration
+## Online Focused Chain Orchestration
 
 Run:
 
@@ -382,11 +388,12 @@ bash scripts/test-online-deployment-gate.sh
 ```
 
 This focused runner exercises `bash scripts/verify-release.sh
---online-deployment-gate`. It is a KISS sequence runner for
+--online-deployment-gate`. It is a KISS sequence runner for the online focused
+chain on
 `existing_kubernetes/external_declared/online` only. It does not implement a
-release platform, cloud resource provisioning, image mirroring, airgap bundle
-creation, kind image import, rollback, product-flow checks, or full release
-readiness.
+release platform, cloud resource provisioning, substrate installation, image
+mirroring, airgap bundle creation, kind image import, rollback, product-flow
+checks, or full release readiness.
 
 The runner calls existing focused diagnostics in order: inputs,
 target-preflight, template-package, render, render-check, apply, and, for
@@ -472,7 +479,11 @@ The accepted truth schema is
 non-canonical pre-GA target names such as `local-kind`, `existing-cluster`,
 `real-k8s`, and synonym
 axes such as `kind` or `cluster` are rejected. The supported focused profiles
-are `existing_kubernetes/external_declared/online` and
+for this diagnostic are the canonical target-preflight intake profiles:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`,
+`existing_kubernetes/kit_installed/airgap`, and
 `kind_rehearsal/kit_installed/online`.
 
 For `external_declared`, the operator provides the connection truth and the

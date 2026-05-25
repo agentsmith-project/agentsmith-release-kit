@@ -19,7 +19,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
 | Route/service smoke diagnostic | Focused only | `smoke-report.json` keeps `readiness: false`. |
-| Online deployment gate runner | Focused only | `online-deployment-gate-report.json` keeps `readiness: false`. |
+| Online focused chain runner | Focused only | `online-deployment-gate-report.json` keeps `readiness: false`. |
 | Release-kit evidence envelope diagnostic | Focused only | `evidence-validation-report.json` keeps `readiness: false`. |
 | Target preflight diagnostic | Focused only | `target-preflight-report.json` keeps `readiness: false`. |
 | Online deploy evidence | Not implemented | Future release-kit authority. |
@@ -31,9 +31,9 @@ The quick gate is not release readiness and does not produce deploy, package,
 or operator evidence.
 
 Contract intake output proves contract/input digest readiness only. Its target
-profile coverage report is limited to required profile support coverage for the
-current focused set and never claims release readiness. It is not deploy,
-package, release, rollout, or operator readiness evidence.
+profile coverage report is limited to canonical required profile coverage and
+never claims release readiness. It is not deploy, package, release, rollout,
+or operator readiness evidence.
 
 Template package archive output proves only that one materialized deploy
 template package archive matches the declared descriptor and path-safety
@@ -56,8 +56,11 @@ or produce operator readiness evidence.
 
 Image-map output proves only that the release contract
 `deploy_image_inventory` can be projected into digest-pinned source/target
-image references for `existing_kubernetes/external_declared/online` or
-`existing_kubernetes/external_declared/airgap`. Online without a target
+image references for existing Kubernetes canonical profiles:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`. Online without a target
 registry uses source refs directly; a provided target registry, and every
 airgap run, produces mirror-required target refs. It does not verify that
 images exist in a target registry, does not pull or push images, does not build
@@ -78,7 +81,9 @@ archive sha256, and the archive sha256 must match
 declarations must match airgap image-map mappings one-to-one by id. The release
 contract must declare `existing_kubernetes/external_declared/airgap` in
 `target_profiles`, each profile entry must carry `required: boolean`, and
-`support_level` is rejected. The bundle manifest accepts only the documented
+`support_level` is rejected. `existing_kubernetes/kit_installed/airgap` may be
+declared in the contract, but this diagnostic does not deploy it. The bundle
+manifest accepts only the documented
 top-level, `bindings`, `components`, `image_artifact_declarations`, and
 `substrate` fields. The image-map must have `mirror_required: true` and every
 mapping must use `action: mirror_required`. This diagnostic is manifest/digest
@@ -118,13 +123,14 @@ allow them, and records only normalized route and status summaries.
 `smoke-report.json` keeps `readiness: false`; it is not deploy, release,
 product-flow, package, full smoke, or operator readiness evidence.
 
-Online deployment gate output proves only that the repo-local runner invoked
-the focused online chain in order for
+Online focused chain output proves only that the repo-local runner invoked the
+focused online chain in order for
 `existing_kubernetes/external_declared/online`. Default mode stops after
 server-side dry-run apply; confirmed apply additionally runs rollout and
-optional route smoke. It does not provision cloud resources, mirror images,
-build airgap bundles, import images into kind, roll back changes, or produce
-product-flow evidence. `online-deployment-gate-report.json` keeps
+optional route smoke. It does not provision cloud resources, install
+substrates, mirror images, build airgap bundles, import images into kind, roll
+back changes, or produce product-flow evidence.
+`online-deployment-gate-report.json` keeps
 `readiness: false`; it is not deploy, release, package, airgap, kind, product
 readiness, or operator signoff evidence.
 

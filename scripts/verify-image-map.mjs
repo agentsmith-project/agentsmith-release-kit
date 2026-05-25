@@ -3,21 +3,17 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  CANONICAL_DECLARABLE_TARGET_PROFILE_SET,
+  CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES,
+  IMAGE_MAP_TARGET_PROFILE_SET,
+  IMAGE_MAP_TARGET_PROFILE_VALUES
+} from './lib/release-kit-version-policy.mjs';
+
 const REQUIRED_ARGS = ['releaseContract', 'targetProfile', 'outputDir'];
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const REPORT_SCHEMA = 'agentsmith.image-map/v1';
 const IMAGE_MAP_SCOPE = 'image_map_only';
-const SUPPORTED_TARGET_PROFILE_VALUES = [
-  'existing_kubernetes/external_declared/online',
-  'existing_kubernetes/external_declared/airgap'
-];
-const SUPPORTED_TARGET_PROFILE_SET = new Set(SUPPORTED_TARGET_PROFILE_VALUES);
-const CANONICAL_TARGET_PROFILE_VALUES = [
-  'existing_kubernetes/external_declared/online',
-  'existing_kubernetes/external_declared/airgap',
-  'kind_rehearsal/kit_installed/online'
-];
-const CANONICAL_TARGET_PROFILE_SET = new Set(CANONICAL_TARGET_PROFILE_VALUES);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -161,6 +157,13 @@ function requireString(value, label) {
   return value;
 }
 
+function requireBoolean(value, label) {
+  if (typeof value !== 'boolean') {
+    fail(`${label} must be a boolean`);
+  }
+  return value;
+}
+
 function requireDigest(value, label) {
   const digest = requireString(value, label);
   if (!DIGEST_RE.test(digest)) {
@@ -193,8 +196,8 @@ function parseTargetProfile(value) {
 
   const [targetCluster, substrateSource, distribution] = tuple;
   const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
-  if (!SUPPORTED_TARGET_PROFILE_SET.has(normalized)) {
-    fail(`--image-map only accepts ${SUPPORTED_TARGET_PROFILE_VALUES.join(' or ')}`);
+  if (!IMAGE_MAP_TARGET_PROFILE_SET.has(normalized)) {
+    fail(`--image-map only accepts ${IMAGE_MAP_TARGET_PROFILE_VALUES.join(' or ')}`);
   }
 
   return {
@@ -207,6 +210,7 @@ function parseTargetProfile(value) {
 
 function assertContractTargetProfile(contract, targetProfile) {
   const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
+  const seen = new Map();
   let matched = false;
 
   for (const [index, profileValue] of profiles.entries()) {
@@ -224,13 +228,38 @@ function assertContractTargetProfile(contract, targetProfile) {
       `release_contract.target_profiles[${index}].distribution`
     );
     const profileTuple = `${targetCluster}/${substrateSource}/${distribution}`;
-    if (!CANONICAL_TARGET_PROFILE_SET.has(profileTuple)) {
+    if (!CANONICAL_DECLARABLE_TARGET_PROFILE_SET.has(profileTuple)) {
       fail(
-        `release_contract.target_profiles[${index}] must be one of canonical profiles: ${CANONICAL_TARGET_PROFILE_VALUES.join(
+        `release_contract.target_profiles[${index}] must be one of canonical profiles: ${CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.join(
           ', '
         )}`
       );
     }
+    if (Object.prototype.hasOwnProperty.call(profile, 'support_level')) {
+      fail(
+        `release_contract.target_profiles[${index}].support_level is not allowed; use release_contract.target_profiles[${index}].required`
+      );
+    }
+    if (!Object.prototype.hasOwnProperty.call(profile, 'required')) {
+      fail(`release_contract.target_profiles[${index}].required is required`);
+    }
+    const required = requireBoolean(
+      profile.required,
+      `release_contract.target_profiles[${index}].required`
+    );
+    if (targetCluster === 'kind_rehearsal' && required) {
+      fail(
+        `release_contract.target_profiles[${index}]: kind_rehearsal target profile must not be required`
+      );
+    }
+    if (seen.has(profileTuple)) {
+      fail(
+        `release_contract.target_profiles[${index}] duplicates target profile tuple declared at ${seen.get(
+          profileTuple
+        )}`
+      );
+    }
+    seen.set(profileTuple, `release_contract.target_profiles[${index}]`);
     if (
       targetCluster === targetProfile.target_cluster &&
       substrateSource === targetProfile.substrate_source &&

@@ -6,8 +6,8 @@ This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle manifest/digest, apply-only, rollout/live
-digest, route smoke, and online deployment gate focused diagnostics, but does
-not contain full deploy tooling yet.
+digest, route smoke, and online focused chain orchestration diagnostics, but
+does not contain full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -60,6 +60,15 @@ The intended future deployment model has three independent choices:
 - `substrate_source`: `external_declared` or `kit_installed`.
 - `distribution`: `online` or `airgap`.
 
+The canonical declarable target profiles are
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`,
+`existing_kubernetes/kit_installed/airgap`, and
+`kind_rehearsal/kit_installed/online`. Removed old input names and synonym
+axes such as `local-kind`, `existing-cluster`, `real-k8s`, `kind`, or
+`cluster` fail fast.
+
 `kind_rehearsal` is only a local or CI rehearsal target. It is not a user deployment prerequisite.
 It does not replace real Kubernetes evidence when a real Kubernetes target is in scope.
 
@@ -90,15 +99,14 @@ bash scripts/test-inputs.sh
 profile, provenance, release-kit version policy, and digest-bound image
 inventory. Every declared `target_profiles` entry must carry
 `required: boolean`; `support_level` is rejected, duplicate three-axis tuples
-are rejected, and required profiles must fit the current focused support set:
-`existing_kubernetes/external_declared/online` and
-`kind_rehearsal/kit_installed/online`. The kind profile is supported only as a
-focused rehearsal and must not be `required: true`. The airgap profile
-`existing_kubernetes/external_declared/airgap` may be declared only with
-`required: false` during this bootstrap slice. `intake-report.json`,
-`image-digest-plan.json`, and `target-profile-coverage-report.json` are
-written with `readiness: false`; they prove only contract/input digest
-readiness, not deploy, package, or release readiness.
+are rejected, and every entry must use a canonical declarable profile. Existing
+Kubernetes profiles can be declared for both `external_declared` and
+`kit_installed` substrate choices across online and airgap distributions.
+`kind_rehearsal/kit_installed/online` is intake-only rehearsal and must not be
+`required: true`. `intake-report.json`, `image-digest-plan.json`, and
+`target-profile-coverage-report.json` are written with `readiness: false`;
+they prove only contract/input digest readiness, not deploy, package, or
+release readiness.
 
 Deploy template package archive focused diagnostic:
 
@@ -170,9 +178,12 @@ bash scripts/test-image-map.sh
 
 `--image-map` validates only the release contract
 `deploy_image_inventory` and writes a digest-pinned source-to-target image
-reference plan. It accepts only
-`existing_kubernetes/external_declared/online` and
-`existing_kubernetes/external_declared/airgap` as CLI targets.
+reference plan. It accepts existing Kubernetes canonical profiles as CLI
+targets:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`.
 `kind_rehearsal/kit_installed/online` is a canonical profile tuple but out of
 scope for image-map CLI. Only canonical profile tuples are accepted in
 `release_contract.target_profiles`; non-canonical pre-GA names and synonym
@@ -203,7 +214,9 @@ bash scripts/test-airgap-bundle-check.sh
 bundle root, release contract, deploy template package descriptor, deploy
 template archive `.tgz`, and airgap `image-map`. It accepts only
 `existing_kubernetes/external_declared/airgap`; online, kind, and
-non-canonical pre-GA target names fail fast. The release contract
+non-canonical pre-GA target names fail fast. `kit_installed` airgap profiles
+may be declared in the release contract but are not airgap bundle-check CLI
+targets in this slice. The release contract
 `target_profiles` value must be an array, must include
 `existing_kubernetes/external_declared/airgap`, and every entry must use a
 canonical profile tuple with `required: boolean`; `support_level` is rejected.
@@ -327,13 +340,13 @@ digest, and rollout report digest/summary. It must not contain response body,
 raw headers, custom tokens, kubeconfig content, verdict fields, deploy
 readiness fields, or AgentSmith product-flow fields.
 
-Online deployment gate focused orchestration:
+Online focused chain orchestration:
 
 ```bash
 bash scripts/test-online-deployment-gate.sh
 ```
 
-`--online-deployment-gate` is a KISS runner for
+`--online-deployment-gate` is a KISS runner for the online focused chain on
 `existing_kubernetes/external_declared/online` only. It invokes existing
 focused diagnostics in order: inputs, target-preflight, template-package,
 render, render-check, apply, and, in `--mode apply` only, rollout plus optional
@@ -341,9 +354,9 @@ route smoke. Default `server-dry-run` mode stops after apply dry-run and
 rejects `--smoke-url`. Apply mode requires exact confirm text and an operator
 run id before Kubernetes calls.
 
-This runner does not provision cloud resources, mirror images, build airgap
-bundles, import images into kind, perform rollback, or claim deploy/release
-readiness. `online-deployment-gate-report.json` keeps `schema:
+This runner does not provision cloud resources, install substrates, mirror
+images, build airgap bundles, import images into kind, perform rollback, or
+claim deploy/release readiness. `online-deployment-gate-report.json` keeps `schema:
 agentsmith.online-deployment-gate/v1`, `scope:
 online_deployment_gate_only`, `readiness: false`, and `status: pass`; it lists
 only step names and relative report paths.
@@ -384,8 +397,8 @@ bash scripts/test-target-preflight.sh
 
 `--target-preflight` validates only repo-local intake of
 `agentsmith.substrate-connection.truth/v1` substrate connection truth for an
-explicit target profile. It checks the three target axes, supported focused
-profiles, required substrate services, canonical endpoint declarations
+explicit target profile. It checks the three target axes, canonical target
+preflight profiles, required substrate services, canonical endpoint declarations
 (`host` for PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and
 `bucket` for object storage, and `issuer_url` for OIDC), secret references, TLS
 or sslmode declarations, `extensions.pgvector.status: installed`, reachability

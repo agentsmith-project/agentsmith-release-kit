@@ -195,6 +195,8 @@ image_refs_without_digest_claim+=" digest (are )?(allowed|accepted|release-ready
 non_digest_image_claim="non-digest image"
 non_digest_image_claim+="(s)? (are )?(allowed|accepted|release-ready)"
 mutable_image_claim_pattern="(${latest_tag}([^[:alnum:]_.-]|$)|${mutable_tag_claim}|${image_refs_without_digest_claim}|${non_digest_image_claim})"
+old_llmup_image="ghcr[.]io/agentsmith-project/llm"
+old_llmup_image+="up"
 
 reject_scan \
   "AgentSmith product source import or relative source path found" \
@@ -219,6 +221,11 @@ reject_scan \
 reject_scan \
   "mutable image or non-digest release claim found" \
   "$mutable_image_claim_pattern" \
+  "${scan_paths[@]}"
+
+reject_scan \
+  "removed old input provider image name found" \
+  "$old_llmup_image" \
   "${scan_paths[@]}"
 
 reject_scan \

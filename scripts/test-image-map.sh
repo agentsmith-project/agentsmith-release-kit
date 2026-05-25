@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 ONLINE_PROFILE="existing_kubernetes/external_declared/online"
 AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
+KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 
 TMP_DIR="$(mktemp -d)"
@@ -81,7 +83,7 @@ switch (mutation) {
     contract.target_profiles[1].target_cluster = 'existing-cluster';
     break;
   case 'noncanonical_contract_target_tuple':
-    contract.target_profiles[0].substrate_source = 'kit_installed';
+    contract.target_profiles[0].substrate_source = 'cluster';
     break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);
@@ -263,6 +265,18 @@ run_image_map "$VALID_CONTRACT" "$airgap_output" "$AIRGAP_PROFILE" \
   --target-registry "$airgap_registry" >/dev/null
 assert_report "$airgap_output/image-map.json" "$AIRGAP_PROFILE" true "$airgap_registry"
 pass "airgap image-map with target registry accepted"
+
+kit_online_output="$TMP_DIR/out-kit-online-source"
+run_image_map "$VALID_CONTRACT" "$kit_online_output" "$KIT_ONLINE_PROFILE" >/dev/null
+assert_report "$kit_online_output/image-map.json" "$KIT_ONLINE_PROFILE" false
+pass "kit-installed online image-map writes source digest-pinned refs"
+
+kit_airgap_registry="registry.example.internal:5000/kit/releases"
+kit_airgap_output="$TMP_DIR/out-kit-airgap"
+run_image_map "$VALID_CONTRACT" "$kit_airgap_output" "$KIT_AIRGAP_PROFILE" \
+  --target-registry "$kit_airgap_registry" >/dev/null
+assert_report "$kit_airgap_output/image-map.json" "$KIT_AIRGAP_PROFILE" true "$kit_airgap_registry"
+pass "kit-installed airgap image-map with target registry accepted"
 
 airgap_missing_output="$TMP_DIR/out-airgap-missing-registry"
 mkdir -p "$airgap_missing_output"
