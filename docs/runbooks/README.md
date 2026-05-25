@@ -11,7 +11,7 @@ sign off deploy, package, offline install, or release readiness.
 | Path | Target profile | Operator command entry | Current result |
 | --- | --- | --- | --- |
 | Real or cloud Kubernetes, existing substrates, online | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ... [--target-registry ...]` | Runs the online focused chain for existing substrate endpoints; target registry only adopts rendered image refs through image-map. |
-| Real or cloud Kubernetes, existing substrates, airgap | `existing_kubernetes/external_declared/airgap` | `bash scripts/verify-release.sh --bundle-create ...` or `--image-map ... --target-registry ...`, then `--airgap-bundle-check ...` | Assembles a local bundle and immediately self-checks it, or checks an already assembled bundle manifest/digests. |
+| Real or cloud Kubernetes, existing substrates, airgap | `existing_kubernetes/external_declared/airgap` | `bash scripts/verify-release.sh --bundle-create ...` or `--image-map ... --target-registry ...`, then `--airgap-bundle-check ...` and optional `--bundle-load-plan ...` | Assembles a local bundle and immediately self-checks it, checks an already assembled bundle manifest/digests, or writes a read-only load plan summary. |
 | Real or cloud Kubernetes, kit-installed substrates, online or airgap | `existing_kubernetes/kit_installed/online` or `existing_kubernetes/kit_installed/airgap` | `bash scripts/verify-release.sh --inputs ...`, `--target-preflight ...`, and `--image-map ...` | Accepts the declaration, substrate truth intake, and image plan only. |
 
 Optional rehearsal path:
@@ -25,7 +25,7 @@ Optional rehearsal path:
 | Path | Implemented now | Not yet |
 | --- | --- | --- |
 | Real or cloud Kubernetes + existing substrates + online | Inputs, target-preflight, template-package, optional image-map target-ref adoption, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
-| Real or cloud Kubernetes + existing substrates + airgap | Image-map mirror plan, local bundle assembler plus self-check, and airgap bundle manifest/digest check for `existing_kubernetes/external_declared/airgap`. | Registry mirroring, image load/import, offline install, airgap deploy gate, deploy readiness, package readiness. |
+| Real or cloud Kubernetes + existing substrates + airgap | Image-map mirror plan, local bundle assembler plus self-check, airgap bundle manifest/digest check, and read-only load plan summary for `existing_kubernetes/external_declared/airgap`. | Registry mirroring, image load/import, offline install, airgap deploy gate, deploy readiness, package readiness. |
 | Real or cloud Kubernetes + kit-installed substrates + online/airgap | Contract declaration, target-preflight substrate truth intake, and image-map planning for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`. | Substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
 | Kind rehearsal + kit-installed substrates + online | Contract declaration and target-preflight truth intake for `kind_rehearsal/kit_installed/online`. | Real deployment evidence, release readiness, mandatory pre-deploy rehearsal. |
 
@@ -77,6 +77,14 @@ bundle root; operator prerequisite locations/proofs are strings and must not be
 URLs, download instructions, or secret-looking content. The airgap image-map is
 also rebound to `release_contract.deploy_image_inventory`. Stdout ends with
 `readiness=false`.
+
+For airgap bundle load plans, use `--bundle-load-plan` only after a bundle has
+already been assembled. The command reuses `--airgap-bundle-check`, accepts
+only `existing_kubernetes/external_declared/airgap`, and writes
+`airgap-bundle-load-plan-report.json` with `readiness=false`. The report is a
+digest/count/target-registry summary only; it is not evidence-envelope input,
+does not prove registry presence, and does not push, import, load, deploy, or
+smoke.
 
 For route smoke, use `bash scripts/verify-release.sh --smoke` only after a
 passing focused `rollout-report.json`. Supply an HTTPS URL by default; local

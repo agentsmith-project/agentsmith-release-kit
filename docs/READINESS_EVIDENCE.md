@@ -17,6 +17,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Image-map / mirror-plan diagnostic | Focused only | `image-map.json` keeps `readiness: false`. |
 | Airgap bundle create diagnostic | Focused only | `bundle-create-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle manifest/digest diagnostic | Focused only | `airgap-bundle-check-report.json` keeps `readiness: false`. |
+| Airgap bundle load-plan diagnostic | Focused only | `airgap-bundle-load-plan-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
 | Route/service smoke diagnostic | Focused only | `smoke-report.json` keeps `readiness: false`. |
@@ -126,6 +127,20 @@ package, release, rollout, smoke, product-flow, or operator readiness evidence.
 It may include only non-sensitive payload/tool counts, not raw paths, refs,
 locations, or proof strings.
 
+Airgap bundle load-plan output proves only that one already assembled bundle
+passed the existing airgap bundle check and can be summarized as a read-only
+target-registry load plan. It accepts only
+`existing_kubernetes/external_declared/airgap`, rechecks the airgap image-map
+mirror plan and image artifact declarations, and confirms operator
+prerequisites declare a target registry proof ref and operator-prerequisite
+tool proof. It does not treat those proof strings as registry presence, signed
+load evidence, image push/import/load success, package readiness, or release
+readiness. It does not call Docker, skopeo, oras, kubectl, curl, or wget, does
+not log in to a registry, does not read OCI tar contents, and does not deploy
+or smoke. `airgap-bundle-load-plan-report.json` keeps `readiness: false`; it
+contains only digest/count/target-registry summaries and is not accepted by the
+release-kit evidence envelope validator.
+
 Kubernetes apply-only output proves only that already-rendered manifests passed
 the render/check image inventory guard and were accepted by `kubectl apply`
 against `existing_kubernetes/external_declared/online`. The default path is
@@ -188,7 +203,9 @@ rollout, and smoke reports remain individual focused diagnostic files, but
 their combinations are not accepted release-kit evidence envelope outputs.
 `bundle-create-report.json` is also intentionally not accepted; use the
 generated airgap bundle check report plus manifest pair for focused airgap
-evidence intake.
+evidence intake. `airgap-bundle-load-plan-report.json` is intentionally not
+accepted because it is plan-only and does not prove registry execution or
+package readiness.
 Online gate evidence is accepted only for
 `existing_kubernetes/external_declared/online`; airgap bundle check evidence is
 accepted only for `existing_kubernetes/external_declared/airgap`. Raw

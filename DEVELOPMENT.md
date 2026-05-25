@@ -17,6 +17,7 @@ bash scripts/test-render-check.sh
 bash scripts/test-image-map.sh
 bash scripts/test-bundle-create.sh
 bash scripts/test-airgap-bundle-check.sh
+bash scripts/test-bundle-load-plan.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
@@ -193,6 +194,21 @@ kubectl, pull, push, mirror, save, load, or inspect image contents, and does
 not prove registry presence, image load, offline install readiness, deploy
 readiness, package readiness, or release readiness. It does not support kind or
 online targets.
+
+The current `--bundle-load-plan` path is a focused read-only airgap bundle load
+plan diagnostic only. It consumes an already assembled bundle and the same
+explicit inputs as `--airgap-bundle-check`, accepts only
+`existing_kubernetes/external_declared/airgap`, and runs the existing airgap
+bundle check before writing its own report. It rechecks that the image-map is a
+passing airgap mirror plan, image artifact declarations match mappings
+one-to-one, target images are digest-pinned under `image_map.target_registry`,
+and operator prerequisites declare registry proof and operator-prerequisite
+tool proof. Its `airgap-bundle-load-plan-report.json` keeps
+`readiness: false` and `scope: airgap_bundle_load_plan_only`; it contains only
+digest/count/target-registry summaries and is not accepted by the evidence
+envelope validator. It does not call Docker, skopeo, oras, kubectl, curl, or
+wget, does not log in, push, import, load, verify registry presence, deploy, or
+claim package/release readiness.
 
 The current `--apply` path is a focused diagnostic for Kubernetes apply-only
 validation. It consumes a release contract, an already-rendered manifests

@@ -122,6 +122,21 @@ does not call Docker, skopeo, oras, kubectl, pull, push, mirror, save, or load
 images, and does not prove registry presence, image load, offline install
 readiness, deploy readiness, package readiness, or release readiness.
 
+The current `--bundle-load-plan` validator is a focused read-only plan
+diagnostic only. It consumes the same already assembled bundle inputs as
+`--airgap-bundle-check`, accepts only
+`existing_kubernetes/external_declared/airgap`, and runs the existing bundle
+check first. It then verifies the airgap image-map mirror plan, one-to-one
+image artifact declarations, target image digest suffixes under
+`image_map.target_registry`, and declared operator registry/tool proofs without
+treating those proofs as registry presence or signed load evidence. Its
+`airgap-bundle-load-plan-report.json` uses `schema:
+agentsmith.airgap-bundle-load-plan-report/v1`, `readiness: false`, and `scope:
+airgap_bundle_load_plan_only`; it contains only digest/count/target-registry
+summaries. It is not a release-kit evidence envelope output and must not claim
+image push/import/load success, registry execution, offline install, package,
+deploy, or release readiness.
+
 The current `--rollout` validator is a focused Kubernetes rollout/live digest
 diagnostic only. It consumes the release contract, an already-rendered manifest
 directory, explicit target profile `existing_kubernetes/external_declared/online`,

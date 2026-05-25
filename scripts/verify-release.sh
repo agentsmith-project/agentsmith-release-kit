@@ -15,6 +15,7 @@ Usage:
   bash scripts/verify-release.sh --image-map --release-contract <json> --target-profile existing_kubernetes/<external_declared|kit_installed>/<online|airgap> --output-dir <dir> [--target-registry <registry-host[/namespace]>]
   bash scripts/verify-release.sh --bundle-create --release-contract <json> --deploy-template-package <json> --archive <tgz> --target-profile existing_kubernetes/external_declared/airgap --target-registry <registry-host[/namespace]> --image-archive <image_id=local-file> [--image-archive <image_id=local-file> ...] --runbook <file> --script <file> --profile-values-schema <file> [--profile-values-example <file>] --operator-prerequisites <json> --bundle-root <dir> --output-dir <dir>
   bash scripts/verify-release.sh --airgap-bundle-check --release-contract <json> --deploy-template-package <json> --archive <tgz> --image-map <json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <json> --output-dir <dir>
+  bash scripts/verify-release.sh --bundle-load-plan --release-contract <json> --deploy-template-package <json> --archive <tgz> --image-map <json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <json> --output-dir <dir>
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> --mode apply --confirm-apply existing_kubernetes/external_declared/online --operator-run-id <id> [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --rollout --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--timeout <duration>] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
@@ -33,6 +34,7 @@ Bootstrap status:
   --image-map writes digest-pinned source/target image reference mapping only; it is not release readiness.
   --bundle-create assembles a local airgap bundle and immediately runs airgap-bundle-check only; it is not release readiness.
   --airgap-bundle-check checks an airgap bundle manifest, deploy template archive digest, payload/tool declarations, and declared file digests only; it is not release readiness.
+  --bundle-load-plan checks an already assembled airgap bundle through airgap-bundle-check and writes a read-only load plan summary only; it is not release readiness or registry execution.
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
   --rollout checks Kubernetes rollout status and live image digests only; it is not release readiness.
   --smoke checks one route status after a bound rollout report only; it is not release readiness.
@@ -88,6 +90,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-airgap-bundle-check.mjs" "$@"
     echo "airgap bundle check mode is not release readiness; readiness=false"
+    ;;
+  --bundle-load-plan)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-bundle-load-plan.mjs" "$@"
+    echo "bundle load plan mode is not release readiness; readiness=false"
     ;;
   --apply)
     shift

@@ -6,8 +6,9 @@ This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
-apply-only, rollout/live digest, route smoke, and online focused chain
-orchestration diagnostics, but does not contain full deploy tooling yet.
+airgap bundle load-plan, apply-only, rollout/live digest, route smoke, and
+online focused chain orchestration diagnostics, but does not contain full
+deploy tooling yet.
 
 ## Canonical Identity
 
@@ -303,6 +304,26 @@ airgap_bundle_manifest_check_only`, `readiness: false`, and `status: pass`.
 It may include only non-sensitive counts for payload artifacts and tools, not
 raw paths, proof strings, locations, or refs.
 
+Airgap bundle load-plan focused diagnostic:
+
+```bash
+bash scripts/test-bundle-load-plan.sh
+```
+
+`--bundle-load-plan` consumes only an already assembled bundle plus the same
+release contract, deploy template package descriptor, archive, image-map,
+bundle root, and bundle manifest inputs as `--airgap-bundle-check`. It accepts
+only `existing_kubernetes/external_declared/airgap`; online, kind,
+`kit_installed`, non-canonical pre-GA names, and synonym axes fail fast before
+self-check. It first reuses `--airgap-bundle-check`; only after that passes it
+writes `airgap-bundle-load-plan-report.json` with `schema:
+agentsmith.airgap-bundle-load-plan-report/v1`, `scope:
+airgap_bundle_load_plan_only`, `readiness: false`, and a digest/count/target
+registry summary. It is a read-only plan: it does not call Docker, skopeo,
+oras, kubectl, curl, or wget, does not log in to a registry, does not push,
+import, load, or verify registry presence, and is not an accepted evidence
+envelope output.
+
 Kubernetes apply-only focused diagnostic:
 
 ```bash
@@ -463,6 +484,8 @@ provenance `subject_name` is `release-kit-evidence-subject`. For
 `evidence-validation-report.json` is written with `readiness: false`,
 `scope: release_kit_evidence_intake_only`, and `status: pass`; it is not
 render, apply, smoke, package, deploy, or release readiness.
+`airgap-bundle-load-plan-report.json` is intentionally not accepted because it
+is plan-only and does not prove registry execution or package readiness.
 
 Target preflight focused diagnostic:
 

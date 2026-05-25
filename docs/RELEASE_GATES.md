@@ -322,6 +322,43 @@ AgentSmith product-flow fields, raw credential payloads, or registry login
 material. It may include only non-sensitive counts for payload artifacts and
 tools, not raw paths, refs, locations, or proof strings.
 
+## Airgap Bundle Load Plan Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-bundle-load-plan.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--bundle-load-plan`. It consumes an already assembled airgap bundle and first
+reuses the existing `--airgap-bundle-check` validator. It accepts only
+`existing_kubernetes/external_declared/airgap`; online, kind rehearsal,
+`kit_installed`, non-canonical pre-GA target names, and synonym axes fail fast
+before self-check.
+
+The load plan rechecks that the image-map is a passing airgap mirror plan with
+`scope: image_map_only`, `readiness: false`, `mirror_required: true`, target
+registry, and `action: mirror_required` on every mapping. Image artifact
+declarations must match image-map mappings one-to-one by id, target digests
+must match target image digest suffixes, and target images must be under
+`image_map.target_registry`. Operator prerequisites must declare the target
+registry proof ref and operator-prerequisite tool proofs, but those proof
+strings are not registry presence, signed load, push, import, or package
+readiness evidence.
+
+The generated `airgap-bundle-load-plan-report.json` must keep `schema:
+agentsmith.airgap-bundle-load-plan-report/v1`, `scope:
+airgap_bundle_load_plan_only`, `readiness: false`, and `status: pass`. It may
+contain only release identity, target profile, target registry, image count,
+digest summary, count summary, and target-registry summary. It must not contain
+raw local paths, operator refs, locations, proofs, secrets, `verdict`,
+`release_verdict`, registry presence fields, image load/import/push success
+fields, or deploy/package/release readiness fields. It does not call Docker,
+skopeo, oras, kubectl, curl, or wget, does not read OCI tar contents, does not
+log in to a registry, push, import, load images, deploy, or smoke. It is not an
+accepted release-kit evidence envelope output.
+
 ## Kubernetes Apply-Only Focused Diagnostic
 
 Run:
@@ -536,7 +573,9 @@ file list must contain only `evidence.json` plus the mapped output files:
 `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json`.
 Render, rollout, and smoke reports remain individual focused diagnostic
 outputs, but render+rollout combinations are not accepted release-kit evidence
-envelope outputs.
+envelope outputs. `airgap-bundle-load-plan-report.json` is also intentionally
+not accepted because it is plan-only and does not prove registry execution,
+package readiness, or release readiness.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.
