@@ -359,6 +359,41 @@ skopeo, oras, kubectl, curl, or wget, does not read OCI tar contents, does not
 log in to a registry, push, import, load images, deploy, or smoke. It is not an
 accepted release-kit evidence envelope output.
 
+## Airgap Bundle Render-Check Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-airgap-bundle-render-check.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--airgap-bundle-render-check`. It consumes an already assembled airgap bundle
+only. The release contract, deploy template package descriptor, archive,
+image-map, bundle manifest, render values, and substrate truth must all be
+local files inside the bundle root. It accepts only
+`existing_kubernetes/external_declared/airgap`; online, kind rehearsal,
+`kit_installed`, non-canonical pre-GA target names, and synonym axes fail fast.
+
+The diagnostic first reuses `--airgap-bundle-check`, then reuses `--render`
+with the bundle-local airgap image-map, then reuses `--render-check` against
+the rendered manifests. After those pass, it verifies that the rendered image
+inventory uses image-map `target_image` refs only; source-image refs in
+rendered workloads fail even if they are digest-pinned and listed in the
+release contract.
+
+The generated `airgap-bundle-render-check-report.json` must keep `schema:
+agentsmith.airgap-bundle-render-check-report/v1`, `scope:
+airgap_bundle_render_check_only`, `readiness: false`, and `status: pass`. It
+may contain only digest, count, and relative-path summaries, and must not
+include `target_registry`. It must not contain operator refs, locations,
+proofs, absolute paths, `verdict`, `release_verdict`, package/offline
+install/deploy/release readiness, registry presence, image load/import/push
+success, apply, rollout, or smoke claims. It does not call Docker, skopeo,
+oras, kubectl, curl, or wget, does not log in to a registry, load or import
+images, apply manifests, deploy, or smoke. It is not an accepted release-kit
+evidence envelope output.
+
 ## Kubernetes Apply-Only Focused Diagnostic
 
 Run:
@@ -598,6 +633,10 @@ outputs, but render+rollout combinations are not accepted release-kit evidence
 envelope outputs. `airgap-bundle-load-plan-report.json` is also intentionally
 not accepted because it is plan-only and does not prove registry execution,
 package readiness, or release readiness.
+`airgap-bundle-render-check-report.json` is intentionally not accepted because
+it proves only offline bundle render plus rendered image inventory, not
+registry execution, package readiness, offline install readiness, deploy
+readiness, or release readiness.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.

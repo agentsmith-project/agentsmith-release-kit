@@ -18,6 +18,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Airgap bundle create diagnostic | Focused only | `bundle-create-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle manifest/digest diagnostic | Focused only | `airgap-bundle-check-report.json` keeps `readiness: false`. |
 | Airgap bundle load-plan diagnostic | Focused only | `airgap-bundle-load-plan-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
+| Airgap bundle render-check diagnostic | Focused only | `airgap-bundle-render-check-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
 | Route/service smoke diagnostic | Focused only | `smoke-report.json` keeps `readiness: false`. |
@@ -141,6 +142,21 @@ or smoke. `airgap-bundle-load-plan-report.json` keeps `readiness: false`; it
 contains only digest/count/target-registry summaries and is not accepted by the
 release-kit evidence envelope validator.
 
+Airgap bundle render-check output proves only that one already assembled
+bundle can be checked, rendered offline from bundle-local render values and
+substrate truth, and passed through rendered manifest image inventory checking.
+It accepts only `existing_kubernetes/external_declared/airgap`; every
+contract/package/archive/image-map/bundle-manifest/render-values/substrate-truth
+input must be a local file inside the bundle root. It reuses
+`--airgap-bundle-check`, `--render`, and `--render-check`, then asserts that
+every rendered workload image is an image-map `target_image` ref. It does not
+call Docker, skopeo, oras, kubectl, curl, or wget, does not log in, load/import
+images, apply manifests, smoke routes, verify registry presence, deploy, or
+prove package/offline install readiness.
+`airgap-bundle-render-check-report.json` keeps `readiness: false`; it contains
+only digest/count/relative-path summaries, omits `target_registry`, and is not
+accepted by the release-kit evidence envelope validator.
+
 Kubernetes apply-only output proves only that already-rendered manifests passed
 the render/check image inventory guard and were accepted by `kubectl apply`
 against `existing_kubernetes/external_declared/online`. The default path is
@@ -229,6 +245,10 @@ generated airgap bundle check report plus manifest plus image-map set for
 focused airgap evidence intake. `airgap-bundle-load-plan-report.json` is intentionally not
 accepted because it is plan-only and does not prove registry execution or
 package readiness.
+`airgap-bundle-render-check-report.json` is intentionally not accepted because
+it proves only offline bundle rendering and rendered image inventory, not
+registry execution, package readiness, offline install readiness, deploy
+readiness, or release readiness.
 Online gate evidence is accepted only for
 `existing_kubernetes/external_declared/online`; airgap bundle check evidence is
 accepted only for `existing_kubernetes/external_declared/airgap`. Raw

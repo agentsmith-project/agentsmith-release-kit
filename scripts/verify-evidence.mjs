@@ -82,6 +82,10 @@ const INVALID_RELEASE_KIT_OUTPUT_VALUES = new Map([
   [
     OLD_AIRGAP_BUNDLE_EVIDENCE_OUTPUT,
     `${OLD_AIRGAP_BUNDLE_EVIDENCE_OUTPUT} is no longer accepted; use ${AIRGAP_BUNDLE_EVIDENCE_OUTPUT}`
+  ],
+  [
+    'airgap-bundle-render-check-report.json',
+    'airgap-bundle-render-check-report.json is render-check-only and is not accepted as release evidence'
   ]
 ]);
 const FORBIDDEN_RELEASE_KIT_OUTPUT_VALUES = new Set([

@@ -6,9 +6,9 @@ This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
-airgap bundle load-plan, apply-only, rollout/live digest, route smoke, and
-online focused chain orchestration diagnostics, but does not contain full
-deploy tooling yet.
+airgap bundle load-plan, airgap bundle render-check, apply-only,
+rollout/live digest, route smoke, and online focused chain orchestration
+diagnostics, but does not contain full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -325,6 +325,33 @@ oras, kubectl, curl, or wget, does not log in to a registry, does not push,
 import, load, or verify registry presence, and is not an accepted evidence
 envelope output.
 
+Airgap bundle render-check focused diagnostic:
+
+```bash
+bash scripts/test-airgap-bundle-render-check.sh
+```
+
+`--airgap-bundle-render-check` consumes only an already assembled bundle. All
+release contract, deploy template package descriptor, archive, image-map,
+bundle manifest, render-values, and substrate-truth inputs must be local files
+inside the bundle root. It accepts only
+`existing_kubernetes/external_declared/airgap`; online, kind, and
+`kit_installed` airgap targets fail fast. It first reuses
+`--airgap-bundle-check`, then renders the bundle-local deploy template package
+with the bundle-local airgap image-map, and finally reuses `--render-check` on
+the rendered manifests. The final report also verifies that every rendered
+workload image is one of the image-map `target_image` refs, not a source ref.
+
+`airgap-bundle-render-check-report.json` keeps `schema:
+agentsmith.airgap-bundle-render-check-report/v1`, `scope:
+airgap_bundle_render_check_only`, `readiness: false`, and `status: pass`. It
+contains only digest/count/relative-path summaries and omits
+`target_registry`. It does not call Docker, skopeo, oras, kubectl, curl, or
+wget, does not log in to a registry, does not load/import images, apply
+manifests, smoke routes, prove registry presence, or claim package, offline
+install, deploy, registry, or release readiness. It is not an accepted evidence
+envelope output.
+
 Kubernetes apply-only focused diagnostic:
 
 ```bash
@@ -502,8 +529,11 @@ contain only `evidence.json` plus the mapped output files: `image-map.json`,
 `evidence-validation-report.json` is written with `readiness: false`,
 `scope: release_kit_evidence_intake_only`, and `status: pass`; it is not
 render, apply, smoke, package, deploy, or release readiness.
-`airgap-bundle-load-plan-report.json` is intentionally not accepted because it
-is plan-only and does not prove registry execution or package readiness.
+`airgap-bundle-load-plan-report.json` and
+`airgap-bundle-render-check-report.json` are intentionally not accepted:
+load-plan is plan-only, and render-check proves only offline render plus
+rendered manifest image inventory, not registry execution, package readiness,
+offline install readiness, deploy readiness, or release readiness.
 
 Target preflight focused diagnostic:
 

@@ -18,6 +18,7 @@ bash scripts/test-image-map.sh
 bash scripts/test-bundle-create.sh
 bash scripts/test-airgap-bundle-check.sh
 bash scripts/test-bundle-load-plan.sh
+bash scripts/test-airgap-bundle-render-check.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
@@ -211,6 +212,23 @@ envelope validator. It does not call Docker, skopeo, oras, kubectl, curl, or
 wget, does not log in, push, import, load, verify registry presence, deploy, or
 claim package/release readiness.
 
+The current `--airgap-bundle-render-check` path is a focused read-only airgap
+bundle render/check diagnostic only. It consumes an already assembled bundle,
+requires the release contract, deploy template package descriptor, archive,
+image-map, bundle manifest, render values, and substrate truth to be local
+files inside that bundle root, and accepts only
+`existing_kubernetes/external_declared/airgap`. It first runs
+`--airgap-bundle-check`, then renders with the bundle-local airgap image-map,
+then runs `--render-check` on the rendered manifests. Its extra assertion is
+that every rendered workload image uses an image-map `target_image` ref, not a
+source image ref. `airgap-bundle-render-check-report.json` must keep
+`readiness: false` and `scope: airgap_bundle_render_check_only`; it contains
+only digest/count/relative-path summaries, omits `target_registry`, and is not
+accepted by the evidence envelope validator. It does not call Docker, skopeo,
+oras, kubectl, curl, or wget, does not log in, load/import images, apply
+manifests, smoke routes, verify registry presence, or claim package, offline
+install, deploy, or release readiness.
+
 The current `--apply` path is a focused diagnostic for Kubernetes apply-only
 validation. It consumes a release contract, an already-rendered manifests
 directory, explicit target profile `existing_kubernetes/external_declared/online`,
@@ -325,6 +343,9 @@ airgap sets are rejected.
 pre-GA; do not preserve future/unimplemented output compatibility here. Render,
 rollout, and smoke reports remain individual focused diagnostic files, but
 their combinations are not accepted release-kit evidence envelope outputs.
+`airgap-bundle-load-plan-report.json` and
+`airgap-bundle-render-check-report.json` are also not accepted evidence
+envelope outputs.
 `evidence_subject.files` must contain only `evidence.json` plus the mapped
 output files: `image-map.json`, `online-deployment-gate-report.json`, or
 `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json` plus

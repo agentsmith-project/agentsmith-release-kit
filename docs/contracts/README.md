@@ -137,6 +137,20 @@ summaries. It is not a release-kit evidence envelope output and must not claim
 image push/import/load success, registry execution, offline install, package,
 deploy, or release readiness.
 
+The current `--airgap-bundle-render-check` validator is a focused read-only
+render/check diagnostic for an already assembled airgap bundle only. It
+requires the release contract, deploy template package descriptor, archive,
+image-map, bundle manifest, render values, and substrate truth to be local
+files inside the bundle root, accepts only
+`existing_kubernetes/external_declared/airgap`, and reuses
+`--airgap-bundle-check`, `--render`, and `--render-check`. Its final report
+uses `schema: agentsmith.airgap-bundle-render-check-report/v1`,
+`readiness: false`, and `scope: airgap_bundle_render_check_only`; it contains
+only digest/count/relative-path summaries, omits `target_registry`, and must
+not claim registry presence, image load/import, offline install, package,
+deploy, apply, smoke, or release readiness. It is not a release-kit evidence
+envelope output.
+
 The current `--rollout` validator is a focused Kubernetes rollout/live digest
 diagnostic only. It consumes the release contract, an already-rendered manifest
 directory, explicit target profile `existing_kubernetes/external_declared/online`,
@@ -218,7 +232,9 @@ aligned. The old two-file airgap output value is rejected.
 `deploy-result.json#substrate` is future reserved and is not accepted during
 pre-GA. Render, rollout, and smoke reports remain individual focused diagnostic
 files, but their combinations are not accepted release-kit evidence envelope
-outputs. `evidence_subject.files` must contain only subject entries for
+outputs. `airgap-bundle-load-plan-report.json` and
+`airgap-bundle-render-check-report.json` are also not accepted release-kit
+evidence envelope outputs. `evidence_subject.files` must contain only subject entries for
 `evidence.json` plus the mapped output files: `image-map.json`,
 `online-deployment-gate-report.json`, or `airgap-bundle-check-report.json` plus
 `airgap-bundle-manifest.json` plus `image-map.json`.
