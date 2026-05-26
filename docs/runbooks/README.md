@@ -10,7 +10,7 @@ sign off deploy, package, offline install, or release readiness.
 
 | Path | Target profile | Operator command entry | Current result |
 | --- | --- | --- | --- |
-| Real or cloud Kubernetes, existing substrates, online | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ... --substrate-truth ... --target-prerequisites ... [--target-registry ...]` | Runs the online focused chain for existing substrate endpoints and explicit target prerequisites; target registry only adopts rendered image refs through image-map. |
+| Real or cloud Kubernetes, existing substrates, online | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ... --substrate-truth ... --target-prerequisites ... [--target-registry ...]`; optional `--registry-presence ... --image-map ... --registry-probe ...` | Runs the online focused chain for existing substrate endpoints and explicit target prerequisites; registry presence is a separate probe-based digest-ref check. |
 | Real or cloud Kubernetes, existing substrates, airgap | `existing_kubernetes/external_declared/airgap` | `bash scripts/verify-release.sh --bundle-create ...` or `--image-map ... --target-registry ...`, then `--airgap-bundle-check ...`, optional `--bundle-load-plan ...`, and optional `--airgap-bundle-render-check ...` | Assembles a local bundle and immediately self-checks it, checks an already assembled bundle manifest/digests, writes a read-only load plan summary, or renders/checks bundle-local manifests offline. |
 
 Advanced intake-only paths:
@@ -29,7 +29,7 @@ Optional rehearsal path:
 
 | Path | Implemented now | Not yet |
 | --- | --- | --- |
-| Real or cloud Kubernetes + existing substrates + online | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
+| Real or cloud Kubernetes + existing substrates + online | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, optional registry presence through an operator probe, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
 | Real or cloud Kubernetes + existing substrates + airgap | Image-map mirror plan, local bundle assembler plus self-check, airgap bundle manifest/digest check, read-only load plan summary, and offline bundle render-check for `existing_kubernetes/external_declared/airgap`. | Registry mirroring, image load/import, offline install, airgap deploy gate, deploy readiness, package readiness. |
 | Real or cloud Kubernetes + kit-installed substrates + online/airgap | Advanced contract declaration, target-preflight substrate/prerequisites intake, and image-map planning for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`. | Default operator deployment path, substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
 | Kind rehearsal + kit-installed substrates + online | Contract declaration and target-preflight truth/prerequisites intake for `kind_rehearsal/kit_installed/online`. | Real deployment evidence, release readiness, mandatory pre-deploy rehearsal. |
@@ -59,6 +59,14 @@ Online `--target-registry <registry-host[/namespace]>` only asks the gate to
 generate an image-map and render target image references. It does not perform
 registry login, pull, push, mirror, or registry presence checks.
 
+For online target registry presence, run `--registry-presence` separately with
+the generated mirror-required `image-map.json` and an operator-provided
+read-only probe. The probe is called as
+`<executable> <target_image> <expected_digest>` and must print exactly one
+matching sha256 digest. The resulting `registry-presence-report.json` has
+`readiness=false`, omits raw probe output and probe path, is not
+evidence-envelope input, and does not prove deploy/package/release readiness.
+
 After a confirmed online focused chain run, operators may run
 `--operator-signoff-intake` with `operator-signoff-intake.json` and the
 generated `online-deployment-gate-report.json`. This is machine intake and
@@ -83,6 +91,11 @@ lowercase and start and end with alphanumeric characters.
 Evidence intake rechecks the same adoption rule as render: source-use plans
 cannot carry `target_registry`, and mirrored targets must match the
 deterministic target registry ref.
+
+For registry presence, use only `existing_kubernetes/external_declared/online`
+and only a passing mirror-required image-map. This diagnostic does not log in,
+pull, push, mirror, or choose registry tooling; the operator owns the
+read-only probe implementation and credentials outside the report.
 
 For airgap bundle create, provide exactly one local
 `--image-archive <image_id=file>` for each image-map mapping plus local

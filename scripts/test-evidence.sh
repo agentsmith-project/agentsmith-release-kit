@@ -986,6 +986,9 @@ switch (mutation) {
   case 'airgap_bundle_render_check_report_release_kit_output':
     evidence.release_kit_output = 'airgap-bundle-render-check-report.json';
     break;
+  case 'registry_presence_report_release_kit_output':
+    evidence.release_kit_output = 'registry-presence-report.json';
+    break;
   case 'product_flow_release_kit_output':
     evidence.release_kit_output = 'AgentSmith product flow aggregate';
     break;
@@ -1398,6 +1401,7 @@ expect_fail future-deploy-result-output ci_artifact future_deploy_result_output
 expect_fail bundle-create-report-release-kit-output ci_artifact bundle_create_report_release_kit_output
 expect_fail airgap-bundle-load-plan-report-release-kit-output ci_artifact airgap_bundle_load_plan_report_release_kit_output
 expect_fail airgap-bundle-render-check-report-release-kit-output ci_artifact airgap_bundle_render_check_report_release_kit_output
+expect_fail registry-presence-report-release-kit-output ci_artifact registry_presence_report_release_kit_output
 expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
 expect_fail online-gate-wrong-schema ci_artifact online_gate_wrong_schema
 expect_fail online-gate-wrong-scope ci_artifact online_gate_wrong_scope

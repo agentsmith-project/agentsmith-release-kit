@@ -15,6 +15,7 @@ bash scripts/test-template-package.sh
 bash scripts/test-render.sh
 bash scripts/test-render-check.sh
 bash scripts/test-image-map.sh
+bash scripts/test-registry-presence.sh
 bash scripts/test-bundle-create.sh
 bash scripts/test-airgap-bundle-check.sh
 bash scripts/test-bundle-load-plan.sh
@@ -142,6 +143,19 @@ Its `image-map.json` must keep `readiness: false` and `scope:
 image_map_only`; it does not log in to a registry, pull, push, mirror, build an
 airgap bundle, import images into kind, call Kubernetes, or claim deploy,
 package, or release readiness.
+
+The current `--registry-presence` path is a focused online target-registry
+presence diagnostic only. It consumes a release contract, a passing
+mirror-required `agentsmith.image-map/v1` report, explicit target profile
+`existing_kubernetes/external_declared/online`, an operator-provided executable
+probe, and an output directory. The probe is invoked as
+`<executable> <target_image> <expected_digest>` and stdout must contain exactly
+one matching `sha256:<64>` digest. `registry-presence-report.json` keeps
+`readiness: false` and `scope: registry_presence_only`; it records release
+identity, target registry, input digests, image count, and digest match
+summaries only. It does not log in, pull, push, mirror, execute registry
+tooling itself, call Kubernetes, or claim deploy/package/release readiness,
+and it is not accepted by the evidence envelope validator.
 
 The current `--bundle-create` path is a focused diagnostic for local airgap
 bundle assembly plus immediate self-check only. It supports only

@@ -6,7 +6,7 @@ This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
-airgap bundle load-plan, airgap bundle render-check, apply-only,
+registry presence, airgap bundle load-plan, airgap bundle render-check, apply-only,
 rollout/live digest, route smoke, and online focused chain orchestration
 diagnostics, plus operator signoff intake binding, but does not contain full
 deploy tooling yet.
@@ -220,6 +220,26 @@ package, or release readiness. `image-map.json` keeps `schema:
 agentsmith.image-map/v1`, `scope: image_map_only`, `readiness: false`, and
 `status: pass`; it contains only release identity, release contract digest,
 target axes, optional target registry, image count, and mappings.
+
+Registry presence focused diagnostic:
+
+```bash
+bash scripts/test-registry-presence.sh
+```
+
+`--registry-presence` validates only a mirror-required online image-map against
+an operator-provided read-only probe. It accepts only
+`existing_kubernetes/external_declared/online`; the image-map must be passing
+`agentsmith.image-map/v1` with `scope: image_map_only`, `readiness: false`,
+`mirror_required: true`, and `target_registry`. The probe interface is:
+`<executable> <target_image> <expected_digest>`, and stdout must be exactly one
+`sha256:<64>` digest matching the mapping target digest. It writes
+`registry-presence-report.json` with `schema:
+agentsmith.registry-presence/v1`, `scope: registry_presence_only`,
+`readiness: false`, and non-sensitive digest summaries only. It does not log
+in, pull, push, mirror, call Docker/skopeo/oras/kubectl/curl/wget/cloud APIs,
+or claim deploy/package/release readiness; the report is not accepted by the
+evidence envelope validator.
 
 Airgap bundle create focused diagnostic:
 
@@ -551,6 +571,8 @@ render, apply, smoke, package, deploy, or release readiness.
 load-plan is plan-only, and render-check proves only offline render plus
 rendered manifest image inventory, not registry execution, package readiness,
 offline install readiness, deploy readiness, or release readiness.
+`registry-presence-report.json` is also intentionally not accepted; it is a
+focused target digest-ref presence check only.
 
 Operator signoff intake focused diagnostic:
 

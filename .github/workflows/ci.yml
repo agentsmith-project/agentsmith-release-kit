@@ -26,6 +26,8 @@ jobs:
         run: bash scripts/test-render-check.sh
       - name: Image map focused guard
         run: bash scripts/test-image-map.sh
+      - name: Registry presence focused guard
+        run: bash scripts/test-registry-presence.sh
       - name: Airgap bundle create focused guard
         run: bash scripts/test-bundle-create.sh
       - name: Airgap bundle manifest/digest focused guard

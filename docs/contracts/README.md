@@ -65,6 +65,20 @@ The report is a plan for source/target digest references only; it must not
 claim registry presence, deploy readiness, package readiness, release
 readiness, product-flow evidence, or registry credential handling.
 
+The current `--registry-presence` validator is a focused target-registry
+presence diagnostic only. It consumes a release contract, a passing
+mirror-required online `agentsmith.image-map/v1` report, explicit target
+profile `existing_kubernetes/external_declared/online`, and an operator
+provided executable probe. The probe is invoked as
+`<executable> <target_image> <expected_digest>` and stdout must contain exactly
+one matching `sha256:<64>` digest. It writes
+`registry-presence-report.json` with `schema:
+agentsmith.registry-presence/v1`, `readiness: false`, and `scope:
+registry_presence_only`. The report contains only release identity, target
+registry, input digests, image count, and digest match summaries; it is not a
+release-kit evidence envelope output and must not claim deploy, package, or
+release readiness.
+
 The current `--bundle-create` validator is a focused local airgap assembler
 and self-check only. It accepts only
 `existing_kubernetes/external_declared/airgap`, reuses the existing inputs,

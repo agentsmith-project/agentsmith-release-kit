@@ -15,6 +15,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Materialized template render diagnostic | Focused only | `manifest-render-report.json` keeps `readiness: false`. |
 | Render/check image inventory diagnostic | Focused only | `render-report.json` keeps `readiness: false`. |
 | Image-map / mirror-plan diagnostic | Focused only | `image-map.json` keeps `readiness: false`. |
+| Registry presence diagnostic | Focused only | `registry-presence-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle create diagnostic | Focused only | `bundle-create-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle manifest/digest diagnostic | Focused only | `airgap-bundle-check-report.json` keeps `readiness: false`. |
 | Airgap bundle load-plan diagnostic | Focused only | `airgap-bundle-load-plan-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
@@ -80,6 +81,16 @@ image-map generation also enforces the app-current
 required id to exist in `deploy_image_inventory`.
 `image-map.json` keeps `readiness: false`; it is not deploy, package, release,
 rollout, smoke, product-flow, or operator readiness evidence.
+
+Registry presence output proves only that a passing mirror-required online
+image-map points at target registry digest refs that an operator-provided
+read-only probe can resolve. It accepts only
+`existing_kubernetes/external_declared/online`; the probe receives
+`<target_image> <expected_digest>` and must return exactly one matching
+sha256 digest on stdout. The release kit does not log in, pull, push, mirror,
+call registry tooling directly, or call Kubernetes. The report omits raw
+probe stdout/stderr and executable path, keeps `readiness: false`, and is not
+accepted by the release-kit evidence envelope validator.
 
 Airgap bundle create output proves only that one local bundle root was
 assembled from explicit local inputs and immediately accepted by the existing
@@ -270,6 +281,9 @@ package readiness.
 it proves only offline bundle rendering and rendered image inventory, not
 registry execution, package readiness, offline install readiness, deploy
 readiness, or release readiness.
+`registry-presence-report.json` is intentionally not accepted because it is a
+focused online distribution diagnostic only, not deploy, package, or release
+readiness.
 Online gate evidence is accepted only for
 `existing_kubernetes/external_declared/online`; airgap bundle check evidence is
 accepted only for `existing_kubernetes/external_declared/airgap`. Raw

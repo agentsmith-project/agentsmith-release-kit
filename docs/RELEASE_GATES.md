@@ -225,6 +225,49 @@ The generated `image-map.json` must keep `schema: agentsmith.image-map/v1`,
 contain `verdict`, `release_verdict`, deploy readiness, AgentSmith
 product-flow fields, raw credential payloads, or registry login material.
 
+## Registry Presence Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-registry-presence.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--registry-presence`. It checks only that a passing, mirror-required online
+image-map points at digest refs that an operator-provided read-only probe can
+resolve in the target registry. It accepts only
+`existing_kubernetes/external_declared/online`.
+
+Required inputs are `--release-contract <json>`, `--image-map <json>`,
+`--target-profile existing_kubernetes/external_declared/online`,
+`--registry-probe <executable>`, and `--output-dir <dir>`. The image-map must
+have schema `agentsmith.image-map/v1`, scope `image_map_only`,
+`readiness: false`, `status: pass`, `mirror_required: true`, a
+`target_registry`, matching release identity, matching release contract raw
+sha256, and one-to-one
+mappings for `release_contract.deploy_image_inventory`. The release contract
+must keep the current six `required_image_ids` exact set and every required id
+must exist in inventory. Target images must equal the deterministic mirror ref
+computed from the release contract source image plus
+`image_map.target_registry`, and every target digest must equal the source
+digest.
+
+The probe interface is `<executable> <target_image> <expected_digest>`. The
+producer does not implement registry clients itself; it only checks the probe
+exit code and requires stdout to contain exactly one `sha256:<64>` digest equal
+to the expected target digest. Raw probe stdout, stderr, executable path,
+credentials, kubeconfig content, and tokens must not be written to the report.
+
+The generated `registry-presence-report.json` must keep `schema:
+agentsmith.registry-presence/v1`, `scope: registry_presence_only`,
+`readiness: false`, and `status: pass`. It may contain only release identity,
+target profile, target registry, release contract and image-map input digests,
+image count, and digest match summaries. It does not log in, pull, push,
+mirror, call Docker, skopeo, oras, kubectl, curl, wget, or cloud APIs, apply
+Kubernetes resources, or claim deploy/package/release readiness. It is not an
+accepted release-kit evidence envelope output.
+
 ## Airgap Bundle Create Focused Diagnostic
 
 Run:
@@ -715,6 +758,9 @@ package readiness, or release readiness.
 it proves only offline bundle render plus rendered image inventory, not
 registry execution, package readiness, offline install readiness, deploy
 readiness, or release readiness.
+`registry-presence-report.json` is intentionally not accepted because it proves
+only focused target digest-ref presence through an operator probe, not deploy,
+package, or release readiness.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.
