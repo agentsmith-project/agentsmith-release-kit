@@ -732,6 +732,9 @@ function assertExpectedImageRefsObserved(expectedImageRefs, liveSummary, resourc
 
     const observedRefs = liveSummary.observed_image_refs_by_digest.get(expected.digest);
     if (!observedRefs || observedRefs.size === 0) {
+      if (liveSummary.observed_digests.includes(expected.digest)) {
+        fail(`${resource.kind}/${resource.name} selected pods expose expected digest ${expected.digest} but no digest-pinned live image ref was observed`);
+      }
       continue;
     }
 

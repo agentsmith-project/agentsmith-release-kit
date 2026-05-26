@@ -1197,6 +1197,37 @@ run_evidence "$VALID_CONTRACT_MATERIAL" "$target_registry_apply_evidence_root" "
 [[ -f "$target_registry_apply_evidence_output/evidence-validation/evidence-validation-report.json" ]] || fail "target-registry apply evidence gate did not internally validate evidence root"
 pass "target-registry confirmed apply rollout smoke can generate validator-accepted online gate evidence root"
 
+target_registry_digest_only_live_root="$TMP_DIR/evidence-target-registry-digest-only-live"
+target_registry_digest_only_live_output="$TMP_DIR/out-target-registry-digest-only-live"
+target_registry_tag_only_image="${target_registry_app_image%@sha256:*}:runtime"
+target_registry_live_digest="${target_registry_app_image##*@}"
+write_stale_evidence_files "$target_registry_digest_only_live_root"
+reset_kubectl_log
+before_target_registry_digest_only_live="$(hit_count)"
+if FAKE_KUBECTL_LIVE_IMAGE="$target_registry_tag_only_image" \
+  FAKE_KUBECTL_LIVE_IMAGE_ID="$target_registry_live_digest" \
+  run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$target_registry_digest_only_live_output" "$TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$TARGET_PROFILE" \
+  --operator-run-id operator-run-1014 \
+  --timeout 120s \
+  --target-registry "$target_registry" \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost \
+  --evidence-root "$target_registry_digest_only_live_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/target-registry-digest-only-live.out" 2>"$TMP_DIR/target-registry-digest-only-live.err"; then
+  fail "expected target-registry apply evidence to reject digest-only live status without target digest-pinned refs"
+fi
+after_target_registry_digest_only_live="$(hit_count)"
+grep -q 'get pods' "$KUBECTL_LOG" || fail "target-registry digest-only live case did not reach live pod check"
+[[ "$before_target_registry_digest_only_live" == "$after_target_registry_digest_only_live" ]] || fail "target-registry digest-only live rejection should stop before route/network smoke"
+assert_no_gate_report "$target_registry_digest_only_live_output"
+assert_no_evidence_files "$target_registry_digest_only_live_root"
+[[ ! -e "$target_registry_digest_only_live_output/rollout/rollout-report.json" ]] || fail "target-registry digest-only live rejection must not write rollout report"
+[[ ! -e "$target_registry_digest_only_live_output/smoke/smoke-report.json" ]] || fail "target-registry digest-only live rejection must not write smoke report"
+pass "target-registry apply evidence rejects digest-only live status without target digest-pinned refs before smoke or evidence closure"
+
 target_registry_mixed_live_root="$TMP_DIR/evidence-target-registry-mixed-live"
 target_registry_mixed_live_output="$TMP_DIR/out-target-registry-mixed-live"
 write_stale_evidence_files "$target_registry_mixed_live_root"
@@ -1209,7 +1240,7 @@ if FAKE_KUBECTL_LIVE_INIT_IMAGE="$target_registry_app_image" \
   run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$target_registry_mixed_live_output" "$TARGET_PROFILE" \
   --mode apply \
   --confirm-apply "$TARGET_PROFILE" \
-  --operator-run-id operator-run-1014 \
+  --operator-run-id operator-run-1015 \
   --timeout 120s \
   --target-registry "$target_registry" \
   --smoke-url "$BASE_URL/ok" \
