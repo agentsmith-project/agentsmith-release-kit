@@ -10,7 +10,7 @@
     "normalized_remote": "github.com/agentsmith-project/agentsmith",
     "commit_sha": "0123456789abcdef0123456789abcdef01234567",
     "subject_name": "agentsmith-deploy-template-package",
-    "subject_sha256": "sha256:b314e0ff2856fccf868256f7450db554183b2e592f64e62605c7ff304473e3f2",
+    "subject_sha256": "sha256:b5884776090e9e2c9321ba2c49f478085dfc1968f9190e198f706d0c0d7283b6",
     "subject_uri": "deploy-template-package.json",
     "workflow_name": "release-contract",
     "run_id": "10001",
@@ -29,6 +29,7 @@
     "afscp",
     "asbcp",
     "ingress_nginx_controller",
-    "ingress_nginx_certgen"
+    "ingress_nginx_certgen",
+    "managed_runner"
   ]
 }

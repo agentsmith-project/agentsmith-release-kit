@@ -158,12 +158,10 @@ const contract = JSON.parse(fs.readFileSync(validContract, 'utf8'));
 const imageMap = JSON.parse(fs.readFileSync(imageMapInput, 'utf8'));
 
 switch (mutation) {
-  case 'legacy_three_image_required_image_ids':
-    contract.required_image_ids = [
-      'agentsmith_app',
-      'llmup',
-      'ingress_nginx_controller'
-    ];
+  case 'stale_six_image_required_image_ids':
+    contract.required_image_ids = contract.required_image_ids.filter(
+      (id) => id !== 'managed_runner'
+    );
     break;
   case 'required_current_id_absent_from_inventory':
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
@@ -188,12 +186,15 @@ NODE
 assert_report() {
   local report_file="$1"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$TARGET_PROFILE" "$TARGET_REGISTRY" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$TARGET_PROFILE" "$TARGET_REGISTRY" "$VALID_CONTRACT" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile, expectedProfile, expectedRegistry] = process.argv.slice(2);
+const [reportFile, expectedProfile, expectedRegistry, validContract] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
+const expectedImageCount = JSON.parse(
+  fs.readFileSync(validContract, 'utf8')
+).deploy_image_inventory.length;
 
 if (report.schema !== 'agentsmith.registry-presence/v1') {
   throw new Error(`unexpected schema: ${report.schema}`);
@@ -214,15 +215,15 @@ if (report.target_registry !== expectedRegistry) {
   throw new Error(`unexpected target registry: ${report.target_registry}`);
 }
 if (
-  report.image_count !== 6 ||
-  report.image_map?.image_count !== 6 ||
+  report.image_count !== expectedImageCount ||
+  report.image_map?.image_count !== expectedImageCount ||
   !Array.isArray(report.mappings) ||
-  report.mappings.length !== 6
+  report.mappings.length !== expectedImageCount
 ) {
-  throw new Error('registry presence report must contain six image mappings');
+  throw new Error(`registry presence report must contain ${expectedImageCount} image mappings`);
 }
-if (report.present_digest_summary?.matched_count !== 6) {
-  throw new Error('registry presence report must summarize six matched digests');
+if (report.present_digest_summary?.matched_count !== expectedImageCount) {
+  throw new Error(`registry presence report must summarize ${expectedImageCount} matched digests`);
 }
 if (!report.release_contract?.input_sha256?.startsWith('sha256:')) {
   throw new Error('release contract input sha is missing');
@@ -295,7 +296,7 @@ valid_output="$TMP_DIR/out-valid"
 run_registry_presence "$VALID_CONTRACT" "$valid_image_map" "$valid_output" "$TARGET_PROFILE" "$pass_probe" \
   >/dev/null
 assert_report "$valid_output/registry-presence-report.json"
-pass "registry presence accepts six target digest refs with readiness=false"
+pass "registry presence accepts release contract target digest refs with readiness=false"
 
 mirror_false_image_map="$TMP_DIR/image-map-mirror-false.json"
 mutate_image_map "$valid_image_map" "$mirror_false_image_map" mirror_required_false
@@ -408,20 +409,20 @@ expect_fail \
   "$pass_probe" \
   "--registry-presence only accepts $TARGET_PROFILE"
 
-legacy_contract="$TMP_DIR/contract-legacy-required.json"
-legacy_image_map="$TMP_DIR/image-map-legacy-required.json"
+stale_contract="$TMP_DIR/contract-stale-required.json"
+stale_image_map="$TMP_DIR/image-map-stale-required.json"
 write_contract_and_bound_image_map \
-  "$legacy_contract" \
+  "$stale_contract" \
   "$valid_image_map" \
-  "$legacy_image_map" \
-  legacy_three_image_required_image_ids
+  "$stale_image_map" \
+  stale_six_image_required_image_ids
 expect_fail \
-  legacy-three-image-required-image-ids \
-  "$legacy_contract" \
-  "$legacy_image_map" \
+  stale-six-image-required-image-ids \
+  "$stale_contract" \
+  "$stale_image_map" \
   "$TARGET_PROFILE" \
   "$pass_probe" \
-  "release_contract.required_image_ids must match current app image ids"
+  "release_contract.required_image_ids must match release_contract.deploy_image_inventory ids"
 
 missing_inventory_contract="$TMP_DIR/contract-missing-inventory.json"
 missing_inventory_image_map="$TMP_DIR/image-map-missing-inventory.json"
@@ -436,6 +437,6 @@ expect_fail \
   "$missing_inventory_image_map" \
   "$TARGET_PROFILE" \
   "$pass_probe" \
-  "release_contract.required_image_ids contains id missing from release_contract.deploy_image_inventory"
+  "release_contract.deploy_image_inventory must match declared image sources"
 
 pass "registry-presence focused diagnostic tests completed"

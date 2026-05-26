@@ -13,13 +13,16 @@ ALIAS_OFFLINE_PROFILE="existing_kubernetes/external_declared/offline"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="bundle-create-report.json"
 CHECK_REPORT_FILE="airgap-bundle-check-report.json"
-APP_CURRENT_IMAGE_IDS=(
-  agentsmith_app
-  llmup
-  afscp
-  asbcp
-  ingress_nginx_controller
-  ingress_nginx_certgen
+mapfile -t RELEASE_IMAGE_IDS < <(
+  "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
+import fs from 'node:fs';
+
+const [fixtureContract] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(fixtureContract, 'utf8'));
+for (const item of contract.deploy_image_inventory) {
+  console.log(item.id);
+}
+NODE
 )
 
 TMP_DIR="$(mktemp -d)"
@@ -173,7 +176,7 @@ YAML
 
 create_image_archives() {
   mkdir -p "$IMAGE_DIR"
-  for id in "${APP_CURRENT_IMAGE_IDS[@]}"; do
+  for id in "${RELEASE_IMAGE_IDS[@]}"; do
     printf 'local oci layout tar placeholder for %s\n' "$id" >"$IMAGE_DIR/$id.oci-layout.tar"
   done
 }
@@ -248,7 +251,7 @@ refresh_args() {
   )
   default_image_args=(
   )
-  for id in "${APP_CURRENT_IMAGE_IDS[@]}"; do
+  for id in "${RELEASE_IMAGE_IDS[@]}"; do
     default_image_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
   done
 }
@@ -316,25 +319,20 @@ assert_bundle_and_report() {
   local bundle_root="$1"
   local output_dir="$2"
 
-  "$NODE_BIN" --input-type=module - "$bundle_root" "$output_dir/$REPORT_FILE" "$output_dir/$CHECK_REPORT_FILE" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$bundle_root" "$output_dir/$REPORT_FILE" "$output_dir/$CHECK_REPORT_FILE" "$VALID_CONTRACT" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [bundleRoot, reportFile, checkReportFile] = process.argv.slice(2);
+const [bundleRoot, reportFile, checkReportFile, validContract] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const checkReport = JSON.parse(fs.readFileSync(checkReportFile, 'utf8'));
 const manifest = JSON.parse(
   fs.readFileSync(path.join(bundleRoot, 'airgap-bundle-manifest.json'), 'utf8')
 );
 const serializedReport = JSON.stringify(report);
-const expectedImageIds = [
-  'agentsmith_app',
-  'llmup',
-  'afscp',
-  'asbcp',
-  'ingress_nginx_controller',
-  'ingress_nginx_certgen'
-];
+const expectedImageIds = JSON.parse(
+  fs.readFileSync(validContract, 'utf8')
+).deploy_image_inventory.map((item) => item.id);
 
 function assertFile(relativePath) {
   const file = path.join(bundleRoot, relativePath);
@@ -371,12 +369,7 @@ for (const relativePath of [
   'components/deploy-template-package.json',
   'components/agentsmith-deploy-template-package.tgz',
   'components/image-map.json',
-  'images/agentsmith_app.oci-layout.tar',
-  'images/llmup.oci-layout.tar',
-  'images/afscp.oci-layout.tar',
-  'images/asbcp.oci-layout.tar',
-  'images/ingress_nginx_controller.oci-layout.tar',
-  'images/ingress_nginx_certgen.oci-layout.tar',
+  ...expectedImageIds.map((id) => `images/${id}.oci-layout.tar`),
   'payload/runbook.md',
   'payload/install.sh',
   'payload/profile-values.schema.json',
@@ -416,7 +409,7 @@ if (manifest.image_artifact_declarations?.length !== expectedImageIds.length) {
 }
 const imageIds = manifest.image_artifact_declarations.map((item) => item.id);
 if (JSON.stringify(imageIds) !== JSON.stringify(expectedImageIds)) {
-  throw new Error(`bundle manifest must declare app-current image ids: ${imageIds.join(',')}`);
+  throw new Error(`bundle manifest must declare release contract image ids: ${imageIds.join(',')}`);
 }
 if (manifest.operator_prerequisites?.tools?.length !== 2) {
   throw new Error('bundle manifest must include bundled and operator prerequisite tools');
@@ -555,6 +548,7 @@ expect_create_fail image-archive-symlink "$TMP_DIR/bundle-image-symlink" "$TMP_D
     --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
     --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
     --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
+    --image-archive "managed_runner=$IMAGE_DIR/managed_runner.oci-layout.tar" \
     "${common_payload_args[@]}"
 
 expect_create_fail image-archive-directory "$TMP_DIR/bundle-image-directory" "$TMP_DIR/out-image-directory" \
@@ -565,6 +559,7 @@ expect_create_fail image-archive-directory "$TMP_DIR/bundle-image-directory" "$T
     --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
     --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
     --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
+    --image-archive "managed_runner=$IMAGE_DIR/managed_runner.oci-layout.tar" \
     "${common_payload_args[@]}"
 
 expect_create_fail image-archive-uri "$TMP_DIR/bundle-image-uri" "$TMP_DIR/out-image-uri" \
@@ -575,6 +570,7 @@ expect_create_fail image-archive-uri "$TMP_DIR/bundle-image-uri" "$TMP_DIR/out-i
     --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
     --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
     --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
+    --image-archive "managed_runner=$IMAGE_DIR/managed_runner.oci-layout.tar" \
     "${common_payload_args[@]}"
 
 expect_create_fail missing-runbook "$TMP_DIR/bundle-missing-runbook" "$TMP_DIR/out-missing-runbook" \

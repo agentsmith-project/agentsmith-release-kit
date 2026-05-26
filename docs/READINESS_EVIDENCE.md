@@ -51,9 +51,11 @@ operator readiness evidence.
 Materialized template render output proves only that one descriptor-bound
 archive can render its declared Kubernetes templates from explicit render
 values, release contract image inventory, target axes, and substrate connection
-truth. Direct render also enforces app-current `required_image_ids` exact-set
+truth. Direct render also enforces dynamic `required_image_ids` exact-set
 closure across the release contract, deploy template package descriptor, and
-`deploy_image_inventory`. Its `manifest-render-report.json` keeps
+`deploy_image_inventory` ids. The closure is dynamic from the AgentSmith
+release contract rather than a fixed six-image list; current fixtures/examples
+include `managed_runner`. Its `manifest-render-report.json` keeps
 `readiness: false`; it is not
 apply, deploy, package, release, rollout, smoke, or operator readiness
 evidence.
@@ -77,9 +79,12 @@ airgap run, produces mirror-required target refs. It does not verify that
 images exist in a target registry, does not pull or push images, does not build
 an airgap bundle, and does not support local kind image import. Because
 `image-map.json` is an accepted release-kit evidence output, standalone
-image-map generation also enforces the app-current
-`release_contract.required_image_ids` exact-set closure and requires every
-required id to exist in `deploy_image_inventory`.
+image-map generation also enforces the release contract's dynamic
+`required_image_ids` exact-set closure against `deploy_image_inventory` ids.
+When that closure includes `managed_runner`, image-map, render, and airgap
+archive diagnostics propagate it through the ordinary image mapping and archive
+declaration mechanisms; this is not runner runtime, backend-real, package,
+deploy, or release readiness evidence.
 `image-map.json` keeps `readiness: false`; it is not deploy, package, release,
 rollout, smoke, product-flow, or operator readiness evidence.
 

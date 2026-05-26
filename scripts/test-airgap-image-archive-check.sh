@@ -12,14 +12,6 @@ KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 ALIAS_OFFLINE_PROFILE="existing_kubernetes/external_declared/offline"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="airgap-image-archive-check-report.json"
-APP_CURRENT_IMAGE_IDS=(
-  agentsmith_app
-  llmup
-  afscp
-  asbcp
-  ingress_nginx_controller
-  ingress_nginx_certgen
-)
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -265,6 +257,20 @@ NODE
 run_bundle_create() {
   local bundle_root="$1"
   local output_dir="$2"
+  local image_archive_args=()
+
+  while IFS= read -r id; do
+    image_archive_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
+  done < <("$NODE_BIN" --input-type=module - "$VALID_CONTRACT" <<'NODE'
+import fs from 'node:fs';
+
+const [contractInput] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+for (const image of contract.deploy_image_inventory) {
+  console.log(image.id);
+}
+NODE
+)
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
     --release-contract "$VALID_CONTRACT" \
@@ -274,12 +280,7 @@ run_bundle_create() {
     --target-registry "$AIRGAP_REGISTRY" \
     --bundle-root "$bundle_root" \
     --output-dir "$output_dir" \
-    --image-archive "agentsmith_app=$IMAGE_DIR/agentsmith_app.oci-layout.tar" \
-    --image-archive "llmup=$IMAGE_DIR/llmup.oci-layout.tar" \
-    --image-archive "afscp=$IMAGE_DIR/afscp.oci-layout.tar" \
-    --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
-    --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
-    --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
+    "${image_archive_args[@]}" \
     --runbook "$PAYLOAD_DIR/runbook.md" \
     --script "$PAYLOAD_DIR/install.sh" \
     --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
@@ -398,13 +399,15 @@ NODE
 assert_report() {
   local report_file="$1"
 
-  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$VALID_CONTRACT" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile] = process.argv.slice(2);
+const [reportFile, validContract] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
-const expectedImageCount = 6;
+const expectedImageCount = JSON.parse(
+  fs.readFileSync(validContract, 'utf8')
+).deploy_image_inventory.length;
 const digestRe = /^sha256:[0-9a-f]{64}$/;
 
 function assertNoLeakKeys(value, path = 'report') {

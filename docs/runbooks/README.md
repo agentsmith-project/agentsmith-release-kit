@@ -98,6 +98,19 @@ lowercase and start and end with alphanumeric characters.
 Evidence intake rechecks the same adoption rule as render: source-use plans
 cannot carry `target_registry`, and mirrored targets must match the
 deterministic target registry ref.
+The image id set comes from the AgentSmith release contract's dynamic closure:
+`release_contract.required_image_ids`,
+`deploy_template_package.required_image_ids`, and `deploy_image_inventory` ids
+must be exact-set aligned. Current fixtures/examples include `managed_runner`,
+which is carried by ordinary image-map, render, and airgap archive mechanics
+rather than a runner-specific runtime gate.
+
+During pre-GA, stale six-image required-id inputs, obsolete
+`${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale
+runner-name aliases such as `agent-task-runner` or `agentsmith-codex-runner`
+are not operator success or compatibility paths. Treat them only as
+fail-fast cases or negative diagnostics, and delete those cases once the formal
+fixtures and runbooks stabilize.
 
 For registry presence, use only `existing_kubernetes/external_declared/online`
 and only a passing mirror-required image-map. This diagnostic does not log in,

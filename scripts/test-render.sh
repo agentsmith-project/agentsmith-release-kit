@@ -202,6 +202,8 @@ spec:
           containers:
             - name: llmup
               image: ${{ images.llmup.image }}
+            - name: managed-runner
+              image: ${{ images.managed_runner.image }}
 YAML
       ;;
     unknown_variable)
@@ -420,13 +422,13 @@ const [
 ] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const deployTemplatePackage = JSON.parse(fs.readFileSync(deployTemplatePackageInput, 'utf8'));
-const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
+const staleSixImageIds = contract.required_image_ids.filter((id) => id !== 'managed_runner');
 
 switch (mutation) {
-  case 'legacy-three-image-required-image-ids':
-    contract.required_image_ids = legacyThreeImageIds;
-    contract.deploy_template_package.required_image_ids = legacyThreeImageIds;
-    deployTemplatePackage.required_image_ids = legacyThreeImageIds;
+  case 'stale-six-image-required-image-ids':
+    contract.required_image_ids = staleSixImageIds;
+    contract.deploy_template_package.required_image_ids = staleSixImageIds;
+    deployTemplatePackage.required_image_ids = staleSixImageIds;
     break;
   case 'required-current-id-absent-from-inventory':
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
@@ -768,24 +770,30 @@ const [renderedFile, imageMapFile, contractFile, mode] = process.argv.slice(2);
 const rendered = fs.readFileSync(renderedFile, 'utf8');
 const imageMap = JSON.parse(fs.readFileSync(imageMapFile, 'utf8'));
 const contract = JSON.parse(fs.readFileSync(contractFile, 'utf8'));
-const appSource = contract.deploy_image_inventory.find((item) => item.id === 'agentsmith_app')?.image;
-const appTarget = imageMap.mappings.find((item) => item.id === 'agentsmith_app')?.target_image;
+const expectedImageIds = ['agentsmith_app', 'managed_runner'];
 
-if (!appSource || !appTarget) {
-  throw new Error('fixture app image is missing');
+for (const imageId of expectedImageIds) {
+  const source = contract.deploy_image_inventory.find((item) => item.id === imageId)?.image;
+  const target = imageMap.mappings.find((item) => item.id === imageId)?.target_image;
+  if (!source || !target) {
+    throw new Error(`fixture image is missing: ${imageId}`);
+  }
+
+  if (mode === 'target') {
+    if (!rendered.includes(target)) {
+      throw new Error(`rendered manifest did not adopt target image for ${imageId}: ${target}`);
+    }
+    if (rendered.includes(source)) {
+      throw new Error(`rendered manifest should not keep source image for ${imageId} when image-map is provided`);
+    }
+  } else {
+    if (!rendered.includes(source)) {
+      throw new Error(`rendered manifest did not use source image for ${imageId}: ${source}`);
+    }
+  }
 }
 
-if (mode === 'target') {
-  if (!rendered.includes(appTarget)) {
-    throw new Error(`rendered manifest did not adopt target image: ${appTarget}`);
-  }
-  if (rendered.includes(appSource)) {
-    throw new Error('rendered manifest should not keep the source image when image-map is provided');
-  }
-} else {
-  if (!rendered.includes(appSource)) {
-    throw new Error(`rendered manifest did not use source image: ${appSource}`);
-  }
+if (mode !== 'target') {
   if (rendered.includes('registry.release.example/agentsmith/')) {
     throw new Error('rendered manifest should not use target registry without image-map');
   }
@@ -824,25 +832,25 @@ assert_rendered_image_adoption \
   source
 pass "valid render accepted with focused non-readiness report"
 
-LEGACY_REQUIRED_IDS_CONTRACT="$TMP_DIR/release-contract.legacy-three-image-required-image-ids.json"
-LEGACY_REQUIRED_IDS_PACKAGE="$TMP_DIR/deploy-template-package.legacy-three-image-required-image-ids.json"
+STALE_REQUIRED_IDS_CONTRACT="$TMP_DIR/release-contract.stale-six-image-required-image-ids.json"
+STALE_REQUIRED_IDS_PACKAGE="$TMP_DIR/deploy-template-package.stale-six-image-required-image-ids.json"
 mutate_required_image_ids \
-  legacy-three-image-required-image-ids \
+  stale-six-image-required-image-ids \
   "$VALID_CONTRACT_MATERIAL" \
   "$VALID_PACKAGE_MATERIAL" \
-  "$LEGACY_REQUIRED_IDS_CONTRACT" \
-  "$LEGACY_REQUIRED_IDS_PACKAGE"
+  "$STALE_REQUIRED_IDS_CONTRACT" \
+  "$STALE_REQUIRED_IDS_PACKAGE"
 expect_fail_case \
-  legacy-three-image-required-image-ids \
-  "$LEGACY_REQUIRED_IDS_CONTRACT" \
-  "$LEGACY_REQUIRED_IDS_PACKAGE" \
+  stale-six-image-required-image-ids \
+  "$STALE_REQUIRED_IDS_CONTRACT" \
+  "$STALE_REQUIRED_IDS_PACKAGE" \
   "$VALID_ARCHIVE" \
   "$VALID_VALUES" \
   "$VALID_TRUTH" \
   "$TARGET_PROFILE" \
   "" \
   "" \
-  "release_contract.required_image_ids must match current app image ids"
+  "release_contract.required_image_ids must match release_contract.deploy_image_inventory ids"
 
 MISSING_REQUIRED_ID_CONTRACT="$TMP_DIR/release-contract.required-current-id-absent-from-inventory.json"
 MISSING_REQUIRED_ID_PACKAGE="$TMP_DIR/deploy-template-package.required-current-id-absent-from-inventory.json"
@@ -862,7 +870,7 @@ expect_fail_case \
   "$TARGET_PROFILE" \
   "" \
   "" \
-  "deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory"
+  "release_contract.deploy_image_inventory must match declared image sources"
 
 IMAGE_MAP_OUT="$TMP_DIR/out-valid-image-map"
 run_render \

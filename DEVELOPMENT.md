@@ -61,15 +61,15 @@ The current `--inputs` path is a focused diagnostic for contract intake only.
 Its `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` outputs must keep `readiness: false`;
 they prove contract/input digest readiness only and are not deploy, package, or
-release readiness evidence. App-current inventory closure requires
-`release_contract.required_image_ids` and
-`deploy_template_package.required_image_ids` to be non-empty exact matches for
-the current app image id set, and all required ids must exist in
-`deploy_image_inventory`. The current required ids are `agentsmith_app`,
-`llmup`, `afscp`, `asbcp`, `ingress_nginx_controller`, and
-`ingress_nginx_certgen`. All target profiles must declare `required: boolean`;
-`support_level` is rejected. Required profiles must be covered by the current
-canonical focused set:
+release readiness evidence. Release contract inventory closure requires
+`release_contract.required_image_ids`,
+`deploy_template_package.required_image_ids`, and the
+`deploy_image_inventory` id set to be non-empty exact-set matches. The release
+kit consumes the AgentSmith release contract's dynamic image closure; current
+fixtures/examples include `managed_runner`, a digest-bound inventory image
+supplied by the release contract. All target profiles
+must declare `required: boolean`; `support_level` is rejected. Required
+profiles must be covered by the current canonical focused set:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`,
@@ -92,8 +92,8 @@ render values, and operator-provided substrate truth. It renders only
 `kubernetes` templates declared by archive `manifest.json` into
 `<output-dir>/rendered-manifests` and writes `manifest-render-report.json` with
 `readiness: false` and `scope: manifest_render_only`.
-Direct render enforces app-current `required_image_ids` exact-set closure
-across the release contract, deploy template package, and inventory.
+Direct render enforces the dynamic `required_image_ids` exact-set closure
+across the release contract, deploy template package, and inventory ids.
 Optional `--image-map <json>` is accepted only as image reference adoption: it
 must be a passing `agentsmith.image-map/v1` report bound to the same release
 contract digest and target profile, and render uses `mapping.target_image` for
@@ -133,8 +133,12 @@ as CLI targets. `kind_rehearsal/kit_installed/online` is a canonical profile
 tuple but out of scope for image-map CLI. Only canonical profile tuples are
 accepted in `release_contract.target_profiles`; non-canonical pre-GA names and
 synonym axes fail fast.
-Standalone image-map enforces app-current `release_contract.required_image_ids`
-exact-set closure against `deploy_image_inventory`.
+Standalone image-map enforces the release contract's dynamic
+`required_image_ids` exact-set closure against `deploy_image_inventory` ids.
+If that closure includes `managed_runner`, it flows through image-map, render
+image placeholder adoption, and airgap image-artifact declarations as an
+ordinary digest-bound inventory image. It does not enable a runner runtime,
+backend-real, or release readiness gate in release-kit.
 For online without a target registry, it maps each image to itself with
 `action: use_source`; with a target registry, and always for airgap, it writes
 digest-pinned target refs under that registry with `action: mirror_required`.
@@ -144,6 +148,13 @@ Its `image-map.json` must keep `readiness: false` and `scope:
 image_map_only`; it does not log in to a registry, pull, push, mirror, build an
 airgap bundle, import images into kind, call Kubernetes, or claim deploy,
 package, or release readiness.
+
+During pre-GA, stale six-image required-id inputs, obsolete
+`${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale
+runner-name aliases such as `agent-task-runner` or `agentsmith-codex-runner`
+are not formal success or compatibility paths. They may appear only as
+fail-fast cases or negative diagnostics, and can be deleted once the formal
+fixtures and runbooks stabilize.
 
 The current `--registry-presence` path is a focused online target-registry
 presence diagnostic only. It consumes a release contract, a passing

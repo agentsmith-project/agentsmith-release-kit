@@ -10,14 +10,13 @@ const REQUIRED_ARGS = [
   'archive',
   'outputDir'
 ];
-const APP_CURRENT_REQUIRED_IMAGE_IDS = [
-  'agentsmith_app',
-  'llmup',
-  'afscp',
-  'asbcp',
-  'ingress_nginx_controller',
-  'ingress_nginx_certgen'
+const IMAGE_ARRAY_SOURCES = [
+  'product_images',
+  'adopted_provider_images',
+  'release_kit_prerequisite_images'
 ];
+const IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
+const IMAGE_SOURCES = [...IMAGE_ARRAY_SOURCES, ...IMAGE_SINGLETON_SOURCES];
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const LOCAL_URI_RE = /\b(?:file|local|source|git\+file):\/\//i;
@@ -494,29 +493,108 @@ function normalizeRequiredImageIds(value, label) {
   });
 }
 
-function assertSameStringSet(actual, expected, label) {
+function assertSameStringSet(
+  actual,
+  expected,
+  label,
+  expectedLabel = 'release_contract.required_image_ids'
+) {
   const actualSet = new Set(actual);
   const expectedSet = new Set(expected);
   if (actualSet.size !== expectedSet.size) {
-    fail(`${label} must match release_contract.required_image_ids`);
+    fail(`${label} must match ${expectedLabel}`);
   }
   for (const id of actualSet) {
     if (!expectedSet.has(id)) {
-      fail(`${label} must match release_contract.required_image_ids`);
+      fail(`${label} must match ${expectedLabel}`);
     }
   }
 }
 
-function assertAppCurrentRequiredImageIds(ids, label) {
-  const expected = new Set(APP_CURRENT_REQUIRED_IMAGE_IDS);
-  if (ids.length !== expected.size) {
-    fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+function imageDigestSuffix(image, label) {
+  const marker = '@sha256:';
+  const index = image.lastIndexOf(marker);
+  if (index < 0) {
+    fail(`${label} must be digest-pinned with @sha256`);
   }
-  for (const id of ids) {
-    if (!expected.has(id)) {
-      fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+  const digest = `sha256:${image.slice(index + marker.length)}`;
+  if (!DIGEST_RE.test(digest)) {
+    fail(`${label} has invalid sha256 suffix`);
+  }
+  return digest;
+}
+
+function normalizeImageSourceItem(itemValue, source, label) {
+  const item = requireObject(itemValue, label);
+  const id = requireString(item.id, `${label}.id`);
+  const image = requireString(item.image, `${label}.image`);
+  const digest = requireDigest(item.digest, `${label}.digest`);
+  if (imageDigestSuffix(image, `${label}.image`) !== digest) {
+    fail(`${label}.digest must match image digest suffix`);
+  }
+  return { id, source, image, digest };
+}
+
+function declaredImageInventory(contract) {
+  return [
+    ...IMAGE_ARRAY_SOURCES.flatMap((source) => {
+      const group = requireArray(contract[source], `release_contract.${source}`);
+      if (group.length === 0) {
+        fail(`release_contract.${source} must not be empty`);
+      }
+      return group.map((item, index) =>
+        normalizeImageSourceItem(item, source, `release_contract.${source}[${index}]`)
+      );
+    }),
+    ...IMAGE_SINGLETON_SOURCES.map((source) =>
+      normalizeImageSourceItem(contract[source], source, `release_contract.${source}`)
+    )
+  ];
+}
+
+function buildDeployImageInventory(contract) {
+  const inventory = requireArray(
+    contract.deploy_image_inventory,
+    'release_contract.deploy_image_inventory'
+  );
+  if (inventory.length === 0) {
+    fail('release_contract.deploy_image_inventory must not be empty');
+  }
+
+  const byId = new Map();
+  for (const [index, item] of inventory.entries()) {
+    const label = `release_contract.deploy_image_inventory[${index}]`;
+    const normalized = normalizeImageSourceItem(
+      item,
+      requireString(requireObject(item, label).source, `${label}.source`),
+      label
+    );
+    if (!IMAGE_SOURCES.includes(normalized.source)) {
+      fail(`${label}.source is not a known image source`);
+    }
+    if (byId.has(normalized.id)) {
+      fail(`release_contract.deploy_image_inventory contains duplicate image id: ${normalized.id}`);
+    }
+    byId.set(normalized.id, normalized);
+  }
+
+  const expected = declaredImageInventory(contract);
+  if (expected.length !== byId.size) {
+    fail('release_contract.deploy_image_inventory must match declared image sources');
+  }
+  for (const expectedItem of expected) {
+    const actual = byId.get(expectedItem.id);
+    if (
+      !actual ||
+      actual.source !== expectedItem.source ||
+      actual.image !== expectedItem.image ||
+      actual.digest !== expectedItem.digest
+    ) {
+      fail('release_contract.deploy_image_inventory must match declared image sources');
     }
   }
+
+  return byId;
 }
 
 function assertRequiredImageIds(contract, deployTemplatePackage) {
@@ -533,32 +611,20 @@ function assertRequiredImageIds(contract, deployTemplatePackage) {
     contractRequiredImageIds,
     'deploy_template_package.required_image_ids'
   );
-  assertAppCurrentRequiredImageIds(
+  const inventoryIds = [...buildDeployImageInventory(contract).keys()];
+  assertSameStringSet(
     contractRequiredImageIds,
-    'release_contract.required_image_ids'
+    inventoryIds,
+    'release_contract.required_image_ids',
+    'release_contract.deploy_image_inventory ids'
   );
-  assertAppCurrentRequiredImageIds(
+  assertSameStringSet(
     packageRequiredImageIds,
-    'deploy_template_package.required_image_ids'
+    inventoryIds,
+    'deploy_template_package.required_image_ids',
+    'release_contract.deploy_image_inventory ids'
   );
 
-  const inventoryIds = new Set(
-    requireArray(
-      contract.deploy_image_inventory,
-      'release_contract.deploy_image_inventory'
-    ).map((item, index) => {
-      return requireString(
-        requireObject(item, `release_contract.deploy_image_inventory[${index}]`).id,
-        `release_contract.deploy_image_inventory[${index}].id`
-      );
-    })
-  );
-
-  for (const id of packageRequiredImageIds) {
-    if (!inventoryIds.has(id)) {
-      fail(`deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory: ${id}`);
-    }
-  }
 }
 
 function assertArchiveDigests(deployTemplatePackage, archiveSha256) {

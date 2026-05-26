@@ -11,13 +11,16 @@ KIND_PROFILE="kind_rehearsal/kit_installed/online"
 KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="airgap-bundle-render-check-report.json"
-APP_CURRENT_IMAGE_IDS=(
-  agentsmith_app
-  llmup
-  afscp
-  asbcp
-  ingress_nginx_controller
-  ingress_nginx_certgen
+mapfile -t RELEASE_IMAGE_IDS < <(
+  "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
+import fs from 'node:fs';
+
+const [fixtureContract] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(fixtureContract, 'utf8'));
+for (const item of contract.deploy_image_inventory) {
+  console.log(item.id);
+}
+NODE
 )
 
 TMP_DIR="$(mktemp -d)"
@@ -335,7 +338,7 @@ JSON
 
 create_image_archives() {
   mkdir -p "$IMAGE_DIR"
-  for id in "${APP_CURRENT_IMAGE_IDS[@]}"; do
+  for id in "${RELEASE_IMAGE_IDS[@]}"; do
     printf 'local oci layout tar placeholder for %s\n' "$id" >"$IMAGE_DIR/$id.oci-layout.tar"
   done
 }
@@ -379,6 +382,11 @@ run_bundle_create() {
   local archive="$3"
   local bundle_root="$4"
   local output_dir="$5"
+  local image_archive_args=()
+
+  for id in "${RELEASE_IMAGE_IDS[@]}"; do
+    image_archive_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
+  done
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
     --release-contract "$release_contract" \
@@ -388,12 +396,7 @@ run_bundle_create() {
     --target-registry "$AIRGAP_REGISTRY" \
     --bundle-root "$bundle_root" \
     --output-dir "$output_dir" \
-    --image-archive "agentsmith_app=$IMAGE_DIR/agentsmith_app.oci-layout.tar" \
-    --image-archive "llmup=$IMAGE_DIR/llmup.oci-layout.tar" \
-    --image-archive "afscp=$IMAGE_DIR/afscp.oci-layout.tar" \
-    --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
-    --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
-    --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
+    "${image_archive_args[@]}" \
     --runbook "$PAYLOAD_DIR/runbook.md" \
     --script "$PAYLOAD_DIR/install.sh" \
     --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
@@ -479,12 +482,15 @@ NODE
 assert_report() {
   local report_file="$1"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$AIRGAP_REGISTRY" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$AIRGAP_REGISTRY" "$VALID_CONTRACT" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile, expectedRegistry] = process.argv.slice(2);
+const [reportFile, expectedRegistry, validContract] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
+const expectedImageMapCount = JSON.parse(
+  fs.readFileSync(validContract, 'utf8')
+).deploy_image_inventory.length;
 
 function assertNoLeakKeys(value, path = 'report') {
   if (!value || typeof value !== 'object') {
@@ -526,7 +532,7 @@ if (report.target_profile?.value !== 'existing_kubernetes/external_declared/airg
 if (Object.prototype.hasOwnProperty.call(report, 'target_registry')) {
   throw new Error('airgap bundle render-check report must not include target_registry');
 }
-if (report.image_inventory?.image_map_image_count !== 6) {
+if (report.image_inventory?.image_map_image_count !== expectedImageMapCount) {
   throw new Error(`unexpected image-map image count: ${report.image_inventory?.image_map_image_count}`);
 }
 if (report.image_inventory?.rendered_image_count !== 2) {

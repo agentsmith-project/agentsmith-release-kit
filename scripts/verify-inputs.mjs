@@ -22,19 +22,13 @@ const AGENTSMITH_PRODUCT = AGENTSMITH_REPO.slice(AGENTSMITH_REPO.lastIndexOf('/'
 const CONTRACT_SUBJECT = 'agentsmith-release-contract';
 const DEPLOY_TEMPLATE_PACKAGE_SUBJECT = 'agentsmith-deploy-template-package';
 const PROVENANCE_KIND = 'ci_artifact';
-const IMAGE_GROUPS = [
+const IMAGE_ARRAY_SOURCES = [
   'product_images',
   'adopted_provider_images',
   'release_kit_prerequisite_images'
 ];
-const APP_CURRENT_REQUIRED_IMAGE_IDS = [
-  'agentsmith_app',
-  'llmup',
-  'afscp',
-  'asbcp',
-  'ingress_nginx_controller',
-  'ingress_nginx_certgen'
-];
+const IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
+const IMAGE_SOURCES = [...IMAGE_ARRAY_SOURCES, ...IMAGE_SINGLETON_SOURCES];
 const REQUIRED_ARGS = [
   'releaseContract',
   'deployTemplatePackage',
@@ -275,8 +269,7 @@ function imageDigestSuffix(image, label) {
   return digest;
 }
 
-function normalizeImageItem(item, source, index) {
-  const label = `${source}[${index}]`;
+function normalizeImageItem(item, source, label) {
   const object = requireObject(item, label);
   const id = requireString(object.id, `${label}.id`);
   const image = requireString(object.image, `${label}.image`);
@@ -300,11 +293,11 @@ function normalizeInventoryItem(item, index) {
   const object = requireObject(item, label);
   const source = requireString(object.source, `${label}.source`);
 
-  if (!IMAGE_GROUPS.includes(source)) {
+  if (!IMAGE_SOURCES.includes(source)) {
     fail(`${label}.source is not a known image source`);
   }
 
-  return normalizeImageItem(object, source, index);
+  return normalizeImageItem(object, source, label);
 }
 
 function imageSortKey(item) {
@@ -342,27 +335,20 @@ function normalizeRequiredImageIds(value, label) {
   });
 }
 
-function assertSameStringSet(actual, expected, label) {
+function assertSameStringSet(
+  actual,
+  expected,
+  label,
+  expectedLabel = 'release_contract.required_image_ids'
+) {
   const actualSet = new Set(actual);
   const expectedSet = new Set(expected);
   if (actualSet.size !== expectedSet.size) {
-    fail(`${label} must match release_contract.required_image_ids`);
+    fail(`${label} must match ${expectedLabel}`);
   }
   for (const id of actualSet) {
     if (!expectedSet.has(id)) {
-      fail(`${label} must match release_contract.required_image_ids`);
-    }
-  }
-}
-
-function assertAppCurrentRequiredImageIds(ids, label) {
-  const expected = new Set(APP_CURRENT_REQUIRED_IMAGE_IDS);
-  if (ids.length !== expected.size) {
-    fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
-  }
-  for (const id of ids) {
-    if (!expected.has(id)) {
-      fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+      fail(`${label} must match ${expectedLabel}`);
     }
   }
 }
@@ -381,33 +367,39 @@ function assertRequiredImageIds(contract, deployTemplatePackage, images) {
     contractRequiredImageIds,
     'deploy_template_package.required_image_ids'
   );
-  assertAppCurrentRequiredImageIds(
+  const inventoryIds = images.map((image) => image.id);
+  assertSameStringSet(
     contractRequiredImageIds,
-    'release_contract.required_image_ids'
+    inventoryIds,
+    'release_contract.required_image_ids',
+    'release_contract.deploy_image_inventory ids'
   );
-  assertAppCurrentRequiredImageIds(
+  assertSameStringSet(
     packageRequiredImageIds,
-    'deploy_template_package.required_image_ids'
+    inventoryIds,
+    'deploy_template_package.required_image_ids',
+    'release_contract.deploy_image_inventory ids'
   );
-
-  const inventoryIds = new Set(images.map((image) => image.id));
-  for (const id of packageRequiredImageIds) {
-    if (!inventoryIds.has(id)) {
-      fail(`deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory: ${id}`);
-    }
-  }
 
   return packageRequiredImageIds;
 }
 
 function assertImageInventory(contract) {
-  const expected = IMAGE_GROUPS.flatMap((source) => {
+  const expectedArrayItems = IMAGE_ARRAY_SOURCES.flatMap((source) => {
     const group = requireArray(contract[source], `release_contract.${source}`);
     if (group.length === 0) {
       fail(`release_contract.${source} must not be empty`);
     }
-    return group.map((item, index) => normalizeImageItem(item, source, index));
+    return group.map((item, index) => normalizeImageItem(item, source, `${source}[${index}]`));
   });
+  const expectedSingletonItems = IMAGE_SINGLETON_SOURCES.map((source) =>
+    normalizeImageItem(
+      contract[source],
+      source,
+      source
+    )
+  );
+  const expected = [...expectedArrayItems, ...expectedSingletonItems];
   const actual = requireArray(
     contract.deploy_image_inventory,
     'release_contract.deploy_image_inventory'

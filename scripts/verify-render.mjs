@@ -29,14 +29,13 @@ const DEPLOY_TEMPLATE_MANIFEST_SCHEMA = 'agentsmith.deploy-template-manifest/v1'
 const IMAGE_MAP_SCHEMA = 'agentsmith.image-map/v1';
 const IMAGE_MAP_SCOPE = 'image_map_only';
 const REPORT_SCHEMA = 'agentsmith.manifest-render-report/v1';
-const APP_CURRENT_REQUIRED_IMAGE_IDS = [
-  'agentsmith_app',
-  'llmup',
-  'afscp',
-  'asbcp',
-  'ingress_nginx_controller',
-  'ingress_nginx_certgen'
+const IMAGE_ARRAY_SOURCES = [
+  'product_images',
+  'adopted_provider_images',
+  'release_kit_prerequisite_images'
 ];
+const IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
+const IMAGE_SOURCES = [...IMAGE_ARRAY_SOURCES, ...IMAGE_SINGLETON_SOURCES];
 const WORKLOAD_KINDS = new Set([
   'Deployment',
   'StatefulSet',
@@ -833,27 +832,20 @@ function normalizeRequiredImageIds(value, label) {
   });
 }
 
-function assertSameStringSet(actual, expected, label) {
+function assertSameStringSet(
+  actual,
+  expected,
+  label,
+  expectedLabel = 'release_contract.required_image_ids'
+) {
   const actualSet = new Set(actual);
   const expectedSet = new Set(expected);
   if (actualSet.size !== expectedSet.size) {
-    fail(`${label} must match release_contract.required_image_ids`);
+    fail(`${label} must match ${expectedLabel}`);
   }
   for (const id of actualSet) {
     if (!expectedSet.has(id)) {
-      fail(`${label} must match release_contract.required_image_ids`);
-    }
-  }
-}
-
-function assertAppCurrentRequiredImageIds(ids, label) {
-  const expected = new Set(APP_CURRENT_REQUIRED_IMAGE_IDS);
-  if (ids.length !== expected.size) {
-    fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
-  }
-  for (const id of ids) {
-    if (!expected.has(id)) {
-      fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+      fail(`${label} must match ${expectedLabel}`);
     }
   }
 }
@@ -872,20 +864,19 @@ function assertRequiredImageIds(contract, deployTemplatePackage, inventoryById) 
     contractRequiredImageIds,
     'deploy_template_package.required_image_ids'
   );
-  assertAppCurrentRequiredImageIds(
+  const inventoryIds = [...inventoryById.keys()];
+  assertSameStringSet(
     contractRequiredImageIds,
-    'release_contract.required_image_ids'
+    inventoryIds,
+    'release_contract.required_image_ids',
+    'release_contract.deploy_image_inventory ids'
   );
-  assertAppCurrentRequiredImageIds(
+  assertSameStringSet(
     packageRequiredImageIds,
-    'deploy_template_package.required_image_ids'
+    inventoryIds,
+    'deploy_template_package.required_image_ids',
+    'release_contract.deploy_image_inventory ids'
   );
-
-  for (const id of packageRequiredImageIds) {
-    if (!inventoryById.has(id)) {
-      fail(`deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory: ${id}`);
-    }
-  }
 }
 
 function imageDigestSuffix(image, label) {
@@ -919,6 +910,44 @@ function imageDigestSuffix(image, label) {
   return { digest, image_without_digest: imageWithoutDigest };
 }
 
+function normalizeDeclaredImageItem(itemValue, source, label) {
+  const item = requireObject(itemValue, label);
+  const id = requireString(item.id, `${label}.id`);
+  const image = requireString(item.image, `${label}.image`);
+  const declaredDigest = requireDigest(item.digest, `${label}.digest`);
+  const { digest, image_without_digest: imageWithoutDigest } = imageDigestSuffix(
+    image,
+    `${label}.image`
+  );
+  if (digest !== declaredDigest) {
+    fail(`${label}.digest must match image digest suffix`);
+  }
+  return {
+    id,
+    image,
+    digest,
+    image_without_digest: imageWithoutDigest,
+    source
+  };
+}
+
+function declaredInventory(contract) {
+  return [
+    ...IMAGE_ARRAY_SOURCES.flatMap((source) => {
+      const items = requireArray(contract[source], `release_contract.${source}`);
+      if (items.length === 0) {
+        fail(`release_contract.${source} must not be empty`);
+      }
+      return items.map((item, index) =>
+        normalizeDeclaredImageItem(item, source, `release_contract.${source}[${index}]`)
+      );
+    }),
+    ...IMAGE_SINGLETON_SOURCES.map((source) =>
+      normalizeDeclaredImageItem(contract[source], source, `release_contract.${source}`)
+    )
+  ];
+}
+
 function buildInventory(contract) {
   const items = requireArray(
     contract.deploy_image_inventory,
@@ -949,12 +978,17 @@ function buildInventory(contract) {
       fail(`release_contract.deploy_image_inventory contains duplicate id: ${id}`);
     }
 
+    const source = requireString(item.source, `${label}.source`);
+    if (!IMAGE_SOURCES.includes(source)) {
+      fail(`${label}.source is not a known image source`);
+    }
+
     const normalized = {
       id,
       image,
       digest,
       image_without_digest: imageWithoutDigest,
-      source: typeof item.source === 'string' ? item.source : undefined
+      source
     };
     byExact.set(image, normalized);
     byId.set(id, normalized);
@@ -970,6 +1004,22 @@ function buildInventory(contract) {
 
   if (byExact.size === 0) {
     fail('release_contract.deploy_image_inventory must not be empty');
+  }
+
+  const expected = declaredInventory(contract);
+  if (expected.length !== byId.size) {
+    fail('release_contract.deploy_image_inventory must match declared image sources');
+  }
+  for (const expectedItem of expected) {
+    const actual = byId.get(expectedItem.id);
+    if (
+      !actual ||
+      actual.source !== expectedItem.source ||
+      actual.image !== expectedItem.image ||
+      actual.digest !== expectedItem.digest
+    ) {
+      fail('release_contract.deploy_image_inventory must match declared image sources');
+    }
   }
 
   return { byExact, byDigest, byImageWithoutDigest, byId };

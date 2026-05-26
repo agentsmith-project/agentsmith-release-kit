@@ -14,14 +14,13 @@ const REQUIRED_ARGS = ['releaseContract', 'targetProfile', 'outputDir'];
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const REPORT_SCHEMA = 'agentsmith.image-map/v1';
 const IMAGE_MAP_SCOPE = 'image_map_only';
-const APP_CURRENT_REQUIRED_IMAGE_IDS = [
-  'agentsmith_app',
-  'llmup',
-  'afscp',
-  'asbcp',
-  'ingress_nginx_controller',
-  'ingress_nginx_certgen'
+const IMAGE_ARRAY_SOURCES = [
+  'product_images',
+  'adopted_provider_images',
+  'release_kit_prerequisite_images'
 ];
+const IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
+const IMAGE_SOURCES = [...IMAGE_ARRAY_SOURCES, ...IMAGE_SINGLETON_SOURCES];
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -337,34 +336,60 @@ function normalizeRequiredImageIds(value, label) {
   });
 }
 
-function assertAppCurrentRequiredImageIds(ids, label) {
-  const expected = new Set(APP_CURRENT_REQUIRED_IMAGE_IDS);
-  if (ids.length !== expected.size) {
-    fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
-  }
-  for (const id of ids) {
-    if (!expected.has(id)) {
-      fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
-    }
-  }
-}
-
 function assertReleaseContractRequiredImageIds(contract, inventory) {
   const requiredImageIds = normalizeRequiredImageIds(
     contract.required_image_ids,
     'release_contract.required_image_ids'
   );
-  assertAppCurrentRequiredImageIds(
-    requiredImageIds,
-    'release_contract.required_image_ids'
-  );
-
   const inventoryIds = new Set(inventory.map((item) => item.id));
+  if (requiredImageIds.length !== inventoryIds.size) {
+    fail('release_contract.required_image_ids must match release_contract.deploy_image_inventory ids');
+  }
   for (const id of requiredImageIds) {
     if (!inventoryIds.has(id)) {
-      fail(`release_contract.required_image_ids contains id missing from release_contract.deploy_image_inventory: ${id}`);
+      fail('release_contract.required_image_ids must match release_contract.deploy_image_inventory ids');
     }
   }
+}
+
+function normalizeDeclaredImageItem(itemValue, source, label) {
+  const item = requireObject(itemValue, label);
+  const id = requireString(item.id, `${label}.id`);
+  const image = requireString(item.image, `${label}.image`);
+  const declaredDigest = requireDigest(item.digest, `${label}.digest`);
+  const { digest, image_without_digest: imageWithoutDigest } = imageDigestSuffix(
+    image,
+    `${label}.image`
+  );
+
+  if (digest !== declaredDigest) {
+    fail(`${label}.digest must match image digest suffix`);
+  }
+
+  return {
+    id,
+    source,
+    source_image: image,
+    source_digest: digest,
+    image_without_digest: imageWithoutDigest
+  };
+}
+
+function declaredInventory(contract) {
+  return [
+    ...IMAGE_ARRAY_SOURCES.flatMap((source) => {
+      const items = requireArray(contract[source], `release_contract.${source}`);
+      if (items.length === 0) {
+        fail(`release_contract.${source} must not be empty`);
+      }
+      return items.map((item, index) =>
+        normalizeDeclaredImageItem(item, source, `release_contract.${source}[${index}]`)
+      );
+    }),
+    ...IMAGE_SINGLETON_SOURCES.map((source) =>
+      normalizeDeclaredImageItem(contract[source], source, `release_contract.${source}`)
+    )
+  ];
 }
 
 function buildInventory(contract) {
@@ -380,11 +405,14 @@ function buildInventory(contract) {
   const seenImages = new Set();
   const seenDigests = new Set();
 
-  return items.map((itemValue, index) => {
+  const normalized = items.map((itemValue, index) => {
     const label = `release_contract.deploy_image_inventory[${index}]`;
     const item = requireObject(itemValue, label);
     const id = requireString(item.id, `${label}.id`);
     const source = requireString(item.source, `${label}.source`);
+    if (!IMAGE_SOURCES.includes(source)) {
+      fail(`${label}.source is not a known image source`);
+    }
     const sourceImage = requireString(item.image, `${label}.image`);
     const declaredDigest = requireDigest(item.digest, `${label}.digest`);
     const { digest, image_without_digest: imageWithoutDigest } = imageDigestSuffix(
@@ -420,6 +448,20 @@ function buildInventory(contract) {
       image_without_digest: imageWithoutDigest
     };
   });
+
+  const expected = declaredInventory(contract);
+  if (expected.length !== items.length) {
+    fail('release_contract.deploy_image_inventory must match declared image sources');
+  }
+  const actualKey = (item) => `${item.source}\u0000${item.id}\u0000${item.source_image}\u0000${item.source_digest}`;
+  const actualSet = new Set(normalized.map(actualKey));
+  for (const expectedItem of expected) {
+    if (!actualSet.has(actualKey(expectedItem))) {
+      fail('release_contract.deploy_image_inventory must match declared image sources');
+    }
+  }
+
+  return normalized;
 }
 
 function parseRegistryHostPort(hostPort, label) {

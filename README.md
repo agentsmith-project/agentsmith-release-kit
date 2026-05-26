@@ -100,16 +100,18 @@ bash scripts/test-inputs.sh
 
 `--inputs` validates only the release contract, deploy template package, target
 profile, provenance, release-kit version policy, and digest-bound image
-inventory. During app-current intake, `release_contract.required_image_ids`
-and `deploy_template_package.required_image_ids` must be non-empty, must match
-the exact current app image id set, and every required id must exist in
-`deploy_image_inventory`; the current required ids are `agentsmith_app`,
-`llmup`, `afscp`, `asbcp`, `ingress_nginx_controller`, and
-`ingress_nginx_certgen`. Every declared `target_profiles` entry must carry
-`required: boolean`; `support_level` is rejected, duplicate three-axis tuples
-are rejected, and every entry must use a canonical declarable profile. Existing
-Kubernetes profiles can be declared for both `external_declared` and
-`kit_installed` substrate choices across online and airgap distributions.
+inventory. During release contract intake, `release_contract.required_image_ids`,
+`deploy_template_package.required_image_ids`, and the
+`deploy_image_inventory` id set must be non-empty exact-set matches. The
+release kit consumes the dynamic image closure from the AgentSmith release
+contract instead of a hardcoded six-image list. Current fixtures/examples
+include `managed_runner`, a digest-bound inventory image supplied by the
+release contract. Every declared `target_profiles` entry
+must carry `required: boolean`; `support_level` is rejected, duplicate
+three-axis tuples are rejected, and every entry must use a canonical declarable
+profile. Existing Kubernetes profiles can be declared for both
+`external_declared` and `kit_installed` substrate choices across online and
+airgap distributions.
 During pre-GA every target profile must use `required: false`; `required:
 true` fails fast because full deploy/package evidence is not implemented for
 every path. `intake-report.json`, `image-digest-plan.json`, and
@@ -143,8 +145,8 @@ target profile, explicit render values, and
 `agentsmith.substrate-connection.truth/v1` substrate truth. Output goes to
 `<output-dir>/rendered-manifests`, and `manifest-render-report.json` is written
 with `readiness: false`, `scope: manifest_render_only`, and `status: pass`.
-Direct render enforces app-current `required_image_ids` exact-set closure
-across the release contract, deploy template package, and inventory.
+Direct render enforces the dynamic `required_image_ids` exact-set closure
+across the release contract, deploy template package, and inventory ids.
 When `--image-map <json>` is supplied, render first validates that it is a
 passing `agentsmith.image-map/v1` report bound to the same release contract
 digest and target profile, then uses `mapping.target_image` for
@@ -211,8 +213,21 @@ derived by stripping the source registry and tag, keeping the repository path,
 and appending the original sha256 digest under the target registry. Registry
 namespace components must be lowercase and must start and end with
 alphanumeric characters.
-Standalone image-map enforces app-current `release_contract.required_image_ids`
-exact-set closure against `deploy_image_inventory`.
+Standalone image-map enforces the release contract's dynamic
+`required_image_ids` exact-set closure against `deploy_image_inventory` ids.
+When the closure includes `managed_runner`, image-map treats it like any other
+digest-bound inventory image. Render then adopts it through normal
+`${{ images.<id>.image }}` and `${{ images.<id>.digest }}` placeholders when
+templates reference it, and airgap archive flows carry it through the existing
+image-map and image-artifact declaration mechanisms. This is not a dedicated
+runner runtime, backend-real, or release readiness gate.
+
+Pre-GA stale six-image required-id inputs, obsolete
+`${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale
+runner-name aliases such as `agent-task-runner` or `agentsmith-codex-runner`
+are not success or compatibility paths. Keep them only as fail-fast/negative
+diagnostic evidence, and remove those cases once the formal fixtures and
+runbooks stabilize.
 
 This diagnostic does not log in to a registry, pull, push, mirror, build an
 airgap bundle, import images into kind, call Kubernetes, or claim deploy,

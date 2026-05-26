@@ -41,11 +41,14 @@ checks release contract intake, deploy template package intake, target-profile
 selection, target-profile coverage, release-kit version policy, provenance, and
 digest-bound image inventory only.
 
-App-current inventory closure is exact-set: `release_contract.required_image_ids`
-and `deploy_template_package.required_image_ids` must both be non-empty, must
-match the current required ids `agentsmith_app`, `llmup`, `afscp`, `asbcp`,
-`ingress_nginx_controller`, and `ingress_nginx_certgen`, and each id must exist
-in `deploy_image_inventory`. This is still a focused diagnostic with
+Release contract inventory closure is exact-set:
+`release_contract.required_image_ids`,
+`deploy_template_package.required_image_ids`, and
+`release_contract.deploy_image_inventory` ids must be non-empty exact-set
+matches. The release kit consumes the dynamic image closure from the AgentSmith
+release contract rather than a hardcoded six-image list. Current
+fixtures/examples include `managed_runner`, a digest-bound inventory image
+supplied by the release contract. This is still a focused diagnostic with
 `readiness: false`, not release readiness.
 
 Every `release_contract.target_profiles` entry must declare
@@ -87,8 +90,8 @@ artifact sha256, archive `manifest.json` sha256, path safety for package
 entries, and obvious local source or plaintext credential payloads. It rejects
 absolute paths, `..` package-root escapes, symlinks, and hardlinks before any
 future render/check code can consume the archive.
-It also enforces the same app-current `required_image_ids` exact-set closure
-against `deploy_image_inventory`; the report remains `readiness: false`.
+It also enforces the same dynamic `required_image_ids` exact-set closure
+against `deploy_image_inventory` ids; the report remains `readiness: false`.
 
 The generated `template-package-report.json` must keep `readiness: false` and
 `scope: template_package_intake_only`. It is not release readiness, package
@@ -120,7 +123,7 @@ explicit render values, and
 template package diagnostic: absolute paths, `..` package-root escapes,
 symlinks, hardlinks, local/source payloads, plaintext credential payloads, and
 missing declared template files fail fast.
-Direct render also enforces app-current `required_image_ids` exact-set closure;
+Direct render also enforces the dynamic `required_image_ids` exact-set closure;
 the report remains `readiness: false` and is not release readiness.
 If `--image-map <json>` is supplied, render validates a passing
 `agentsmith.image-map/v1` report with `scope: image_map_only`,
@@ -206,9 +209,9 @@ axes fail fast. The selected target profile must exist in the release
 contract. Every inventory item must have unique `id`, `image`, and `digest`
 values; each image must be digest-pinned and its `@sha256` suffix must match
 the `digest` field.
-Standalone image-map enforces app-current `release_contract.required_image_ids`
-exact-set closure against `deploy_image_inventory`; this remains a focused
-`readiness: false` diagnostic, not release readiness.
+Standalone image-map enforces the release contract's dynamic
+`required_image_ids` exact-set closure against `deploy_image_inventory` ids;
+this remains a focused `readiness: false` diagnostic, not release readiness.
 
 For online targets without `--target-registry`, target image refs equal source
 image refs and mappings use `action: use_source`. Airgap targets require
@@ -224,6 +227,18 @@ The generated `image-map.json` must keep `schema: agentsmith.image-map/v1`,
 `scope: image_map_only`, `readiness: false`, and `status: pass`. It must not
 contain `verdict`, `release_verdict`, deploy readiness, AgentSmith
 product-flow fields, raw credential payloads, or registry login material.
+
+If the release contract closure includes `managed_runner`, image-map propagates
+it as a normal digest-bound mapping. Render and airgap archive diagnostics carry
+that id through their existing image placeholder adoption and image artifact
+declaration rules. This is not a dedicated runner runtime gate and does not
+cover AgentSmith runner runtime, backend-real validation, or release readiness.
+During pre-GA, stale six-image required-id inputs, obsolete
+`${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale
+runner-name aliases such as `agent-task-runner` or `agentsmith-codex-runner`
+are not formal success or compatibility paths; they are limited to fail-fast
+checks or negative diagnostics, and can be deleted once the formal fixtures and
+runbooks stabilize.
 
 ## Registry Presence Focused Diagnostic
 
@@ -247,8 +262,8 @@ have schema `agentsmith.image-map/v1`, scope `image_map_only`,
 `target_registry`, matching release identity, matching release contract raw
 sha256, and one-to-one
 mappings for `release_contract.deploy_image_inventory`. The release contract
-must keep the current six `required_image_ids` exact set and every required id
-must exist in inventory. Target images must equal the deterministic mirror ref
+must keep `required_image_ids` as an exact-set match for
+`deploy_image_inventory` ids. Target images must equal the deterministic mirror ref
 computed from the release contract source image plus
 `image_map.target_registry`, and every target digest must equal the source
 digest.
@@ -331,9 +346,9 @@ binds those mappings back to `release_contract.deploy_image_inventory`: ids
 must exist, source image and digest must match inventory, target digest must
 equal source digest, and target image must be under `image_map.target_registry`
 with `@<target_digest>`.
-The check also enforces the app-current `required_image_ids` exact-set closure
-from inputs/template-package; this does not make the bundle check release
-readiness.
+The check also enforces the dynamic `required_image_ids` exact-set closure from
+inputs/template-package and `deploy_image_inventory` ids; this does not make the
+bundle check release readiness.
 
 The release contract `target_profiles` value must be an array and must declare
 `existing_kubernetes/external_declared/airgap`. Every target profile tuple must

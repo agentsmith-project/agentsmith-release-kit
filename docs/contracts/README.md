@@ -12,19 +12,20 @@ infer product truth from source paths.
 The current `--inputs` validator is a focused contract intake diagnostic only.
 Its reports keep `readiness: false` and prove contract/input digest readiness,
 not deploy, package, or release readiness.
-It enforces app-current `required_image_ids` exact-set closure:
-`release_contract.required_image_ids` and
-`deploy_template_package.required_image_ids` must match exactly
-`agentsmith_app`, `llmup`, `afscp`, `asbcp`,
-`ingress_nginx_controller`, and `ingress_nginx_certgen`, and all required ids
-must exist in `deploy_image_inventory`.
+It enforces release contract `required_image_ids` exact-set closure:
+`release_contract.required_image_ids`,
+`deploy_template_package.required_image_ids`, and
+`release_contract.deploy_image_inventory` ids must be non-empty exact-set
+matches. The release kit consumes the dynamic image closure from the AgentSmith
+release contract; current fixtures/examples include `managed_runner`, a
+digest-bound inventory image supplied by the release contract.
 
 The current `--template-package` validator is a focused materialized archive
 intake diagnostic only. It confirms that the deploy template package descriptor
 matches the release contract and that the `.tgz` archive matches the declared
 package and manifest digests. Its report keeps `readiness: false` and does not
 claim render, deploy, package, or release readiness.
-It also checks the same app-current `required_image_ids` exact-set closure.
+It also checks the same dynamic `required_image_ids` exact-set closure.
 
 The current `--render` validator is a focused materialized template render
 diagnostic only. Optional `--image-map <json>` must be a passing
@@ -64,6 +65,9 @@ agentsmith.image-map/v1`, `readiness: false`, and `scope: image_map_only`.
 The report is a plan for source/target digest references only; it must not
 claim registry presence, deploy readiness, package readiness, release
 readiness, product-flow evidence, or registry credential handling.
+If `managed_runner` is present in the dynamic closure, this validator maps it
+through the same source/target digest mechanism as every other id; it is not a
+dedicated runner runtime or backend-real gate.
 
 The current `--registry-presence` validator is a focused target-registry
 presence diagnostic only. It consumes a release contract, a passing
@@ -121,7 +125,7 @@ image-map must be airgap, `mirror_required: true`, and every mapping must use
 match `release_contract.deploy_image_inventory`, target digests must equal
 source digests, and target images must be under `image_map.target_registry`
 with `@<target_digest>`.
-It also checks the app-current `required_image_ids` exact-set closure, while
+It also checks the dynamic `required_image_ids` exact-set closure, while
 remaining a focused `readiness: false` diagnostic rather than release
 readiness.
 

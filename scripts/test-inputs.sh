@@ -77,7 +77,7 @@ const [input, output, label, rootDir] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(input, 'utf8'));
 const digestE = `sha256:${'e'.repeat(64)}`;
 const digestUpperA = `sha256:${'A'.repeat(64)}`;
-const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
+const staleSixImageIds = contract.required_image_ids.filter((id) => id !== 'managed_runner');
 
 function stableJson(value) {
   if (Array.isArray(value)) {
@@ -332,9 +332,9 @@ function refreshContractArtifactDigest() {
   case 'required-image-ids-mismatch':
     contract.required_image_ids = contract.required_image_ids.slice(0, -1);
     break;
-  case 'legacy-three-image-required-image-ids':
-    contract.required_image_ids = legacyThreeImageIds;
-    contract.deploy_template_package.required_image_ids = legacyThreeImageIds;
+  case 'stale-six-image-required-image-ids':
+    contract.required_image_ids = staleSixImageIds;
+    contract.deploy_template_package.required_image_ids = staleSixImageIds;
     break;
   case 'missing-deploy-package-required-image-ids':
     delete contract.deploy_template_package.required_image_ids;
@@ -680,7 +680,9 @@ import fs from 'node:fs';
 
 const [input, output, label] = process.argv.slice(2);
 const deployTemplatePackage = JSON.parse(fs.readFileSync(input, 'utf8'));
-const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
+const staleSixImageIds = deployTemplatePackage.required_image_ids.filter(
+  (id) => id !== 'managed_runner'
+);
 
 switch (label) {
   case 'deploy-package-bad-subject-sha256':
@@ -708,8 +710,8 @@ switch (label) {
     deployTemplatePackage.artifact_provenance.artifact_uri =
       'gh-artifact://agentsmith/deploy-template-package/10001/drift.tgz';
     break;
-  case 'legacy-three-image-required-image-ids':
-    deployTemplatePackage.required_image_ids = legacyThreeImageIds;
+  case 'stale-six-image-required-image-ids':
+    deployTemplatePackage.required_image_ids = staleSixImageIds;
     break;
   case 'missing-deploy-package-required-image-ids':
     delete deployTemplatePackage.required_image_ids;
@@ -744,23 +746,19 @@ assert_outputs() {
   local output_dir="$1"
   local expected_profile="${2:-$TARGET_PROFILE}"
   local expected_required="${3:-false}"
+  local expected_contract="${4:-$VALID_CONTRACT}"
 
-  "$NODE_BIN" --input-type=module - "$output_dir" "$expected_profile" "$expected_required" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$output_dir" "$expected_profile" "$expected_required" "$expected_contract" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [outputDir, expectedProfile, expectedRequiredText] = process.argv.slice(2);
+const [outputDir, expectedProfile, expectedRequiredText, expectedContract] =
+  process.argv.slice(2);
 const [expectedTargetCluster, expectedSubstrateSource, expectedDistribution] =
   expectedProfile.split('/');
 const expectedRequired = expectedRequiredText === 'true';
-const expectedAppCurrentImageIds = [
-  'agentsmith_app',
-  'llmup',
-  'afscp',
-  'asbcp',
-  'ingress_nginx_controller',
-  'ingress_nginx_certgen'
-];
+const contract = JSON.parse(fs.readFileSync(expectedContract, 'utf8'));
+const expectedImageIds = contract.deploy_image_inventory.map((item) => item.id);
 const allowedKeys = [
   'artifacts',
   'digests',
@@ -821,11 +819,11 @@ for (const file of ['intake-report.json', 'image-digest-plan.json']) {
   }
   const imageIds = payload.images.map((item) => item.id);
   const digestIds = payload.digests.map((item) => item.id);
-  if (JSON.stringify(imageIds) !== JSON.stringify(expectedAppCurrentImageIds)) {
-    throw new Error(`${file} did not include app-current image inventory: ${imageIds.join(',')}`);
+  if (JSON.stringify(imageIds) !== JSON.stringify(expectedImageIds)) {
+    throw new Error(`${file} did not include release contract image inventory: ${imageIds.join(',')}`);
   }
-  if (JSON.stringify(digestIds) !== JSON.stringify(expectedAppCurrentImageIds)) {
-    throw new Error(`${file} did not include app-current digest plan: ${digestIds.join(',')}`);
+  if (JSON.stringify(digestIds) !== JSON.stringify(expectedImageIds)) {
+    throw new Error(`${file} did not include release contract digest plan: ${digestIds.join(',')}`);
   }
 }
 NODE
@@ -1120,7 +1118,7 @@ for label in \
   duplicate-image-id \
   missing-release-required-image-ids \
   required-image-ids-mismatch \
-  legacy-three-image-required-image-ids \
+  stale-six-image-required-image-ids \
   missing-deploy-package-required-image-ids \
   empty-deploy-package-required-image-ids \
   non-array-deploy-package-required-image-ids \
@@ -1145,7 +1143,7 @@ do
   mutate_contract "$label" "$mutated"
 
   case "$label" in
-    bad-provenance-kind|deploy-package-bad-subject-sha256|missing-attestation|deploy-package-missing-attestation|bad-artifact-provenance-schema|deploy-package-bad-artifact-provenance-schema|non-agentsmith-repo-provenance|package-provenance-artifact-drift|legacy-three-image-required-image-ids|missing-deploy-package-required-image-ids|empty-deploy-package-required-image-ids|non-array-deploy-package-required-image-ids|duplicate-deploy-package-required-image-id|required-image-id-missing-in-inventory)
+    bad-provenance-kind|deploy-package-bad-subject-sha256|missing-attestation|deploy-package-missing-attestation|bad-artifact-provenance-schema|deploy-package-bad-artifact-provenance-schema|non-agentsmith-repo-provenance|package-provenance-artifact-drift|stale-six-image-required-image-ids|missing-deploy-package-required-image-ids|empty-deploy-package-required-image-ids|non-array-deploy-package-required-image-ids|duplicate-deploy-package-required-image-id|required-image-id-missing-in-inventory)
       deploy_template_package="$TMP_DIR/$label.deploy-template-package.json"
       mutate_deploy_template_package "$label" "$deploy_template_package"
       ;;

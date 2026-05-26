@@ -334,7 +334,7 @@ const [contractInput, packageInput, contractOutput, packageOutput, mutation] =
   process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const deployTemplatePackage = JSON.parse(fs.readFileSync(packageInput, 'utf8'));
-const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
+const staleSixImageIds = contract.required_image_ids.filter((id) => id !== 'managed_runner');
 
 switch (mutation) {
   case 'missing-release-required-image-ids':
@@ -343,10 +343,10 @@ switch (mutation) {
   case 'required-image-ids-mismatch':
     contract.required_image_ids = contract.required_image_ids.slice(0, -1);
     break;
-  case 'legacy-three-image-required-image-ids':
-    contract.required_image_ids = legacyThreeImageIds;
-    contract.deploy_template_package.required_image_ids = legacyThreeImageIds;
-    deployTemplatePackage.required_image_ids = legacyThreeImageIds;
+  case 'stale-six-image-required-image-ids':
+    contract.required_image_ids = staleSixImageIds;
+    contract.deploy_template_package.required_image_ids = staleSixImageIds;
+    deployTemplatePackage.required_image_ids = staleSixImageIds;
     break;
   case 'missing-deploy-package-required-image-ids':
     delete contract.deploy_template_package.required_image_ids;
@@ -473,7 +473,7 @@ expect_fail descriptor-mismatch "$VALID_CONTRACT_MATERIAL" "$DESCRIPTOR_DRIFT_PA
 for mutation in \
   missing-release-required-image-ids \
   required-image-ids-mismatch \
-  legacy-three-image-required-image-ids \
+  stale-six-image-required-image-ids \
   missing-deploy-package-required-image-ids \
   empty-deploy-package-required-image-ids \
   non-array-deploy-package-required-image-ids \
@@ -507,7 +507,7 @@ for mutation in required-current-image-id-absent-from-inventory; do
     "$REQUIRED_IDS_CONTRACT" \
     "$REQUIRED_IDS_PACKAGE" \
     "$VALID_ARCHIVE" \
-    "deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory"
+    "release_contract.deploy_image_inventory must match declared image sources"
 done
 
 expect_fail missing-archive "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$TMP_DIR/missing.tgz"

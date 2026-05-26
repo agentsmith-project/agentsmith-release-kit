@@ -6,6 +6,15 @@ NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 VALID_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-package.valid.json"
+RELEASE_IMAGE_COUNT="$(
+  "$NODE_BIN" --input-type=module - "$VALID_CONTRACT" <<'NODE'
+import fs from 'node:fs';
+
+const [validContract] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(validContract, 'utf8'));
+console.log(contract.deploy_image_inventory.length);
+NODE
+)"
 
 TMP_DIR="$(mktemp -d)"
 SERVER_PID=""
@@ -1440,7 +1449,7 @@ run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "
   --evidence-provenance "$VALID_PROVENANCE" >/dev/null
 after_target_registry_apply_evidence="$(hit_count)"
 [[ "$after_target_registry_apply_evidence" -eq $((before_target_registry_apply_evidence + 1)) ]] || fail "target-registry apply evidence gate smoke should issue one request"
-assert_registry_probe_called 6
+assert_registry_probe_called "$RELEASE_IMAGE_COUNT"
 [[ -f "$target_registry_apply_evidence_output/registry-presence/registry-presence-report.json" ]] || fail "target-registry apply evidence gate did not write registry-presence report"
 assert_gate_report "$target_registry_apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,image-map,registry-presence,render,render-check,apply,rollout,smoke" operator-run-1013
 assert_gate_rendered_target_registry "$target_registry_apply_evidence_output" "$target_registry"
@@ -1474,7 +1483,7 @@ if FAKE_KUBECTL_LIVE_IMAGE="$target_registry_tag_only_image" \
   fail "expected target-registry apply evidence to reject digest-only live status without target digest-pinned refs"
 fi
 after_target_registry_digest_only_live="$(hit_count)"
-assert_registry_probe_called 6
+assert_registry_probe_called "$RELEASE_IMAGE_COUNT"
 grep -q 'get pods' "$KUBECTL_LOG" || fail "target-registry digest-only live case did not reach live pod check"
 [[ "$before_target_registry_digest_only_live" == "$after_target_registry_digest_only_live" ]] || fail "target-registry digest-only live rejection should stop before route/network smoke"
 assert_no_gate_report "$target_registry_digest_only_live_output"
@@ -1508,7 +1517,7 @@ if FAKE_KUBECTL_LIVE_INIT_IMAGE="$target_registry_app_image" \
   fail "expected target-registry apply evidence to reject mixed source and target live image refs"
 fi
 after_target_registry_mixed_live="$(hit_count)"
-assert_registry_probe_called 6
+assert_registry_probe_called "$RELEASE_IMAGE_COUNT"
 grep -q 'get pods' "$KUBECTL_LOG" || fail "target-registry mixed live case did not reach live pod check"
 [[ "$before_target_registry_mixed_live" == "$after_target_registry_mixed_live" ]] || fail "target-registry mixed live rejection should stop before route/network smoke"
 assert_no_gate_report "$target_registry_mixed_live_output"

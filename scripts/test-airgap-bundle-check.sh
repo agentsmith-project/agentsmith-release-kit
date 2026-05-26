@@ -117,7 +117,10 @@ const archiveSha256 = digestFile(archivePath);
 const deployTemplatePackage = JSON.parse(
   fs.readFileSync(fixtureDeployTemplatePackagePath, 'utf8')
 );
-const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
+const fixtureContract = JSON.parse(fs.readFileSync(fixtureContractPath, 'utf8'));
+const staleSixImageIds = fixtureContract.required_image_ids.filter(
+  (id) => id !== 'managed_runner'
+);
 deployTemplatePackage.package_sha256 = archiveSha256;
 if (
   deployTemplatePackage.artifact_provenance &&
@@ -164,7 +167,7 @@ switch (mutation) {
   case 'duplicate_target_profile_tuple':
   case 'missing_release_required_image_ids':
   case 'required_image_ids_mismatch':
-  case 'legacy_three_image_required_image_ids':
+  case 'stale_six_image_required_image_ids':
   case 'required_image_id_missing_in_inventory':
   case 'required_current_image_id_absent_from_inventory':
     break;
@@ -172,7 +175,7 @@ switch (mutation) {
     throw new Error(`unknown material mutation: ${mutation}`);
 }
 
-const contract = JSON.parse(fs.readFileSync(fixtureContractPath, 'utf8'));
+const contract = fixtureContract;
 contract.deploy_template_package = deployTemplatePackage;
 contract.deploy_template_digest = deployTemplatePackage.manifest_sha256;
 
@@ -212,10 +215,10 @@ switch (mutation) {
   case 'required_image_ids_mismatch':
     contract.required_image_ids = contract.required_image_ids.slice(0, -1);
     break;
-  case 'legacy_three_image_required_image_ids':
-    contract.required_image_ids = legacyThreeImageIds;
-    contract.deploy_template_package.required_image_ids = legacyThreeImageIds;
-    deployTemplatePackage.required_image_ids = legacyThreeImageIds;
+  case 'stale_six_image_required_image_ids':
+    contract.required_image_ids = staleSixImageIds;
+    contract.deploy_template_package.required_image_ids = staleSixImageIds;
+    deployTemplatePackage.required_image_ids = staleSixImageIds;
     break;
   case 'required_image_id_missing_in_inventory':
     contract.required_image_ids = [...contract.required_image_ids, 'missing_component'];
@@ -282,6 +285,9 @@ switch (mutation) {
     break;
   case 'image_count_mismatch':
     imageMap.image_count += 1;
+    break;
+  case 'release_contract_inventory_count_mismatch':
+    imageMap.release_contract.deploy_image_inventory_count += 1;
     break;
   case 'mapping_target_digest_mismatch':
     imageMap.mappings[0].target_digest = `sha256:${'2'.repeat(64)}`;
@@ -793,12 +799,15 @@ NODE
 assert_report() {
   local report_file="$1"
 
-  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$VALID_CONTRACT" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile] = process.argv.slice(2);
+const [reportFile, validContract] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
+const expectedImageCount = JSON.parse(
+  fs.readFileSync(validContract, 'utf8')
+).deploy_image_inventory.length;
 
 function assertNoLeakKeys(value, path = 'report') {
   if (!value || typeof value !== 'object') {
@@ -838,8 +847,8 @@ if (report.components_count !== 4) {
   throw new Error(`unexpected components count: ${report.components_count}`);
 }
 const imageMapCount = report.artifacts?.image_map?.image_count;
-if (imageMapCount !== 6) {
-  throw new Error(`image-map image count must match app-current inventory: ${imageMapCount}`);
+if (imageMapCount !== expectedImageCount) {
+  throw new Error(`image-map image count must match release contract inventory: ${imageMapCount}`);
 }
 if (report.image_artifact_declaration_count !== imageMapCount) {
   throw new Error(`unexpected image artifact count: ${report.image_artifact_declaration_count}`);
@@ -1071,6 +1080,9 @@ expect_image_map_fail image-map-source-digest-mismatch mapping_source_digest_mis
 expect_image_map_fail image-map-mapping-id-missing mapping_id_missing
 expect_image_map_fail image-map-duplicate-mapping-id duplicate_mapping_id
 expect_image_map_fail image-map-image-count-mismatch image_count_mismatch
+expect_image_map_fail \
+  image-map-release-contract-inventory-count-mismatch \
+  release_contract_inventory_count_mismatch
 expect_image_map_fail image-map-target-digest-mismatch mapping_target_digest_mismatch
 expect_image_map_fail image-map-target-image-digest-suffix-mismatch target_image_digest_suffix_mismatch
 expect_image_map_fail target-image-outside-registry target_image_outside_registry
@@ -1156,12 +1168,12 @@ expect_contract_fail kind-required-target-profile kind_required_target_profile
 expect_contract_fail duplicate-target-profile-tuple duplicate_target_profile_tuple
 expect_contract_fail missing-release-required-image-ids missing_release_required_image_ids
 expect_contract_fail required-image-ids-mismatch required_image_ids_mismatch
-expect_contract_fail legacy-three-image-required-image-ids legacy_three_image_required_image_ids
+expect_contract_fail stale-six-image-required-image-ids stale_six_image_required_image_ids
 expect_contract_fail required-image-id-missing-in-inventory required_image_id_missing_in_inventory
 expect_contract_fail \
   required-current-image-id-absent-from-inventory \
   required_current_image_id_absent_from_inventory \
-  "deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory"
+  "release_contract.deploy_image_inventory must match declared image sources"
 
 expect_profile_fail online "$ONLINE_PROFILE"
 expect_profile_fail kind-rehearsal "$KIND_PROFILE"

@@ -49,7 +49,7 @@ import fs from 'node:fs';
 const [validContract, output, mutation] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(validContract, 'utf8'));
 const digest = (char) => `sha256:${char.repeat(64)}`;
-const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
+const staleSixImageIds = contract.required_image_ids.filter((id) => id !== 'managed_runner');
 
 switch (mutation) {
   case 'valid':
@@ -80,8 +80,8 @@ switch (mutation) {
   case 'empty_inventory':
     contract.deploy_image_inventory = [];
     break;
-  case 'legacy_three_image_required_image_ids':
-    contract.required_image_ids = legacyThreeImageIds;
+  case 'stale_six_image_required_image_ids':
+    contract.required_image_ids = staleSixImageIds;
     break;
   case 'required_current_id_absent_from_inventory':
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
@@ -111,13 +111,16 @@ assert_report() {
   local expected_mirror_required="$3"
   local expected_registry="${4:-}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$expected_profile" "$expected_mirror_required" "$expected_registry" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$expected_profile" "$expected_mirror_required" "$expected_registry" "$VALID_CONTRACT" <<'NODE'
 import fs from 'node:fs';
 
 const [reportFile, expectedProfile, expectedMirrorRequiredText, expectedRegistry] =
-  process.argv.slice(2);
+  process.argv.slice(2, 6);
+const validContract = process.argv[6];
 const expectedMirrorRequired = expectedMirrorRequiredText === 'true';
-const expectedImageCount = 6;
+const expectedImageCount = JSON.parse(
+  fs.readFileSync(validContract, 'utf8')
+).deploy_image_inventory.length;
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
 
@@ -154,7 +157,7 @@ if (
   !Array.isArray(report.mappings) ||
   report.mappings.length !== expectedImageCount
 ) {
-  throw new Error(`image-map report must contain ${expectedImageCount} app-current image mappings`);
+  throw new Error(`image-map report must contain ${expectedImageCount} release contract image mappings`);
 }
 if ('release_verdict' in report || 'verdict' in report || 'deploy_readiness' in report) {
   throw new Error('image-map report must not claim verdict or deploy readiness');
@@ -324,12 +327,12 @@ expect_contract_fail duplicate-image duplicate_image
 expect_contract_fail duplicate-digest duplicate_digest
 expect_contract_fail empty-inventory empty_inventory
 expect_contract_fail \
-  legacy-three-image-required-image-ids \
-  legacy_three_image_required_image_ids \
-  "release_contract.required_image_ids must match current app image ids"
+  stale-six-image-required-image-ids \
+  stale_six_image_required_image_ids \
+  "release_contract.required_image_ids must match release_contract.deploy_image_inventory ids"
 expect_contract_fail \
   required-current-id-absent-from-inventory \
   required_current_id_absent_from_inventory \
-  "release_contract.required_image_ids contains id missing from release_contract.deploy_image_inventory"
+  "release_contract.deploy_image_inventory must match declared image sources"
 
 pass "image-map focused diagnostic tests completed"
