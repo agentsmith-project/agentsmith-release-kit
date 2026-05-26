@@ -23,6 +23,7 @@ bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
 bash scripts/test-online-deployment-gate.sh
+bash scripts/test-operator-signoff-intake.sh
 bash scripts/test-evidence.sh
 bash scripts/test-target-preflight.sh
 ```
@@ -320,6 +321,23 @@ or release readiness. `--target-registry` only makes the gate generate an
 image-map, pass it into render, and in confirmed apply rollout run strict live
 ref checks for those digest-adopted target refs only. Ordinary source-registry
 rollout remains digest-only. It is not mirror execution or registry readiness.
+
+The current `--operator-signoff-intake` path is a focused intake/binding
+diagnostic only. It consumes a release contract, a generated
+`online-deployment-gate-report.json`, an
+`agentsmith.operator-signoff-intake/v1` JSON file, and the explicit
+`existing_kubernetes/external_declared/online` target profile. The intake JSON
+uses allowlisted fields only and binds `decision: signed_off`,
+`operator_run_id`, operator identity, signoff timestamp, release id, git sha,
+release contract raw sha256, target profile, and
+`subject.kind: online_deployment_gate_report` plus `subject.sha256` to the raw
+online gate report file. The bound online gate report must be confirmed apply
+output with `readiness: false`, `status: pass`, `mode: apply`, top-level
+`operator_run_id`, and non-empty steps including apply and rollout.
+`operator-signoff-intake-report.json` must keep `readiness: false` and
+`scope: operator_signoff_intake_only`; it does not verify signatures or
+identity, does not prove registry presence, is not an accepted evidence
+envelope output, and does not claim deploy, package, or release readiness.
 
 The current `--evidence` path is a focused diagnostic for release-kit evidence
 envelope intake only. It consumes a release contract, an evidence root

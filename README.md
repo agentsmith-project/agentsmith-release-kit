@@ -8,7 +8,8 @@ identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
 airgap bundle load-plan, airgap bundle render-check, apply-only,
 rollout/live digest, route smoke, and online focused chain orchestration
-diagnostics, but does not contain full deploy tooling yet.
+diagnostics, plus operator signoff intake binding, but does not contain full
+deploy tooling yet.
 
 ## Canonical Identity
 
@@ -517,8 +518,9 @@ accepted only for `existing_kubernetes/external_declared/online` or
 `existing_kubernetes/external_declared/airgap`. Online gate evidence is
 accepted only from confirmed apply output on
 `existing_kubernetes/external_declared/online`:
-`mode` must be `apply`, producer steps must be non-empty and include apply plus
-rollout, and `server-dry-run` reports are rejected. Airgap bundle evidence must
+`mode` must be `apply`, top-level `operator_run_id` must be present, producer
+steps must be non-empty and include apply plus rollout, and `server-dry-run`
+reports are rejected. Airgap bundle evidence must
 be a real bundle-check triplet: the report, `airgap-bundle-manifest.json`, and
 `image-map.json` must agree on required component, image artifact, payload/tool
 count, and digest bindings; `components: []` is invalid. The old two-file
@@ -540,6 +542,31 @@ render, apply, smoke, package, deploy, or release readiness.
 load-plan is plan-only, and render-check proves only offline render plus
 rendered manifest image inventory, not registry execution, package readiness,
 offline install readiness, deploy readiness, or release readiness.
+
+Operator signoff intake focused diagnostic:
+
+```bash
+bash scripts/test-operator-signoff-intake.sh
+```
+
+`--operator-signoff-intake` validates only one
+`agentsmith.operator-signoff-intake/v1` JSON file against a generated
+`online-deployment-gate-report.json` from confirmed apply mode. It accepts
+only `existing_kubernetes/external_declared/online`, requires `decision:
+signed_off`, binds `operator_run_id`, release id, git sha, the release contract
+raw sha256, target profile, and `subject.sha256` to the raw online gate report
+file. The online gate report must be `schema:
+agentsmith.online-deployment-gate/v1`, `scope:
+online_deployment_gate_only`, `readiness: false`, `status: pass`, `mode:
+apply`, with top-level `operator_run_id` and non-empty steps including apply
+and rollout.
+
+The output `operator-signoff-intake-report.json` keeps `schema:
+agentsmith.operator-signoff-intake-report/v1`, `scope:
+operator_signoff_intake_only`, `readiness: false`, and `status: pass`. It is a
+machine intake/binding report only: it does not verify signatures or identity,
+does not prove registry presence, does not enter release-kit evidence envelope
+accepted outputs, and is not deploy, package, or release readiness.
 
 Target preflight focused diagnostic:
 

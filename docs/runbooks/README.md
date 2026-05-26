@@ -59,6 +59,16 @@ Online `--target-registry <registry-host[/namespace]>` only asks the gate to
 generate an image-map and render target image references. It does not perform
 registry login, pull, push, mirror, or registry presence checks.
 
+After a confirmed online focused chain run, operators may run
+`--operator-signoff-intake` with `operator-signoff-intake.json` and the
+generated `online-deployment-gate-report.json`. This is machine intake and
+binding only: it checks the signoff JSON allowlist, release identity, release
+contract digest, target profile, operator run id, and raw report sha256. It
+writes `operator-signoff-intake-report.json` with `readiness=false`, does not
+verify signatures or identity, is not registry presence proof, is not accepted
+by the evidence envelope validator, and is not deploy/package/release
+readiness.
+
 ## Current Notes
 
 Pre-GA release contracts may declare the five canonical target profiles, but

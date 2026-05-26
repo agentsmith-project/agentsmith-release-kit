@@ -204,6 +204,24 @@ evidence-root files: `evidence.json`, `evidence-subject.json`, and
 readiness, product-flow evidence, rollback, image mirroring, airgap packaging,
 or registry credential handling.
 
+The current `--operator-signoff-intake` validator is a focused intake/binding
+diagnostic only. Its input schema is
+`agentsmith.operator-signoff-intake/v1` with `scope:
+operator_signoff_intake_only`; its output report schema is
+`agentsmith.operator-signoff-intake-report/v1` with the same scope,
+`readiness: false`, and `status: pass`. It accepts only
+`existing_kubernetes/external_declared/online`, allowlists the intake fields,
+and binds `decision: signed_off`, `operator_run_id`, operator identity,
+timestamp, release id, git sha, release contract raw sha256, target profile,
+and subject `{ kind: online_deployment_gate_report, sha256 }` to a generated
+online deployment gate apply report. The gate report must be
+`agentsmith.online-deployment-gate/v1`, `online_deployment_gate_only`,
+`readiness: false`, `status: pass`, `mode: apply`, with top-level
+`operator_run_id` and non-empty steps including apply and rollout. This
+diagnostic does not verify signatures or identity, does not prove registry
+presence or full online adoption, is not an accepted release-kit evidence
+envelope output, and is not deploy, package, or release readiness.
+
 The current `--evidence` validator is a focused release-kit evidence envelope
 intake diagnostic only. It requires `evidence.json` and
 `evidence-subject.json`, binds them to the supplied release contract raw

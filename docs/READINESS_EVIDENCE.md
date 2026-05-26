@@ -23,12 +23,12 @@ exists. During bootstrap there is no release readiness evidence.
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
 | Route/service smoke diagnostic | Focused only | `smoke-report.json` keeps `readiness: false`. |
 | Online focused chain runner | Focused only | `online-deployment-gate-report.json` keeps `readiness: false`. |
+| Operator runbook signoff | Focused intake only / not readiness | `operator-signoff-intake-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Release-kit evidence envelope diagnostic | Focused only | `evidence-validation-report.json` keeps `readiness: false`. |
 | Target preflight diagnostic | Focused only | `target-preflight-report.json` keeps `readiness: false`. |
 | Online deploy evidence | Not implemented | Future release-kit authority. |
 | Airgap package evidence | Not implemented | Future release-kit authority. |
 | Full Kubernetes rollout evidence | Not implemented | Future release-kit authority beyond the focused live digest diagnostic. |
-| Operator runbook signoff | Not implemented | Future release-kit authority. |
 
 The quick gate is not release readiness and does not produce deploy, package,
 or operator evidence.
@@ -201,6 +201,19 @@ also write a release-kit evidence envelope root and validate it through
 `release_kit_output: online-deployment-gate-report.json`; it is not online
 deploy readiness evidence or operator signoff.
 
+Operator signoff intake proves only that one
+`agentsmith.operator-signoff-intake/v1` JSON document is syntactically
+allowlisted and bound to one generated online deployment gate apply report.
+The binding checks release id, git sha, release contract raw sha256, target
+profile, operator run id, and the raw sha256 of
+`online-deployment-gate-report.json`; the gate report must be confirmed apply
+output with `readiness: false`, `status: pass`, `mode: apply`, top-level
+`operator_run_id`, and apply plus rollout steps. The resulting
+`operator-signoff-intake-report.json` keeps `readiness: false`; it is not
+signature verification, identity verification, registry presence proof, full
+online adoption proof, evidence-envelope input, deploy readiness, package
+readiness, or release readiness.
+
 Release-kit evidence envelope output proves only that one pre-existing evidence
 root has the expected release-kit-owned envelope, subject, provenance, target
 profile, release-kit version, digest, and redaction/source-safety shape. The
@@ -228,8 +241,9 @@ Online gate evidence must keep
 `schema: agentsmith.online-deployment-gate/v1`,
 `scope: online_deployment_gate_only`, `readiness: false`, `status: pass`, and
 is accepted only for confirmed apply output on
-`existing_kubernetes/external_declared/online`; `mode: server-dry-run`, empty
-steps, or missing apply/rollout steps are rejected. Airgap bundle evidence must
+`existing_kubernetes/external_declared/online`; `mode: server-dry-run`, missing
+top-level `operator_run_id`, empty steps, or missing apply/rollout steps are
+rejected. Airgap bundle evidence must
 bind a passing check report to a real
 `agentsmith.airgap-bundle-manifest/v1` manifest for
 `existing_kubernetes/external_declared/airgap`, including the required four

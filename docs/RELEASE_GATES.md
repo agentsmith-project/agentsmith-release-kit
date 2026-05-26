@@ -570,12 +570,67 @@ The generated `online-deployment-gate-report.json` must keep `schema:
 agentsmith.online-deployment-gate/v1`, `scope:
 online_deployment_gate_only`, `readiness: false`, and `status: pass`. It
 records release identity, release contract digest, target axes, mode, and
-step names with relative report paths. It also contains a small capability map
-keyed only by `existing_kubernetes/external_declared/online` with
+step names with relative report paths. Confirmed apply reports must include
+top-level `operator_run_id`; server dry-run reports must not. It also contains
+a small capability map keyed only by `existing_kubernetes/external_declared/online` with
 declared/intake/preflight/render/apply/rollout/smoke/evidence envelope
 capabilities. It must not contain raw command args, response bodies,
 kubeconfig content, secret payloads, product-flow fields, `verdict`,
 `release_verdict`, or deploy readiness fields.
+
+## Operator Signoff Intake Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-operator-signoff-intake.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--operator-signoff-intake`. It validates only an operator signoff intake JSON
+against an already generated online deployment gate apply report. It is not a
+signature verifier, identity system, registry presence proof, full online
+adoption check, deploy readiness check, package readiness check, or release
+readiness check.
+
+The CLI accepts only `existing_kubernetes/external_declared/online`:
+
+```bash
+bash scripts/verify-release.sh --operator-signoff-intake \
+  --release-contract release-contract.json \
+  --online-deployment-gate-report online-deployment-gate-report.json \
+  --operator-signoff-intake operator-signoff-intake.json \
+  --target-profile existing_kubernetes/external_declared/online \
+  --output-dir out
+```
+
+The intake JSON schema is `agentsmith.operator-signoff-intake/v1`, with
+`scope: operator_signoff_intake_only`. It uses an allowlist only:
+`schema_version`, `scope`, `decision`, `operator_run_id`,
+`operator_identity`, `signed_off_at`, `target_profile`, `release_id`,
+`git_sha`, `release_contract_digest`, and `subject`. The subject allows only
+`kind: online_deployment_gate_report` and a raw file `sha256` for the online
+gate report. Local/source paths, secret-looking values, signature fields,
+registry presence claims, image push/pull/mirror/load/import claims,
+product-flow fields, full online adoption fields, and deploy/package/release
+readiness or verdict fields fail fast.
+
+The validator binds release id, git sha, release contract raw sha256, target
+profile, subject sha256, and `operator_run_id` across the release contract,
+the signoff intake, and the online gate report. The online gate report must be
+`schema: agentsmith.online-deployment-gate/v1`, `scope:
+online_deployment_gate_only`, `readiness: false`, `status: pass`, `mode:
+apply`, with top-level `operator_run_id` and non-empty steps including apply
+and rollout.
+
+The generated `operator-signoff-intake-report.json` keeps `schema:
+agentsmith.operator-signoff-intake-report/v1`, `scope:
+operator_signoff_intake_only`, `readiness: false`, and `status: pass`. It
+contains only summary bindings and must not contain raw command args,
+kubeconfig content, secret payloads, product-flow fields, signature fields,
+registry presence claims, verdict fields, or deploy/package/release readiness
+claims. It is not an accepted `release_kit_output` for the release-kit
+evidence envelope.
 
 ## Evidence Envelope Focused Diagnostic
 
@@ -620,8 +675,9 @@ registry ref. The standalone image-map output is accepted only for
 `existing_kubernetes/external_declared/airgap`. The online gate output is
 accepted only for `existing_kubernetes/external_declared/online` confirmed
 apply output:
-`mode` must be `apply`, steps must be non-empty, and apply plus rollout steps
-must be present. The airgap bundle output is accepted only for
+`mode` must be `apply`, top-level `operator_run_id` must be present, steps
+must be non-empty, and apply plus rollout steps must be present. The airgap
+bundle output is accepted only for
 `existing_kubernetes/external_declared/airgap` and must bind
 `airgap-bundle-check-report.json` to a bundle-check-compatible
 `airgap-bundle-manifest.json` and a re-read `image-map.json`: required four
