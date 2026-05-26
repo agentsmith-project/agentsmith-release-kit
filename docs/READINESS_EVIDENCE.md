@@ -18,6 +18,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Registry presence diagnostic | Focused only | `registry-presence-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle create diagnostic | Focused only | `bundle-create-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle manifest/digest diagnostic | Focused only | `airgap-bundle-check-report.json` keeps `readiness: false`. |
+| Airgap image archive materiality diagnostic | Focused only | `airgap-image-archive-check-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle load-plan diagnostic | Focused only | `airgap-bundle-load-plan-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle render-check diagnostic | Focused only | `airgap-bundle-render-check-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
@@ -145,6 +146,27 @@ targets, and does not prove offline install readiness.
 package, release, rollout, smoke, product-flow, or operator readiness evidence.
 It may include only non-sensitive payload/tool counts, not raw paths, refs,
 locations, or proof strings.
+
+Airgap image archive materiality output proves only that one already assembled
+airgap bundle passed the existing bundle manifest/digest check and that each
+declared image archive can be read by an operator-provided local probe as the
+expected digest. It accepts only
+`existing_kubernetes/external_declared/airgap`; online, kind, `kit_installed`,
+and synonym axes fail fast. The probe receives each bundle-local archive path
+as argv and env and must print exactly one `sha256:<64>` digest. That digest
+must match the image-map `target_digest`, which the bundle check has already
+aligned to the release contract inventory. The release kit does not provide a
+Docker, skopeo, oras, or registry implementation here; it only validates the
+probe output. `--archive-probe` is an operator-owned trusted local executable;
+release-kit does not sandbox it or prove the probe itself trustworthy, and
+only validates stdout digest alignment with the release contract, image-map,
+and bundle manifest. It does not log in, pull, push, mirror, load/import
+images, perform offline install, apply manifests, smoke routes, or prove
+package, deploy, registry, or release readiness.
+`airgap-image-archive-check-report.json` keeps `readiness: false`; it contains
+only release identity, target profile, input/report digests, image ids, archive
+counts, and digest summaries, and is not accepted by the release-kit evidence
+envelope validator.
 
 Airgap bundle load-plan output proves only that one already assembled bundle
 passed the existing airgap bundle check and can be summarized as a read-only
@@ -292,6 +314,9 @@ package readiness.
 it proves only offline bundle rendering and rendered image inventory, not
 registry execution, package readiness, offline install readiness, deploy
 readiness, or release readiness.
+`airgap-image-archive-check-report.json` is intentionally not accepted because
+it proves only local archive probe digest alignment, not image load/import,
+offline install, package, deploy, registry, or release readiness.
 `registry-presence-report.json` is intentionally not accepted because it is a
 focused online distribution diagnostic only, not deploy, package, or release
 readiness.

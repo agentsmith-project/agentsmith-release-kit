@@ -6,10 +6,10 @@ This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
-registry presence, airgap bundle load-plan, airgap bundle render-check, apply-only,
-rollout/live digest, route smoke, and online focused chain orchestration
-diagnostics, plus operator signoff intake binding, but does not contain full
-deploy tooling yet.
+airgap image archive materiality, registry presence, airgap bundle load-plan,
+airgap bundle render-check, apply-only, rollout/live digest, route smoke, and
+online focused chain orchestration diagnostics, plus operator signoff intake
+binding, but does not contain full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -335,6 +335,40 @@ airgap_bundle_manifest_check_only`, `readiness: false`, and `status: pass`.
 It may include only non-sensitive counts for payload artifacts and tools, not
 raw paths, proof strings, locations, or refs.
 
+Airgap image archive materiality focused diagnostic:
+
+```bash
+bash scripts/test-airgap-image-archive-check.sh
+```
+
+`--airgap-image-archive-check` consumes only an already assembled bundle plus
+the same release contract, deploy template package descriptor, archive,
+image-map, bundle root, and bundle manifest inputs as `--airgap-bundle-check`,
+and an explicit `--archive-probe <executable>`. It accepts only
+`existing_kubernetes/external_declared/airgap`; online, kind, `kit_installed`,
+non-canonical pre-GA names, and synonym axes fail fast. It first reuses
+`--airgap-bundle-check`; only after that passes it invokes the local read-only
+probe once for each declared image archive file under the bundle root. The
+probe receives the archive path as argv and env, and stdout must be exactly
+one `sha256:<64>` digest. That probe digest must match the image-map
+`target_digest`, which is already bound by bundle-check back to the release
+contract inventory. `--archive-probe` is an operator-owned trusted local
+executable; release-kit does not sandbox it or prove the probe itself
+trustworthy, and only validates stdout digest alignment with the release
+contract, image-map, and bundle manifest.
+
+`airgap-image-archive-check-report.json` keeps `schema:
+agentsmith.airgap-image-archive-check-report/v1`, `scope:
+airgap_image_archive_content_check_only`, `readiness: false`, and `status:
+pass`. It contains only release identity, target profile, input/report digest
+summary, archive counts, image ids, and digest summaries. It omits absolute
+paths, probe path, raw probe output, target registry topology, operator refs,
+locations, proofs, and secrets. This is not package/deploy/offline install or
+release readiness: it does not call Docker, skopeo, oras, kubectl, curl, or
+wget, does not log in to a registry, does not pull, push, mirror, load, import,
+or install images, does not apply manifests or smoke routes, and is not an
+accepted evidence envelope output.
+
 Airgap bundle load-plan focused diagnostic:
 
 ```bash
@@ -576,6 +610,9 @@ render, apply, smoke, package, deploy, or release readiness.
 load-plan is plan-only, and render-check proves only offline render plus
 rendered manifest image inventory, not registry execution, package readiness,
 offline install readiness, deploy readiness, or release readiness.
+`airgap-image-archive-check-report.json` is also intentionally not accepted:
+it proves only local archive probe digest alignment, not load/import, offline
+install, package, deploy, registry, or release readiness.
 `registry-presence-report.json` is also intentionally not accepted; it is a
 focused target digest-ref presence check only.
 

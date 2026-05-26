@@ -18,6 +18,7 @@ bash scripts/test-image-map.sh
 bash scripts/test-registry-presence.sh
 bash scripts/test-bundle-create.sh
 bash scripts/test-airgap-bundle-check.sh
+bash scripts/test-airgap-image-archive-check.sh
 bash scripts/test-bundle-load-plan.sh
 bash scripts/test-airgap-bundle-render-check.sh
 bash scripts/test-apply.sh
@@ -222,6 +223,29 @@ not prove registry presence, image load, offline install readiness, deploy
 readiness, package readiness, or release readiness. It does not support kind or
 online targets.
 
+The current `--airgap-image-archive-check` path is a focused read-only airgap
+image archive materiality diagnostic only. It consumes an already assembled
+bundle and the same explicit release contract, deploy template package
+descriptor, archive, image-map, bundle root, and bundle manifest inputs as
+`--airgap-bundle-check`, plus `--archive-probe <executable>`. It accepts only
+`existing_kubernetes/external_declared/airgap`, first runs the existing airgap
+bundle check, then invokes the local probe once per declared bundle image
+archive. The probe receives the archive path as argv and env and stdout must
+be exactly one `sha256:<64>` digest. Each probe digest must match the
+image-map `target_digest`, which bundle-check already aligns to release
+contract inventory. `--archive-probe` is an operator-owned trusted local
+executable; release-kit does not sandbox it or prove the probe itself
+trustworthy, and only validates stdout digest alignment with the release
+contract, image-map, and bundle manifest.
+Its `airgap-image-archive-check-report.json` keeps `readiness: false` and
+`scope: airgap_image_archive_content_check_only`; it
+records only non-sensitive release identity, target profile, input/report
+digests, image ids, archive counts, and digest summaries, and is not accepted
+by the evidence envelope validator. It does not call Docker, skopeo, oras,
+kubectl, curl, or wget, does not log in, pull, push, mirror, load/import
+images, perform offline install, apply manifests, smoke routes, or claim
+package, deploy, registry, or release readiness.
+
 The current `--bundle-load-plan` path is a focused read-only airgap bundle load
 plan diagnostic only. It consumes an already assembled bundle and the same
 explicit inputs as `--airgap-bundle-check`, accepts only
@@ -406,7 +430,9 @@ rollout, and smoke reports remain individual focused diagnostic files, but
 their combinations are not accepted release-kit evidence envelope outputs.
 `airgap-bundle-load-plan-report.json` and
 `airgap-bundle-render-check-report.json` are also not accepted evidence
-envelope outputs.
+envelope outputs. `airgap-image-archive-check-report.json` is also not
+accepted because it proves only local archive probe digest alignment, not
+load/import, offline install, package, deploy, registry, or release readiness.
 `evidence_subject.files` must contain only `evidence.json` plus the mapped
 output files: `image-map.json`, `online-deployment-gate-report.json`, or
 `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json` plus

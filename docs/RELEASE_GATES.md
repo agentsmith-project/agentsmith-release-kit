@@ -382,6 +382,48 @@ AgentSmith product-flow fields, raw credential payloads, or registry login
 material. It may include only non-sensitive counts for payload artifacts and
 tools, not raw paths, refs, locations, or proof strings.
 
+## Airgap Image Archive Materiality Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-airgap-image-archive-check.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--airgap-image-archive-check`. It consumes an already assembled airgap bundle
+and first reuses the existing `--airgap-bundle-check` validator. It accepts
+only `existing_kubernetes/external_declared/airgap`; online, kind rehearsal,
+`kit_installed`, non-canonical pre-GA target names, and synonym axes fail fast.
+It does not call Docker, skopeo, oras, kubectl, curl, or wget, does not log in
+to a registry, pull, push, mirror, load/import images, apply manifests, deploy,
+or smoke.
+
+The diagnostic requires `--archive-probe <executable>`. The probe must be a
+local executable and is invoked once per
+`bundle_manifest.image_artifact_declarations[]` archive file under the bundle
+root. The archive path is provided as argv and env. Probe stdout must be
+exactly one `sha256:<64>` digest and stderr must be empty. The probe digest
+must match the image-map `target_digest`; bundle-check has already aligned
+that digest with `release_contract.deploy_image_inventory`. This proves only
+local archive digest materiality through the chosen probe. `--archive-probe`
+is an operator-owned trusted local executable; release-kit does not sandbox it
+or prove the probe itself trustworthy, and only validates stdout digest
+alignment with the release contract, image-map, and bundle manifest. It is not
+a registry mirror, image import, image load, offline install, package, deploy,
+or release readiness check.
+
+The generated `airgap-image-archive-check-report.json` must keep `schema:
+agentsmith.airgap-image-archive-check-report/v1`, `scope:
+airgap_image_archive_content_check_only`, `readiness: false`, and `status:
+pass`. It may contain only release identity, target profile, input/report
+digest summary, archive counts, image ids, and digest summaries. It must not
+include absolute paths, bundle root, probe path, raw probe output, target
+registry topology, operator refs, locations, proofs, secrets, `verdict`,
+`release_verdict`, image load/import/push success, registry execution,
+offline install readiness, package readiness, deploy readiness, or release
+readiness. It is not an accepted release-kit evidence envelope output.
+
 ## Airgap Bundle Load Plan Focused Diagnostic
 
 Run:
@@ -771,6 +813,9 @@ package readiness, or release readiness.
 it proves only offline bundle render plus rendered image inventory, not
 registry execution, package readiness, offline install readiness, deploy
 readiness, or release readiness.
+`airgap-image-archive-check-report.json` is intentionally not accepted because
+it proves only local archive probe digest alignment, not image load/import,
+offline install, package, deploy, registry, or release readiness.
 `registry-presence-report.json` is intentionally not accepted because it proves
 only focused target digest-ref presence through an operator probe, not deploy,
 package, or release readiness.

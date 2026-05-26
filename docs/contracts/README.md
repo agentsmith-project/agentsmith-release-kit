@@ -146,6 +146,29 @@ does not call Docker, skopeo, oras, kubectl, pull, push, mirror, save, or load
 images, and does not prove registry presence, image load, offline install
 readiness, deploy readiness, package readiness, or release readiness.
 
+The current `--airgap-image-archive-check` validator is a focused read-only
+image archive materiality diagnostic only. It consumes the same already
+assembled bundle inputs as `--airgap-bundle-check`, accepts only
+`existing_kubernetes/external_declared/airgap`, and first runs the existing
+bundle check. It then invokes an explicit local `--archive-probe <executable>`
+once per `bundle_manifest.image_artifact_declarations[]` archive path. The
+probe receives the archive path as argv and env, and stdout must contain
+exactly one `sha256:<64>` digest. The digest must match the corresponding
+image-map `target_digest`; bundle-check has already bound that digest to the
+release contract inventory. `--archive-probe` is an operator-owned trusted
+local executable; release-kit does not sandbox it or prove the probe itself
+trustworthy, and only validates stdout digest alignment with the release
+contract, image-map, and bundle manifest.
+Its `airgap-image-archive-check-report.json` uses `schema:
+agentsmith.airgap-image-archive-check-report/v1`, `readiness: false`, and
+`scope: airgap_image_archive_content_check_only`; it contains only
+release identity, target profile, input/report digests, image ids, counts, and
+digest summaries. It is not a release-kit evidence envelope output and must
+not claim image load/import success, registry execution, offline install,
+package, deploy, or release readiness. It must not include absolute paths,
+probe path, raw probe output, target registry topology, operator refs,
+locations, proofs, or secrets.
+
 The current `--bundle-load-plan` validator is a focused read-only plan
 diagnostic only. It consumes the same already assembled bundle inputs as
 `--airgap-bundle-check`, accepts only
@@ -280,7 +303,10 @@ pre-GA. Render, rollout, and smoke reports remain individual focused diagnostic
 files, but their combinations are not accepted release-kit evidence envelope
 outputs. `airgap-bundle-load-plan-report.json` and
 `airgap-bundle-render-check-report.json` are also not accepted release-kit
-evidence envelope outputs. `evidence_subject.files` must contain only subject entries for
+evidence envelope outputs. `airgap-image-archive-check-report.json` is also
+not accepted because it proves only local archive probe digest alignment, not
+load/import, offline install, package, deploy, registry, or release readiness.
+`evidence_subject.files` must contain only subject entries for
 `evidence.json` plus the mapped output files: `image-map.json`,
 `online-deployment-gate-report.json`, or `airgap-bundle-check-report.json` plus
 `airgap-bundle-manifest.json` plus `image-map.json`.
