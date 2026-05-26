@@ -255,8 +255,13 @@ fast, and it rejects non-rollout workload kinds before rollout
 commands. It first runs the render/check image inventory guard, then runs
 `kubectl rollout status` for Deployment, StatefulSet, and DaemonSet resources
 and reads each workload's selector through `kubectl get <kind>/<name> -o json`.
-It then checks live pod `imageID` or `image` digests only from
-`kubectl get pods --selector <selector> -o json` for that workload. It accepts
+It then checks live pod `imageID` or `image` digests from
+`kubectl get pods --selector <selector> -o json` for that workload. For
+ordinary source-registry rendered refs, selected pods only need to show the
+expected digest. When render/check accepts a rendered ref through digest
+adoption, including target-registry image-map refs, digest-pinned live refs for
+that digest must be only the rendered refs; mixed source and target refs fail.
+It accepts
 `--forbidden-source-root` and treats an existing sibling `../agentsmith`
 checkout as a default forbidden source root for the render/check guard. Its
 `rollout-report.json` must keep `readiness: false` and `scope:
@@ -310,8 +315,9 @@ the root through the existing `--evidence` diagnostic.
 It does not provision cloud resources, mirror images, build airgap bundles,
 import images into kind, roll back changes, run product flows, or claim deploy
 or release readiness. `--target-registry` only makes the gate generate an
-image-map and pass it into render; it is not mirror execution or registry
-readiness.
+image-map, pass it into render, and in confirmed apply rollout run strict live
+ref checks for those digest-adopted target refs only. Ordinary source-registry
+rollout remains digest-only. It is not mirror execution or registry readiness.
 
 The current `--evidence` path is a focused diagnostic for release-kit evidence
 envelope intake only. It consumes a release contract, an evidence root

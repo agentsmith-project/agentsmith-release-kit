@@ -406,7 +406,11 @@ rollout-capable resource, reads that workload's
 `spec.selector.matchLabels`, then reads only matching pods with
 `kubectl get pods --selector <selector> -o json`. Expected sha256 digests for
 that workload must appear in those selected pods, using live `imageID` first
-and falling back to `image` when needed. `rollout-report.json` keeps
+and falling back to `image` when needed. For ordinary source-registry rendered
+refs, this digest match is the live image check. When render/check accepts a
+rendered ref through digest adoption, as with target-registry image-map refs,
+digest-pinned live refs for that digest must be only the rendered refs; mixed
+source and target refs fail. `rollout-report.json` keeps
 `readiness: false`, `scope: kubernetes_rollout_imageid_only`, and `status:
 pass`; it is not deploy readiness, release readiness, route smoke evidence,
 product-flow evidence, or operator signoff. The report stores
@@ -463,7 +467,9 @@ provided, render, render-check, apply, and, in `--mode apply` only, rollout
 plus optional route smoke. Default `server-dry-run` mode stops after apply
 dry-run and rejects `--smoke-url`. Apply mode requires exact confirm text and
 an operator run id before Kubernetes calls. The target registry option adopts
-image-map target refs for rendering only; it does not log in, pull, push,
+image-map target refs for rendering and, in confirmed apply rollout, strict
+live ref checks for those digest-adopted target refs only; ordinary
+source-registry rollout remains digest-only. It does not log in, pull, push,
 mirror, or prove registry presence.
 
 Confirmed apply mode may also take `--evidence-root <dir>` and

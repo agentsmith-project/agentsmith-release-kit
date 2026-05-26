@@ -468,7 +468,10 @@ and values; `matchExpressions` are not supported. The diagnostic then reads
 `kubectl get pods --namespace <ns> --selector <selector> -o json` and verifies
 that every expected render/check image digest for that workload appears in the
 selected pods, using live `imageID` values first and `image` only as a
-fallback.
+fallback. For ordinary source-registry rendered refs, this digest match is the
+live image check. When render/check accepts a rendered ref through digest
+adoption, as with target-registry image-map refs, digest-pinned live refs for
+that digest must be only the rendered refs; mixed source and target refs fail.
 
 The generated `rollout-report.json` must keep `schema:
 agentsmith.kubernetes-rollout-report/v1`, `scope:
@@ -548,7 +551,9 @@ network checks, and invalid prerequisites remove stale managed reports. Default
 mode requires exact `--confirm-apply
 existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
 before Kubernetes calls. Target-registry mode only adopts image refs through
-the generated image-map; it is not mirror execution, registry login, or
+the generated image-map. In confirmed apply rollout, strict live ref checks
+apply only to those digest-adopted target refs; ordinary source-registry
+rollout remains digest-only. It is not mirror execution, registry login, or
 registry presence evidence.
 
 Confirmed apply mode can optionally add `--evidence-root <dir>` and

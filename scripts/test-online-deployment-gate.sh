@@ -484,8 +484,14 @@ JSON
   fi
 
   if [[ "$get_target" == "pods" ]]; then
-    cat <<'JSON'
-{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}],"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
+    live_image="\${FAKE_KUBECTL_LIVE_IMAGE:-ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
+    live_image_id="\${FAKE_KUBECTL_LIVE_IMAGE_ID:-docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
+    live_init_image="\${FAKE_KUBECTL_LIVE_INIT_IMAGE:-$live_image}"
+    live_init_image_id="\${FAKE_KUBECTL_LIVE_INIT_IMAGE_ID:-$live_image_id}"
+    live_container_image="\${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE:-$live_image}"
+    live_container_image_id="\${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID:-$live_image_id}"
+    cat <<JSON
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"$live_init_image","imageID":"$live_init_image_id"}],"containerStatuses":[{"name":"web","image":"$live_container_image","imageID":"$live_container_image_id"}]}}]}
 JSON
     exit 0
   fi
@@ -620,7 +626,14 @@ run_gate() {
   local target_prerequisites="${TARGET_PREREQUISITES_OVERRIDE:-$VALID_PREREQUISITES}"
   shift 7 || true
 
-  FAKE_KUBECTL_LOG="$KUBECTL_LOG" bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
+  FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  FAKE_KUBECTL_LIVE_IMAGE="${FAKE_KUBECTL_LIVE_IMAGE:-}" \
+  FAKE_KUBECTL_LIVE_IMAGE_ID="${FAKE_KUBECTL_LIVE_IMAGE_ID:-}" \
+  FAKE_KUBECTL_LIVE_INIT_IMAGE="${FAKE_KUBECTL_LIVE_INIT_IMAGE:-}" \
+  FAKE_KUBECTL_LIVE_INIT_IMAGE_ID="${FAKE_KUBECTL_LIVE_INIT_IMAGE_ID:-}" \
+  FAKE_KUBECTL_LIVE_CONTAINER_IMAGE="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE:-}" \
+  FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID:-}" \
+  bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
     --release-contract "$release_contract" \
     --deploy-template-package "$deploy_template_package" \
     --archive "$archive" \
@@ -794,6 +807,25 @@ if (!rendered.includes(appMapping.target_image)) {
 if (rendered.includes(appMapping.source_image)) {
   throw new Error('rendered manifest kept source image despite target-registry image-map');
 }
+NODE
+}
+
+image_map_target_image() {
+  local image_map="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" --input-type=module - "$image_map" "$image_id" <<'NODE'
+import fs from 'node:fs';
+
+const [imageMapFile, imageId] = process.argv.slice(2);
+const imageMap = JSON.parse(fs.readFileSync(imageMapFile, 'utf8'));
+const mapping = imageMap.mappings.find((item) => item.id === imageId);
+
+if (!mapping?.target_image) {
+  throw new Error(`image-map is missing target image for ${imageId}`);
+}
+
+console.log(mapping.target_image);
 NODE
 }
 
@@ -1010,6 +1042,8 @@ assert_gate_report "$target_registry_output/online-deployment-gate-report.json" 
 assert_gate_rendered_target_registry "$target_registry_output" "$target_registry"
 pass "online deployment gate target-registry dry-run writes image-map step and renders target refs without registry ops"
 
+target_registry_app_image="$(image_map_target_image "$target_registry_output/image-map/image-map.json" agentsmith_app)"
+
 invalid_target_registry_output="$TMP_DIR/out-invalid-target-registry"
 reset_kubectl_log
 before_invalid_target_registry="$(hit_count)"
@@ -1135,6 +1169,62 @@ assert_generated_evidence "$apply_evidence_root"
 run_evidence "$VALID_CONTRACT_MATERIAL" "$apply_evidence_root" "$apply_evidence_validation" >/dev/null
 [[ -f "$apply_evidence_output/evidence-validation/evidence-validation-report.json" ]] || fail "apply evidence gate did not internally validate evidence root"
 pass "confirmed apply rollout smoke can generate validator-accepted online gate evidence root"
+
+target_registry_apply_evidence_output="$TMP_DIR/out-apply-target-registry-evidence"
+target_registry_apply_evidence_root="$TMP_DIR/evidence-apply-target-registry"
+target_registry_apply_evidence_validation="$TMP_DIR/out-apply-target-registry-evidence-validation"
+reset_kubectl_log
+before_target_registry_apply_evidence="$(hit_count)"
+FAKE_KUBECTL_LIVE_IMAGE="$target_registry_app_image" \
+FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$target_registry_app_image" \
+run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$target_registry_apply_evidence_output" "$TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$TARGET_PROFILE" \
+  --operator-run-id operator-run-1013 \
+  --timeout 120s \
+  --target-registry "$target_registry" \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost \
+  --evidence-root "$target_registry_apply_evidence_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >/dev/null
+after_target_registry_apply_evidence="$(hit_count)"
+[[ "$after_target_registry_apply_evidence" -eq $((before_target_registry_apply_evidence + 1)) ]] || fail "target-registry apply evidence gate smoke should issue one request"
+assert_gate_report "$target_registry_apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,image-map,render,render-check,apply,rollout,smoke"
+assert_gate_rendered_target_registry "$target_registry_apply_evidence_output" "$target_registry"
+assert_generated_evidence "$target_registry_apply_evidence_root"
+run_evidence "$VALID_CONTRACT_MATERIAL" "$target_registry_apply_evidence_root" "$target_registry_apply_evidence_validation" >/dev/null
+[[ -f "$target_registry_apply_evidence_output/evidence-validation/evidence-validation-report.json" ]] || fail "target-registry apply evidence gate did not internally validate evidence root"
+pass "target-registry confirmed apply rollout smoke can generate validator-accepted online gate evidence root"
+
+target_registry_mixed_live_root="$TMP_DIR/evidence-target-registry-mixed-live"
+target_registry_mixed_live_output="$TMP_DIR/out-target-registry-mixed-live"
+write_stale_evidence_files "$target_registry_mixed_live_root"
+reset_kubectl_log
+before_target_registry_mixed_live="$(hit_count)"
+if FAKE_KUBECTL_LIVE_INIT_IMAGE="$target_registry_app_image" \
+  FAKE_KUBECTL_LIVE_INIT_IMAGE_ID="docker-pullable://$target_registry_app_image" \
+  FAKE_KUBECTL_LIVE_CONTAINER_IMAGE="ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111" \
+  FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID="docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111" \
+  run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$target_registry_mixed_live_output" "$TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$TARGET_PROFILE" \
+  --operator-run-id operator-run-1014 \
+  --timeout 120s \
+  --target-registry "$target_registry" \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost \
+  --evidence-root "$target_registry_mixed_live_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/target-registry-mixed-live.out" 2>"$TMP_DIR/target-registry-mixed-live.err"; then
+  fail "expected target-registry apply evidence to reject mixed source and target live image refs"
+fi
+after_target_registry_mixed_live="$(hit_count)"
+grep -q 'get pods' "$KUBECTL_LOG" || fail "target-registry mixed live case did not reach live pod check"
+[[ "$before_target_registry_mixed_live" == "$after_target_registry_mixed_live" ]] || fail "target-registry mixed live rejection should stop before route/network smoke"
+assert_no_gate_report "$target_registry_mixed_live_output"
+assert_no_evidence_files "$target_registry_mixed_live_root"
+pass "target-registry apply evidence rejects mixed source and target live image refs before smoke or evidence closure"
 
 missing_provenance_root="$TMP_DIR/evidence-missing-provenance"
 missing_provenance_output="$TMP_DIR/out-missing-provenance"

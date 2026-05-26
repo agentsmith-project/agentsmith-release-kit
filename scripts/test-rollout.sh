@@ -158,6 +158,13 @@ JSON
 JSON
       exit 0
     fi
+
+    if [[ "\${FAKE_KUBECTL_PODS_MODE:-full}" == "rewritten_ref_same_digest" ]]; then
+    cat <<'JSON'
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"runtime.registry.example/rewritten/agentsmith-app:runtime@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://runtime.registry.example/rewritten/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}],"containerStatuses":[{"name":"web","image":"runtime.registry.example/rewritten/agentsmith-app:runtime@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":""}]}}]}
+JSON
+      exit 0
+    fi
     cat <<'JSON'
 {"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}],"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":""}]}}]}
 JSON
@@ -367,6 +374,13 @@ grep -q 'get Deployment/agentsmith-web --namespace agentsmith -o json' "$KUBECTL
 grep -q 'get pods --namespace agentsmith --selector app.kubernetes.io/name=agentsmith-web,app.kubernetes.io/part=web -o json' "$KUBECTL_LOG" || fail "fake kubectl did not receive selector-scoped get pods call"
 assert_rollout_report "$valid_output/rollout-report.json"
 pass "rollout happy path calls kubectl and writes non-readiness report"
+
+rewritten_ref_output="$TMP_DIR/out-rewritten-ref"
+reset_kubectl_log
+FAKE_KUBECTL_PODS_MODE=rewritten_ref_same_digest run_rollout "$valid_manifests" "$rewritten_ref_output" "$TARGET_PROFILE" >/dev/null
+grep -q 'get pods --namespace agentsmith --selector app.kubernetes.io/name=agentsmith-web,app.kubernetes.io/part=web -o json' "$KUBECTL_LOG" || fail "fake kubectl did not receive selector-scoped get pods for rewritten-ref case"
+assert_rollout_report "$rewritten_ref_output/rollout-report.json"
+pass "source-registry rollout keeps digest-only semantics for rewritten live refs"
 
 bad_manifests="$TMP_DIR/manifests-render-check-fail"
 bad_output="$TMP_DIR/out-render-check-fail"

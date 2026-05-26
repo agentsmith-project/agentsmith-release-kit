@@ -405,6 +405,10 @@ function rolloutWorkloads(renderReport, namespace) {
       expected_image_digests: expectedDigestsFromImages(
         manifest.images,
         `render-check manifest ${index + 1}`
+      ),
+      expected_image_refs: expectedImageRefsFromImages(
+        manifest.images,
+        `render-check manifest ${index + 1}`
       )
     };
   });
@@ -568,12 +572,89 @@ function extractDigest(value) {
   return match ? match[1].toLowerCase() : undefined;
 }
 
+function stripTag(imageWithoutDigest) {
+  const lastSlash = imageWithoutDigest.lastIndexOf('/');
+  const lastColon = imageWithoutDigest.lastIndexOf(':');
+  if (lastColon > lastSlash) {
+    return imageWithoutDigest.slice(0, lastColon);
+  }
+  return imageWithoutDigest;
+}
+
+function normalizeImageDigestRef(value) {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const withoutScheme = value.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+  const lower = withoutScheme.toLowerCase();
+  const marker = '@sha256:';
+  const markerIndex = lower.lastIndexOf(marker);
+  if (markerIndex < 0) {
+    return undefined;
+  }
+
+  const imageWithoutDigest = withoutScheme.slice(0, markerIndex);
+  if (!imageWithoutDigest || imageWithoutDigest.includes('@')) {
+    return undefined;
+  }
+
+  const digest = `sha256:${lower.slice(markerIndex + marker.length)}`;
+  if (!DIGEST_RE.test(digest)) {
+    return undefined;
+  }
+
+  const repository = stripTag(imageWithoutDigest).toLowerCase();
+  if (!repository) {
+    return undefined;
+  }
+
+  return {
+    digest,
+    ref: `${repository}@${digest}`
+  };
+}
+
+function expectedImageRefsFromImages(images, label) {
+  if (!Array.isArray(images) || images.length === 0) {
+    fail(`${label} must include expected images`);
+  }
+
+  const byDigest = new Map();
+  for (const image of images) {
+    const normalized = normalizeImageDigestRef(image?.image);
+    if (!normalized) {
+      fail(`${label} image ref is invalid`);
+    }
+
+    if (!byDigest.has(normalized.digest)) {
+      byDigest.set(normalized.digest, {
+        digest: normalized.digest,
+        image_refs: new Set(),
+        enforce_live_ref: false
+      });
+    }
+    const entry = byDigest.get(normalized.digest);
+    entry.image_refs.add(normalized.ref);
+    entry.enforce_live_ref = entry.enforce_live_ref || image?.matched_by === 'digest';
+  }
+
+  return [...byDigest.values()]
+    .map((entry) => ({
+      digest: entry.digest,
+      image_refs: [...entry.image_refs].sort(),
+      enforce_live_ref: entry.enforce_live_ref
+    }))
+    .sort((left, right) => left.digest.localeCompare(right.digest));
+}
+
 function collectLiveStatusDigests(podsJson) {
   if (!podsJson || typeof podsJson !== 'object' || !Array.isArray(podsJson.items)) {
     fail('kubectl get pods JSON must include items array');
   }
 
   const observedDigests = new Set();
+  const observedRefsByDigest = new Map();
   let statusEntriesCount = 0;
   let imageIdCount = 0;
   let imageFieldFallbackCount = 0;
@@ -592,8 +673,17 @@ function collectLiveStatusDigests(podsJson) {
         const imageIdDigest = extractDigest(containerStatus?.imageID);
         const imageDigest = extractDigest(containerStatus?.image);
         const selectedDigest = imageIdDigest || imageDigest;
+        const selectedRef =
+          normalizeImageDigestRef(containerStatus?.imageID) ||
+          normalizeImageDigestRef(containerStatus?.image);
         if (selectedDigest) {
           observedDigests.add(selectedDigest);
+        }
+        if (selectedRef && selectedRef.digest === selectedDigest) {
+          if (!observedRefsByDigest.has(selectedRef.digest)) {
+            observedRefsByDigest.set(selectedRef.digest, new Set());
+          }
+          observedRefsByDigest.get(selectedRef.digest).add(selectedRef.ref);
         }
         if (imageIdDigest) {
           imageIdCount += 1;
@@ -612,7 +702,8 @@ function collectLiveStatusDigests(podsJson) {
     image_id_count: imageIdCount,
     image_field_fallback_count: imageFieldFallbackCount,
     missing_digest_count: missingDigestCount,
-    observed_digests: [...observedDigests].sort()
+    observed_digests: [...observedDigests].sort(),
+    observed_image_refs_by_digest: observedRefsByDigest
   };
 }
 
@@ -630,6 +721,35 @@ function assertExpectedDigestsObserved(expectedDigests, liveSummary, resource) {
 
   if (missing.length > 0) {
     fail(`${resource.kind}/${resource.name} selected pods are missing expected release image digest(s): ${missing.join(', ')}`);
+  }
+}
+
+function assertExpectedImageRefsObserved(expectedImageRefs, liveSummary, resource) {
+  for (const expected of expectedImageRefs) {
+    if (!expected.enforce_live_ref) {
+      continue;
+    }
+
+    const observedRefs = liveSummary.observed_image_refs_by_digest.get(expected.digest);
+    if (!observedRefs || observedRefs.size === 0) {
+      continue;
+    }
+
+    const expectedRefs = new Set(expected.image_refs);
+    const missing = expected.image_refs.filter((ref) => !observedRefs.has(ref));
+    const unexpected = [...observedRefs]
+      .filter((ref) => !expectedRefs.has(ref))
+      .sort();
+    if (missing.length > 0 || unexpected.length > 0) {
+      const details = [];
+      if (missing.length > 0) {
+        details.push(`missing rendered ref(s): ${missing.join(', ')}`);
+      }
+      if (unexpected.length > 0) {
+        details.push(`unexpected live ref(s): ${unexpected.join(', ')}`);
+      }
+      fail(`${resource.kind}/${resource.name} selected pods live image ref does not match rendered image ref for digest ${expected.digest}: ${details.join('; ')}`);
+    }
   }
 }
 
@@ -741,6 +861,7 @@ async function main() {
     const livePodsJson = runKubectlGetPods(args, selector);
     const liveSummary = collectLiveStatusDigests(livePodsJson);
     assertExpectedDigestsObserved(workload.expected_image_digests, liveSummary, resource);
+    assertExpectedImageRefsObserved(workload.expected_image_refs, liveSummary, resource);
     workloadResults.push({
       resource_ref: resourceRefWithSelector(resource, selector),
       expected_image_digests: workload.expected_image_digests,
