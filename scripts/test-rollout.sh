@@ -29,6 +29,7 @@ import path from 'node:path';
 const [contractInput, renderedManifests, mutation] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const inventory = new Map(contract.deploy_image_inventory.map((item) => [item.id, item.image]));
+const unknownDigest = `sha256:${'e'.repeat(64)}`;
 let appImage = inventory.get('agentsmith_app');
 
 if (!appImage) {
@@ -36,7 +37,7 @@ if (!appImage) {
 }
 
 if (mutation === 'unknown_image') {
-  appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@sha256:${'9'.repeat(64)}`;
+  appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@${unknownDigest}`;
 }
 
 fs.mkdirSync(renderedManifests, { recursive: true });
@@ -142,12 +143,12 @@ JSON
     if [[ "\${FAKE_KUBECTL_PODS_MODE:-full}" == "stale_unrelated_digest" ]]; then
       if [[ "$selector" == "$expected_selector" ]]; then
         cat <<'JSON'
-{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:9999999999999999999999999999999999999999999999999999999999999999","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:9999999999999999999999999999999999999999999999999999999999999999"}]}}]}
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}]}}]}
 JSON
         exit 0
       fi
       cat <<'JSON'
-{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:9999999999999999999999999999999999999999999999999999999999999999","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:9999999999999999999999999999999999999999999999999999999999999999"}]}},{"metadata":{"name":"unrelated-stale-pod"},"status":{"containerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"containerStatuses":[{"name":"web","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"}]}},{"metadata":{"name":"unrelated-stale-pod"},"status":{"containerStatuses":[{"name":"schema","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
 JSON
       exit 0
     fi

@@ -253,6 +253,7 @@ import path from 'node:path';
 const [contractInput, renderedManifests, mutation] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const inventory = new Map(contract.deploy_image_inventory.map((item) => [item.id, item.image]));
+const unknownDigest = `sha256:${'e'.repeat(64)}`;
 const image = (id) => {
   const value = inventory.get(id);
   if (!value) {
@@ -265,13 +266,13 @@ fs.mkdirSync(renderedManifests, { recursive: true });
 
 let appImage = image('agentsmith_app');
 if (mutation === 'unknown_image') {
-  appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@sha256:${'9'.repeat(64)}`;
+  appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@${unknownDigest}`;
 }
 if (mutation === 'tag_only_image') {
   appImage = appImage.replace(/@sha256:[0-9a-f]{64}$/, '');
 }
 if (mutation === 'digest_mismatch') {
-  appImage = appImage.replace(/@sha256:[0-9a-f]{64}$/, `@sha256:${'9'.repeat(64)}`);
+  appImage = appImage.replace(/@sha256:[0-9a-f]{64}$/, `@${unknownDigest}`);
 }
 
 const deployment = `apiVersion: apps/v1
@@ -375,7 +376,7 @@ items:
         spec:
           containers:
             - name: hidden
-              image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@sha256:${'9'.repeat(64)}
+              image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@${unknownDigest}
 `
   );
 }
@@ -394,7 +395,7 @@ spec:
         - name: schema
           image: ${image('agentsmith_app')}
       containers:
-        - { name: hidden, image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@sha256:${'9'.repeat(64)} }
+        - { name: hidden, image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@${unknownDigest} }
 `
   );
 }
@@ -412,7 +413,7 @@ spec:
       initContainers:
         - name: schema
           image: ${image('agentsmith_app')}
-      containers: [{ name: hidden, image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@sha256:${'9'.repeat(64)} }]
+      containers: [{ name: hidden, image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@${unknownDigest} }]
 `
   );
 }
@@ -436,7 +437,7 @@ spec:
     spec:
       containers:
         - name: hidden
-          image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@sha256:${'9'.repeat(64)}
+          image: ghcr.io/agentsmith-project/hidden:${contract.release_id}@${unknownDigest}
 `
   );
 }

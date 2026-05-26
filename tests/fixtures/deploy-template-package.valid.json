@@ -10,7 +10,7 @@
     "normalized_remote": "github.com/agentsmith-project/agentsmith",
     "commit_sha": "0123456789abcdef0123456789abcdef01234567",
     "subject_name": "agentsmith-deploy-template-package",
-    "subject_sha256": "sha256:2c33733083b29c7d01d5382f94e19e11a737d60ac0dce39feb73f9f153744a68",
+    "subject_sha256": "sha256:b314e0ff2856fccf868256f7450db554183b2e592f64e62605c7ff304473e3f2",
     "subject_uri": "deploy-template-package.json",
     "workflow_name": "release-contract",
     "run_id": "10001",
@@ -22,5 +22,13 @@
     "generator_command": "npm run contracts:check-release-boundary",
     "generator_version": "p0",
     "attestation": "none"
-  }
+  },
+  "required_image_ids": [
+    "agentsmith_app",
+    "llmup",
+    "afscp",
+    "asbcp",
+    "ingress_nginx_controller",
+    "ingress_nginx_certgen"
+  ]
 }

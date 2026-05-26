@@ -11,6 +11,14 @@ KIND_PROFILE="kind_rehearsal/kit_installed/online"
 KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="airgap-bundle-render-check-report.json"
+APP_CURRENT_IMAGE_IDS=(
+  agentsmith_app
+  llmup
+  afscp
+  asbcp
+  ingress_nginx_controller
+  ingress_nginx_certgen
+)
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -327,7 +335,7 @@ JSON
 
 create_image_archives() {
   mkdir -p "$IMAGE_DIR"
-  for id in agentsmith_app llmup ingress_nginx_controller; do
+  for id in "${APP_CURRENT_IMAGE_IDS[@]}"; do
     printf 'local oci layout tar placeholder for %s\n' "$id" >"$IMAGE_DIR/$id.oci-layout.tar"
   done
 }
@@ -382,7 +390,10 @@ run_bundle_create() {
     --output-dir "$output_dir" \
     --image-archive "agentsmith_app=$IMAGE_DIR/agentsmith_app.oci-layout.tar" \
     --image-archive "llmup=$IMAGE_DIR/llmup.oci-layout.tar" \
+    --image-archive "afscp=$IMAGE_DIR/afscp.oci-layout.tar" \
+    --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
     --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
+    --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
     --runbook "$PAYLOAD_DIR/runbook.md" \
     --script "$PAYLOAD_DIR/install.sh" \
     --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
@@ -514,6 +525,9 @@ if (report.target_profile?.value !== 'existing_kubernetes/external_declared/airg
 }
 if (Object.prototype.hasOwnProperty.call(report, 'target_registry')) {
   throw new Error('airgap bundle render-check report must not include target_registry');
+}
+if (report.image_inventory?.image_map_image_count !== 6) {
+  throw new Error(`unexpected image-map image count: ${report.image_inventory?.image_map_image_count}`);
 }
 if (report.image_inventory?.rendered_image_count !== 2) {
   throw new Error(`unexpected rendered image count: ${report.image_inventory?.rendered_image_count}`);

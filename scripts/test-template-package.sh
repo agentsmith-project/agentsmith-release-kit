@@ -320,6 +320,65 @@ fs.writeFileSync(packageOutput, `${JSON.stringify(deployTemplatePackage, null, 2
 NODE
 }
 
+mutate_required_image_ids() {
+  local contract_input="$1"
+  local package_input="$2"
+  local contract_output="$3"
+  local package_output="$4"
+  local mutation="$5"
+
+  "$NODE_BIN" --input-type=module - "$contract_input" "$package_input" "$contract_output" "$package_output" "$mutation" <<'NODE'
+import fs from 'node:fs';
+
+const [contractInput, packageInput, contractOutput, packageOutput, mutation] =
+  process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+const deployTemplatePackage = JSON.parse(fs.readFileSync(packageInput, 'utf8'));
+const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
+
+switch (mutation) {
+  case 'missing-release-required-image-ids':
+    delete contract.required_image_ids;
+    break;
+  case 'required-image-ids-mismatch':
+    contract.required_image_ids = contract.required_image_ids.slice(0, -1);
+    break;
+  case 'legacy-three-image-required-image-ids':
+    contract.required_image_ids = legacyThreeImageIds;
+    contract.deploy_template_package.required_image_ids = legacyThreeImageIds;
+    deployTemplatePackage.required_image_ids = legacyThreeImageIds;
+    break;
+  case 'missing-deploy-package-required-image-ids':
+    delete contract.deploy_template_package.required_image_ids;
+    delete deployTemplatePackage.required_image_ids;
+    break;
+  case 'empty-deploy-package-required-image-ids':
+    contract.deploy_template_package.required_image_ids = [];
+    deployTemplatePackage.required_image_ids = [];
+    break;
+  case 'non-array-deploy-package-required-image-ids':
+    contract.deploy_template_package.required_image_ids = 'agentsmith_app';
+    deployTemplatePackage.required_image_ids = 'agentsmith_app';
+    break;
+  case 'required-image-id-missing-in-inventory':
+    contract.required_image_ids = [...contract.required_image_ids, 'missing_component'];
+    contract.deploy_template_package.required_image_ids = [...contract.required_image_ids];
+    deployTemplatePackage.required_image_ids = [...contract.required_image_ids];
+    break;
+  case 'required-current-image-id-absent-from-inventory':
+    contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
+      (item) => item.id !== 'asbcp'
+    );
+    break;
+  default:
+    throw new Error(`unknown required_image_ids mutation: ${mutation}`);
+}
+
+fs.writeFileSync(packageOutput, `${JSON.stringify(deployTemplatePackage, null, 2)}\n`);
+fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
 run_template_package() {
   local contract="$1"
   local deploy_template_package="$2"
@@ -338,12 +397,19 @@ expect_fail() {
   local contract="$2"
   local deploy_template_package="$3"
   local archive="$4"
+  local expected_stderr="${5:-}"
   local output_dir="$TMP_DIR/out-$label"
 
   if run_template_package "$contract" "$deploy_template_package" "$archive" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected invalid template package case to fail: $label"
+  fi
+
+  if [[ -n "$expected_stderr" ]] && ! grep -Fq "$expected_stderr" "$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected template package stderr to contain '$expected_stderr': $label"
   fi
 
   pass "invalid template package rejected: $label"
@@ -403,6 +469,46 @@ expect_fail manifest-sha-drift "$MANIFEST_DRIFT_CONTRACT" "$MANIFEST_DRIFT_PACKA
 DESCRIPTOR_DRIFT_PACKAGE="$TMP_DIR/deploy-template-package.descriptor-drift.json"
 mutate_descriptor_only "$VALID_PACKAGE_MATERIAL" "$DESCRIPTOR_DRIFT_PACKAGE"
 expect_fail descriptor-mismatch "$VALID_CONTRACT_MATERIAL" "$DESCRIPTOR_DRIFT_PACKAGE" "$VALID_ARCHIVE"
+
+for mutation in \
+  missing-release-required-image-ids \
+  required-image-ids-mismatch \
+  legacy-three-image-required-image-ids \
+  missing-deploy-package-required-image-ids \
+  empty-deploy-package-required-image-ids \
+  non-array-deploy-package-required-image-ids \
+  required-image-id-missing-in-inventory; do
+  REQUIRED_IDS_CONTRACT="$TMP_DIR/release-contract.$mutation.json"
+  REQUIRED_IDS_PACKAGE="$TMP_DIR/deploy-template-package.$mutation.json"
+  mutate_required_image_ids \
+    "$VALID_CONTRACT_MATERIAL" \
+    "$VALID_PACKAGE_MATERIAL" \
+    "$REQUIRED_IDS_CONTRACT" \
+    "$REQUIRED_IDS_PACKAGE" \
+    "$mutation"
+  expect_fail \
+    "$mutation" \
+    "$REQUIRED_IDS_CONTRACT" \
+    "$REQUIRED_IDS_PACKAGE" \
+    "$VALID_ARCHIVE"
+done
+
+for mutation in required-current-image-id-absent-from-inventory; do
+  REQUIRED_IDS_CONTRACT="$TMP_DIR/release-contract.$mutation.json"
+  REQUIRED_IDS_PACKAGE="$TMP_DIR/deploy-template-package.$mutation.json"
+  mutate_required_image_ids \
+    "$VALID_CONTRACT_MATERIAL" \
+    "$VALID_PACKAGE_MATERIAL" \
+    "$REQUIRED_IDS_CONTRACT" \
+    "$REQUIRED_IDS_PACKAGE" \
+    "$mutation"
+  expect_fail \
+    "$mutation" \
+    "$REQUIRED_IDS_CONTRACT" \
+    "$REQUIRED_IDS_PACKAGE" \
+    "$VALID_ARCHIVE" \
+    "deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory"
+done
 
 expect_fail missing-archive "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$TMP_DIR/missing.tgz"
 

@@ -41,6 +41,13 @@ checks release contract intake, deploy template package intake, target-profile
 selection, target-profile coverage, release-kit version policy, provenance, and
 digest-bound image inventory only.
 
+App-current inventory closure is exact-set: `release_contract.required_image_ids`
+and `deploy_template_package.required_image_ids` must both be non-empty, must
+match the current required ids `agentsmith_app`, `llmup`, `afscp`, `asbcp`,
+`ingress_nginx_controller`, and `ingress_nginx_certgen`, and each id must exist
+in `deploy_image_inventory`. This is still a focused diagnostic with
+`readiness: false`, not release readiness.
+
 Every `release_contract.target_profiles` entry must declare
 `required: boolean`; `support_level` is not accepted as a replacement. Duplicate
 `target_cluster/substrate_source/distribution` tuples are rejected. Every entry
@@ -80,6 +87,8 @@ artifact sha256, archive `manifest.json` sha256, path safety for package
 entries, and obvious local source or plaintext credential payloads. It rejects
 absolute paths, `..` package-root escapes, symlinks, and hardlinks before any
 future render/check code can consume the archive.
+It also enforces the same app-current `required_image_ids` exact-set closure
+against `deploy_image_inventory`; the report remains `readiness: false`.
 
 The generated `template-package-report.json` must keep `readiness: false` and
 `scope: template_package_intake_only`. It is not release readiness, package
@@ -111,6 +120,8 @@ explicit render values, and
 template package diagnostic: absolute paths, `..` package-root escapes,
 symlinks, hardlinks, local/source payloads, plaintext credential payloads, and
 missing declared template files fail fast.
+Direct render also enforces app-current `required_image_ids` exact-set closure;
+the report remains `readiness: false` and is not release readiness.
 If `--image-map <json>` is supplied, render validates a passing
 `agentsmith.image-map/v1` report with `scope: image_map_only`,
 `readiness: false`, matching release identity, release contract digest, target
@@ -195,6 +206,9 @@ axes fail fast. The selected target profile must exist in the release
 contract. Every inventory item must have unique `id`, `image`, and `digest`
 values; each image must be digest-pinned and its `@sha256` suffix must match
 the `digest` field.
+Standalone image-map enforces app-current `release_contract.required_image_ids`
+exact-set closure against `deploy_image_inventory`; this remains a focused
+`readiness: false` diagnostic, not release readiness.
 
 For online targets without `--target-registry`, target image refs equal source
 image refs and mappings use `action: use_source`. Airgap targets require
@@ -274,6 +288,9 @@ binds those mappings back to `release_contract.deploy_image_inventory`: ids
 must exist, source image and digest must match inventory, target digest must
 equal source digest, and target image must be under `image_map.target_registry`
 with `@<target_digest>`.
+The check also enforces the app-current `required_image_ids` exact-set closure
+from inputs/template-package; this does not make the bundle check release
+readiness.
 
 The release contract `target_profiles` value must be an array and must declare
 `existing_kubernetes/external_declared/airgap`. Every target profile tuple must

@@ -22,6 +22,14 @@ const REQUIRED_ARGS = [
   'outputDir'
 ];
 const AIRGAP_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const APP_CURRENT_REQUIRED_IMAGE_IDS = [
+  'agentsmith_app',
+  'llmup',
+  'afscp',
+  'asbcp',
+  'ingress_nginx_controller',
+  'ingress_nginx_certgen'
+];
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_PACKAGE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const IMAGE_MAP_SCHEMA = 'agentsmith.image-map/v1';
@@ -455,6 +463,78 @@ function buildDeployImageInventory(contract) {
   return byId;
 }
 
+function normalizeRequiredImageIds(value, label) {
+  const ids = requireArray(value, label);
+  if (ids.length === 0) {
+    fail(`${label} must not be empty`);
+  }
+
+  const seen = new Set();
+  return ids.map((item, index) => {
+    const id = requireString(item, `${label}[${index}]`);
+    if (seen.has(id)) {
+      fail(`${label} contains duplicate image id: ${id}`);
+    }
+    seen.add(id);
+    return id;
+  });
+}
+
+function assertSameStringSet(actual, expected, label) {
+  const actualSet = new Set(actual);
+  const expectedSet = new Set(expected);
+  if (actualSet.size !== expectedSet.size) {
+    fail(`${label} must match release_contract.required_image_ids`);
+  }
+  for (const id of actualSet) {
+    if (!expectedSet.has(id)) {
+      fail(`${label} must match release_contract.required_image_ids`);
+    }
+  }
+}
+
+function assertAppCurrentRequiredImageIds(ids, label) {
+  const expected = new Set(APP_CURRENT_REQUIRED_IMAGE_IDS);
+  if (ids.length !== expected.size) {
+    fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+  }
+  for (const id of ids) {
+    if (!expected.has(id)) {
+      fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+    }
+  }
+}
+
+function assertRequiredImageIds(contract, deployTemplatePackage, deployImageInventoryById) {
+  const contractRequiredImageIds = normalizeRequiredImageIds(
+    contract.required_image_ids,
+    'release_contract.required_image_ids'
+  );
+  const packageRequiredImageIds = normalizeRequiredImageIds(
+    deployTemplatePackage.required_image_ids,
+    'deploy_template_package.required_image_ids'
+  );
+  assertSameStringSet(
+    packageRequiredImageIds,
+    contractRequiredImageIds,
+    'deploy_template_package.required_image_ids'
+  );
+  assertAppCurrentRequiredImageIds(
+    contractRequiredImageIds,
+    'release_contract.required_image_ids'
+  );
+  assertAppCurrentRequiredImageIds(
+    packageRequiredImageIds,
+    'deploy_template_package.required_image_ids'
+  );
+
+  for (const id of packageRequiredImageIds) {
+    if (!deployImageInventoryById.has(id)) {
+      fail(`deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory: ${id}`);
+    }
+  }
+}
+
 function assertReleaseContract(contract, deployTemplatePackage) {
   assertStringEquals(
     contract.schema_version,
@@ -478,6 +558,7 @@ function assertReleaseContract(contract, deployTemplatePackage) {
   );
   assertContractTargetProfiles(contract);
   const deployImageInventoryById = buildDeployImageInventory(contract);
+  assertRequiredImageIds(contract, deployTemplatePackage, deployImageInventoryById);
 
   return { releaseId, gitSha, deployTemplateDigest, deployImageInventoryById };
 }

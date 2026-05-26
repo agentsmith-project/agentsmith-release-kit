@@ -27,6 +27,14 @@ const IMAGE_GROUPS = [
   'adopted_provider_images',
   'release_kit_prerequisite_images'
 ];
+const APP_CURRENT_REQUIRED_IMAGE_IDS = [
+  'agentsmith_app',
+  'llmup',
+  'afscp',
+  'asbcp',
+  'ingress_nginx_controller',
+  'ingress_nginx_certgen'
+];
 const REQUIRED_ARGS = [
   'releaseContract',
   'deployTemplatePackage',
@@ -315,6 +323,81 @@ function assertUniqueImageIds(images, label) {
     }
     ids.add(image.id);
   }
+}
+
+function normalizeRequiredImageIds(value, label) {
+  const ids = requireArray(value, label);
+  if (ids.length === 0) {
+    fail(`${label} must not be empty`);
+  }
+
+  const seen = new Set();
+  return ids.map((item, index) => {
+    const id = requireString(item, `${label}[${index}]`);
+    if (seen.has(id)) {
+      fail(`${label} contains duplicate image id: ${id}`);
+    }
+    seen.add(id);
+    return id;
+  });
+}
+
+function assertSameStringSet(actual, expected, label) {
+  const actualSet = new Set(actual);
+  const expectedSet = new Set(expected);
+  if (actualSet.size !== expectedSet.size) {
+    fail(`${label} must match release_contract.required_image_ids`);
+  }
+  for (const id of actualSet) {
+    if (!expectedSet.has(id)) {
+      fail(`${label} must match release_contract.required_image_ids`);
+    }
+  }
+}
+
+function assertAppCurrentRequiredImageIds(ids, label) {
+  const expected = new Set(APP_CURRENT_REQUIRED_IMAGE_IDS);
+  if (ids.length !== expected.size) {
+    fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+  }
+  for (const id of ids) {
+    if (!expected.has(id)) {
+      fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+    }
+  }
+}
+
+function assertRequiredImageIds(contract, deployTemplatePackage, images) {
+  const contractRequiredImageIds = normalizeRequiredImageIds(
+    contract.required_image_ids,
+    'release_contract.required_image_ids'
+  );
+  const packageRequiredImageIds = normalizeRequiredImageIds(
+    deployTemplatePackage.required_image_ids,
+    'deploy_template_package.required_image_ids'
+  );
+  assertSameStringSet(
+    packageRequiredImageIds,
+    contractRequiredImageIds,
+    'deploy_template_package.required_image_ids'
+  );
+  assertAppCurrentRequiredImageIds(
+    contractRequiredImageIds,
+    'release_contract.required_image_ids'
+  );
+  assertAppCurrentRequiredImageIds(
+    packageRequiredImageIds,
+    'deploy_template_package.required_image_ids'
+  );
+
+  const inventoryIds = new Set(images.map((image) => image.id));
+  for (const id of packageRequiredImageIds) {
+    if (!inventoryIds.has(id)) {
+      fail(`deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory: ${id}`);
+    }
+  }
+
+  return packageRequiredImageIds;
 }
 
 function assertImageInventory(contract) {
@@ -1098,6 +1181,7 @@ async function main() {
   assertDeployTemplatePackageIdentity(deployTemplatePackage);
   assertTemplate(contract, deployTemplatePackage);
   const images = assertImageInventory(contract);
+  assertRequiredImageIds(contract, deployTemplatePackage, images);
   assertProductFlowShape(contract);
   const targetProfiles = assertTargetProfiles(contract);
   const targetProfileCoverageReport = buildTargetProfileCoverageReport(targetProfiles);

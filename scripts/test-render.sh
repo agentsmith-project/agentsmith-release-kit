@@ -233,7 +233,7 @@ spec:
     spec:
       containers:
         - name: hidden
-          image: ghcr.io/agentsmith-project/not-in-contract:2026.05.23-p0@sha256:9999999999999999999999999999999999999999999999999999999999999999
+          image: ghcr.io/agentsmith-project/not-in-contract:2026.05.23-p0@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 YAML
       ;;
     tag_only_image)
@@ -396,6 +396,52 @@ fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
 NODE
 }
 
+mutate_required_image_ids() {
+  local mutation="$1"
+  local contract_input="$2"
+  local deploy_template_package_input="$3"
+  local contract_output="$4"
+  local deploy_template_package_output="$5"
+
+  "$NODE_BIN" --input-type=module - \
+    "$mutation" \
+    "$contract_input" \
+    "$deploy_template_package_input" \
+    "$contract_output" \
+    "$deploy_template_package_output" <<'NODE'
+import fs from 'node:fs';
+
+const [
+  mutation,
+  contractInput,
+  deployTemplatePackageInput,
+  contractOutput,
+  deployTemplatePackageOutput
+] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+const deployTemplatePackage = JSON.parse(fs.readFileSync(deployTemplatePackageInput, 'utf8'));
+const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
+
+switch (mutation) {
+  case 'legacy-three-image-required-image-ids':
+    contract.required_image_ids = legacyThreeImageIds;
+    contract.deploy_template_package.required_image_ids = legacyThreeImageIds;
+    deployTemplatePackage.required_image_ids = legacyThreeImageIds;
+    break;
+  case 'required-current-id-absent-from-inventory':
+    contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
+      (item) => item.id !== 'asbcp'
+    );
+    break;
+  default:
+    throw new Error(`unknown required_image_ids mutation: ${mutation}`);
+}
+
+fs.writeFileSync(deployTemplatePackageOutput, `${JSON.stringify(deployTemplatePackage, null, 2)}\n`);
+fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
 mutate_contract_target_profile() {
   local mutation="$1"
   local contract_input="$2"
@@ -476,6 +522,7 @@ expect_fail_case() {
   local target_profile="${7:-$TARGET_PROFILE}"
   local forbidden_source_root="${8:-}"
   local image_map="${9:-}"
+  local expected_stderr="${10:-}"
   local output_dir="$TMP_DIR/out-$label"
 
   if run_render \
@@ -491,6 +538,12 @@ expect_fail_case() {
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected invalid render case to fail: $label"
+  fi
+
+  if [[ -n "$expected_stderr" ]] && ! grep -Fq "$expected_stderr" "$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected render stderr to contain '$expected_stderr': $label"
   fi
 
   pass "invalid render rejected: $label"
@@ -770,6 +823,46 @@ assert_rendered_image_adoption \
   "$VALID_IMAGE_MAP" \
   source
 pass "valid render accepted with focused non-readiness report"
+
+LEGACY_REQUIRED_IDS_CONTRACT="$TMP_DIR/release-contract.legacy-three-image-required-image-ids.json"
+LEGACY_REQUIRED_IDS_PACKAGE="$TMP_DIR/deploy-template-package.legacy-three-image-required-image-ids.json"
+mutate_required_image_ids \
+  legacy-three-image-required-image-ids \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$LEGACY_REQUIRED_IDS_CONTRACT" \
+  "$LEGACY_REQUIRED_IDS_PACKAGE"
+expect_fail_case \
+  legacy-three-image-required-image-ids \
+  "$LEGACY_REQUIRED_IDS_CONTRACT" \
+  "$LEGACY_REQUIRED_IDS_PACKAGE" \
+  "$VALID_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "release_contract.required_image_ids must match current app image ids"
+
+MISSING_REQUIRED_ID_CONTRACT="$TMP_DIR/release-contract.required-current-id-absent-from-inventory.json"
+MISSING_REQUIRED_ID_PACKAGE="$TMP_DIR/deploy-template-package.required-current-id-absent-from-inventory.json"
+mutate_required_image_ids \
+  required-current-id-absent-from-inventory \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$MISSING_REQUIRED_ID_CONTRACT" \
+  "$MISSING_REQUIRED_ID_PACKAGE"
+expect_fail_case \
+  required-current-id-absent-from-inventory \
+  "$MISSING_REQUIRED_ID_CONTRACT" \
+  "$MISSING_REQUIRED_ID_PACKAGE" \
+  "$VALID_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory"
 
 IMAGE_MAP_OUT="$TMP_DIR/out-valid-image-map"
 run_render \

@@ -14,6 +14,14 @@ const REQUIRED_ARGS = ['releaseContract', 'targetProfile', 'outputDir'];
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const REPORT_SCHEMA = 'agentsmith.image-map/v1';
 const IMAGE_MAP_SCOPE = 'image_map_only';
+const APP_CURRENT_REQUIRED_IMAGE_IDS = [
+  'agentsmith_app',
+  'llmup',
+  'afscp',
+  'asbcp',
+  'ingress_nginx_controller',
+  'ingress_nginx_certgen'
+];
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -312,6 +320,53 @@ function assertNoDuplicate(value, seen, duplicateLabel) {
   seen.add(value);
 }
 
+function normalizeRequiredImageIds(value, label) {
+  const ids = requireArray(value, label);
+  if (ids.length === 0) {
+    fail(`${label} must not be empty`);
+  }
+
+  const seen = new Set();
+  return ids.map((item, index) => {
+    const id = requireString(item, `${label}[${index}]`);
+    if (seen.has(id)) {
+      fail(`${label} contains duplicate image id: ${id}`);
+    }
+    seen.add(id);
+    return id;
+  });
+}
+
+function assertAppCurrentRequiredImageIds(ids, label) {
+  const expected = new Set(APP_CURRENT_REQUIRED_IMAGE_IDS);
+  if (ids.length !== expected.size) {
+    fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+  }
+  for (const id of ids) {
+    if (!expected.has(id)) {
+      fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+    }
+  }
+}
+
+function assertReleaseContractRequiredImageIds(contract, inventory) {
+  const requiredImageIds = normalizeRequiredImageIds(
+    contract.required_image_ids,
+    'release_contract.required_image_ids'
+  );
+  assertAppCurrentRequiredImageIds(
+    requiredImageIds,
+    'release_contract.required_image_ids'
+  );
+
+  const inventoryIds = new Set(inventory.map((item) => item.id));
+  for (const id of requiredImageIds) {
+    if (!inventoryIds.has(id)) {
+      fail(`release_contract.required_image_ids contains id missing from release_contract.deploy_image_inventory: ${id}`);
+    }
+  }
+}
+
 function buildInventory(contract) {
   const items = requireArray(
     contract.deploy_image_inventory,
@@ -570,6 +625,7 @@ async function main() {
   contract.git_sha = requireGitSha(contract.git_sha, 'release_contract.git_sha');
   assertContractTargetProfile(contract, targetProfile);
   const inventory = buildInventory(contract);
+  assertReleaseContractRequiredImageIds(contract, inventory);
 
   await writeReport(
     args.outputDir,

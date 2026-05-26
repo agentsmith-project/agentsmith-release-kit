@@ -49,7 +49,10 @@ operator readiness evidence.
 Materialized template render output proves only that one descriptor-bound
 archive can render its declared Kubernetes templates from explicit render
 values, release contract image inventory, target axes, and substrate connection
-truth. Its `manifest-render-report.json` keeps `readiness: false`; it is not
+truth. Direct render also enforces app-current `required_image_ids` exact-set
+closure across the release contract, deploy template package descriptor, and
+`deploy_image_inventory`. Its `manifest-render-report.json` keeps
+`readiness: false`; it is not
 apply, deploy, package, release, rollout, smoke, or operator readiness
 evidence.
 
@@ -70,7 +73,11 @@ image references for existing Kubernetes canonical profiles:
 registry uses source refs directly; a provided target registry, and every
 airgap run, produces mirror-required target refs. It does not verify that
 images exist in a target registry, does not pull or push images, does not build
-an airgap bundle, and does not support local kind image import.
+an airgap bundle, and does not support local kind image import. Because
+`image-map.json` is an accepted release-kit evidence output, standalone
+image-map generation also enforces the app-current
+`release_contract.required_image_ids` exact-set closure and requires every
+required id to exist in `deploy_image_inventory`.
 `image-map.json` keeps `readiness: false`; it is not deploy, package, release,
 rollout, smoke, product-flow, or operator readiness evidence.
 

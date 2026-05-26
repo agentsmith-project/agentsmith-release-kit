@@ -100,7 +100,12 @@ bash scripts/test-inputs.sh
 
 `--inputs` validates only the release contract, deploy template package, target
 profile, provenance, release-kit version policy, and digest-bound image
-inventory. Every declared `target_profiles` entry must carry
+inventory. During app-current intake, `release_contract.required_image_ids`
+and `deploy_template_package.required_image_ids` must be non-empty, must match
+the exact current app image id set, and every required id must exist in
+`deploy_image_inventory`; the current required ids are `agentsmith_app`,
+`llmup`, `afscp`, `asbcp`, `ingress_nginx_controller`, and
+`ingress_nginx_certgen`. Every declared `target_profiles` entry must carry
 `required: boolean`; `support_level` is rejected, duplicate three-axis tuples
 are rejected, and every entry must use a canonical declarable profile. Existing
 Kubernetes profiles can be declared for both `external_declared` and
@@ -138,6 +143,8 @@ target profile, explicit render values, and
 `agentsmith.substrate-connection.truth/v1` substrate truth. Output goes to
 `<output-dir>/rendered-manifests`, and `manifest-render-report.json` is written
 with `readiness: false`, `scope: manifest_render_only`, and `status: pass`.
+Direct render enforces app-current `required_image_ids` exact-set closure
+across the release contract, deploy template package, and inventory.
 When `--image-map <json>` is supplied, render first validates that it is a
 passing `agentsmith.image-map/v1` report bound to the same release contract
 digest and target profile, then uses `mapping.target_image` for
@@ -204,6 +211,8 @@ derived by stripping the source registry and tag, keeping the repository path,
 and appending the original sha256 digest under the target registry. Registry
 namespace components must be lowercase and must start and end with
 alphanumeric characters.
+Standalone image-map enforces app-current `release_contract.required_image_ids`
+exact-set closure against `deploy_image_inventory`.
 
 This diagnostic does not log in to a registry, pull, push, mirror, build an
 airgap bundle, import images into kind, call Kubernetes, or claim deploy,

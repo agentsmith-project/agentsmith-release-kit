@@ -29,6 +29,14 @@ const DEPLOY_TEMPLATE_MANIFEST_SCHEMA = 'agentsmith.deploy-template-manifest/v1'
 const IMAGE_MAP_SCHEMA = 'agentsmith.image-map/v1';
 const IMAGE_MAP_SCOPE = 'image_map_only';
 const REPORT_SCHEMA = 'agentsmith.manifest-render-report/v1';
+const APP_CURRENT_REQUIRED_IMAGE_IDS = [
+  'agentsmith_app',
+  'llmup',
+  'afscp',
+  'asbcp',
+  'ingress_nginx_controller',
+  'ingress_nginx_certgen'
+];
 const WORKLOAD_KINDS = new Set([
   'Deployment',
   'StatefulSet',
@@ -804,6 +812,78 @@ function assertArchiveDigests(deployTemplatePackage, archiveSha256) {
     );
     if (archiveSha256 !== provenanceArtifactSha256) {
       fail('archive sha256 must match deploy_template_package.artifact_provenance.artifact_sha256');
+    }
+  }
+}
+
+function normalizeRequiredImageIds(value, label) {
+  const ids = requireArray(value, label);
+  if (ids.length === 0) {
+    fail(`${label} must not be empty`);
+  }
+
+  const seen = new Set();
+  return ids.map((item, index) => {
+    const id = requireString(item, `${label}[${index}]`);
+    if (seen.has(id)) {
+      fail(`${label} contains duplicate image id: ${id}`);
+    }
+    seen.add(id);
+    return id;
+  });
+}
+
+function assertSameStringSet(actual, expected, label) {
+  const actualSet = new Set(actual);
+  const expectedSet = new Set(expected);
+  if (actualSet.size !== expectedSet.size) {
+    fail(`${label} must match release_contract.required_image_ids`);
+  }
+  for (const id of actualSet) {
+    if (!expectedSet.has(id)) {
+      fail(`${label} must match release_contract.required_image_ids`);
+    }
+  }
+}
+
+function assertAppCurrentRequiredImageIds(ids, label) {
+  const expected = new Set(APP_CURRENT_REQUIRED_IMAGE_IDS);
+  if (ids.length !== expected.size) {
+    fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+  }
+  for (const id of ids) {
+    if (!expected.has(id)) {
+      fail(`${label} must match current app image ids: ${APP_CURRENT_REQUIRED_IMAGE_IDS.join(', ')}`);
+    }
+  }
+}
+
+function assertRequiredImageIds(contract, deployTemplatePackage, inventoryById) {
+  const contractRequiredImageIds = normalizeRequiredImageIds(
+    contract.required_image_ids,
+    'release_contract.required_image_ids'
+  );
+  const packageRequiredImageIds = normalizeRequiredImageIds(
+    deployTemplatePackage.required_image_ids,
+    'deploy_template_package.required_image_ids'
+  );
+  assertSameStringSet(
+    packageRequiredImageIds,
+    contractRequiredImageIds,
+    'deploy_template_package.required_image_ids'
+  );
+  assertAppCurrentRequiredImageIds(
+    contractRequiredImageIds,
+    'release_contract.required_image_ids'
+  );
+  assertAppCurrentRequiredImageIds(
+    packageRequiredImageIds,
+    'deploy_template_package.required_image_ids'
+  );
+
+  for (const id of packageRequiredImageIds) {
+    if (!inventoryById.has(id)) {
+      fail(`deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory: ${id}`);
     }
   }
 }
@@ -1891,6 +1971,7 @@ async function main() {
   }
 
   const inventory = buildInventory(contract);
+  assertRequiredImageIds(contract, deployTemplatePackage, inventory.byId);
   const imageMapImages = imageMapInput
     ? validateImageMap({
         imageMap: imageMapInput.value,

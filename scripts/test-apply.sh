@@ -29,6 +29,7 @@ import path from 'node:path';
 const [contractInput, renderedManifests, mutation] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const inventory = new Map(contract.deploy_image_inventory.map((item) => [item.id, item.image]));
+const unknownDigest = `sha256:${'e'.repeat(64)}`;
 let appImage = inventory.get('agentsmith_app');
 
 if (!appImage) {
@@ -36,7 +37,7 @@ if (!appImage) {
 }
 
 if (mutation === 'unknown_image') {
-  appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@sha256:${'9'.repeat(64)}`;
+  appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@${unknownDigest}`;
 }
 
 fs.mkdirSync(renderedManifests, { recursive: true });

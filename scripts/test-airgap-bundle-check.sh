@@ -117,6 +117,7 @@ const archiveSha256 = digestFile(archivePath);
 const deployTemplatePackage = JSON.parse(
   fs.readFileSync(fixtureDeployTemplatePackagePath, 'utf8')
 );
+const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
 deployTemplatePackage.package_sha256 = archiveSha256;
 if (
   deployTemplatePackage.artifact_provenance &&
@@ -143,6 +144,15 @@ switch (mutation) {
   case 'provenance_artifact_sha_mismatch':
     deployTemplatePackage.artifact_provenance.artifact_sha256 = `sha256:${'7'.repeat(64)}`;
     break;
+  case 'missing_deploy_package_required_image_ids':
+    delete deployTemplatePackage.required_image_ids;
+    break;
+  case 'empty_deploy_package_required_image_ids':
+    deployTemplatePackage.required_image_ids = [];
+    break;
+  case 'non_array_deploy_package_required_image_ids':
+    deployTemplatePackage.required_image_ids = 'agentsmith_app';
+    break;
   case 'target_profiles_not_array':
   case 'target_profiles_missing_airgap':
   case 'target_profiles_noncanonical_synonym':
@@ -152,6 +162,11 @@ switch (mutation) {
   case 'target_support_level':
   case 'kind_required_target_profile':
   case 'duplicate_target_profile_tuple':
+  case 'missing_release_required_image_ids':
+  case 'required_image_ids_mismatch':
+  case 'legacy_three_image_required_image_ids':
+  case 'required_image_id_missing_in_inventory':
+  case 'required_current_image_id_absent_from_inventory':
     break;
   default:
     throw new Error(`unknown material mutation: ${mutation}`);
@@ -190,6 +205,27 @@ switch (mutation) {
     break;
   case 'duplicate_target_profile_tuple':
     contract.target_profiles.push({ ...contract.target_profiles[1] });
+    break;
+  case 'missing_release_required_image_ids':
+    delete contract.required_image_ids;
+    break;
+  case 'required_image_ids_mismatch':
+    contract.required_image_ids = contract.required_image_ids.slice(0, -1);
+    break;
+  case 'legacy_three_image_required_image_ids':
+    contract.required_image_ids = legacyThreeImageIds;
+    contract.deploy_template_package.required_image_ids = legacyThreeImageIds;
+    deployTemplatePackage.required_image_ids = legacyThreeImageIds;
+    break;
+  case 'required_image_id_missing_in_inventory':
+    contract.required_image_ids = [...contract.required_image_ids, 'missing_component'];
+    contract.deploy_template_package.required_image_ids = [...contract.required_image_ids];
+    deployTemplatePackage.required_image_ids = [...contract.required_image_ids];
+    break;
+  case 'required_current_image_id_absent_from_inventory':
+    contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
+      (item) => item.id !== 'asbcp'
+    );
     break;
   default:
     break;
@@ -802,8 +838,8 @@ if (report.components_count !== 4) {
   throw new Error(`unexpected components count: ${report.components_count}`);
 }
 const imageMapCount = report.artifacts?.image_map?.image_count;
-if (!Number.isInteger(imageMapCount) || imageMapCount < 1) {
-  throw new Error('image-map image count is missing');
+if (imageMapCount !== 6) {
+  throw new Error(`image-map image count must match app-current inventory: ${imageMapCount}`);
 }
 if (report.image_artifact_declaration_count !== imageMapCount) {
   throw new Error(`unexpected image artifact count: ${report.image_artifact_declaration_count}`);
@@ -980,6 +1016,7 @@ expect_material_fail() {
 expect_contract_fail() {
   local label="$1"
   local mutation="$2"
+  local expected_stderr="${3:-}"
   local release_contract="$TMP_DIR/$label.release-contract.json"
   local deploy_template_package="$TMP_DIR/$label.deploy-template-package.json"
   local archive="$TMP_DIR/$label.archive.tgz"
@@ -998,6 +1035,12 @@ expect_contract_fail() {
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected invalid release contract to fail: $label"
+  fi
+
+  if [[ -n "$expected_stderr" ]] && ! grep -Fq "$expected_stderr" "$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected airgap bundle check stderr to contain '$expected_stderr': $label"
   fi
 
   assert_no_report "$output_dir/$REPORT_FILE"
@@ -1099,6 +1142,9 @@ expect_material_fail artifact-provenance-non-object artifact_provenance_non_obje
 expect_material_fail missing-artifact-sha256 missing_artifact_sha256
 expect_material_fail artifact-sha-invalid-format artifact_sha_invalid_format
 expect_material_fail provenance-artifact-sha-mismatch provenance_artifact_sha_mismatch
+expect_material_fail missing-deploy-package-required-image-ids missing_deploy_package_required_image_ids
+expect_material_fail empty-deploy-package-required-image-ids empty_deploy_package_required_image_ids
+expect_material_fail non-array-deploy-package-required-image-ids non_array_deploy_package_required_image_ids
 expect_contract_fail target-profiles-not-array target_profiles_not_array
 expect_contract_fail contract-missing-airgap-target-profile target_profiles_missing_airgap
 expect_contract_fail contract-noncanonical-target-tuple target_profiles_noncanonical_synonym
@@ -1108,6 +1154,14 @@ expect_contract_fail target-required-true target_required_true
 expect_contract_fail target-support-level-present target_support_level
 expect_contract_fail kind-required-target-profile kind_required_target_profile
 expect_contract_fail duplicate-target-profile-tuple duplicate_target_profile_tuple
+expect_contract_fail missing-release-required-image-ids missing_release_required_image_ids
+expect_contract_fail required-image-ids-mismatch required_image_ids_mismatch
+expect_contract_fail legacy-three-image-required-image-ids legacy_three_image_required_image_ids
+expect_contract_fail required-image-id-missing-in-inventory required_image_id_missing_in_inventory
+expect_contract_fail \
+  required-current-image-id-absent-from-inventory \
+  required_current_image_id_absent_from_inventory \
+  "deploy_template_package.required_image_ids contains id missing from release_contract.deploy_image_inventory"
 
 expect_profile_fail online "$ONLINE_PROFILE"
 expect_profile_fail kind-rehearsal "$KIND_PROFILE"

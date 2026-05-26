@@ -59,9 +59,15 @@ The current `--inputs` path is a focused diagnostic for contract intake only.
 Its `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` outputs must keep `readiness: false`;
 they prove contract/input digest readiness only and are not deploy, package, or
-release readiness evidence. All target profiles must declare
-`required: boolean`; `support_level` is rejected. Required profiles must be
-covered by the current canonical focused set:
+release readiness evidence. App-current inventory closure requires
+`release_contract.required_image_ids` and
+`deploy_template_package.required_image_ids` to be non-empty exact matches for
+the current app image id set, and all required ids must exist in
+`deploy_image_inventory`. The current required ids are `agentsmith_app`,
+`llmup`, `afscp`, `asbcp`, `ingress_nginx_controller`, and
+`ingress_nginx_certgen`. All target profiles must declare `required: boolean`;
+`support_level` is rejected. Required profiles must be covered by the current
+canonical focused set:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`,
@@ -83,10 +89,12 @@ package descriptor, matching `.tgz` archive, explicit target profile, explicit
 render values, and operator-provided substrate truth. It renders only
 `kubernetes` templates declared by archive `manifest.json` into
 `<output-dir>/rendered-manifests` and writes `manifest-render-report.json` with
-`readiness: false` and `scope: manifest_render_only`. Optional
-`--image-map <json>` is accepted only as image reference adoption: it must be a
-passing `agentsmith.image-map/v1` report bound to the same release contract
-digest and target profile, and render uses `mapping.target_image` for
+`readiness: false` and `scope: manifest_render_only`.
+Direct render enforces app-current `required_image_ids` exact-set closure
+across the release contract, deploy template package, and inventory.
+Optional `--image-map <json>` is accepted only as image reference adoption: it
+must be a passing `agentsmith.image-map/v1` report bound to the same release
+contract digest and target profile, and render uses `mapping.target_image` for
 `${{ images.<id>.image }}` without registry login, pull, push, mirror, or
 presence checks. The only template syntax is scalar placeholder replacement
 with roots `values`, `images`, `target`, `substrate`, and `release`, such as
@@ -123,6 +131,8 @@ as CLI targets. `kind_rehearsal/kit_installed/online` is a canonical profile
 tuple but out of scope for image-map CLI. Only canonical profile tuples are
 accepted in `release_contract.target_profiles`; non-canonical pre-GA names and
 synonym axes fail fast.
+Standalone image-map enforces app-current `release_contract.required_image_ids`
+exact-set closure against `deploy_image_inventory`.
 For online without a target registry, it maps each image to itself with
 `action: use_source`; with a target registry, and always for airgap, it writes
 digest-pinned target refs under that registry with `action: mirror_required`.

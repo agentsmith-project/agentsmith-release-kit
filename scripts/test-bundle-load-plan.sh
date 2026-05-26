@@ -14,6 +14,14 @@ ALIAS_OFFLINE_PROFILE="existing_kubernetes/external_declared/offline"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="airgap-bundle-load-plan-report.json"
 CHECK_REPORT_FILE="airgap-bundle-check-report.json"
+APP_CURRENT_IMAGE_IDS=(
+  agentsmith_app
+  llmup
+  afscp
+  asbcp
+  ingress_nginx_controller
+  ingress_nginx_certgen
+)
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -163,7 +171,7 @@ JSON
 
 create_image_archives() {
   mkdir -p "$IMAGE_DIR"
-  for id in agentsmith_app llmup ingress_nginx_controller; do
+  for id in "${APP_CURRENT_IMAGE_IDS[@]}"; do
     printf 'local oci layout tar placeholder for %s\n' "$id" >"$IMAGE_DIR/$id.oci-layout.tar"
   done
 }
@@ -215,7 +223,10 @@ run_bundle_create() {
     --output-dir "$output_dir" \
     --image-archive "agentsmith_app=$IMAGE_DIR/agentsmith_app.oci-layout.tar" \
     --image-archive "llmup=$IMAGE_DIR/llmup.oci-layout.tar" \
+    --image-archive "afscp=$IMAGE_DIR/afscp.oci-layout.tar" \
+    --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
     --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
+    --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
     --runbook "$PAYLOAD_DIR/runbook.md" \
     --script "$PAYLOAD_DIR/install.sh" \
     --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
@@ -400,6 +411,7 @@ const [reportFile, checkReportFile, expectedRegistry] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const checkReport = JSON.parse(fs.readFileSync(checkReportFile, 'utf8'));
 const serialized = JSON.stringify(report);
+const expectedImageCount = 6;
 
 function assertNoLeakKeys(value, path = 'report') {
   if (!value || typeof value !== 'object') {
@@ -442,16 +454,16 @@ if (report.target_profile?.value !== 'existing_kubernetes/external_declared/airg
 if (report.target_registry !== expectedRegistry) {
   throw new Error(`unexpected target registry: ${report.target_registry}`);
 }
-if (report.image_count !== 3) {
+if (report.image_count !== expectedImageCount) {
   throw new Error(`unexpected image count: ${report.image_count}`);
 }
 if (report.target_registry_summary?.target_registry !== expectedRegistry) {
   throw new Error('target registry summary is missing target registry');
 }
-if (report.target_registry_summary?.target_digest_count !== 3) {
+if (report.target_registry_summary?.target_digest_count !== expectedImageCount) {
   throw new Error('target registry summary must count target digest refs');
 }
-if (report.target_registry_summary?.mirror_required_count !== 3) {
+if (report.target_registry_summary?.mirror_required_count !== expectedImageCount) {
   throw new Error('target registry summary must count mirror-required mappings');
 }
 if (report.digest_summary?.airgap_bundle_check_report_input_sha256 === undefined) {

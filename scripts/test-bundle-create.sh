@@ -13,6 +13,14 @@ ALIAS_OFFLINE_PROFILE="existing_kubernetes/external_declared/offline"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="bundle-create-report.json"
 CHECK_REPORT_FILE="airgap-bundle-check-report.json"
+APP_CURRENT_IMAGE_IDS=(
+  agentsmith_app
+  llmup
+  afscp
+  asbcp
+  ingress_nginx_controller
+  ingress_nginx_certgen
+)
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -165,7 +173,7 @@ YAML
 
 create_image_archives() {
   mkdir -p "$IMAGE_DIR"
-  for id in agentsmith_app llmup ingress_nginx_controller; do
+  for id in "${APP_CURRENT_IMAGE_IDS[@]}"; do
     printf 'local oci layout tar placeholder for %s\n' "$id" >"$IMAGE_DIR/$id.oci-layout.tar"
   done
 }
@@ -239,10 +247,10 @@ refresh_args() {
     --operator-prerequisites "$OPERATOR_PREREQUISITES"
   )
   default_image_args=(
-    --image-archive "agentsmith_app=$IMAGE_DIR/agentsmith_app.oci-layout.tar"
-    --image-archive "llmup=$IMAGE_DIR/llmup.oci-layout.tar"
-    --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar"
   )
+  for id in "${APP_CURRENT_IMAGE_IDS[@]}"; do
+    default_image_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
+  done
 }
 
 run_bundle_create_full() {
@@ -319,6 +327,14 @@ const manifest = JSON.parse(
   fs.readFileSync(path.join(bundleRoot, 'airgap-bundle-manifest.json'), 'utf8')
 );
 const serializedReport = JSON.stringify(report);
+const expectedImageIds = [
+  'agentsmith_app',
+  'llmup',
+  'afscp',
+  'asbcp',
+  'ingress_nginx_controller',
+  'ingress_nginx_certgen'
+];
 
 function assertFile(relativePath) {
   const file = path.join(bundleRoot, relativePath);
@@ -357,7 +373,10 @@ for (const relativePath of [
   'components/image-map.json',
   'images/agentsmith_app.oci-layout.tar',
   'images/llmup.oci-layout.tar',
+  'images/afscp.oci-layout.tar',
+  'images/asbcp.oci-layout.tar',
   'images/ingress_nginx_controller.oci-layout.tar',
+  'images/ingress_nginx_certgen.oci-layout.tar',
   'payload/runbook.md',
   'payload/install.sh',
   'payload/profile-values.schema.json',
@@ -392,8 +411,12 @@ if (checkReport.readiness !== false) {
 if (manifest.schema_version !== 'agentsmith.airgap-bundle-manifest/v1') {
   throw new Error(`unexpected bundle manifest schema: ${manifest.schema_version}`);
 }
-if (manifest.image_artifact_declarations?.length !== 3) {
+if (manifest.image_artifact_declarations?.length !== expectedImageIds.length) {
   throw new Error('bundle manifest must declare all fixture image archives');
+}
+const imageIds = manifest.image_artifact_declarations.map((item) => item.id);
+if (JSON.stringify(imageIds) !== JSON.stringify(expectedImageIds)) {
+  throw new Error(`bundle manifest must declare app-current image ids: ${imageIds.join(',')}`);
 }
 if (manifest.operator_prerequisites?.tools?.length !== 2) {
   throw new Error('bundle manifest must include bundled and operator prerequisite tools');
@@ -401,7 +424,7 @@ if (manifest.operator_prerequisites?.tools?.length !== 2) {
 if (report.components_count !== 4) {
   throw new Error(`unexpected component count: ${report.components_count}`);
 }
-if (report.image_artifact_count !== 3) {
+if (report.image_artifact_count !== expectedImageIds.length) {
   throw new Error(`unexpected image artifact count: ${report.image_artifact_count}`);
 }
 if (report.payload_artifact_count !== 5) {
@@ -483,6 +506,8 @@ expect_create_fail missing-image-archive "$TMP_DIR/bundle-missing-image" "$TMP_D
   run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-missing-image" "$TMP_DIR/out-missing-image" \
     --image-archive "agentsmith_app=$IMAGE_DIR/agentsmith_app.oci-layout.tar" \
     --image-archive "llmup=$IMAGE_DIR/llmup.oci-layout.tar" \
+    --image-archive "afscp=$IMAGE_DIR/afscp.oci-layout.tar" \
+    --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
     "${common_payload_args[@]}"
 
 expect_create_fail duplicate-image-id "$TMP_DIR/bundle-duplicate-image" "$TMP_DIR/out-duplicate-image" \
@@ -526,21 +551,30 @@ expect_create_fail image-archive-symlink "$TMP_DIR/bundle-image-symlink" "$TMP_D
   run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-image-symlink" "$TMP_DIR/out-image-symlink" \
     --image-archive "agentsmith_app=$TMP_DIR/agentsmith_app.symlink.tar" \
     --image-archive "llmup=$IMAGE_DIR/llmup.oci-layout.tar" \
+    --image-archive "afscp=$IMAGE_DIR/afscp.oci-layout.tar" \
+    --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
     --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
+    --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
     "${common_payload_args[@]}"
 
 expect_create_fail image-archive-directory "$TMP_DIR/bundle-image-directory" "$TMP_DIR/out-image-directory" \
   run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-image-directory" "$TMP_DIR/out-image-directory" \
     --image-archive "agentsmith_app=$IMAGE_DIR" \
     --image-archive "llmup=$IMAGE_DIR/llmup.oci-layout.tar" \
+    --image-archive "afscp=$IMAGE_DIR/afscp.oci-layout.tar" \
+    --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
     --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
+    --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
     "${common_payload_args[@]}"
 
 expect_create_fail image-archive-uri "$TMP_DIR/bundle-image-uri" "$TMP_DIR/out-image-uri" \
   run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-image-uri" "$TMP_DIR/out-image-uri" \
     --image-archive "agentsmith_app=https://example.invalid/agentsmith_app.oci-layout.tar" \
     --image-archive "llmup=$IMAGE_DIR/llmup.oci-layout.tar" \
+    --image-archive "afscp=$IMAGE_DIR/afscp.oci-layout.tar" \
+    --image-archive "asbcp=$IMAGE_DIR/asbcp.oci-layout.tar" \
     --image-archive "ingress_nginx_controller=$IMAGE_DIR/ingress_nginx_controller.oci-layout.tar" \
+    --image-archive "ingress_nginx_certgen=$IMAGE_DIR/ingress_nginx_certgen.oci-layout.tar" \
     "${common_payload_args[@]}"
 
 expect_create_fail missing-runbook "$TMP_DIR/bundle-missing-runbook" "$TMP_DIR/out-missing-runbook" \

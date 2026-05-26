@@ -77,6 +77,7 @@ const [input, output, label, rootDir] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(input, 'utf8'));
 const digestE = `sha256:${'e'.repeat(64)}`;
 const digestUpperA = `sha256:${'A'.repeat(64)}`;
+const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
 
 function stableJson(value) {
   if (Array.isArray(value)) {
@@ -324,6 +325,40 @@ function refreshContractArtifactDigest() {
   case 'duplicate-image-id':
     contract.adopted_provider_images[0].id = contract.product_images[0].id;
     contract.deploy_image_inventory[1].id = contract.deploy_image_inventory[0].id;
+    break;
+  case 'missing-release-required-image-ids':
+    delete contract.required_image_ids;
+    break;
+  case 'required-image-ids-mismatch':
+    contract.required_image_ids = contract.required_image_ids.slice(0, -1);
+    break;
+  case 'legacy-three-image-required-image-ids':
+    contract.required_image_ids = legacyThreeImageIds;
+    contract.deploy_template_package.required_image_ids = legacyThreeImageIds;
+    break;
+  case 'missing-deploy-package-required-image-ids':
+    delete contract.deploy_template_package.required_image_ids;
+    break;
+  case 'empty-deploy-package-required-image-ids':
+    contract.deploy_template_package.required_image_ids = [];
+    break;
+  case 'non-array-deploy-package-required-image-ids':
+    contract.deploy_template_package.required_image_ids = 'agentsmith_app';
+    break;
+  case 'duplicate-deploy-package-required-image-id':
+    contract.deploy_template_package.required_image_ids = [
+      ...contract.deploy_template_package.required_image_ids,
+      contract.deploy_template_package.required_image_ids[0]
+    ];
+    break;
+  case 'required-image-id-missing-in-inventory':
+    contract.required_image_ids = [...contract.required_image_ids, 'missing_component'];
+    contract.deploy_template_package.required_image_ids = [...contract.required_image_ids];
+    break;
+  case 'required-current-image-id-absent-from-inventory':
+    contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
+      (item) => item.id !== 'asbcp'
+    );
     break;
   case 'uppercase-image-digest':
     contract.product_images[0].image = contract.product_images[0].image.replace(
@@ -645,6 +680,7 @@ import fs from 'node:fs';
 
 const [input, output, label] = process.argv.slice(2);
 const deployTemplatePackage = JSON.parse(fs.readFileSync(input, 'utf8'));
+const legacyThreeImageIds = ['agentsmith_app', 'llmup', 'ingress_nginx_controller'];
 
 switch (label) {
   case 'deploy-package-bad-subject-sha256':
@@ -672,6 +708,30 @@ switch (label) {
     deployTemplatePackage.artifact_provenance.artifact_uri =
       'gh-artifact://agentsmith/deploy-template-package/10001/drift.tgz';
     break;
+  case 'legacy-three-image-required-image-ids':
+    deployTemplatePackage.required_image_ids = legacyThreeImageIds;
+    break;
+  case 'missing-deploy-package-required-image-ids':
+    delete deployTemplatePackage.required_image_ids;
+    break;
+  case 'empty-deploy-package-required-image-ids':
+    deployTemplatePackage.required_image_ids = [];
+    break;
+  case 'non-array-deploy-package-required-image-ids':
+    deployTemplatePackage.required_image_ids = 'agentsmith_app';
+    break;
+  case 'duplicate-deploy-package-required-image-id':
+    deployTemplatePackage.required_image_ids = [
+      ...deployTemplatePackage.required_image_ids,
+      deployTemplatePackage.required_image_ids[0]
+    ];
+    break;
+  case 'required-image-id-missing-in-inventory':
+    deployTemplatePackage.required_image_ids = [
+      ...deployTemplatePackage.required_image_ids,
+      'missing_component'
+    ];
+    break;
   default:
     throw new Error(`unknown mutation: ${label}`);
 }
@@ -693,6 +753,14 @@ const [outputDir, expectedProfile, expectedRequiredText] = process.argv.slice(2)
 const [expectedTargetCluster, expectedSubstrateSource, expectedDistribution] =
   expectedProfile.split('/');
 const expectedRequired = expectedRequiredText === 'true';
+const expectedAppCurrentImageIds = [
+  'agentsmith_app',
+  'llmup',
+  'afscp',
+  'asbcp',
+  'ingress_nginx_controller',
+  'ingress_nginx_certgen'
+];
 const allowedKeys = [
   'artifacts',
   'digests',
@@ -745,17 +813,19 @@ for (const file of ['intake-report.json', 'image-digest-plan.json']) {
   if (payload.target_profile?.required !== expectedRequired) {
     throw new Error(`${file} did not preserve target profile required metadata`);
   }
-  if (!Array.isArray(payload.images) || payload.images.length < 1) {
+  if (!Array.isArray(payload.images)) {
     throw new Error(`${file} did not include expected image inventory`);
   }
   if (!Array.isArray(payload.digests) || payload.digests.length !== payload.images.length) {
     throw new Error(`${file} did not include expected digest plan`);
   }
-  if (!payload.images.every((item) => typeof item.id === 'string')) {
-    throw new Error(`${file} did not include expected image inventory`);
+  const imageIds = payload.images.map((item) => item.id);
+  const digestIds = payload.digests.map((item) => item.id);
+  if (JSON.stringify(imageIds) !== JSON.stringify(expectedAppCurrentImageIds)) {
+    throw new Error(`${file} did not include app-current image inventory: ${imageIds.join(',')}`);
   }
-  if (!payload.digests.every((item) => typeof item.id === 'string')) {
-    throw new Error(`${file} did not include id-bound digest plan`);
+  if (JSON.stringify(digestIds) !== JSON.stringify(expectedAppCurrentImageIds)) {
+    throw new Error(`${file} did not include app-current digest plan: ${digestIds.join(',')}`);
   }
 }
 NODE
@@ -1048,6 +1118,15 @@ for label in \
   ref-pull-secret-ref \
   colon-only-secretref-pull-secret-ref \
   duplicate-image-id \
+  missing-release-required-image-ids \
+  required-image-ids-mismatch \
+  legacy-three-image-required-image-ids \
+  missing-deploy-package-required-image-ids \
+  empty-deploy-package-required-image-ids \
+  non-array-deploy-package-required-image-ids \
+  duplicate-deploy-package-required-image-id \
+  required-image-id-missing-in-inventory \
+  required-current-image-id-absent-from-inventory \
   uppercase-image-digest \
   empty-provider-images \
   empty-required-product-flows \
@@ -1066,7 +1145,7 @@ do
   mutate_contract "$label" "$mutated"
 
   case "$label" in
-    bad-provenance-kind|deploy-package-bad-subject-sha256|missing-attestation|deploy-package-missing-attestation|bad-artifact-provenance-schema|deploy-package-bad-artifact-provenance-schema|non-agentsmith-repo-provenance|package-provenance-artifact-drift)
+    bad-provenance-kind|deploy-package-bad-subject-sha256|missing-attestation|deploy-package-missing-attestation|bad-artifact-provenance-schema|deploy-package-bad-artifact-provenance-schema|non-agentsmith-repo-provenance|package-provenance-artifact-drift|legacy-three-image-required-image-ids|missing-deploy-package-required-image-ids|empty-deploy-package-required-image-ids|non-array-deploy-package-required-image-ids|duplicate-deploy-package-required-image-id|required-image-id-missing-in-inventory)
       deploy_template_package="$TMP_DIR/$label.deploy-template-package.json"
       mutate_deploy_template_package "$label" "$deploy_template_package"
       ;;
