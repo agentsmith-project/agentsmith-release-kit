@@ -766,7 +766,7 @@ function readAttestation(value, label) {
   };
 }
 
-function validateEvidenceProvenanceInput(value) {
+function validateEvidenceProvenanceInput(value, args) {
   const provenance = requireObject(value, 'evidence_provenance');
   assertNoUnsafePayload(provenance, 'evidence_provenance');
 
@@ -842,6 +842,9 @@ function validateEvidenceProvenanceInput(value) {
     provenance.operator_run_id,
     'evidence_provenance.operator_run_id'
   );
+  if (operatorRunId !== args.operatorRunId) {
+    fail('evidence_provenance.operator_run_id must match --operator-run-id');
+  }
   return {
     ...common,
     artifact_uri: requireBoundArtifactUri(provenance.artifact_uri, 'evidence_provenance.artifact_uri', {
@@ -866,7 +869,7 @@ async function loadEvidenceProvenance(args) {
     return undefined;
   }
   const input = await readJsonFile(args.evidenceProvenance, 'evidence provenance');
-  return validateEvidenceProvenanceInput(input.value);
+  return validateEvidenceProvenanceInput(input.value, args);
 }
 
 function outputSubdir(args, name) {
@@ -969,7 +972,7 @@ function buildCapabilityMap(targetProfile) {
 }
 
 function buildReport({ releaseIdentity, args, steps }) {
-  return {
+  const report = {
     schema: REPORT_SCHEMA,
     scope: REPORT_SCOPE,
     readiness: false,
@@ -985,6 +988,10 @@ function buildReport({ releaseIdentity, args, steps }) {
     steps,
     generated_at: new Date().toISOString()
   };
+  if (args.mode === 'apply') {
+    report.operator_run_id = args.operatorRunId;
+  }
+  return report;
 }
 
 function evidenceProjection(evidence) {

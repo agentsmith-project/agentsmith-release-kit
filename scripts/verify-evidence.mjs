@@ -1061,8 +1061,9 @@ function assertProvenance(evidence, evidenceSubjectDigest) {
     requireString(provenance.job, 'evidence.artifact_provenance.job');
   }
 
+  let operatorRunId;
   if (provenanceKind === 'signed_operator_run') {
-    const operatorRunId = requireString(
+    operatorRunId = requireString(
       provenance.operator_run_id,
       'evidence.artifact_provenance.operator_run_id'
     );
@@ -1077,7 +1078,8 @@ function assertProvenance(evidence, evidenceSubjectDigest) {
 
   return {
     provenance_kind: provenanceKind,
-    subject_sha256: subjectSha256
+    subject_sha256: subjectSha256,
+    ...(operatorRunId ? { operator_run_id: operatorRunId } : {})
   };
 }
 
@@ -1576,7 +1578,8 @@ function assertOnlineDeploymentGateOutput({
   report,
   evidence,
   releaseContractInput,
-  targetProfile
+  targetProfile,
+  provenance
 }) {
   if (targetProfile.value !== ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE) {
     fail(`online_deployment_gate target_profile must be ${ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE}`);
@@ -1595,6 +1598,15 @@ function assertOnlineDeploymentGateOutput({
   });
 
   assertStringEquals(report.mode, 'apply', 'online_deployment_gate.mode');
+  const reportOperatorRunId = requireString(
+    report.operator_run_id,
+    'online_deployment_gate.operator_run_id'
+  );
+  if (provenance.provenance_kind === 'signed_operator_run') {
+    if (reportOperatorRunId !== provenance.operator_run_id) {
+      fail('online_deployment_gate.operator_run_id must match signed_operator_run provenance operator_run_id');
+    }
+  }
 
   const capabilityMap = requireObject(
     report.capability_map,
@@ -2157,7 +2169,8 @@ async function assertReleaseKitOutputSemantics({
   evidence,
   releaseContractInput,
   targetProfile,
-  releaseKitOutput
+  releaseKitOutput,
+  provenance
 }) {
   switch (releaseKitOutput) {
     case 'image-map.json': {
@@ -2179,7 +2192,8 @@ async function assertReleaseKitOutputSemantics({
         report: requireObject(reportInput.value, 'online_deployment_gate'),
         evidence,
         releaseContractInput,
-        targetProfile
+        targetProfile,
+        provenance
       });
       return;
     }
@@ -2300,15 +2314,16 @@ async function main() {
     evidenceSubject,
     releaseKitOutput
   );
+  const evidenceSubjectDigest = canonicalDigest(evidenceSubject);
+  const provenance = assertProvenance(evidence, evidenceSubjectDigest);
   await assertReleaseKitOutputSemantics({
     evidenceRoot,
     evidence,
     releaseContractInput,
     targetProfile,
-    releaseKitOutput
+    releaseKitOutput,
+    provenance
   });
-  const evidenceSubjectDigest = canonicalDigest(evidenceSubject);
-  const provenance = assertProvenance(evidence, evidenceSubjectDigest);
 
   await writeReport(
     args.outputDir,

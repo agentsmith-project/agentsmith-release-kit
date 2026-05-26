@@ -395,6 +395,7 @@ const rolloutReport = {
   readiness: false,
   status: 'passed'
 };
+const operatorRunId = 'operator-run-10001';
 const smokeReport = {
   schema: 'agentsmith.route-smoke-report/v1',
   scope: 'route_smoke_only',
@@ -415,6 +416,7 @@ const onlineDeploymentGateReport = {
   readiness: false,
   status: 'pass',
   mode: 'apply',
+  operator_run_id: operatorRunId,
   release_id: contract.release_id,
   git_sha: contract.git_sha,
   release_contract: {
@@ -596,8 +598,6 @@ let outputFiles = [
 ];
 let syncAirgapReportManifestDigest = true;
 let syncAirgapImageMapDigest = true;
-
-const operatorRunId = 'operator-run-10001';
 let provenanceArtifactUri =
   kind === 'signed_operator_run'
     ? `signed-operator-run://agentsmith-release-kit/evidence/${operatorRunId}/evidence-envelope.tgz`
@@ -714,6 +714,12 @@ switch (mutation) {
     break;
   case 'online_gate_stale_git_sha':
     onlineDeploymentGateReport.git_sha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    break;
+  case 'online_gate_missing_operator_run_id':
+    delete onlineDeploymentGateReport.operator_run_id;
+    break;
+  case 'online_gate_operator_run_id_mismatch':
+    onlineDeploymentGateReport.operator_run_id = 'operator-run-drift';
     break;
   case 'online_gate_dry_run':
     onlineDeploymentGateReport.mode = 'server-dry-run';
@@ -1401,6 +1407,8 @@ expect_fail online-gate-release-digest-mismatch ci_artifact online_gate_release_
 expect_fail online-gate-report-target-profile-mismatch ci_artifact online_gate_report_target_profile_mismatch
 expect_fail online-gate-stale-release-id ci_artifact online_gate_stale_release_id
 expect_fail online-gate-stale-git-sha ci_artifact online_gate_stale_git_sha
+expect_fail online-gate-missing-operator-run-id ci_artifact online_gate_missing_operator_run_id
+expect_fail online-gate-operator-run-id-mismatch signed_operator_run online_gate_operator_run_id_mismatch
 expect_fail online-gate-dry-run ci_artifact online_gate_dry_run
 expect_fail online-gate-empty-steps ci_artifact online_gate_empty_steps
 expect_fail image-map-mapping-missing ci_artifact image_map_mapping_missing

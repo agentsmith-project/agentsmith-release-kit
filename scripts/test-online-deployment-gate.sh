@@ -212,13 +212,15 @@ const provenance = {
   job: 'online-deployment-gate'
 };
 
-function useSignedOperatorRun(artifactUri) {
+function useSignedOperatorRun(operatorRunId, artifactUri) {
   provenance.provenance_kind = 'signed_operator_run';
-  provenance.artifact_uri = artifactUri;
-  provenance.operator_run_id = 'operator-run-10001';
+  provenance.artifact_uri =
+    artifactUri ||
+    `signed-operator-run://agentsmith-release-kit/evidence/${operatorRunId}/online-deployment-gate-evidence.tgz`;
+  provenance.operator_run_id = operatorRunId;
   provenance.operator_identity = 'release-operator@example.com';
   provenance.signature_uri =
-    'https://signatures.example.com/agentsmith-release-kit/operator-run-10001.sig';
+    `https://signatures.example.com/agentsmith-release-kit/${operatorRunId}.sig`;
   provenance.signature_sha256 = `sha256:${'a'.repeat(64)}`;
   delete provenance.workflow_name;
   delete provenance.run_id;
@@ -258,8 +260,15 @@ switch (mutation) {
     provenance.artifact_uri =
       'gh-artifact://agentsmith-release-kit/evidence/99999/online-deployment-gate-evidence.tgz';
     break;
+  case 'signed_operator_run_operator_1003':
+    useSignedOperatorRun('operator-run-1003');
+    break;
+  case 'signed_operator_run_cli_mismatch':
+    useSignedOperatorRun('operator-run-B');
+    break;
   case 'signed_unbound_operator_run_uri':
     useSignedOperatorRun(
+      'operator-run-10001',
       'gh-artifact://agentsmith-release-kit/evidence/10001/online-deployment-gate-evidence.tgz'
     );
     break;
@@ -674,12 +683,14 @@ assert_gate_report() {
   local report_file="$1"
   local expected_mode="$2"
   local expected_steps="$3"
+  local expected_operator_run_id="${4:-}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$expected_mode" "$expected_steps" "$TARGET_PROFILE" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$expected_mode" "$expected_steps" "$TARGET_PROFILE" "$expected_operator_run_id" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [reportFile, expectedMode, expectedStepsText, expectedProfile] = process.argv.slice(2);
+const [reportFile, expectedMode, expectedStepsText, expectedProfile, expectedOperatorRunId] =
+  process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
 const expectedSteps = expectedStepsText.split(',');
@@ -699,6 +710,13 @@ if (report.status !== 'pass') {
 }
 if (report.mode !== expectedMode) {
   throw new Error(`unexpected mode: ${report.mode}`);
+}
+if (expectedMode === 'apply') {
+  if (report.operator_run_id !== expectedOperatorRunId) {
+    throw new Error(`unexpected operator_run_id: ${report.operator_run_id}`);
+  }
+} else if ('operator_run_id' in report) {
+  throw new Error('server dry-run report must not include operator_run_id');
 }
 if (report.target_profile?.value !== expectedProfile) {
   throw new Error(`unexpected target profile: ${report.target_profile?.value}`);
@@ -904,6 +922,12 @@ if (JSON.stringify(files) !== JSON.stringify(['evidence.json', 'online-deploymen
 if (gateReport.target_profile?.value !== targetProfile) {
   throw new Error('evidence root gate report target profile drifted');
 }
+if (
+  evidence.artifact_provenance?.provenance_kind === 'signed_operator_run' &&
+  evidence.artifact_provenance.operator_run_id !== gateReport.operator_run_id
+) {
+  throw new Error('signed online gate evidence must bind provenance operator_run_id to gate report operator_run_id');
+}
 if (serialized.includes(localSmokeUrl)) {
   throw new Error('evidence root must not persist local focused smoke URL');
 }
@@ -932,6 +956,8 @@ WRONG_HOST_PROVENANCE="$TMP_DIR/evidence-provenance.wrong-host.json"
 WRONG_REPO_PROVENANCE="$TMP_DIR/evidence-provenance.wrong-repo.json"
 REPO_LEVEL_ARTIFACT_PROVENANCE="$TMP_DIR/evidence-provenance.repo-level-artifact.json"
 RUN_ID_MISMATCH_PROVENANCE="$TMP_DIR/evidence-provenance.run-id-mismatch.json"
+SIGNED_MATCHED_OPERATOR_PROVENANCE="$TMP_DIR/evidence-provenance.signed-matched-operator.json"
+SIGNED_CLI_MISMATCH_OPERATOR_PROVENANCE="$TMP_DIR/evidence-provenance.signed-cli-mismatch.json"
 SIGNED_UNBOUND_OPERATOR_PROVENANCE="$TMP_DIR/evidence-provenance.signed-unbound-operator.json"
 
 write_truth "$VALID_TRUTH"
@@ -948,6 +974,8 @@ write_evidence_provenance "$WRONG_HOST_PROVENANCE" wrong_artifact_host
 write_evidence_provenance "$WRONG_REPO_PROVENANCE" wrong_artifact_repo
 write_evidence_provenance "$REPO_LEVEL_ARTIFACT_PROVENANCE" repo_level_artifact_uri
 write_evidence_provenance "$RUN_ID_MISMATCH_PROVENANCE" run_id_mismatch
+write_evidence_provenance "$SIGNED_MATCHED_OPERATOR_PROVENANCE" signed_operator_run_operator_1003
+write_evidence_provenance "$SIGNED_CLI_MISMATCH_OPERATOR_PROVENANCE" signed_operator_run_cli_mismatch
 write_evidence_provenance "$SIGNED_UNBOUND_OPERATOR_PROVENANCE" signed_unbound_operator_run_uri
 start_server
 BASE_URL="http://127.0.0.1:$SERVER_PORT"
@@ -1120,6 +1148,22 @@ assert_kubectl_not_called
 assert_no_gate_report "$TMP_DIR/out-apply-missing-run-id"
 pass "apply mode without operator run id rejected before kubectl"
 
+signed_cli_mismatch_root="$TMP_DIR/evidence-signed-cli-mismatch-provenance"
+signed_cli_mismatch_output="$TMP_DIR/out-signed-cli-mismatch-provenance"
+write_stale_evidence_files "$signed_cli_mismatch_root"
+reset_kubectl_log
+before_signed_cli_mismatch="$(hit_count)"
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$signed_cli_mismatch_output" "$TARGET_PROFILE" \
+  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-A --evidence-root "$signed_cli_mismatch_root" --evidence-provenance "$SIGNED_CLI_MISMATCH_OPERATOR_PROVENANCE" >"$TMP_DIR/signed-cli-mismatch-provenance.out" 2>"$TMP_DIR/signed-cli-mismatch-provenance.err"; then
+  fail "expected signed_operator_run provenance operator_run_id mismatch with CLI operator run id to fail"
+fi
+after_signed_cli_mismatch="$(hit_count)"
+assert_kubectl_not_called
+[[ "$before_signed_cli_mismatch" == "$after_signed_cli_mismatch" ]] || fail "signed operator run mismatch reached network"
+assert_no_gate_report "$signed_cli_mismatch_output"
+assert_no_evidence_files "$signed_cli_mismatch_root"
+pass "signed_operator_run provenance must bind to CLI operator run id before kubectl"
+
 apply_output="$TMP_DIR/out-apply-smoke"
 reset_kubectl_log
 before_apply_smoke="$(hit_count)"
@@ -1141,7 +1185,7 @@ grep -q 'get pods' "$KUBECTL_LOG" || fail "apply gate did not check live pods"
 [[ "$after_apply_smoke" -eq $((before_apply_smoke + 1)) ]] || fail "apply gate smoke should issue one request"
 [[ -f "$apply_output/rollout/rollout-report.json" ]] || fail "apply gate did not write rollout report"
 [[ -f "$apply_output/smoke/smoke-report.json" ]] || fail "apply gate did not write smoke report"
-assert_gate_report "$apply_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke"
+assert_gate_report "$apply_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke" operator-run-1002
 pass "apply mode runs rollout and optional smoke with non-readiness aggregate"
 
 apply_evidence_output="$TMP_DIR/out-apply-evidence"
@@ -1158,17 +1202,17 @@ run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "
   --allow-http \
   --allow-localhost \
   --evidence-root "$apply_evidence_root" \
-  --evidence-provenance "$VALID_PROVENANCE" >/dev/null
+  --evidence-provenance "$SIGNED_MATCHED_OPERATOR_PROVENANCE" >/dev/null
 after_apply_evidence="$(hit_count)"
 [[ "$after_apply_evidence" -eq $((before_apply_evidence + 1)) ]] || fail "apply evidence gate smoke should issue one request"
 [[ -f "$apply_evidence_root/evidence.json" ]] || fail "apply evidence gate did not write evidence.json"
 [[ -f "$apply_evidence_root/evidence-subject.json" ]] || fail "apply evidence gate did not write evidence-subject.json"
 [[ -f "$apply_evidence_root/online-deployment-gate-report.json" ]] || fail "apply evidence gate did not write evidence root gate report"
-assert_gate_report "$apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke"
+assert_gate_report "$apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke" operator-run-1003
 assert_generated_evidence "$apply_evidence_root"
 run_evidence "$VALID_CONTRACT_MATERIAL" "$apply_evidence_root" "$apply_evidence_validation" >/dev/null
 [[ -f "$apply_evidence_output/evidence-validation/evidence-validation-report.json" ]] || fail "apply evidence gate did not internally validate evidence root"
-pass "confirmed apply rollout smoke can generate validator-accepted online gate evidence root"
+pass "confirmed apply rollout smoke can generate signed operator-run-bound online gate evidence root"
 
 target_registry_apply_evidence_output="$TMP_DIR/out-apply-target-registry-evidence"
 target_registry_apply_evidence_root="$TMP_DIR/evidence-apply-target-registry"
@@ -1190,7 +1234,7 @@ run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "
   --evidence-provenance "$VALID_PROVENANCE" >/dev/null
 after_target_registry_apply_evidence="$(hit_count)"
 [[ "$after_target_registry_apply_evidence" -eq $((before_target_registry_apply_evidence + 1)) ]] || fail "target-registry apply evidence gate smoke should issue one request"
-assert_gate_report "$target_registry_apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,image-map,render,render-check,apply,rollout,smoke"
+assert_gate_report "$target_registry_apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,image-map,render,render-check,apply,rollout,smoke" operator-run-1013
 assert_gate_rendered_target_registry "$target_registry_apply_evidence_output" "$target_registry"
 assert_generated_evidence "$target_registry_apply_evidence_root"
 run_evidence "$VALID_CONTRACT_MATERIAL" "$target_registry_apply_evidence_root" "$target_registry_apply_evidence_validation" >/dev/null
