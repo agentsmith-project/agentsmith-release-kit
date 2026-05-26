@@ -188,7 +188,8 @@ orchestration runner only. It accepts only
 validators in order, and writes `online-deployment-gate-report.json` with
 `schema: agentsmith.online-deployment-gate/v1`, `readiness: false`, and
 `scope: online_deployment_gate_only`. Default mode stops after server-side
-dry-run apply; confirmed apply runs rollout and optional smoke. When
+dry-run apply and must not write `operator_run_id`; confirmed apply runs
+rollout and optional smoke and writes top-level `operator_run_id`. When
 `--target-registry <registry-host[/namespace]>` is supplied, it first generates
 an image-map and passes it to render for image reference adoption only. The
 report lists only step names, relative report paths, and a capability map keyed
@@ -223,9 +224,12 @@ digest-pinned mappings to `deploy_image_inventory` and follow the same
 `target_registry`/`use_source`/deterministic mirror ref rule as render;
 online gate reports are accepted only from confirmed apply output for
 `existing_kubernetes/external_declared/online` with `mode: apply` and
-non-empty producer steps including apply and rollout; and the airgap triplet
-must be compatible with `--airgap-bundle-check`, binding the check report to an
-`agentsmith.airgap-bundle-manifest/v1` manifest and re-read `image-map.json`
+top-level `operator_run_id`, plus non-empty producer steps including apply and
+rollout; when provenance is `signed_operator_run`, the report
+`operator_run_id` must match the provenance `operator_run_id`; and the airgap
+triplet must be compatible with `--airgap-bundle-check`, binding the check
+report to an `agentsmith.airgap-bundle-manifest/v1` manifest and re-read
+`image-map.json`
 with required components, image artifact declarations, mandatory payload/tool
 categories and counts, report counts, mapping alignment, and artifact digests
 aligned. The old two-file airgap output value is rejected.

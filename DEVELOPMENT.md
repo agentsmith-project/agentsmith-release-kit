@@ -303,7 +303,9 @@ existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
 before Kubernetes calls. Its `online-deployment-gate-report.json` must keep
 `readiness: false` and `scope: online_deployment_gate_only`; it records only
 release identity, target profile, mode, step names, relative report paths, and
-a small capability map for the current online profile.
+a small capability map for the current online profile. `server-dry-run`
+reports must not include `operator_run_id`; confirmed apply reports include
+top-level `operator_run_id` copied from `--operator-run-id`.
 Confirmed apply may optionally write a focused evidence root with
 `--evidence-root <dir> --evidence-provenance <json>`. The provenance JSON must
 carry explicit remote release-kit provenance; local/file URIs, source paths,
@@ -339,7 +341,9 @@ is accepted only for `existing_kubernetes/external_declared/online` or
 `existing_kubernetes/external_declared/airgap`;
 `online-deployment-gate-report.json` is accepted only when it is the confirmed
 apply output for `existing_kubernetes/external_declared/online` with
-`mode: apply` and non-empty producer steps including apply and rollout; and
+`mode: apply`, top-level `operator_run_id`, and non-empty producer steps
+including apply and rollout; when provenance is `signed_operator_run`, the
+report `operator_run_id` must match the provenance `operator_run_id`; and
 the airgap triplet must be a real bundle-check report, manifest, and image-map
 set with required component kinds, image artifact declarations, payload/tool
 kinds and counts, report counts, and digest bindings aligned. `components: []`,
