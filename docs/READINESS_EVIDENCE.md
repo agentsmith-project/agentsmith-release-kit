@@ -218,6 +218,11 @@ also write a release-kit evidence envelope root and validate it through
 `--evidence`. That envelope is still focused diagnostic evidence with
 `release_kit_output: online-deployment-gate-report.json`; it is not online
 deploy readiness evidence or operator signoff.
+If the online gate report contains an `image-map` step, evidence validation
+requires exactly one `registry-presence` step after `image-map` and before
+`render`. This binds target-registry confirmed apply to the operator-provided
+read-only probe without accepting standalone `registry-presence-report.json` as
+release-kit evidence.
 
 Operator signoff intake proves only that one
 `agentsmith.operator-signoff-intake/v1` JSON document is syntactically
@@ -226,7 +231,8 @@ The binding checks release id, git sha, release contract raw sha256, target
 profile, operator run id, and the raw sha256 of
 `online-deployment-gate-report.json`; the gate report must be confirmed apply
 output with `readiness: false`, `status: pass`, `mode: apply`, top-level
-`operator_run_id`, and apply plus rollout steps. The resulting
+`operator_run_id`, and one canonical source-registry or target-registry
+producer sequence with apply plus rollout. The resulting
 `operator-signoff-intake-report.json` keeps `readiness: false`; it is not
 signature verification, identity verification, registry presence proof, full
 online adoption proof, evidence-envelope input, deploy readiness, package
@@ -261,7 +267,12 @@ Online gate evidence must keep
 is accepted only for confirmed apply output on
 `existing_kubernetes/external_declared/online`; `mode: server-dry-run`, missing
 top-level `operator_run_id`, empty steps, or missing apply/rollout steps are
-rejected. Airgap bundle evidence must
+rejected. Evidence accepts only canonical source-registry apply order
+`inputs,target-preflight,template-package,render,render-check,apply,rollout`
+with optional trailing `smoke`, or canonical target-registry apply order
+`inputs,target-preflight,template-package,image-map,registry-presence,render,render-check,apply,rollout`
+with optional trailing `smoke`; reports with all required steps in any other
+order are rejected. Airgap bundle evidence must
 bind a passing check report to a real
 `agentsmith.airgap-bundle-manifest/v1` manifest for
 `existing_kubernetes/external_declared/airgap`, including the required four
@@ -297,6 +308,8 @@ axes. The substrate document covers required services, canonical endpoints,
 secret refs, TLS or sslmode, pgvector, and reachability. The prerequisites
 document covers namespace, RBAC policy/proof, ingress host plus TLS secret ref,
 registry pull secret ref, storage class plus PV policy, and the substrate
-secret refs declared by substrate truth. It does not connect to Kubernetes and
+secret refs declared by substrate truth. The prerequisites `registry` object
+accepts only `pull_secret_ref`; pseudo-evidence or secret payload fields such
+as `preloaded`, `mirror_done`, `verdict`, or `token` are rejected. It does not connect to Kubernetes and
 is not render, apply, deploy, package, release, rollout, smoke, or operator
 readiness evidence.

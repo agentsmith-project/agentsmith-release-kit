@@ -514,6 +514,53 @@ fs.chmodSync(fakeKubectl, 0o755);
 NODE
 }
 
+write_registry_probe() {
+  local registry_probe="$1"
+  local mode="${2:-pass}"
+
+  "$NODE_BIN" --input-type=module - "$registry_probe" "$mode" <<'NODE'
+import fs from 'node:fs';
+
+const [registryProbe, mode] = process.argv.slice(2);
+fs.writeFileSync(
+  registryProbe,
+  `#!/usr/bin/env bash
+set -euo pipefail
+
+target_image="\${1:?target image required}"
+expected_digest="\${2:?expected digest required}"
+
+if [[ -n "\${REGISTRY_PROBE_LOG:-}" ]]; then
+  printf '%s %s\\n' "\$target_image" "\$expected_digest" >> "\$REGISTRY_PROBE_LOG"
+fi
+
+case "${mode}" in
+  pass)
+    [[ "\$target_image" == *@sha256:* ]] || exit 23
+    printf '%s\\n' "\$expected_digest"
+    ;;
+  mismatch)
+    printf '%s\\n' 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    ;;
+  nonzero)
+    printf '%s\\n' 'TOKEN_SHOULD_NOT_LEAK_FROM_STDOUT'
+    printf '%s\\n' 'SECRET_STDERR_SHOULD_NOT_LEAK kubeconfig' >&2
+    exit 42
+    ;;
+  sleep)
+    sleep 10
+    printf '%s\\n' "\$expected_digest"
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+`
+);
+fs.chmodSync(registryProbe, 0o755);
+NODE
+}
+
 start_server() {
   local ready_file="$TMP_DIR/server-ready"
   local log_file="$TMP_DIR/server-hits.log"
@@ -573,15 +620,45 @@ hit_count() {
 KUBECTL_LOG="$TMP_DIR/kubectl.log"
 FAKE_KUBECTL="$TMP_DIR/kubectl"
 write_fake_kubectl "$FAKE_KUBECTL"
+REGISTRY_PROBE_LOG="$TMP_DIR/registry-probe.log"
+PASS_REGISTRY_PROBE="$TMP_DIR/registry-probe-pass.sh"
+MISMATCH_REGISTRY_PROBE="$TMP_DIR/registry-probe-mismatch.sh"
+NONZERO_REGISTRY_PROBE="$TMP_DIR/registry-probe-nonzero.sh"
+SLEEP_REGISTRY_PROBE="$TMP_DIR/registry-probe-sleep.sh"
+write_registry_probe "$PASS_REGISTRY_PROBE" pass
+write_registry_probe "$MISMATCH_REGISTRY_PROBE" mismatch
+write_registry_probe "$NONZERO_REGISTRY_PROBE" nonzero
+write_registry_probe "$SLEEP_REGISTRY_PROBE" sleep
 
 reset_kubectl_log() {
   : >"$KUBECTL_LOG"
+}
+
+reset_registry_probe_log() {
+  : >"$REGISTRY_PROBE_LOG"
 }
 
 assert_kubectl_not_called() {
   if [[ -s "$KUBECTL_LOG" ]]; then
     cat "$KUBECTL_LOG" >&2
     fail "kubectl should not have been called"
+  fi
+}
+
+assert_registry_probe_not_called() {
+  if [[ -s "$REGISTRY_PROBE_LOG" ]]; then
+    cat "$REGISTRY_PROBE_LOG" >&2
+    fail "registry probe should not have been called"
+  fi
+}
+
+assert_registry_probe_called() {
+  local expected_count="$1"
+  local actual_count
+  actual_count="$(wc -l <"$REGISTRY_PROBE_LOG" | tr -d '[:space:]')"
+  if [[ "$actual_count" != "$expected_count" ]]; then
+    cat "$REGISTRY_PROBE_LOG" >&2
+    fail "registry probe expected $expected_count calls, got $actual_count"
   fi
 }
 
@@ -642,6 +719,7 @@ run_gate() {
   FAKE_KUBECTL_LIVE_INIT_IMAGE_ID="${FAKE_KUBECTL_LIVE_INIT_IMAGE_ID:-}" \
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE:-}" \
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID:-}" \
+  REGISTRY_PROBE_LOG="$REGISTRY_PROBE_LOG" \
   bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
     --release-contract "$release_contract" \
     --deploy-template-package "$deploy_template_package" \
@@ -937,6 +1015,60 @@ if (/required_product_flows|product_flows|product_flow_results|cloud.?provision|
 NODE
 }
 
+expect_registry_presence_gate_fail() {
+  local label="$1"
+  local registry_probe="$2"
+  local expected_stderr="$3"
+  local output_dir="$TMP_DIR/out-$label"
+  local evidence_root="$TMP_DIR/evidence-$label"
+
+  mkdir -p "$output_dir/render" "$output_dir/apply" "$output_dir/smoke" "$output_dir/registry-presence"
+  printf '%s\n' '{"stale":true}' >"$output_dir/online-deployment-gate-report.json"
+  printf '%s\n' '{"stale":true}' >"$output_dir/render/manifest-render-report.json"
+  printf '%s\n' '{"stale":true}' >"$output_dir/apply/apply-report.json"
+  printf '%s\n' '{"stale":true}' >"$output_dir/smoke/smoke-report.json"
+  printf '%s\n' '{"stale":true}' >"$output_dir/registry-presence/registry-presence-report.json"
+  write_stale_evidence_files "$evidence_root"
+
+  reset_kubectl_log
+  reset_registry_probe_log
+  local before_count
+  before_count="$(hit_count)"
+  if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$output_dir" "$TARGET_PROFILE" \
+    --mode apply \
+    --confirm-apply "$TARGET_PROFILE" \
+    --operator-run-id "operator-run-$label" \
+    --timeout 120s \
+    --target-registry "$target_registry" \
+    --registry-probe "$registry_probe" \
+    --smoke-url "$BASE_URL/ok" \
+    --allow-http \
+    --allow-localhost \
+    --evidence-root "$evidence_root" \
+    --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    fail "expected registry-presence failure to stop online deployment gate: $label"
+  fi
+  local after_count
+  after_count="$(hit_count)"
+
+  if [[ -n "$expected_stderr" ]] && ! grep -Fq -- "$expected_stderr" "$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected registry-presence stderr to contain '$expected_stderr': $label"
+  fi
+
+  [[ "$before_count" == "$after_count" ]] || fail "registry-presence failure reached route/network smoke: $label"
+  assert_kubectl_not_called
+  assert_no_gate_report "$output_dir"
+  assert_no_evidence_files "$evidence_root"
+  [[ -f "$output_dir/image-map/image-map.json" ]] || fail "registry-presence failure should happen after image-map: $label"
+  [[ ! -e "$output_dir/registry-presence/registry-presence-report.json" ]] || fail "registry-presence failure must not leave report: $label"
+  [[ ! -e "$output_dir/render/manifest-render-report.json" ]] || fail "registry-presence failure must stop before render: $label"
+  [[ ! -e "$output_dir/apply/apply-report.json" ]] || fail "registry-presence failure must stop before apply: $label"
+  [[ ! -e "$output_dir/smoke/smoke-report.json" ]] || fail "registry-presence failure must stop before smoke: $label"
+  pass "registry-presence failure stops online gate before render, kubectl, smoke, or evidence: $label"
+}
+
 KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
 VALID_TRUTH="$TMP_DIR/substrate-truth.valid.json"
 VALID_PREREQUISITES="$TMP_DIR/target-prerequisites.valid.json"
@@ -1054,6 +1186,7 @@ pass "online deployment gate server dry-run writes non-readiness aggregate witho
 target_registry="registry.release.example/agentsmith"
 target_registry_output="$TMP_DIR/out-dry-target-registry"
 reset_kubectl_log
+reset_registry_probe_log
 before_target_registry="$(hit_count)"
 run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$target_registry_output" "$TARGET_PROFILE" \
   --target-registry "$target_registry" >/dev/null
@@ -1066,11 +1199,79 @@ if grep -Eiq 'docker|skopeo|oras|crane|registry login|registry push|registry mir
   cat "$KUBECTL_LOG" >&2
   fail "target-registry dry-run must not run registry network operations"
 fi
+assert_registry_probe_not_called
 assert_gate_report "$target_registry_output/online-deployment-gate-report.json" server-dry-run "inputs,target-preflight,template-package,image-map,render,render-check,apply"
 assert_gate_rendered_target_registry "$target_registry_output" "$target_registry"
 pass "online deployment gate target-registry dry-run writes image-map step and renders target refs without registry ops"
 
 target_registry_app_image="$(image_map_target_image "$target_registry_output/image-map/image-map.json" agentsmith_app)"
+
+target_registry_apply_missing_probe_root="$TMP_DIR/evidence-apply-target-registry-missing-probe"
+target_registry_apply_missing_probe_output="$TMP_DIR/out-apply-target-registry-missing-probe"
+write_stale_evidence_files "$target_registry_apply_missing_probe_root"
+reset_kubectl_log
+reset_registry_probe_log
+before_target_registry_apply_missing_probe="$(hit_count)"
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$target_registry_apply_missing_probe_output" "$TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$TARGET_PROFILE" \
+  --operator-run-id operator-run-1016 \
+  --timeout 120s \
+  --target-registry "$target_registry" \
+  --evidence-root "$target_registry_apply_missing_probe_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/target-registry-apply-missing-probe.out" 2>"$TMP_DIR/target-registry-apply-missing-probe.err"; then
+  fail "expected target-registry apply without registry probe to fail"
+fi
+after_target_registry_apply_missing_probe="$(hit_count)"
+assert_kubectl_not_called
+assert_registry_probe_not_called
+[[ "$before_target_registry_apply_missing_probe" == "$after_target_registry_apply_missing_probe" ]] || fail "target-registry missing probe reached route/network smoke"
+assert_no_gate_report "$target_registry_apply_missing_probe_output"
+assert_no_evidence_files "$target_registry_apply_missing_probe_root"
+[[ ! -e "$target_registry_apply_missing_probe_output/image-map/image-map.json" ]] || fail "target-registry missing probe must fail before image-map"
+pass "target-registry apply requires registry probe before producer steps or evidence"
+
+registry_probe_without_target_output="$TMP_DIR/out-registry-probe-without-target-registry"
+reset_kubectl_log
+reset_registry_probe_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$registry_probe_without_target_output" "$TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$TARGET_PROFILE" \
+  --operator-run-id operator-run-1017 \
+  --timeout 120s \
+  --registry-probe "$PASS_REGISTRY_PROBE" >"$TMP_DIR/registry-probe-without-target-registry.out" 2>"$TMP_DIR/registry-probe-without-target-registry.err"; then
+  fail "expected registry probe without target registry to fail"
+fi
+assert_kubectl_not_called
+assert_registry_probe_not_called
+assert_no_gate_report "$registry_probe_without_target_output"
+pass "registry probe is rejected without target-registry before kubectl or probe execution"
+
+dry_target_registry_probe_output="$TMP_DIR/out-dry-target-registry-probe"
+reset_kubectl_log
+reset_registry_probe_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$dry_target_registry_probe_output" "$TARGET_PROFILE" \
+  --target-registry "$target_registry" \
+  --registry-probe "$PASS_REGISTRY_PROBE" >"$TMP_DIR/dry-target-registry-probe.out" 2>"$TMP_DIR/dry-target-registry-probe.err"; then
+  fail "expected server dry-run with registry probe to fail"
+fi
+assert_kubectl_not_called
+assert_registry_probe_not_called
+assert_no_gate_report "$dry_target_registry_probe_output"
+pass "server dry-run rejects registry probe and does not execute it"
+
+expect_registry_presence_gate_fail \
+  registry-probe-mismatch \
+  "$MISMATCH_REGISTRY_PROBE" \
+  "registry probe digest mismatch"
+expect_registry_presence_gate_fail \
+  registry-probe-nonzero \
+  "$NONZERO_REGISTRY_PROBE" \
+  "registry probe returned non-zero status"
+expect_registry_presence_gate_fail \
+  registry-probe-timeout \
+  "$SLEEP_REGISTRY_PROBE" \
+  "registry probe timed out"
 
 invalid_target_registry_output="$TMP_DIR/out-invalid-target-registry"
 reset_kubectl_log
@@ -1192,6 +1393,7 @@ apply_evidence_output="$TMP_DIR/out-apply-evidence"
 apply_evidence_root="$TMP_DIR/evidence-apply"
 apply_evidence_validation="$TMP_DIR/out-apply-evidence-validation"
 reset_kubectl_log
+reset_registry_probe_log
 before_apply_evidence="$(hit_count)"
 run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$apply_evidence_output" "$TARGET_PROFILE" \
   --mode apply \
@@ -1205,9 +1407,11 @@ run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "
   --evidence-provenance "$SIGNED_MATCHED_OPERATOR_PROVENANCE" >/dev/null
 after_apply_evidence="$(hit_count)"
 [[ "$after_apply_evidence" -eq $((before_apply_evidence + 1)) ]] || fail "apply evidence gate smoke should issue one request"
+assert_registry_probe_not_called
 [[ -f "$apply_evidence_root/evidence.json" ]] || fail "apply evidence gate did not write evidence.json"
 [[ -f "$apply_evidence_root/evidence-subject.json" ]] || fail "apply evidence gate did not write evidence-subject.json"
 [[ -f "$apply_evidence_root/online-deployment-gate-report.json" ]] || fail "apply evidence gate did not write evidence root gate report"
+[[ ! -e "$apply_evidence_output/registry-presence/registry-presence-report.json" ]] || fail "source-registry apply evidence must not write registry-presence report"
 assert_gate_report "$apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke" operator-run-1003
 assert_generated_evidence "$apply_evidence_root"
 run_evidence "$VALID_CONTRACT_MATERIAL" "$apply_evidence_root" "$apply_evidence_validation" >/dev/null
@@ -1218,6 +1422,7 @@ target_registry_apply_evidence_output="$TMP_DIR/out-apply-target-registry-eviden
 target_registry_apply_evidence_root="$TMP_DIR/evidence-apply-target-registry"
 target_registry_apply_evidence_validation="$TMP_DIR/out-apply-target-registry-evidence-validation"
 reset_kubectl_log
+reset_registry_probe_log
 before_target_registry_apply_evidence="$(hit_count)"
 FAKE_KUBECTL_LIVE_IMAGE="$target_registry_app_image" \
 FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$target_registry_app_image" \
@@ -1227,6 +1432,7 @@ run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "
   --operator-run-id operator-run-1013 \
   --timeout 120s \
   --target-registry "$target_registry" \
+  --registry-probe "$PASS_REGISTRY_PROBE" \
   --smoke-url "$BASE_URL/ok" \
   --allow-http \
   --allow-localhost \
@@ -1234,7 +1440,9 @@ run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "
   --evidence-provenance "$VALID_PROVENANCE" >/dev/null
 after_target_registry_apply_evidence="$(hit_count)"
 [[ "$after_target_registry_apply_evidence" -eq $((before_target_registry_apply_evidence + 1)) ]] || fail "target-registry apply evidence gate smoke should issue one request"
-assert_gate_report "$target_registry_apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,image-map,render,render-check,apply,rollout,smoke" operator-run-1013
+assert_registry_probe_called 6
+[[ -f "$target_registry_apply_evidence_output/registry-presence/registry-presence-report.json" ]] || fail "target-registry apply evidence gate did not write registry-presence report"
+assert_gate_report "$target_registry_apply_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,image-map,registry-presence,render,render-check,apply,rollout,smoke" operator-run-1013
 assert_gate_rendered_target_registry "$target_registry_apply_evidence_output" "$target_registry"
 assert_generated_evidence "$target_registry_apply_evidence_root"
 run_evidence "$VALID_CONTRACT_MATERIAL" "$target_registry_apply_evidence_root" "$target_registry_apply_evidence_validation" >/dev/null
@@ -1247,6 +1455,7 @@ target_registry_tag_only_image="${target_registry_app_image%@sha256:*}:runtime"
 target_registry_live_digest="${target_registry_app_image##*@}"
 write_stale_evidence_files "$target_registry_digest_only_live_root"
 reset_kubectl_log
+reset_registry_probe_log
 before_target_registry_digest_only_live="$(hit_count)"
 if FAKE_KUBECTL_LIVE_IMAGE="$target_registry_tag_only_image" \
   FAKE_KUBECTL_LIVE_IMAGE_ID="$target_registry_live_digest" \
@@ -1256,6 +1465,7 @@ if FAKE_KUBECTL_LIVE_IMAGE="$target_registry_tag_only_image" \
   --operator-run-id operator-run-1014 \
   --timeout 120s \
   --target-registry "$target_registry" \
+  --registry-probe "$PASS_REGISTRY_PROBE" \
   --smoke-url "$BASE_URL/ok" \
   --allow-http \
   --allow-localhost \
@@ -1264,6 +1474,7 @@ if FAKE_KUBECTL_LIVE_IMAGE="$target_registry_tag_only_image" \
   fail "expected target-registry apply evidence to reject digest-only live status without target digest-pinned refs"
 fi
 after_target_registry_digest_only_live="$(hit_count)"
+assert_registry_probe_called 6
 grep -q 'get pods' "$KUBECTL_LOG" || fail "target-registry digest-only live case did not reach live pod check"
 [[ "$before_target_registry_digest_only_live" == "$after_target_registry_digest_only_live" ]] || fail "target-registry digest-only live rejection should stop before route/network smoke"
 assert_no_gate_report "$target_registry_digest_only_live_output"
@@ -1276,6 +1487,7 @@ target_registry_mixed_live_root="$TMP_DIR/evidence-target-registry-mixed-live"
 target_registry_mixed_live_output="$TMP_DIR/out-target-registry-mixed-live"
 write_stale_evidence_files "$target_registry_mixed_live_root"
 reset_kubectl_log
+reset_registry_probe_log
 before_target_registry_mixed_live="$(hit_count)"
 if FAKE_KUBECTL_LIVE_INIT_IMAGE="$target_registry_app_image" \
   FAKE_KUBECTL_LIVE_INIT_IMAGE_ID="docker-pullable://$target_registry_app_image" \
@@ -1287,6 +1499,7 @@ if FAKE_KUBECTL_LIVE_INIT_IMAGE="$target_registry_app_image" \
   --operator-run-id operator-run-1015 \
   --timeout 120s \
   --target-registry "$target_registry" \
+  --registry-probe "$PASS_REGISTRY_PROBE" \
   --smoke-url "$BASE_URL/ok" \
   --allow-http \
   --allow-localhost \
@@ -1295,6 +1508,7 @@ if FAKE_KUBECTL_LIVE_INIT_IMAGE="$target_registry_app_image" \
   fail "expected target-registry apply evidence to reject mixed source and target live image refs"
 fi
 after_target_registry_mixed_live="$(hit_count)"
+assert_registry_probe_called 6
 grep -q 'get pods' "$KUBECTL_LOG" || fail "target-registry mixed live case did not reach live pod check"
 [[ "$before_target_registry_mixed_live" == "$after_target_registry_mixed_live" ]] || fail "target-registry mixed live rejection should stop before route/network smoke"
 assert_no_gate_report "$target_registry_mixed_live_output"

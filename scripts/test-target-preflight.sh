@@ -362,6 +362,18 @@ switch (mutation) {
   case 'missing_registry_pull_secret_ref':
     delete prerequisites.registry.pull_secret_ref;
     break;
+  case 'registry_preloaded':
+    prerequisites.registry.preloaded = true;
+    break;
+  case 'registry_mirror_done':
+    prerequisites.registry.mirror_done = true;
+    break;
+  case 'registry_verdict':
+    prerequisites.registry.verdict = 'preloaded';
+    break;
+  case 'registry_token':
+    prerequisites.registry.token = 'secretRef:release/registry-token';
+    break;
   case 'missing_storage_class':
     delete prerequisites.storage.storage_class;
     break;
@@ -682,6 +694,10 @@ expect_prerequisites_fail prerequisites-missing-rbac-policy-and-proof missing_rb
 expect_prerequisites_fail prerequisites-missing-ingress-host missing_ingress_host
 expect_prerequisites_fail prerequisites-missing-ingress-tls-secret-ref missing_ingress_tls_secret_ref
 expect_prerequisites_fail prerequisites-missing-registry-pull-secret-ref missing_registry_pull_secret_ref
+expect_prerequisites_fail prerequisites-registry-preloaded registry_preloaded
+expect_prerequisites_fail prerequisites-registry-mirror-done registry_mirror_done
+expect_prerequisites_fail prerequisites-registry-verdict registry_verdict
+expect_prerequisites_fail prerequisites-registry-token registry_token
 expect_prerequisites_fail prerequisites-missing-storage-class missing_storage_class
 expect_prerequisites_fail prerequisites-missing-persistent-volume-policy missing_persistent_volume_policy
 expect_prerequisites_fail prerequisites-missing-substrate-secret-ref missing_substrate_secret_ref

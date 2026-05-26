@@ -319,13 +319,17 @@ orchestration runner only. It supports
 in order after both `--substrate-truth <json>` and
 `--target-prerequisites <json>` are provided: inputs, target-preflight,
 template-package, optional image-map when
-`--target-registry <registry-host[/namespace]>` is provided, render,
+`--target-registry <registry-host[/namespace]>` is provided, target-registry
+apply registry-presence through `--registry-probe <executable>`, render,
 render-check, apply, and, for confirmed `--mode apply` only, rollout plus
 optional smoke.
-Default `server-dry-run` does not run rollout or smoke and rejects
-`--smoke-url`. Confirmed apply requires exact `--confirm-apply
+Default `server-dry-run` does not run rollout, smoke, or registry-presence and
+rejects `--smoke-url` and `--registry-probe`. Confirmed apply requires exact `--confirm-apply
 existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
-before Kubernetes calls. Its `online-deployment-gate-report.json` must keep
+before Kubernetes calls. Confirmed apply with `--target-registry` also
+requires `--registry-probe <executable>` and runs `--registry-presence` after
+image-map and before render, apply, smoke, or evidence closure. Its
+`online-deployment-gate-report.json` must keep
 `readiness: false` and `scope: online_deployment_gate_only`; it records only
 release identity, target profile, mode, step names, relative report paths, and
 a small capability map for the current online profile. `server-dry-run`
@@ -342,9 +346,10 @@ the root through the existing `--evidence` diagnostic.
 It does not provision cloud resources, mirror images, build airgap bundles,
 import images into kind, roll back changes, run product flows, or claim deploy
 or release readiness. `--target-registry` only makes the gate generate an
-image-map, pass it into render, and in confirmed apply rollout run strict live
-ref checks for those digest-adopted target refs only. Ordinary source-registry
-rollout remains digest-only. It is not mirror execution or registry readiness.
+image-map, bind read-only registry-presence in apply mode, pass it into
+render, and in confirmed apply rollout run strict live ref checks for those
+digest-adopted target refs only. Ordinary source-registry rollout remains
+digest-only. It is not mirror execution or registry readiness.
 
 The current `--operator-signoff-intake` path is a focused intake/binding
 diagnostic only. It consumes a release contract, a generated
@@ -357,7 +362,11 @@ release contract raw sha256, target profile, and
 `subject.kind: online_deployment_gate_report` plus `subject.sha256` to the raw
 online gate report file. The bound online gate report must be confirmed apply
 output with `readiness: false`, `status: pass`, `mode: apply`, top-level
-`operator_run_id`, and non-empty steps including apply and rollout.
+`operator_run_id`, and one canonical producer sequence: source-registry apply
+`inputs,target-preflight,template-package,render,render-check,apply,rollout`
+with optional trailing `smoke`, or target-registry apply
+`inputs,target-preflight,template-package,image-map,registry-presence,render,render-check,apply,rollout`
+with optional trailing `smoke`.
 `operator-signoff-intake-report.json` must keep `readiness: false` and
 `scope: operator_signoff_intake_only`; it does not verify signatures or
 identity, does not prove registry presence, is not an accepted evidence
@@ -422,7 +431,9 @@ Kubernetes, render manifests, apply resources, smoke a cluster, package
 artifacts, or claim deploy or release readiness. The prerequisites document is
 the only place for namespace, RBAC policy/proof, ingress host and TLS secret
 ref, registry pull secret ref, storage class/PV policy, and substrate secret
-refs needed before a real Kubernetes or cloud target deploy.
+refs needed before a real Kubernetes or cloud target deploy. Its `registry`
+object accepts only `pull_secret_ref`; `preloaded`, `mirror_done`, `verdict`,
+`token`, and other pseudo-proof or secret payload fields fail fast.
 
 ## Non-Goals
 

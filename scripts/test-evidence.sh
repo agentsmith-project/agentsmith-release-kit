@@ -237,11 +237,12 @@ function buildImageMap(profile = ONLINE_PROFILE, targetRegistry) {
   return report;
 }
 
-function buildGateSteps(includeSmoke = true) {
+function buildGateSteps(includeSmoke = true, preRenderSteps = []) {
   const names = [
     'inputs',
     'target-preflight',
     'template-package',
+    ...preRenderSteps,
     'render',
     'render-check',
     'apply',
@@ -252,6 +253,8 @@ function buildGateSteps(includeSmoke = true) {
     inputs: 'inputs/target-profile-coverage-report.json',
     'target-preflight': 'target-preflight/target-preflight-report.json',
     'template-package': 'template-package/template-package-report.json',
+    'image-map': 'image-map/image-map.json',
+    'registry-presence': 'registry-presence/registry-presence-report.json',
     render: 'render/manifest-render-report.json',
     'render-check': 'render-check/render-report.json',
     apply: 'apply/apply-report.json',
@@ -727,6 +730,30 @@ switch (mutation) {
     break;
   case 'online_gate_empty_steps':
     onlineDeploymentGateReport.steps = [];
+    break;
+  case 'online_gate_image_map_missing_registry_presence':
+    onlineDeploymentGateReport.steps = buildGateSteps(true, ['image-map']);
+    break;
+  case 'online_gate_registry_presence_wrong_order':
+    onlineDeploymentGateReport.steps = buildGateSteps(
+      true,
+      ['registry-presence', 'image-map']
+    );
+    break;
+  case 'online_gate_registry_presence_without_image_map':
+    onlineDeploymentGateReport.steps = buildGateSteps(true, ['registry-presence']);
+    break;
+  case 'online_gate_duplicate_registry_presence':
+    onlineDeploymentGateReport.steps = buildGateSteps(
+      true,
+      ['image-map', 'registry-presence', 'registry-presence']
+    );
+    break;
+  case 'online_gate_image_map_prefix_before_inputs':
+    onlineDeploymentGateReport.steps = [
+      ...buildGateSteps(true, ['image-map', 'registry-presence']).slice(3, 5),
+      ...buildGateSteps()
+    ];
     break;
   case 'valid_image_map_output':
     useImageMapOutput();
@@ -1415,6 +1442,11 @@ expect_fail online-gate-missing-operator-run-id ci_artifact online_gate_missing_
 expect_fail online-gate-operator-run-id-mismatch signed_operator_run online_gate_operator_run_id_mismatch
 expect_fail online-gate-dry-run ci_artifact online_gate_dry_run
 expect_fail online-gate-empty-steps ci_artifact online_gate_empty_steps
+expect_fail online-gate-image-map-missing-registry-presence ci_artifact online_gate_image_map_missing_registry_presence
+expect_fail online-gate-registry-presence-wrong-order ci_artifact online_gate_registry_presence_wrong_order
+expect_fail online-gate-registry-presence-without-image-map ci_artifact online_gate_registry_presence_without_image_map
+expect_fail online-gate-duplicate-registry-presence ci_artifact online_gate_duplicate_registry_presence
+expect_fail online-gate-image-map-prefix-before-inputs ci_artifact online_gate_image_map_prefix_before_inputs
 expect_fail image-map-mapping-missing ci_artifact image_map_mapping_missing
 expect_fail image-map-digest-drift ci_artifact image_map_digest_drift
 expect_fail image-map-target-registry-with-use-source ci_artifact image_map_target_registry_with_use_source

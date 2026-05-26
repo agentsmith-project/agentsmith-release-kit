@@ -96,6 +96,7 @@ const MANAGED_OUTPUT_ENTRIES = [
   'target-preflight',
   'template-package',
   'image-map',
+  'registry-presence',
   'render',
   'render-check',
   'apply',
@@ -155,6 +156,7 @@ function usage() {
     [--allow-http] \\
     [--allow-localhost] \\
     [--target-registry <registry-host[/namespace]>] \\
+    [--registry-probe <executable>] \\
     [--evidence-root <dir> --evidence-provenance <json>] \\
     [--forbidden-source-root <dir>]`;
 }
@@ -326,6 +328,9 @@ function parseArgs(argv) {
       case '--target-registry':
         parsed.targetRegistry = nextValue();
         break;
+      case '--registry-probe':
+        parsed.registryProbe = nextValue();
+        break;
       case '--forbidden-source-root':
         parsed.forbiddenSourceRoots.push(nextValue());
         break;
@@ -426,6 +431,16 @@ function validateArgs(args) {
   }
   if (args.evidenceRoot && !args.evidenceProvenance) {
     cliFail('--evidence-root requires --evidence-provenance <json>');
+  }
+
+  if (args.registryProbe && !args.targetRegistry) {
+    cliFail('--registry-probe requires --target-registry');
+  }
+  if (args.registryProbe && args.mode !== 'apply') {
+    cliFail('--registry-probe is only accepted with --mode apply');
+  }
+  if (args.mode === 'apply' && args.targetRegistry && !args.registryProbe) {
+    cliFail('--mode apply with --target-registry requires --registry-probe <executable>');
   }
 
   return args;
@@ -1239,6 +1254,30 @@ async function main(argv) {
       ],
       reportPaths: [imageMapPath]
     });
+
+    if (args.mode === 'apply') {
+      runStep({
+        args,
+        steps,
+        name: 'registry-presence',
+        mode: '--registry-presence',
+        argv: [
+          '--release-contract',
+          args.releaseContract,
+          '--image-map',
+          imageMapPath,
+          '--target-profile',
+          targetProfile,
+          '--registry-probe',
+          args.registryProbe,
+          '--output-dir',
+          outputSubdir(args, 'registry-presence')
+        ],
+        reportPaths: [
+          path.join(outputSubdir(args, 'registry-presence'), 'registry-presence-report.json')
+        ]
+      });
+    }
   }
 
   const renderArgv = [

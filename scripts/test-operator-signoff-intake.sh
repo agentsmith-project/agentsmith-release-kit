@@ -167,6 +167,22 @@ switch (mutation) {
   case 'gate_missing_rollout':
     gateReport.steps = gateReport.steps.filter((step) => step.name !== 'rollout');
     break;
+  case 'gate_target_registry_registry_presence':
+    gateReport.steps.splice(
+      3,
+      0,
+      {
+        name: 'image-map',
+        status: 'pass',
+        report_paths: ['image-map/image-map.json']
+      },
+      {
+        name: 'registry-presence',
+        status: 'pass',
+        report_paths: ['registry-presence/registry-presence-report.json']
+      }
+    );
+    break;
   case 'gate_minimal_apply_rollout_steps':
     gateReport.steps = gateReport.steps.filter((step) =>
       ['apply', 'rollout'].includes(step.name)
@@ -182,6 +198,18 @@ switch (mutation) {
   case 'gate_unknown_top_level_field':
     gateReport.releaseReady = true;
     gateReport.registryPresence = true;
+    break;
+  case 'gate_standalone_registry_presence_report':
+    Object.assign(gateReport, {
+      schema: 'agentsmith.registry-presence/v1',
+      scope: 'registry_presence_only',
+      target_registry: 'registry.example.internal/releases',
+      image_count: 6,
+      mappings: []
+    });
+    delete gateReport.mode;
+    delete gateReport.capability_map;
+    delete gateReport.steps;
     break;
   case 'gate_missing_capability_map':
     delete gateReport.capability_map;
@@ -224,12 +252,14 @@ const signoff = {
 
 switch (mutation) {
   case 'valid':
+  case 'gate_target_registry_registry_presence':
   case 'gate_missing_operator_run_id':
   case 'gate_dry_run':
   case 'gate_missing_rollout':
   case 'gate_minimal_apply_rollout_steps':
   case 'gate_unknown_step':
   case 'gate_unknown_top_level_field':
+  case 'gate_standalone_registry_presence_report':
   case 'gate_missing_capability_map':
   case 'gate_bad_capability_map':
   case 'gate_missing_generated_at':
@@ -322,12 +352,13 @@ expect_fail() {
 assert_pass_report() {
   local report_file="$1"
   local gate_report_file="$2"
+  local expected_steps="${3:-}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$gate_report_file" "$TARGET_PROFILE" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$gate_report_file" "$TARGET_PROFILE" "$expected_steps" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-const [reportFile, gateReportFile, targetProfile] = process.argv.slice(2);
+const [reportFile, gateReportFile, targetProfile, expectedStepsText] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
 const expectedGateSha = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(gateReportFile)).digest('hex')}`;
@@ -378,6 +409,12 @@ if (report.online_deployment_gate?.mode !== 'apply') {
 }
 if (!report.online_deployment_gate?.steps?.includes('apply') || !report.online_deployment_gate?.steps?.includes('rollout')) {
   throw new Error('intake report must summarize apply and rollout step binding');
+}
+if (expectedStepsText) {
+  const expectedSteps = expectedStepsText.split(',');
+  if (JSON.stringify(report.online_deployment_gate?.steps) !== JSON.stringify(expectedSteps)) {
+    throw new Error(`unexpected summarized gate steps: ${report.online_deployment_gate?.steps}`);
+  }
 }
 for (const key of Object.keys(report)) {
   if (!allowedTopLevelKeys.has(key)) {
@@ -431,6 +468,24 @@ fi
 assert_pass_report "$valid_output/operator-signoff-intake-report.json" "$valid_gate_report"
 pass "valid operator-signoff-intake accepted focused binding without readiness claims"
 
+target_registry_tuple="$(write_inputs target-registry gate_target_registry_registry_presence)"
+target_registry_release_contract="${target_registry_tuple%%|*}"
+target_registry_rest="${target_registry_tuple#*|}"
+target_registry_gate_report="${target_registry_rest%%|*}"
+target_registry_signoff_intake="${target_registry_rest#*|}"
+target_registry_output="$TMP_DIR/out-target-registry"
+if ! run_intake "$target_registry_release_contract" "$target_registry_gate_report" "$target_registry_signoff_intake" "$target_registry_output" >"$TMP_DIR/target-registry.out" 2>"$TMP_DIR/target-registry.err"; then
+  cat "$TMP_DIR/target-registry.out" >&2
+  cat "$TMP_DIR/target-registry.err" >&2
+  fail "expected target-registry operator-signoff-intake to pass"
+fi
+[[ -f "$target_registry_output/operator-signoff-intake-report.json" ]] || fail "target-registry operator-signoff-intake did not write report"
+assert_pass_report \
+  "$target_registry_output/operator-signoff-intake-report.json" \
+  "$target_registry_gate_report" \
+  "inputs,target-preflight,template-package,image-map,registry-presence,render,render-check,apply,rollout"
+pass "target-registry operator-signoff-intake accepts image-map registry-presence canonical binding"
+
 expect_fail subject-sha-mismatch subject_sha_mismatch
 expect_fail signoff-operator-run-id-mismatch signoff_operator_run_id_mismatch
 expect_fail gate-missing-operator-run-id gate_missing_operator_run_id
@@ -439,6 +494,7 @@ expect_fail gate-missing-rollout gate_missing_rollout
 expect_fail gate-minimal-apply-rollout-steps gate_minimal_apply_rollout_steps
 expect_fail gate-unknown-step gate_unknown_step
 expect_fail gate-unknown-top-level-field gate_unknown_top_level_field
+expect_fail gate-standalone-registry-presence-report gate_standalone_registry_presence_report
 expect_fail gate-missing-capability-map gate_missing_capability_map
 expect_fail gate-bad-capability-map gate_bad_capability_map
 expect_fail gate-missing-generated-at gate_missing_generated_at

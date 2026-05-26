@@ -493,14 +493,19 @@ bash scripts/test-online-deployment-gate.sh
 `--substrate-truth <json>` and `--target-prerequisites <json>`, then invokes
 existing focused diagnostics in order: inputs, target-preflight, template-package,
 optional image-map when `--target-registry <registry-host[/namespace]>` is
-provided, render, render-check, apply, and, in `--mode apply` only, rollout
-plus optional route smoke. Default `server-dry-run` mode stops after apply
-dry-run and rejects `--smoke-url`. Apply mode requires exact confirm text and
-an operator run id before Kubernetes calls. The target registry option adopts
+provided, target-registry apply-only registry-presence through
+`--registry-probe <executable>`, render, render-check, apply, and, in
+`--mode apply` only, rollout plus optional route smoke. Default
+`server-dry-run` mode stops after apply dry-run and rejects `--smoke-url` and
+`--registry-probe`; server dry-run target-registry does not require a probe.
+Apply mode requires exact confirm text and an operator run id before
+Kubernetes calls. Apply mode with `--target-registry` also requires
+`--registry-probe <executable>` and runs registry-presence after image-map and
+before render/apply/smoke/evidence. The target registry option adopts
 image-map target refs for rendering and, in confirmed apply rollout, strict
 live ref checks for those digest-adopted target refs only; ordinary
 source-registry rollout remains digest-only. It does not log in, pull, push,
-mirror, or prove registry presence.
+or mirror; registry presence is a read-only operator-probe prerequisite.
 
 Confirmed apply mode may also take `--evidence-root <dir>` and
 `--evidence-provenance <json>`. The provenance input must be explicit remote
@@ -590,7 +595,11 @@ file. The online gate report must be `schema:
 agentsmith.online-deployment-gate/v1`, `scope:
 online_deployment_gate_only`, `readiness: false`, `status: pass`, `mode:
 apply`, with top-level `operator_run_id` and non-empty steps including apply
-and rollout.
+and rollout. Accepted step order is canonical only: either
+`inputs,target-preflight,template-package,render,render-check,apply,rollout`
+with optional trailing `smoke`, or
+`inputs,target-preflight,template-package,image-map,registry-presence,render,render-check,apply,rollout`
+with optional trailing `smoke`.
 
 The output `operator-signoff-intake-report.json` keeps `schema:
 agentsmith.operator-signoff-intake-report/v1`, `scope:
@@ -614,6 +623,9 @@ pgvector, and reachability. Target prerequisites carry the real Kubernetes or
 cloud deployment preconditions: target profile, namespace, RBAC policy/proof,
 ingress host plus TLS secret ref, registry pull secret ref, storage class plus
 PV policy, and the substrate secret refs declared by substrate truth.
+The target prerequisites `registry` object is fail-fast allowlisted to
+`pull_secret_ref` only; pseudo-proof or secret fields such as `preloaded`,
+`mirror_done`, `verdict`, or `token` are rejected.
 `target-preflight-report.json` is written with `readiness: false`,
 `scope: target_preflight_prerequisite_only`, and `status: pass`; it is not
 Kubernetes connectivity evidence, render/check evidence, apply evidence, smoke

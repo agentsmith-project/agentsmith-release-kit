@@ -174,8 +174,53 @@ const ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS = [
 const ONLINE_DEPLOYMENT_GATE_ALLOWED_STEPS = new Set([
   ...ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS,
   'image-map',
+  'registry-presence',
   'smoke'
 ]);
+const ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES = [
+  [
+    'inputs',
+    'target-preflight',
+    'template-package',
+    'render',
+    'render-check',
+    'apply',
+    'rollout'
+  ],
+  [
+    'inputs',
+    'target-preflight',
+    'template-package',
+    'render',
+    'render-check',
+    'apply',
+    'rollout',
+    'smoke'
+  ],
+  [
+    'inputs',
+    'target-preflight',
+    'template-package',
+    'image-map',
+    'registry-presence',
+    'render',
+    'render-check',
+    'apply',
+    'rollout'
+  ],
+  [
+    'inputs',
+    'target-preflight',
+    'template-package',
+    'image-map',
+    'registry-presence',
+    'render',
+    'render-check',
+    'apply',
+    'rollout',
+    'smoke'
+  ]
+];
 const AIRGAP_BUNDLE_COMPONENT_KINDS = new Set([
   'release_contract',
   'deploy_template_package',
@@ -1659,13 +1704,13 @@ function assertOnlineDeploymentGateOutput({
     }
   }
 
-  let lastIndex = -1;
-  for (const name of ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS) {
-    const index = stepOrder.indexOf(name);
-    if (index <= lastIndex) {
-      fail('online_deployment_gate.steps must preserve producer step order');
-    }
-    lastIndex = index;
+  const isCanonicalSequence = ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES.some(
+    (sequence) =>
+      sequence.length === stepOrder.length &&
+      sequence.every((expectedStep, index) => stepOrder[index] === expectedStep)
+  );
+  if (!isCanonicalSequence) {
+    fail('online_deployment_gate.steps must match a canonical confirmed apply sequence');
   }
 
   requireString(report.generated_at, 'online_deployment_gate.generated_at');

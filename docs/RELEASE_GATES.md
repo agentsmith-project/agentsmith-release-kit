@@ -603,18 +603,23 @@ checks, or full release readiness.
 The runner requires both `--substrate-truth <json>` and
 `--target-prerequisites <json>`, then calls existing focused diagnostics in
 order: inputs, target-preflight, template-package, optional image-map when
-`--target-registry <registry-host[/namespace]>` is provided, render,
+`--target-registry <registry-host[/namespace]>` is provided, target-registry
+apply registry-presence through `--registry-probe <executable>`, render,
 render-check, apply, and, for confirmed `--mode apply` only, rollout plus
 optional route smoke. Target-preflight runs before render, kubectl, or route
 network checks, and invalid prerequisites remove stale managed reports. Default
-`server-dry-run` stops after apply dry-run and rejects `--smoke-url`. Apply
-mode requires exact `--confirm-apply
+`server-dry-run` stops after apply dry-run and rejects `--smoke-url` and
+`--registry-probe`; server dry-run target-registry does not require a probe.
+Apply mode requires exact `--confirm-apply
 existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
 before Kubernetes calls. Target-registry mode only adopts image refs through
-the generated image-map. In confirmed apply rollout, strict live ref checks
-apply only to those digest-adopted target refs; ordinary source-registry
-rollout remains digest-only. It is not mirror execution, registry login, or
-registry presence evidence.
+the generated image-map. Confirmed apply with target-registry must also provide
+`--registry-probe <executable>`; the gate runs `--registry-presence` after
+image-map and before render/apply/rollout/smoke/evidence. In confirmed apply
+rollout, strict live ref checks apply only to those digest-adopted target refs;
+ordinary source-registry rollout remains digest-only. It is not mirror
+execution or registry login; registry presence remains a focused read-only
+probe prerequisite and is not standalone release evidence.
 
 Confirmed apply mode can optionally add `--evidence-root <dir>` and
 `--evidence-provenance <json>`. The provenance input must be explicit remote
@@ -681,7 +686,12 @@ the signoff intake, and the online gate report. The online gate report must be
 `schema: agentsmith.online-deployment-gate/v1`, `scope:
 online_deployment_gate_only`, `readiness: false`, `status: pass`, `mode:
 apply`, with top-level `operator_run_id` and non-empty steps including apply
-and rollout.
+and rollout. Only canonical confirmed-apply producer order is accepted:
+source-registry apply is
+`inputs,target-preflight,template-package,render,render-check,apply,rollout`
+with optional trailing `smoke`; target-registry apply is
+`inputs,target-preflight,template-package,image-map,registry-presence,render,render-check,apply,rollout`
+with optional trailing `smoke`.
 
 The generated `operator-signoff-intake-report.json` keeps `schema:
 agentsmith.operator-signoff-intake-report/v1`, `scope:
@@ -736,7 +746,10 @@ registry ref. The standalone image-map output is accepted only for
 accepted only for `existing_kubernetes/external_declared/online` confirmed
 apply output:
 `mode` must be `apply`, top-level `operator_run_id` must be present, steps
-must be non-empty, and apply plus rollout steps must be present. The airgap
+must be non-empty, and apply plus rollout steps must be present. Only the same
+canonical source-registry or target-registry confirmed-apply producer order is
+accepted; reports such as `image-map,registry-presence,inputs,...` are
+rejected even if all required steps are present. The airgap
 bundle output is accepted only for
 `existing_kubernetes/external_declared/airgap` and must bind
 `airgap-bundle-check-report.json` to a bundle-check-compatible
@@ -816,7 +829,9 @@ declarations, `extensions.pgvector.status: installed`, and reachability status
 `declared_reachable` or `verified_by_operator` with proof. Target prerequisites
 must include target profile, namespace, RBAC policy or proof, ingress host plus
 TLS secret ref, registry pull secret ref, storage class plus PV policy, and the
-substrate secret refs declared in substrate truth. Plaintext credentials,
+substrate secret refs declared in substrate truth. The prerequisites `registry`
+object accepts only `pull_secret_ref`; pseudo-evidence or secret payload fields
+such as `preloaded`, `mirror_done`, `verdict`, or `token` are rejected. Plaintext credentials,
 connection strings, kubeconfig payloads, file or source URIs, localhost,
 `host.docker.internal`, and hosts or URLs with userinfo are rejected.
 

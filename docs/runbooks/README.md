@@ -10,7 +10,7 @@ sign off deploy, package, offline install, or release readiness.
 
 | Path | Target profile | Operator command entry | Current result |
 | --- | --- | --- | --- |
-| Real or cloud Kubernetes, existing substrates, online | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ... --substrate-truth ... --target-prerequisites ... [--target-registry ...]`; optional `--registry-presence ... --image-map ... --registry-probe ...` | Runs the online focused chain for existing substrate endpoints and explicit target prerequisites; registry presence is a separate probe-based digest-ref check. |
+| Real or cloud Kubernetes, existing substrates, online | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]`; optional standalone `--registry-presence ... --image-map ... --registry-probe ...` | Runs the online focused chain for existing substrate endpoints and explicit target prerequisites; target-registry confirmed apply binds registry presence through the operator probe before render/apply. |
 | Real or cloud Kubernetes, existing substrates, airgap | `existing_kubernetes/external_declared/airgap` | `bash scripts/verify-release.sh --bundle-create ...` or `--image-map ... --target-registry ...`, then `--airgap-bundle-check ...`, optional `--bundle-load-plan ...`, and optional `--airgap-bundle-render-check ...` | Assembles a local bundle and immediately self-checks it, checks an already assembled bundle manifest/digests, writes a read-only load plan summary, or renders/checks bundle-local manifests offline. |
 
 Advanced intake-only paths:
@@ -46,7 +46,9 @@ directory for their chosen path.
 For target-preflight and the online focused chain, keep substrate connection
 truth and target prerequisites as separate files. Substrate truth stays neutral;
 target prerequisites carry namespace, RBAC policy/proof, ingress TLS, registry
-pull secret, storage policy, and substrate secret refs.
+pull secret, storage policy, and substrate secret refs. The registry object is
+limited to `pull_secret_ref`; do not add `preloaded`, `mirror_done`, `verdict`,
+`token`, or other pseudo-proof fields.
 
 For the online focused chain, confirmed apply can optionally add
 `--evidence-root <dir> --evidence-provenance <json>`. Use only remote
@@ -55,23 +57,28 @@ The gate writes a focused evidence envelope and revalidates it through
 `--evidence`; it is still `readiness=false` and is not deploy or release
 signoff. Evidence intake accepts only this confirmed-apply envelope; server
 dry-run reports and empty-step online gate reports are rejected.
-Online `--target-registry <registry-host[/namespace]>` only asks the gate to
-generate an image-map and render target image references. It does not perform
-registry login, pull, push, mirror, or registry presence checks.
+Online `--target-registry <registry-host[/namespace]>` asks the gate to
+generate an image-map and render target image references. In confirmed
+`--mode apply`, it also requires `--registry-probe <executable>` and runs
+`--registry-presence` immediately after image-map and before render, apply,
+smoke, or evidence closure. Server dry-run target-registry does not require and
+does not allow the probe.
 
-For online target registry presence, run `--registry-presence` separately with
-the generated mirror-required `image-map.json` and an operator-provided
-read-only probe. The probe is called as
+For standalone online target registry presence diagnostics, run
+`--registry-presence` separately with the generated mirror-required
+`image-map.json` and an operator-provided read-only probe. The probe is called as
 `<executable> <target_image> <expected_digest>` and must print exactly one
 matching sha256 digest. The resulting `registry-presence-report.json` has
 `readiness=false`, omits raw probe output and probe path, is not
 evidence-envelope input, and does not prove deploy/package/release readiness.
+Neither path performs registry login, pull, push, or mirror.
 
 After a confirmed online focused chain run, operators may run
 `--operator-signoff-intake` with `operator-signoff-intake.json` and the
 generated `online-deployment-gate-report.json`. This is machine intake and
 binding only: it checks the signoff JSON allowlist, release identity, release
-contract digest, target profile, operator run id, and raw report sha256. It
+contract digest, target profile, operator run id, raw report sha256, and the
+canonical source-registry or target-registry confirmed-apply producer order. It
 writes `operator-signoff-intake-report.json` with `readiness=false`, does not
 verify signatures or identity, is not registry presence proof, is not accepted
 by the evidence envelope validator, and is not deploy/package/release

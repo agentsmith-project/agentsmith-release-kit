@@ -702,6 +702,7 @@ export function validateTargetPrerequisitesTruth(
   );
 
   const registry = requireObject(prerequisites.registry, `${label}.registry`);
+  assertAllowedObjectFields(registry, `${label}.registry`, ['pull_secret_ref']);
   requireSecretReference(
     registry.pull_secret_ref,
     `${label}.registry.pull_secret_ref`
