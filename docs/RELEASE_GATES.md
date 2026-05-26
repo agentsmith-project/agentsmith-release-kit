@@ -502,12 +502,15 @@ release platform, cloud resource provisioning, substrate installation, image
 mirroring, airgap bundle creation, kind image import, rollback, product-flow
 checks, or full release readiness.
 
-The runner calls existing focused diagnostics in order: inputs,
-target-preflight, template-package, optional image-map when
+The runner requires both `--substrate-truth <json>` and
+`--target-prerequisites <json>`, then calls existing focused diagnostics in
+order: inputs, target-preflight, template-package, optional image-map when
 `--target-registry <registry-host[/namespace]>` is provided, render,
 render-check, apply, and, for confirmed `--mode apply` only, rollout plus
-optional route smoke. Default `server-dry-run` stops after apply dry-run and
-rejects `--smoke-url`. Apply mode requires exact `--confirm-apply
+optional route smoke. Target-preflight runs before render, kubectl, or route
+network checks, and invalid prerequisites remove stale managed reports. Default
+`server-dry-run` stops after apply dry-run and rejects `--smoke-url`. Apply
+mode requires exact `--confirm-apply
 existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
 before Kubernetes calls. Target-registry mode only adopts image refs through
 the generated image-map; it is not mirror execution, registry login, or
@@ -618,40 +621,44 @@ bash scripts/test-target-preflight.sh
 ```
 
 This focused guard exercises `bash scripts/verify-release.sh
---target-preflight`. It checks only repo-local intake of a substrate connection
-truth document supplied by the operator or by a release-kit adjacent substrate
-pack. It does not open a Kubernetes client, render manifests, run checks,
-apply resources, roll out workloads, smoke product endpoints, create cloud
-resources, or build an airgap bundle.
+--target-preflight`. It checks only repo-local intake of a neutral substrate
+connection truth document and a separate target prerequisites truth document.
+It does not open a Kubernetes client, render manifests, run checks, apply
+resources, roll out workloads, smoke product endpoints, create cloud resources,
+or build an airgap bundle.
 
-The accepted truth schema is
-`agentsmith.substrate-connection.truth/v1`. Docker substrate truth,
+The accepted truth schemas are
+`agentsmith.substrate-connection.truth/v1` and
+`agentsmith.target-prerequisites.truth/v1`. Docker substrate truth,
 non-canonical pre-GA target names such as `local-kind`, `existing-cluster`,
-`real-k8s`, and synonym
-axes such as `kind` or `cluster` are rejected. The supported focused profiles
-for this diagnostic are the canonical target-preflight intake profiles:
+`real-k8s`, and synonym axes such as `kind` or `cluster` are rejected. The
+supported focused profiles for this diagnostic are the canonical
+target-preflight intake profiles:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`,
 `existing_kubernetes/kit_installed/airgap`, and
 `kind_rehearsal/kit_installed/online`.
 
-For `external_declared`, the operator provides the connection truth and the
-release kit only validates the document. Raw evidence envelopes for
-`external_declared` must include inline neutral connection truth under
-`substrate_connection_truth`. For `kit_installed`, the same neutral truth
+For `external_declared`, the operator provides the connection truth and target
+prerequisites; the release kit only validates the documents. Raw evidence
+envelopes for `external_declared` must include inline neutral connection truth
+under `substrate_connection_truth`. For `kit_installed`, the same neutral truth
 schema is used and the document must declare `installed_by` and
-`release_kit_version` as plain `x.y.z` semver. Both paths must include the required substrate services,
-canonical endpoint declarations (`host` for PostgreSQL/MongoDB/Redis, `url` or
-`endpoint` plus `region` and `bucket` for object storage, and `issuer_url` for
-OIDC), secret references, TLS or sslmode declarations,
-`extensions.pgvector.status: installed`, and reachability status
-`declared_reachable` or `verified_by_operator` with proof. Plaintext
-credentials, connection strings, kubeconfig payloads, file or source URIs, and
-AgentSmith source paths are rejected.
+`release_kit_version` as plain `x.y.z` semver. Both paths must include the
+required substrate services, canonical endpoint declarations (`host` for
+PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and `bucket` for
+object storage, and `issuer_url` for OIDC), secret references, TLS or sslmode
+declarations, `extensions.pgvector.status: installed`, and reachability status
+`declared_reachable` or `verified_by_operator` with proof. Target prerequisites
+must include target profile, namespace, RBAC policy or proof, ingress host plus
+TLS secret ref, registry pull secret ref, storage class plus PV policy, and the
+substrate secret refs declared in substrate truth. Plaintext credentials,
+connection strings, kubeconfig payloads, file or source URIs, localhost,
+`host.docker.internal`, and hosts or URLs with userinfo are rejected.
 
 The generated `target-preflight-report.json` must keep `readiness: false`,
-`scope: target_preflight_intake_only`, and `status: pass`. It must not contain
+`scope: target_preflight_prerequisite_only`, and `status: pass`. It must not contain
 `verdict` or `release_verdict`. It is not release readiness, package readiness,
 Kubernetes connectivity evidence, render/check evidence, apply evidence,
 rollout evidence, smoke evidence, or operator signoff.

@@ -5,12 +5,14 @@ import path from 'node:path';
 
 import {
   SUBSTRATE_CONNECTION_SCHEMA,
+  TARGET_PREREQUISITES_SCHEMA,
   assertNoUnsafeSubstratePayload,
   parseTargetProfile,
-  validateSubstrateConnectionTruth
+  validateSubstrateConnectionTruth,
+  validateTargetPrerequisitesTruth
 } from './lib/substrate-truth-validation.mjs';
 
-const REQUIRED_ARGS = ['targetProfile', 'substrateTruth', 'outputDir'];
+const REQUIRED_ARGS = ['targetProfile', 'substrateTruth', 'targetPrerequisites', 'outputDir'];
 
 class CliError extends Error {
   constructor(message) {
@@ -31,6 +33,7 @@ function usage() {
   node scripts/verify-target-preflight.mjs \\
     --target-profile <target_cluster>/<substrate_source>/<distribution> \\
     --substrate-truth <json> \\
+    --target-prerequisites <json> \\
     --output-dir <dir>`;
 }
 
@@ -66,6 +69,12 @@ function parseArgs(argv) {
         break;
       case '--substrate-truth':
         parsed.substrateTruth = nextValue();
+        break;
+      case '--target-prerequisites':
+        parsed.targetPrerequisites = nextValue();
+        break;
+      case '--expected-namespace':
+        parsed.expectedNamespace = nextValue();
         break;
       case '--output-dir':
         parsed.outputDir = nextValue();
@@ -115,22 +124,38 @@ async function readJson(file, label) {
   }
 }
 
-function buildReport({ targetProfile, truthProfile, inputDigest, serviceSummary }) {
+function buildReport({
+  targetProfile,
+  truthProfile,
+  substrateInputDigest,
+  prerequisitesInputDigest,
+  serviceSummary,
+  prerequisitesSummary
+}) {
   return {
-    scope: 'target_preflight_intake_only',
+    scope: 'target_preflight_prerequisite_only',
     readiness: false,
     target_profile: targetProfile,
     substrate_truth: {
       schema_version: SUBSTRATE_CONNECTION_SCHEMA,
-      input_sha256: inputDigest,
+      input_sha256: substrateInputDigest,
       target_profile: truthProfile,
       services_count: serviceSummary.services_count,
       services: serviceSummary.services
+    },
+    target_prerequisites: {
+      schema_version: TARGET_PREREQUISITES_SCHEMA,
+      input_sha256: prerequisitesInputDigest,
+      target_profile: prerequisitesSummary.target_profile,
+      namespace: prerequisitesSummary.namespace,
+      ingress_host: prerequisitesSummary.ingress_host,
+      substrate_secret_refs_count: prerequisitesSummary.substrate_secret_refs_count
     },
     checks: {
       schema: 'pass',
       target_axes: 'pass',
       service_contracts: 'pass',
+      target_prerequisites: 'pass',
       secret_references: 'pass',
       tls_or_sslmode: 'pass',
       reachability: 'pass'
@@ -156,15 +181,33 @@ async function main() {
 
   const targetProfile = parseTargetProfile(args.targetProfile);
   const substrateTruthInput = await readJson(args.substrateTruth, 'substrate truth');
+  const targetPrerequisitesInput = await readJson(
+    args.targetPrerequisites,
+    'target prerequisites'
+  );
   assertNoUnsafeSubstratePayload(
     substrateTruthInput.value,
     'substrate_truth',
     substrateTruthInput.raw
   );
+  assertNoUnsafeSubstratePayload(
+    targetPrerequisitesInput.value,
+    'target_prerequisites',
+    targetPrerequisitesInput.raw
+  );
   const { truthProfile, serviceSummary } = validateSubstrateConnectionTruth(
     substrateTruthInput.value,
     targetProfile,
     { label: 'substrate_truth' }
+  );
+  const { prerequisitesSummary } = validateTargetPrerequisitesTruth(
+    targetPrerequisitesInput.value,
+    targetProfile,
+    substrateTruthInput.value,
+    {
+      label: 'target_prerequisites',
+      expectedNamespace: args.expectedNamespace
+    }
   );
 
   await writeReport(
@@ -172,8 +215,10 @@ async function main() {
     buildReport({
       targetProfile,
       truthProfile,
-      inputDigest: substrateTruthInput.inputDigest,
-      serviceSummary
+      substrateInputDigest: substrateTruthInput.inputDigest,
+      prerequisitesInputDigest: targetPrerequisitesInput.inputDigest,
+      serviceSummary,
+      prerequisitesSummary
     })
   );
   console.log('PASS: target preflight truth accepted');

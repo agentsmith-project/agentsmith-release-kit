@@ -193,12 +193,33 @@ switch (mutation) {
   case 'object_storage_missing_region':
     delete truth.services.object_storage.region;
     break;
+  case 'object_storage_userinfo_url':
+    truth.services.object_storage.url = 'https://operator@objects.release.example.internal';
+    break;
   case 'oidc_issuer_alias':
     truth.services.oidc.issuer = truth.services.oidc.issuer_url;
     delete truth.services.oidc.issuer_url;
     break;
   case 'localhost_endpoint':
     truth.services.postgresql.host = 'localhost';
+    break;
+  case 'localhost_with_port_endpoint':
+    truth.services.postgresql.host = 'localhost:5432';
+    break;
+  case 'loopback_ip_with_port_endpoint':
+    truth.services.postgresql.host = '127.0.0.1:5432';
+    break;
+  case 'unspecified_ip_with_port_endpoint':
+    truth.services.redis.host = '0.0.0.0:6379';
+    break;
+  case 'top_level_namespace':
+    truth.namespace = 'agentsmith';
+    break;
+  case 'top_level_ingress':
+    truth.ingress = {
+      host: 'agentsmith.release.example.com',
+      tls_secret_ref: 'secretRef:release/agentsmith-ingress-tls'
+    };
     break;
   case 'sslmode_only':
     useSslmodeOnly();
@@ -245,15 +266,175 @@ fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
 NODE
 }
 
+write_prerequisites() {
+  local output="$1"
+  local profile="$2"
+  local mutation="${3:-valid}"
+
+  "$NODE_BIN" --input-type=module - "$output" "$profile" "$mutation" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profile, mutation] = process.argv.slice(2);
+
+const substrateSecretRefs = [
+  'secretRef:release/postgresql-credential',
+  'secretRef:release/postgresql-admin',
+  'secretRef:release/postgresql-ca',
+  'secretRef:release/mongodb-credential',
+  'secretRef:release/mongodb-ca',
+  'secretRef:release/redis-credential',
+  'secretRef:release/redis-ca',
+  'secretRef:release/object-storage-credential',
+  'secretRef:release/object-storage-ca',
+  'secretRef:release/oidc-client',
+  'secretRef:release/oidc-ca'
+];
+
+const prerequisites = {
+  schema_version: 'agentsmith.target-prerequisites.truth/v1',
+  target_profile: profile,
+  namespace: 'agentsmith',
+  rbac: {
+    policy: 'pre_provisioned',
+    proof: 'operator kubectl auth can-i apply deployments in namespace agentsmith 2026-05-23T12:00:00Z'
+  },
+  ingress: {
+    host: 'agentsmith.release.example.com',
+    tls_secret_ref: 'secretRef:release/agentsmith-ingress-tls'
+  },
+  registry: {
+    pull_secret_ref: 'secretRef:release/registry-pull'
+  },
+  storage: {
+    storage_class: 'gp3',
+    persistent_volume_policy: 'dynamic'
+  },
+  substrate_secret_refs: substrateSecretRefs
+};
+
+function useSslmodeOnlyRefs() {
+  prerequisites.substrate_secret_refs = prerequisites.substrate_secret_refs.filter(
+    (ref) => !ref.endsWith('-ca')
+  );
+}
+
+function useRedactedFingerprints() {
+  const fingerprint = `redacted:sha256:${'b'.repeat(64)}`;
+  prerequisites.ingress.tls_secret_ref = fingerprint;
+  prerequisites.registry.pull_secret_ref = fingerprint;
+  prerequisites.substrate_secret_refs = [fingerprint];
+}
+
+switch (mutation) {
+  case 'valid':
+    break;
+  case 'sslmode_only':
+    useSslmodeOnlyRefs();
+    break;
+  case 'redacted_fingerprint':
+    useRedactedFingerprints();
+    break;
+  case 'wrong_schema':
+    prerequisites.schema_version = 'agentsmith.kubernetes-prerequisites/v1';
+    break;
+  case 'target_profile_mismatch':
+    prerequisites.target_profile = 'kind_rehearsal/kit_installed/online';
+    break;
+  case 'missing_namespace':
+    delete prerequisites.namespace;
+    break;
+  case 'namespace_mismatch':
+    prerequisites.namespace = 'agentsmith-other';
+    break;
+  case 'missing_rbac':
+    delete prerequisites.rbac;
+    break;
+  case 'missing_rbac_policy_and_proof':
+    delete prerequisites.rbac.policy;
+    delete prerequisites.rbac.proof;
+    break;
+  case 'missing_ingress_host':
+    delete prerequisites.ingress.host;
+    break;
+  case 'missing_ingress_tls_secret_ref':
+    delete prerequisites.ingress.tls_secret_ref;
+    break;
+  case 'missing_registry_pull_secret_ref':
+    delete prerequisites.registry.pull_secret_ref;
+    break;
+  case 'missing_storage_class':
+    delete prerequisites.storage.storage_class;
+    break;
+  case 'missing_persistent_volume_policy':
+    delete prerequisites.storage.persistent_volume_policy;
+    break;
+  case 'missing_substrate_secret_ref':
+    prerequisites.substrate_secret_refs = prerequisites.substrate_secret_refs.filter(
+      (ref) => ref !== 'secretRef:release/redis-credential'
+    );
+    break;
+  case 'extra_substrate_secret_ref':
+    prerequisites.substrate_secret_refs.push('secretRef:release/not-declared-by-substrate');
+    break;
+  case 'plaintext_registry_pull_secret':
+    prerequisites.registry.pull_secret_ref = 'plain-registry-secret-value';
+    break;
+  case 'empty_registry_pull_secret':
+    prerequisites.registry.pull_secret_ref = '';
+    break;
+  case 'ingress_localhost':
+    prerequisites.ingress.host = 'localhost';
+    break;
+  case 'ingress_host_docker_internal':
+    prerequisites.ingress.host = 'host.docker.internal';
+    break;
+  case 'ingress_userinfo':
+    prerequisites.ingress.host = 'operator@agentsmith.release.example.com';
+    break;
+  case 'ingress_url_with_userinfo':
+    prerequisites.ingress.host = 'https://operator@agentsmith.release.example.com';
+    break;
+  case 'raw_kubeconfig':
+    prerequisites.target_access = {
+      ['kube' + 'config']: 'apiVersion: v1\nclusters:\n- name: release'
+    };
+    break;
+  case 'provider_matrix':
+    prerequisites.provider_matrix = {
+      eks: 'not_in_pre_ga_scope'
+    };
+    break;
+  case 'rollback_plan':
+    prerequisites.rollback_plan = {
+      strategy: 'future_release_scope'
+    };
+    break;
+  case 'live_k8s_checks':
+    prerequisites.live_k8s_checks = {
+      enabled: true
+    };
+    break;
+  default:
+    throw new Error(`unknown prerequisites mutation: ${mutation}`);
+}
+
+fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
 run_target_preflight() {
   local target_profile="$1"
   local substrate_truth="$2"
-  local output_dir="$3"
+  local target_prerequisites="$3"
+  local output_dir="$4"
+  shift 4 || true
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --target-preflight \
     --target-profile "$target_profile" \
     --substrate-truth "$substrate_truth" \
-    --output-dir "$output_dir"
+    --target-prerequisites "$target_prerequisites" \
+    --output-dir "$output_dir" \
+    "$@"
 }
 
 expect_fail() {
@@ -261,11 +442,13 @@ expect_fail() {
   local mutation="${2:-$label}"
   local target_profile="${3:-$EXTERNAL_PROFILE}"
   local truth_file="$TMP_DIR/truth-$label.json"
+  local prerequisites_file="$TMP_DIR/prerequisites-$label.json"
   local output_dir="$TMP_DIR/out-$label"
 
   write_truth "$truth_file" "$EXTERNAL_PROFILE" "$mutation"
+  write_prerequisites "$prerequisites_file" "$EXTERNAL_PROFILE" valid
 
-  if run_target_preflight "$target_profile" "$truth_file" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+  if run_target_preflight "$target_profile" "$truth_file" "$prerequisites_file" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected invalid target preflight case to fail: $label"
@@ -278,11 +461,13 @@ expect_kit_fail() {
   local label="$1"
   local mutation="${2:-$label}"
   local truth_file="$TMP_DIR/truth-kit-$label.json"
+  local prerequisites_file="$TMP_DIR/prerequisites-kit-$label.json"
   local output_dir="$TMP_DIR/out-kit-$label"
 
   write_truth "$truth_file" "$KIT_PROFILE" "$mutation"
+  write_prerequisites "$prerequisites_file" "$KIT_PROFILE" valid
 
-  if run_target_preflight "$KIT_PROFILE" "$truth_file" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+  if run_target_preflight "$KIT_PROFILE" "$truth_file" "$prerequisites_file" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected invalid kit target preflight case to fail: $label"
@@ -295,17 +480,45 @@ expect_profile_fail() {
   local label="$1"
   local target_profile="$2"
   local truth_file="$TMP_DIR/truth-profile-$label.json"
+  local prerequisites_file="$TMP_DIR/prerequisites-profile-$label.json"
   local output_dir="$TMP_DIR/out-profile-$label"
 
   write_truth "$truth_file" "$EXTERNAL_PROFILE" valid
+  write_prerequisites "$prerequisites_file" "$EXTERNAL_PROFILE" valid
 
-  if run_target_preflight "$target_profile" "$truth_file" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+  if run_target_preflight "$target_profile" "$truth_file" "$prerequisites_file" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "expected invalid target profile to fail: $label"
   fi
 
   pass "canonical profiles only; non-canonical pre-GA name or synonym axis rejected: $label"
+}
+
+expect_prerequisites_fail() {
+  local label="$1"
+  local mutation="${2:-$label}"
+  local target_profile="${3:-$EXTERNAL_PROFILE}"
+  local truth_mutation="${4:-valid}"
+  local truth_file="$TMP_DIR/truth-prerequisites-$label.json"
+  local prerequisites_file="$TMP_DIR/prerequisites-invalid-$label.json"
+  local output_dir="$TMP_DIR/out-prerequisites-$label"
+
+  write_truth "$truth_file" "$EXTERNAL_PROFILE" "$truth_mutation"
+  write_prerequisites "$prerequisites_file" "$EXTERNAL_PROFILE" "$mutation"
+
+  local extra_args=()
+  if [[ "$mutation" == "namespace_mismatch" ]]; then
+    extra_args+=(--expected-namespace agentsmith)
+  fi
+
+  if run_target_preflight "$target_profile" "$truth_file" "$prerequisites_file" "$output_dir" "${extra_args[@]}" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected invalid target prerequisites case to fail: $label"
+  fi
+
+  pass "invalid target prerequisites rejected: $label"
 }
 
 assert_pass_report() {
@@ -317,7 +530,7 @@ import fs from 'node:fs';
 
 const [reportFile, expectedProfile] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
-if (report.scope !== 'target_preflight_intake_only') {
+if (report.scope !== 'target_preflight_prerequisite_only') {
   throw new Error(`unexpected scope: ${report.scope}`);
 }
 if (report.readiness !== false) {
@@ -329,6 +542,12 @@ if (report.status !== 'pass') {
 if (report.target_profile?.value !== expectedProfile) {
   throw new Error(`unexpected target profile: ${report.target_profile?.value}`);
 }
+if (report.target_prerequisites?.schema_version !== 'agentsmith.target-prerequisites.truth/v1') {
+  throw new Error('target preflight report must summarize target prerequisites truth');
+}
+if (report.target_prerequisites?.namespace !== 'agentsmith') {
+  throw new Error(`unexpected prerequisites namespace: ${report.target_prerequisites?.namespace}`);
+}
 if ('release_verdict' in report || 'verdict' in report) {
   throw new Error('target preflight report must not claim a release verdict');
 }
@@ -336,55 +555,69 @@ NODE
 }
 
 EXTERNAL_TRUTH="$TMP_DIR/external-valid.json"
+EXTERNAL_PREREQUISITES="$TMP_DIR/external-prerequisites-valid.json"
 EXTERNAL_OUT="$TMP_DIR/out-external-valid"
 write_truth "$EXTERNAL_TRUTH" "$EXTERNAL_PROFILE" valid
-run_target_preflight "$EXTERNAL_PROFILE" "$EXTERNAL_TRUTH" "$EXTERNAL_OUT" >/dev/null
+write_prerequisites "$EXTERNAL_PREREQUISITES" "$EXTERNAL_PROFILE" valid
+run_target_preflight "$EXTERNAL_PROFILE" "$EXTERNAL_TRUTH" "$EXTERNAL_PREREQUISITES" "$EXTERNAL_OUT" >/dev/null
 assert_pass_report "$EXTERNAL_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
 pass "valid existing_kubernetes/external_declared/online truth accepted with focused non-readiness report"
 
 EXTERNAL_AIRGAP_TRUTH="$TMP_DIR/external-airgap-valid.json"
+EXTERNAL_AIRGAP_PREREQUISITES="$TMP_DIR/external-airgap-prerequisites-valid.json"
 EXTERNAL_AIRGAP_OUT="$TMP_DIR/out-external-airgap-valid"
 write_truth "$EXTERNAL_AIRGAP_TRUTH" "$EXTERNAL_AIRGAP_PROFILE" valid
-run_target_preflight "$EXTERNAL_AIRGAP_PROFILE" "$EXTERNAL_AIRGAP_TRUTH" "$EXTERNAL_AIRGAP_OUT" >/dev/null
+write_prerequisites "$EXTERNAL_AIRGAP_PREREQUISITES" "$EXTERNAL_AIRGAP_PROFILE" valid
+run_target_preflight "$EXTERNAL_AIRGAP_PROFILE" "$EXTERNAL_AIRGAP_TRUTH" "$EXTERNAL_AIRGAP_PREREQUISITES" "$EXTERNAL_AIRGAP_OUT" >/dev/null
 assert_pass_report "$EXTERNAL_AIRGAP_OUT/target-preflight-report.json" "$EXTERNAL_AIRGAP_PROFILE"
 pass "valid existing_kubernetes/external_declared/airgap truth accepted"
 
 EXISTING_KIT_ONLINE_TRUTH="$TMP_DIR/existing-kit-online-valid.json"
+EXISTING_KIT_ONLINE_PREREQUISITES="$TMP_DIR/existing-kit-online-prerequisites-valid.json"
 EXISTING_KIT_ONLINE_OUT="$TMP_DIR/out-existing-kit-online-valid"
 write_truth "$EXISTING_KIT_ONLINE_TRUTH" "$EXISTING_KIT_ONLINE_PROFILE" valid
-run_target_preflight "$EXISTING_KIT_ONLINE_PROFILE" "$EXISTING_KIT_ONLINE_TRUTH" "$EXISTING_KIT_ONLINE_OUT" >/dev/null
+write_prerequisites "$EXISTING_KIT_ONLINE_PREREQUISITES" "$EXISTING_KIT_ONLINE_PROFILE" valid
+run_target_preflight "$EXISTING_KIT_ONLINE_PROFILE" "$EXISTING_KIT_ONLINE_TRUTH" "$EXISTING_KIT_ONLINE_PREREQUISITES" "$EXISTING_KIT_ONLINE_OUT" >/dev/null
 assert_pass_report \
   "$EXISTING_KIT_ONLINE_OUT/target-preflight-report.json" \
   "$EXISTING_KIT_ONLINE_PROFILE"
 pass "valid existing_kubernetes/kit_installed/online truth accepted"
 
 EXISTING_KIT_AIRGAP_TRUTH="$TMP_DIR/existing-kit-airgap-valid.json"
+EXISTING_KIT_AIRGAP_PREREQUISITES="$TMP_DIR/existing-kit-airgap-prerequisites-valid.json"
 EXISTING_KIT_AIRGAP_OUT="$TMP_DIR/out-existing-kit-airgap-valid"
 write_truth "$EXISTING_KIT_AIRGAP_TRUTH" "$EXISTING_KIT_AIRGAP_PROFILE" valid
-run_target_preflight "$EXISTING_KIT_AIRGAP_PROFILE" "$EXISTING_KIT_AIRGAP_TRUTH" "$EXISTING_KIT_AIRGAP_OUT" >/dev/null
+write_prerequisites "$EXISTING_KIT_AIRGAP_PREREQUISITES" "$EXISTING_KIT_AIRGAP_PROFILE" valid
+run_target_preflight "$EXISTING_KIT_AIRGAP_PROFILE" "$EXISTING_KIT_AIRGAP_TRUTH" "$EXISTING_KIT_AIRGAP_PREREQUISITES" "$EXISTING_KIT_AIRGAP_OUT" >/dev/null
 assert_pass_report \
   "$EXISTING_KIT_AIRGAP_OUT/target-preflight-report.json" \
   "$EXISTING_KIT_AIRGAP_PROFILE"
 pass "valid existing_kubernetes/kit_installed/airgap truth accepted"
 
 KIT_TRUTH="$TMP_DIR/kit-valid.json"
+KIT_PREREQUISITES="$TMP_DIR/kit-prerequisites-valid.json"
 KIT_OUT="$TMP_DIR/out-kit-valid"
 write_truth "$KIT_TRUTH" "$KIT_PROFILE" valid
-run_target_preflight "$KIT_PROFILE" "$KIT_TRUTH" "$KIT_OUT" >/dev/null
+write_prerequisites "$KIT_PREREQUISITES" "$KIT_PROFILE" valid
+run_target_preflight "$KIT_PROFILE" "$KIT_TRUTH" "$KIT_PREREQUISITES" "$KIT_OUT" >/dev/null
 assert_pass_report "$KIT_OUT/target-preflight-report.json" "$KIT_PROFILE"
 pass "valid kind_rehearsal/kit_installed/online truth accepted"
 
 SSLMODE_ONLY_TRUTH="$TMP_DIR/sslmode-only-valid.json"
+SSLMODE_ONLY_PREREQUISITES="$TMP_DIR/sslmode-only-prerequisites-valid.json"
 SSLMODE_ONLY_OUT="$TMP_DIR/out-sslmode-only-valid"
 write_truth "$SSLMODE_ONLY_TRUTH" "$EXTERNAL_PROFILE" sslmode_only
-run_target_preflight "$EXTERNAL_PROFILE" "$SSLMODE_ONLY_TRUTH" "$SSLMODE_ONLY_OUT" >/dev/null
+write_prerequisites "$SSLMODE_ONLY_PREREQUISITES" "$EXTERNAL_PROFILE" sslmode_only
+run_target_preflight "$EXTERNAL_PROFILE" "$SSLMODE_ONLY_TRUTH" "$SSLMODE_ONLY_PREREQUISITES" "$SSLMODE_ONLY_OUT" >/dev/null
 assert_pass_report "$SSLMODE_ONLY_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
 pass "valid sslmode-only truth accepted"
 
 REDACTED_FINGERPRINT_TRUTH="$TMP_DIR/redacted-fingerprint-valid.json"
+REDACTED_FINGERPRINT_PREREQUISITES="$TMP_DIR/redacted-fingerprint-prerequisites-valid.json"
 REDACTED_FINGERPRINT_OUT="$TMP_DIR/out-redacted-fingerprint-valid"
 write_truth "$REDACTED_FINGERPRINT_TRUTH" "$EXTERNAL_PROFILE" redacted_fingerprint
-run_target_preflight "$EXTERNAL_PROFILE" "$REDACTED_FINGERPRINT_TRUTH" "$REDACTED_FINGERPRINT_OUT" >/dev/null
+write_prerequisites "$REDACTED_FINGERPRINT_PREREQUISITES" "$EXTERNAL_PROFILE" redacted_fingerprint
+run_target_preflight "$EXTERNAL_PROFILE" "$REDACTED_FINGERPRINT_TRUTH" "$REDACTED_FINGERPRINT_PREREQUISITES" "$REDACTED_FINGERPRINT_OUT" >/dev/null
 assert_pass_report "$REDACTED_FINGERPRINT_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
 pass "valid redacted fingerprint truth accepted"
 
@@ -395,12 +628,26 @@ expect_profile_fail synonym-kind 'kind/external_declared/online'
 expect_profile_fail synonym-substrate-cluster 'existing_kubernetes/cluster/online'
 expect_profile_fail synonym-distribution-cluster 'existing_kubernetes/external_declared/cluster'
 
+MISSING_ARG_PREREQUISITES="$TMP_DIR/missing-arg-prerequisites-valid.json"
+write_prerequisites "$MISSING_ARG_PREREQUISITES" "$EXTERNAL_PROFILE" valid
+
 if bash "$ROOT_DIR/scripts/verify-release.sh" --target-preflight \
   --target-profile "$EXTERNAL_PROFILE" \
+  --target-prerequisites "$MISSING_ARG_PREREQUISITES" \
   --output-dir "$TMP_DIR/out-missing-truth" >"$TMP_DIR/missing-truth.out" 2>"$TMP_DIR/missing-truth.err"; then
   fail "expected missing substrate truth to fail"
 fi
 pass "missing substrate truth rejected"
+
+MISSING_ARG_TRUTH="$TMP_DIR/missing-arg-truth-valid.json"
+write_truth "$MISSING_ARG_TRUTH" "$EXTERNAL_PROFILE" valid
+if bash "$ROOT_DIR/scripts/verify-release.sh" --target-preflight \
+  --target-profile "$EXTERNAL_PROFILE" \
+  --substrate-truth "$MISSING_ARG_TRUTH" \
+  --output-dir "$TMP_DIR/out-missing-prerequisites" >"$TMP_DIR/missing-prerequisites.out" 2>"$TMP_DIR/missing-prerequisites.err"; then
+  fail "expected missing target prerequisites to fail"
+fi
+pass "missing target prerequisites rejected"
 
 expect_fail wrong-schema wrong_schema
 expect_fail target-profile-mismatch target_mismatch
@@ -419,7 +666,36 @@ expect_fail mongodb-url-alias mongodb_url_alias
 expect_fail redis-endpoint-alias redis_endpoint_alias
 expect_fail object-storage-host-alias object_storage_host_alias
 expect_fail object-storage-missing-region object_storage_missing_region
+expect_fail object-storage-userinfo-url object_storage_userinfo_url
 expect_fail oidc-issuer-alias oidc_issuer_alias
+expect_fail localhost-with-port-endpoint localhost_with_port_endpoint
+expect_fail loopback-ip-with-port-endpoint loopback_ip_with_port_endpoint
+expect_fail unspecified-ip-with-port-endpoint unspecified_ip_with_port_endpoint
+expect_fail top-level-namespace top_level_namespace
+expect_fail top-level-ingress top_level_ingress
+expect_prerequisites_fail prerequisites-wrong-schema wrong_schema
+expect_prerequisites_fail prerequisites-target-profile-mismatch target_profile_mismatch
+expect_prerequisites_fail prerequisites-missing-namespace missing_namespace
+expect_prerequisites_fail prerequisites-namespace-mismatch namespace_mismatch
+expect_prerequisites_fail prerequisites-missing-rbac missing_rbac
+expect_prerequisites_fail prerequisites-missing-rbac-policy-and-proof missing_rbac_policy_and_proof
+expect_prerequisites_fail prerequisites-missing-ingress-host missing_ingress_host
+expect_prerequisites_fail prerequisites-missing-ingress-tls-secret-ref missing_ingress_tls_secret_ref
+expect_prerequisites_fail prerequisites-missing-registry-pull-secret-ref missing_registry_pull_secret_ref
+expect_prerequisites_fail prerequisites-missing-storage-class missing_storage_class
+expect_prerequisites_fail prerequisites-missing-persistent-volume-policy missing_persistent_volume_policy
+expect_prerequisites_fail prerequisites-missing-substrate-secret-ref missing_substrate_secret_ref
+expect_prerequisites_fail prerequisites-extra-substrate-secret-ref extra_substrate_secret_ref
+expect_prerequisites_fail prerequisites-plaintext-registry-pull-secret plaintext_registry_pull_secret
+expect_prerequisites_fail prerequisites-empty-registry-pull-secret empty_registry_pull_secret
+expect_prerequisites_fail prerequisites-ingress-localhost ingress_localhost
+expect_prerequisites_fail prerequisites-ingress-host-docker-internal ingress_host_docker_internal
+expect_prerequisites_fail prerequisites-ingress-userinfo ingress_userinfo
+expect_prerequisites_fail prerequisites-ingress-url-with-userinfo ingress_url_with_userinfo
+expect_prerequisites_fail prerequisites-raw-kubeconfig raw_kubeconfig
+expect_prerequisites_fail prerequisites-provider-matrix provider_matrix
+expect_prerequisites_fail prerequisites-rollback-plan rollback_plan
+expect_prerequisites_fail prerequisites-live-k8s-checks live_k8s_checks
 expect_fail localhost-endpoint localhost_endpoint
 expect_fail raw-password raw_password
 expect_fail raw-token raw_token

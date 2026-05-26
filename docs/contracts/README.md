@@ -169,11 +169,12 @@ deploy readiness fields.
 
 The current `--online-deployment-gate` validator is a focused online
 orchestration runner only. It accepts only
-`existing_kubernetes/external_declared/online`, calls existing validators in
-order, and writes `online-deployment-gate-report.json` with `schema:
-agentsmith.online-deployment-gate/v1`, `readiness: false`, and `scope:
-online_deployment_gate_only`. Default mode stops after server-side dry-run
-apply; confirmed apply runs rollout and optional smoke. When
+`existing_kubernetes/external_declared/online`, requires explicit
+`--substrate-truth <json>` and `--target-prerequisites <json>`, calls existing
+validators in order, and writes `online-deployment-gate-report.json` with
+`schema: agentsmith.online-deployment-gate/v1`, `readiness: false`, and
+`scope: online_deployment_gate_only`. Default mode stops after server-side
+dry-run apply; confirmed apply runs rollout and optional smoke. When
 `--target-registry <registry-host[/namespace]>` is supplied, it first generates
 an image-map and passes it to render for image reference adoption only. The
 report lists only step names, relative report paths, and a capability map keyed
@@ -231,26 +232,28 @@ other subject file entries use their raw file sha256. This prevents
 that carries it. AgentSmith `product_flows` and `product_flow_results` remain
 AgentSmith-produced evidence and are rejected here.
 
-The current `--target-preflight` validator is a focused substrate connection
-truth intake diagnostic only. It accepts only
-`agentsmith.substrate-connection.truth/v1`, rejects Docker substrate truth and
-non-canonical pre-GA target names, and binds the truth document to the supplied
+The current `--target-preflight` validator is a focused substrate plus target
+prerequisites intake diagnostic only. It accepts
+`agentsmith.substrate-connection.truth/v1` and
+`agentsmith.target-prerequisites.truth/v1`, rejects Docker substrate truth and
+non-canonical pre-GA target names, and binds both documents to the supplied
 `target_cluster/substrate_source/distribution` tuple. It writes
 `target-preflight-report.json` with `readiness: false` and
-`scope: target_preflight_intake_only`. It validates declarations for required
-substrate services, canonical endpoints (`host` for
+`scope: target_preflight_prerequisite_only`. It validates declarations for
+required substrate services, canonical endpoints (`host` for
 PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and `bucket` for
 object storage, and `issuer_url` for OIDC), secret refs or redacted
-fingerprints, TLS or sslmode, `extensions.pgvector.status: installed`, and
-reachability status `declared_reachable` or `verified_by_operator`. It does
-not connect to Kubernetes, render, apply, smoke, package, deploy, or claim
-release readiness.
+fingerprints, TLS or sslmode, `extensions.pgvector.status: installed`,
+reachability status `declared_reachable` or `verified_by_operator`, and target
+prerequisites for namespace, RBAC policy/proof, ingress TLS, registry pull
+secret, storage, and substrate secret refs. It does not connect to Kubernetes,
+render, apply, smoke, package, deploy, or claim release readiness.
 
 Future contracts should cover:
 
 - Release contract input validation.
 - Deploy template package input validation.
-- Substrate connection truth validation.
+- Substrate connection truth and target prerequisites validation.
 - Evidence subject and provenance validation.
 - Image inventory and digest adoption validation.
 - Airgap bundle manifest validation.

@@ -118,6 +118,63 @@ fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
 NODE
 }
 
+write_prerequisites() {
+  local output="$1"
+  local mutation="${2:-valid}"
+
+  "$NODE_BIN" --input-type=module - "$output" "$TARGET_PROFILE" "$mutation" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profile, mutation] = process.argv.slice(2);
+
+const prerequisites = {
+  schema_version: 'agentsmith.target-prerequisites.truth/v1',
+  target_profile: profile,
+  namespace: 'agentsmith',
+  rbac: {
+    policy: 'pre_provisioned',
+    proof: 'operator kubectl auth can-i apply deployments in namespace agentsmith 2026-05-23T12:00:00Z'
+  },
+  ingress: {
+    host: 'agentsmith.release.example.com',
+    tls_secret_ref: 'secretRef:release/agentsmith-ingress-tls'
+  },
+  registry: {
+    pull_secret_ref: 'secretRef:release/registry-pull'
+  },
+  storage: {
+    storage_class: 'gp3',
+    persistent_volume_policy: 'dynamic'
+  },
+  substrate_secret_refs: [
+    'secretRef:release/postgresql-credential',
+    'secretRef:release/postgresql-admin',
+    'secretRef:release/postgresql-ca',
+    'secretRef:release/mongodb-credential',
+    'secretRef:release/mongodb-ca',
+    'secretRef:release/redis-credential',
+    'secretRef:release/redis-ca',
+    'secretRef:release/object-storage-credential',
+    'secretRef:release/object-storage-ca',
+    'secretRef:release/oidc-client',
+    'secretRef:release/oidc-ca'
+  ]
+};
+
+switch (mutation) {
+  case 'valid':
+    break;
+  case 'missing_namespace':
+    delete prerequisites.namespace;
+    break;
+  default:
+    throw new Error(`unknown prerequisites mutation: ${mutation}`);
+}
+
+fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
 write_render_values() {
   local output="$1"
 
@@ -560,6 +617,31 @@ run_gate() {
   local substrate_truth="$5"
   local output_dir="$6"
   local target_profile="${7:-$TARGET_PROFILE}"
+  local target_prerequisites="${TARGET_PREREQUISITES_OVERRIDE:-$VALID_PREREQUISITES}"
+  shift 7 || true
+
+  FAKE_KUBECTL_LOG="$KUBECTL_LOG" bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
+    --release-contract "$release_contract" \
+    --deploy-template-package "$deploy_template_package" \
+    --archive "$archive" \
+    --target-profile "$target_profile" \
+    --render-values "$render_values" \
+    --substrate-truth "$substrate_truth" \
+    --target-prerequisites "$target_prerequisites" \
+    --namespace agentsmith \
+    --output-dir "$output_dir" \
+    --kubectl "$FAKE_KUBECTL" \
+    "$@"
+}
+
+run_gate_without_prerequisites() {
+  local release_contract="$1"
+  local deploy_template_package="$2"
+  local archive="$3"
+  local render_values="$4"
+  local substrate_truth="$5"
+  local output_dir="$6"
+  local target_profile="${7:-$TARGET_PROFILE}"
   shift 7 || true
 
   FAKE_KUBECTL_LOG="$KUBECTL_LOG" bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
@@ -801,6 +883,8 @@ NODE
 
 KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
 VALID_TRUTH="$TMP_DIR/substrate-truth.valid.json"
+VALID_PREREQUISITES="$TMP_DIR/target-prerequisites.valid.json"
+INVALID_PREFLIGHT_PREREQUISITES="$TMP_DIR/target-prerequisites.invalid-preflight.json"
 VALID_VALUES="$TMP_DIR/render-values.valid.json"
 VALID_ARCHIVE="$TMP_DIR/valid.tgz"
 VALID_CONTRACT_MATERIAL="$TMP_DIR/release-contract.valid-material.json"
@@ -819,6 +903,8 @@ RUN_ID_MISMATCH_PROVENANCE="$TMP_DIR/evidence-provenance.run-id-mismatch.json"
 SIGNED_UNBOUND_OPERATOR_PROVENANCE="$TMP_DIR/evidence-provenance.signed-unbound-operator.json"
 
 write_truth "$VALID_TRUTH"
+write_prerequisites "$VALID_PREREQUISITES" valid
+write_prerequisites "$INVALID_PREFLIGHT_PREREQUISITES" missing_namespace
 write_render_values "$VALID_VALUES"
 prepare_archive_case valid valid "$VALID_ARCHIVE" "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL"
 prepare_archive_case invalid-render unknown_variable "$INVALID_ARCHIVE" "$INVALID_CONTRACT_MATERIAL" "$INVALID_PACKAGE_MATERIAL"
@@ -852,6 +938,38 @@ if bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
 fi
 assert_no_evidence_files "$parse_missing_root"
 pass "parse-time missing required args clear stale evidence files"
+
+missing_preflight_input_output="$TMP_DIR/out-missing-target-prerequisites"
+mkdir -p "$missing_preflight_input_output"
+printf '%s\n' '{"stale":true}' >"$missing_preflight_input_output/online-deployment-gate-report.json"
+reset_kubectl_log
+before_missing_preflight_input="$(hit_count)"
+if run_gate_without_prerequisites "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$missing_preflight_input_output" "$TARGET_PROFILE" >"$TMP_DIR/missing-target-prerequisites.out" 2>"$TMP_DIR/missing-target-prerequisites.err"; then
+  fail "expected online deployment gate without target prerequisites to fail"
+fi
+after_missing_preflight_input="$(hit_count)"
+assert_kubectl_not_called
+[[ "$before_missing_preflight_input" == "$after_missing_preflight_input" ]] || fail "missing target prerequisites reached route/network smoke"
+assert_no_gate_report "$missing_preflight_input_output"
+pass "online deployment gate requires target prerequisites before kubectl or network"
+
+invalid_preflight_output="$TMP_DIR/out-invalid-target-preflight"
+mkdir -p "$invalid_preflight_output/render" "$invalid_preflight_output/apply"
+printf '%s\n' '{"stale":true}' >"$invalid_preflight_output/online-deployment-gate-report.json"
+printf '%s\n' '{"stale":true}' >"$invalid_preflight_output/render/manifest-render-report.json"
+printf '%s\n' '{"stale":true}' >"$invalid_preflight_output/apply/apply-report.json"
+reset_kubectl_log
+before_invalid_preflight="$(hit_count)"
+if TARGET_PREREQUISITES_OVERRIDE="$INVALID_PREFLIGHT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$invalid_preflight_output" "$TARGET_PROFILE" >"$TMP_DIR/invalid-preflight.out" 2>"$TMP_DIR/invalid-preflight.err"; then
+  fail "expected invalid target-preflight truth to stop online deployment gate"
+fi
+after_invalid_preflight="$(hit_count)"
+assert_kubectl_not_called
+[[ "$before_invalid_preflight" == "$after_invalid_preflight" ]] || fail "invalid target-preflight reached route/network smoke"
+assert_no_gate_report "$invalid_preflight_output"
+[[ ! -e "$invalid_preflight_output/render/manifest-render-report.json" ]] || fail "invalid target-preflight must not leave stale render report"
+[[ ! -e "$invalid_preflight_output/apply/apply-report.json" ]] || fail "invalid target-preflight must not leave stale apply report"
+pass "invalid target preflight stops online gate before render, kubectl, or network and clears stale reports"
 
 dry_output="$TMP_DIR/out-dry"
 mkdir -p "$dry_output/rollout" "$dry_output/smoke"

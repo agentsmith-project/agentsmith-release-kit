@@ -28,8 +28,9 @@ AgentSmith Release Kit consumes:
 
 - AgentSmith release contract.
 - AgentSmith deploy template package.
-- Operator inputs, including target cluster, registry, substrate connection
-  truth, namespace, ingress, TLS, and secret references.
+- Operator inputs, including target cluster, registry, neutral substrate
+  connection truth, target prerequisites truth, namespace, ingress, TLS, and
+  secret references.
 
 AgentSmith Release Kit owns:
 
@@ -427,8 +428,9 @@ bash scripts/test-online-deployment-gate.sh
 ```
 
 `--online-deployment-gate` is a KISS runner for the online focused chain on
-`existing_kubernetes/external_declared/online` only. It invokes existing
-focused diagnostics in order: inputs, target-preflight, template-package,
+`existing_kubernetes/external_declared/online` only. It requires both
+`--substrate-truth <json>` and `--target-prerequisites <json>`, then invokes
+existing focused diagnostics in order: inputs, target-preflight, template-package,
 optional image-map when `--target-registry <registry-host[/namespace]>` is
 provided, render, render-check, apply, and, in `--mode apply` only, rollout
 plus optional route smoke. Default `server-dry-run` mode stops after apply
@@ -509,20 +511,19 @@ Target preflight focused diagnostic:
 bash scripts/test-target-preflight.sh
 ```
 
-`--target-preflight` validates only repo-local intake of
-`agentsmith.substrate-connection.truth/v1` substrate connection truth for an
-explicit target profile. It checks the three target axes, canonical target
-preflight profiles, required substrate services, canonical endpoint declarations
-(`host` for PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and
-`bucket` for object storage, and `issuer_url` for OIDC), secret references, TLS
-or sslmode declarations, `extensions.pgvector.status: installed`, reachability
-statuses `declared_reachable` or `verified_by_operator`, `kit_installed`
-release-kit versions as plain `x.y.z` semver, and obvious local source or
-plaintext credential payloads. `target-preflight-report.json` is written with
-`readiness: false`, `scope: target_preflight_intake_only`, and `status: pass`;
-it is not Kubernetes connectivity evidence, render/check evidence, apply
-evidence, smoke evidence, package readiness, deploy readiness, or release
-readiness.
+`--target-preflight` validates repo-local intake of two explicit documents:
+neutral substrate connection truth
+`agentsmith.substrate-connection.truth/v1` and target prerequisites truth
+`agentsmith.target-prerequisites.truth/v1`. Substrate truth stays limited to
+service endpoints, secret refs or redacted fingerprints, TLS or sslmode,
+pgvector, and reachability. Target prerequisites carry the real Kubernetes or
+cloud deployment preconditions: target profile, namespace, RBAC policy/proof,
+ingress host plus TLS secret ref, registry pull secret ref, storage class plus
+PV policy, and the substrate secret refs declared by substrate truth.
+`target-preflight-report.json` is written with `readiness: false`,
+`scope: target_preflight_prerequisite_only`, and `status: pass`; it is not
+Kubernetes connectivity evidence, render/check evidence, apply evidence, smoke
+evidence, package readiness, deploy readiness, or release readiness.
 
 The full release gate is a future repo-local authority. It is intentionally not
 implemented during bootstrap.

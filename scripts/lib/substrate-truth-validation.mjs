@@ -10,10 +10,34 @@ import {
 export { DISTRIBUTION_VALUES, SUBSTRATE_SOURCE_VALUES, TARGET_CLUSTER_VALUES };
 
 export const SUBSTRATE_CONNECTION_SCHEMA = 'agentsmith.substrate-connection.truth/v1';
+export const TARGET_PREREQUISITES_SCHEMA = 'agentsmith.target-prerequisites.truth/v1';
 
 const REQUIRED_SERVICES = ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc'];
+const SUBSTRATE_TRUTH_FIELDS = [
+  'schema_version',
+  'target_cluster',
+  'substrate_source',
+  'distribution',
+  'declared_at',
+  'declared_by',
+  'installed_by',
+  'release_kit_version',
+  'installation_id',
+  'services'
+];
+const TARGET_PREREQUISITES_FIELDS = [
+  'schema_version',
+  'target_profile',
+  'namespace',
+  'rbac',
+  'ingress',
+  'registry',
+  'storage',
+  'substrate_secret_refs'
+];
 const SECRET_REF_PREFIX = 'secretRef:';
 const FINGERPRINT_RE = /^(?:redacted|fingerprint):sha256:[0-9a-f]{64}$/;
+const KUBERNETES_NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const LOCAL_URI_RE = /\b(?:file|local|source|git\+file):\/\//i;
 const LOCAL_SCHEME_RE = /^(?:file|local|source|git\+file):/i;
@@ -61,6 +85,22 @@ function requireObject(value, label) {
   return value;
 }
 
+function assertAllowedObjectFields(value, label, allowedFields) {
+  const allowed = new Set(allowedFields);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      fail(`${label}.${key} is not allowed`);
+    }
+  }
+}
+
+function requireArray(value, label) {
+  if (!Array.isArray(value)) {
+    fail(`${label} must be an array`);
+  }
+  return value;
+}
+
 function requireString(value, label) {
   if (typeof value !== 'string' || value.trim() === '') {
     fail(`${label} is required`);
@@ -92,6 +132,21 @@ function isLoopbackHost(hostname) {
     normalized === '::1' ||
     /^(?:127|0)(?:\.\d{1,3}){3}$/.test(normalized)
   );
+}
+
+function endpointHostnameCandidate(text) {
+  const trimmed = text.trim();
+  const bracketed = trimmed.match(/^\[([^\]]+)\](?::[^:/?#\s@]+)?$/);
+  if (bracketed) {
+    return bracketed[1];
+  }
+
+  const hostWithPort = trimmed.match(/^([^:/?#\s@]+):[^:/?#\s@]+$/);
+  if (hostWithPort) {
+    return hostWithPort[1];
+  }
+
+  return trimmed;
 }
 
 function isSecretRefValue(value) {
@@ -241,13 +296,59 @@ function assertEndpointValue(value, label) {
     } catch {
       fail(`${label} must be a valid endpoint URI`);
     }
+    if (parsed.username || parsed.password) {
+      fail(`${label} must not include userinfo`);
+    }
     if (isLoopbackHost(parsed.hostname)) {
       fail(`${label} must not use a local or Docker-only endpoint`);
     }
-  } else if (isLoopbackHost(text)) {
+  } else if (isLoopbackHost(endpointHostnameCandidate(text))) {
     fail(`${label} must not use a local or Docker-only host`);
+  } else if (text.includes('@')) {
+    fail(`${label} must not include userinfo`);
   }
 
+  return text;
+}
+
+function assertKubernetesNamespace(value, label) {
+  const namespace = requireString(value, label);
+  if (
+    namespace.length > 63 ||
+    !KUBERNETES_NAMESPACE_RE.test(namespace)
+  ) {
+    fail(`${label} must be a Kubernetes namespace name`);
+  }
+  return namespace;
+}
+
+function assertIngressHost(value, label) {
+  const host = requireString(value, label);
+  const issues = [];
+  scanUnsafeString(host, label, issues);
+  if (issues.length > 0) {
+    fail(issues[0]);
+  }
+  if (
+    URI_SCHEME_RE.test(host) ||
+    host.includes('@') ||
+    host.includes('/') ||
+    host.includes(':') ||
+    /\s/.test(host)
+  ) {
+    fail(`${label} must be a host without scheme, path, port, or userinfo`);
+  }
+  if (isLoopbackHost(host)) {
+    fail(`${label} must not use a local or Docker-only host`);
+  }
+  return host;
+}
+
+function assertNonDisabledString(value, label) {
+  const text = requireString(value, label);
+  if (['disable', 'disabled', 'none', 'not_required'].includes(text.toLowerCase())) {
+    fail(`${label} must not disable the prerequisite`);
+  }
   return text;
 }
 
@@ -345,6 +446,88 @@ function assertVectorExtension(postgresql, label) {
   return {
     status,
     version: typeof vector.version === 'string' ? vector.version : undefined
+  };
+}
+
+function collectSafeSecretReferences(value, refs = new Set()) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectSafeSecretReferences(item, refs);
+    }
+    return refs;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return refs;
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    if (
+      SECRET_KEY_RE.test(key) &&
+      typeof nested === 'string' &&
+      isSafeSecretReference(nested)
+    ) {
+      refs.add(nested);
+    }
+    collectSafeSecretReferences(nested, refs);
+  }
+  return refs;
+}
+
+function assertTargetProfilePrerequisites(prerequisites, targetProfile, label) {
+  assertSchemaVersion(
+    prerequisites.schema_version,
+    TARGET_PREREQUISITES_SCHEMA,
+    `${label}.schema_version`
+  );
+
+  const targetProfileValue = requireString(
+    prerequisites.target_profile,
+    `${label}.target_profile`
+  );
+  if (targetProfileValue !== targetProfile.value) {
+    fail(`${label}.target_profile must match CLI target_profile`);
+  }
+  return targetProfileValue;
+}
+
+function assertRbacPrerequisite(value, label) {
+  const rbac = requireObject(value, label);
+  const hasPolicy = Object.prototype.hasOwnProperty.call(rbac, 'policy');
+  const hasProof = Object.prototype.hasOwnProperty.call(rbac, 'proof');
+  if (!hasPolicy && !hasProof) {
+    fail(`${label} must include policy or proof`);
+  }
+  if (hasPolicy) {
+    assertNonDisabledString(rbac.policy, `${label}.policy`);
+  }
+  if (hasProof) {
+    requireString(rbac.proof, `${label}.proof`);
+  }
+  return {
+    policy: hasPolicy ? rbac.policy : undefined,
+    proof: hasProof ? rbac.proof : undefined
+  };
+}
+
+function assertTargetSecretRefs(value, label, expectedRefs) {
+  const refs = requireArray(value, label).map((item, index) =>
+    requireSecretReference(item, `${label}[${index}]`)
+  );
+  const actualRefs = new Set(refs);
+  for (const expectedRef of expectedRefs) {
+    if (!actualRefs.has(expectedRef)) {
+      fail(`${label} missing substrate secret ref: ${expectedRef}`);
+    }
+  }
+  for (const actualRef of actualRefs) {
+    if (!expectedRefs.has(actualRef)) {
+      fail(`${label} includes substrate secret ref not declared by substrate truth: ${actualRef}`);
+    }
+  }
+  return {
+    count: actualRefs.size,
+    refs: [...actualRefs].sort()
   };
 }
 
@@ -472,6 +655,7 @@ export function validateSubstrateConnectionTruth(
   { label = 'substrate_truth', requiredSubstrateSource } = {}
 ) {
   const truth = requireObject(value, label);
+  assertAllowedObjectFields(truth, label, SUBSTRATE_TRUTH_FIELDS);
   const truthProfile = assertTruthIdentity(
     truth,
     targetProfile,
@@ -483,5 +667,73 @@ export function validateSubstrateConnectionTruth(
     truth,
     truthProfile,
     serviceSummary
+  };
+}
+
+export function validateTargetPrerequisitesTruth(
+  value,
+  targetProfile,
+  substrateTruth,
+  { label = 'target_prerequisites', expectedNamespace } = {}
+) {
+  const prerequisites = requireObject(value, label);
+  assertAllowedObjectFields(prerequisites, label, TARGET_PREREQUISITES_FIELDS);
+  const targetProfileValue = assertTargetProfilePrerequisites(
+    prerequisites,
+    targetProfile,
+    label
+  );
+
+  const namespace = assertKubernetesNamespace(
+    prerequisites.namespace,
+    `${label}.namespace`
+  );
+  if (expectedNamespace && namespace !== expectedNamespace) {
+    fail(`${label}.namespace must match --expected-namespace`);
+  }
+
+  assertRbacPrerequisite(prerequisites.rbac, `${label}.rbac`);
+
+  const ingress = requireObject(prerequisites.ingress, `${label}.ingress`);
+  const ingressHost = assertIngressHost(ingress.host, `${label}.ingress.host`);
+  requireSecretReference(
+    ingress.tls_secret_ref,
+    `${label}.ingress.tls_secret_ref`
+  );
+
+  const registry = requireObject(prerequisites.registry, `${label}.registry`);
+  requireSecretReference(
+    registry.pull_secret_ref,
+    `${label}.registry.pull_secret_ref`
+  );
+
+  const storage = requireObject(prerequisites.storage, `${label}.storage`);
+  assertNonDisabledString(
+    storage.storage_class,
+    `${label}.storage.storage_class`
+  );
+  assertNonDisabledString(
+    storage.persistent_volume_policy,
+    `${label}.storage.persistent_volume_policy`
+  );
+
+  const expectedSubstrateRefs = collectSafeSecretReferences(
+    requireObject(substrateTruth, 'substrate_truth')
+  );
+  const substrateRefsSummary = assertTargetSecretRefs(
+    prerequisites.substrate_secret_refs,
+    `${label}.substrate_secret_refs`,
+    expectedSubstrateRefs
+  );
+
+  return {
+    prerequisites,
+    prerequisitesSummary: {
+      schema_version: TARGET_PREREQUISITES_SCHEMA,
+      target_profile: targetProfileValue,
+      namespace,
+      ingress_host: ingressHost,
+      substrate_secret_refs_count: substrateRefsSummary.count
+    }
   };
 }

@@ -17,6 +17,7 @@ const REQUIRED_ARGS = [
   'targetProfile',
   'renderValues',
   'substrateTruth',
+  'targetPrerequisites',
   'namespace',
   'outputDir'
 ];
@@ -138,6 +139,7 @@ function usage() {
     --target-profile existing_kubernetes/external_declared/online \\
     --render-values <json> \\
     --substrate-truth <json> \\
+    --target-prerequisites <json> \\
     --namespace <name> \\
     --output-dir <dir> \\
     [--mode server-dry-run|apply] \\
@@ -189,6 +191,28 @@ function extractEvidenceRootFromRawArgs(argv) {
     return value;
   }
   return undefined;
+}
+
+function extractOutputDirFromRawArgs(argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== '--output-dir') {
+      continue;
+    }
+    const value = argv[index + 1];
+    if (!value || value.trim() === '' || value.startsWith('--')) {
+      return undefined;
+    }
+    return value;
+  }
+  return undefined;
+}
+
+async function removeManagedOutputsFromRawArgs(argv) {
+  const outputDir = extractOutputDirFromRawArgs(argv);
+  if (!outputDir) {
+    return;
+  }
+  await removeManagedOutputs(path.resolve(outputDir));
 }
 
 async function removeManagedEvidenceOutputsFromRawArgs(argv) {
@@ -247,6 +271,9 @@ function parseArgs(argv) {
         break;
       case '--substrate-truth':
         parsed.substrateTruth = nextValue();
+        break;
+      case '--target-prerequisites':
+        parsed.targetPrerequisites = nextValue();
         break;
       case '--namespace':
         parsed.namespace = nextValue();
@@ -1105,7 +1132,10 @@ async function main(argv) {
   try {
     args = parseArgs(argv);
   } catch (error) {
-    await removeManagedEvidenceOutputsFromRawArgs(argv);
+    await Promise.all([
+      removeManagedOutputsFromRawArgs(argv),
+      removeManagedEvidenceOutputsFromRawArgs(argv)
+    ]);
     throw error;
   }
   if (args.help) {
@@ -1151,6 +1181,10 @@ async function main(argv) {
       targetProfile,
       '--substrate-truth',
       args.substrateTruth,
+      '--target-prerequisites',
+      args.targetPrerequisites,
+      '--expected-namespace',
+      args.namespace,
       '--output-dir',
       outputSubdir(args, 'target-preflight')
     ],

@@ -236,10 +236,12 @@ envelopes include inline neutral substrate connection truth for
 `external_declared`.
 
 Target preflight output proves only that one explicit
-`agentsmith.substrate-connection.truth/v1` document matches the requested
-target axes and contains the required service, canonical endpoint, secret
-reference, TLS or sslmode, `extensions.pgvector.status: installed`, object
-storage, OIDC `issuer_url`, `kit_installed` release-kit version plain semver,
-and reachability status `declared_reachable` or `verified_by_operator`. It
-does not connect to Kubernetes and is not render, apply, deploy, package,
-release, rollout, smoke, or operator readiness evidence.
+`agentsmith.substrate-connection.truth/v1` document and one explicit
+`agentsmith.target-prerequisites.truth/v1` document match the requested target
+axes. The substrate document covers required services, canonical endpoints,
+secret refs, TLS or sslmode, pgvector, and reachability. The prerequisites
+document covers namespace, RBAC policy/proof, ingress host plus TLS secret ref,
+registry pull secret ref, storage class plus PV policy, and the substrate
+secret refs declared by substrate truth. It does not connect to Kubernetes and
+is not render, apply, deploy, package, release, rollout, smoke, or operator
+readiness evidence.

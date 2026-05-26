@@ -48,6 +48,7 @@ Future implementation must consume only explicit inputs:
 - AgentSmith deploy template package.
 - Operator target inputs.
 - Operator declared substrate connection truth.
+- Operator declared target prerequisites truth.
 - Operator registry and namespace inputs.
 
 The release kit must not infer those inputs from a sibling checkout.
@@ -267,7 +268,9 @@ deploy readiness.
 The current `--online-deployment-gate` path is a KISS online focused
 orchestration runner only. It supports
 `existing_kubernetes/external_declared/online` and invokes existing diagnostics
-in order: inputs, target-preflight, template-package, optional image-map when
+in order after both `--substrate-truth <json>` and
+`--target-prerequisites <json>` are provided: inputs, target-preflight,
+template-package, optional image-map when
 `--target-registry <registry-host[/namespace]>` is provided, render,
 render-check, apply, and, for confirmed `--mode apply` only, rollout plus
 optional smoke.
@@ -336,17 +339,17 @@ plain `x.y.z` semver and must be greater than or equal to
 `release_contract.min_release_kit_version`.
 
 The current `--target-preflight` path is a focused diagnostic for substrate
-connection truth intake only. It consumes an explicit target profile and an
-operator-provided `agentsmith.substrate-connection.truth/v1` document. Its
+truth plus target prerequisites truth intake. It consumes an explicit target
+profile, an operator-provided `agentsmith.substrate-connection.truth/v1`
+document, and an operator-provided
+`agentsmith.target-prerequisites.truth/v1` document. Its
 `target-preflight-report.json` must keep `readiness: false` and
-`scope: target_preflight_intake_only`; it does not connect to Kubernetes,
-render manifests, apply resources, smoke a cluster, package artifacts, or
-claim deploy or release readiness.
-Accepted connection truth uses `host` for PostgreSQL/MongoDB/Redis, `url` or
-`endpoint` plus `region` and `bucket` for object storage, `issuer_url` for
-OIDC, `extensions.pgvector.status: installed`, and reachability status
-`declared_reachable` or `verified_by_operator`. For `kit_installed`,
-`release_kit_version` must be plain `x.y.z` semver.
+`scope: target_preflight_prerequisite_only`; it does not connect to
+Kubernetes, render manifests, apply resources, smoke a cluster, package
+artifacts, or claim deploy or release readiness. The prerequisites document is
+the only place for namespace, RBAC policy/proof, ingress host and TLS secret
+ref, registry pull secret ref, storage class/PV policy, and substrate secret
+refs needed before a real Kubernetes or cloud target deploy.
 
 ## Non-Goals
 

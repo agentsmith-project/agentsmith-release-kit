@@ -10,24 +10,29 @@ sign off deploy, package, offline install, or release readiness.
 
 | Path | Target profile | Operator command entry | Current result |
 | --- | --- | --- | --- |
-| Real or cloud Kubernetes, existing substrates, online | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ... [--target-registry ...]` | Runs the online focused chain for existing substrate endpoints; target registry only adopts rendered image refs through image-map. |
+| Real or cloud Kubernetes, existing substrates, online | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ... --substrate-truth ... --target-prerequisites ... [--target-registry ...]` | Runs the online focused chain for existing substrate endpoints and explicit target prerequisites; target registry only adopts rendered image refs through image-map. |
 | Real or cloud Kubernetes, existing substrates, airgap | `existing_kubernetes/external_declared/airgap` | `bash scripts/verify-release.sh --bundle-create ...` or `--image-map ... --target-registry ...`, then `--airgap-bundle-check ...` and optional `--bundle-load-plan ...` | Assembles a local bundle and immediately self-checks it, checks an already assembled bundle manifest/digests, or writes a read-only load plan summary. |
-| Real or cloud Kubernetes, kit-installed substrates, online or airgap | `existing_kubernetes/kit_installed/online` or `existing_kubernetes/kit_installed/airgap` | `bash scripts/verify-release.sh --inputs ...`, `--target-preflight ...`, and `--image-map ...` | Accepts the declaration, substrate truth intake, and image plan only. |
+
+Advanced intake-only paths:
+
+| Path | Target profile | Operator command entry | Current result |
+| --- | --- | --- | --- |
+| Real or cloud Kubernetes, kit-installed substrates, online or airgap | `existing_kubernetes/kit_installed/online` or `existing_kubernetes/kit_installed/airgap` | `bash scripts/verify-release.sh --inputs ...`, `--target-preflight ... --substrate-truth ... --target-prerequisites ...`, and `--image-map ...` | Advanced/intake-only. Accepts the declaration, substrate truth, target prerequisites, and image plan only; it is not a default operator deployment path. |
 
 Optional rehearsal path:
 
 | Path | Target profile | Operator command entry | Current result |
 | --- | --- | --- | --- |
-| Kind rehearsal, kit-installed substrates, online | `kind_rehearsal/kit_installed/online` | `bash scripts/verify-release.sh --inputs ...` and `--target-preflight ...` | Accepts rehearsal intake only. It is not a prerequisite for real Kubernetes. |
+| Kind rehearsal, kit-installed substrates, online | `kind_rehearsal/kit_installed/online` | `bash scripts/verify-release.sh --inputs ...` and `--target-preflight ... --substrate-truth ... --target-prerequisites ...` | Accepts rehearsal intake only. It is not a prerequisite for real Kubernetes. |
 
 ## Implemented Now / Not Yet
 
 | Path | Implemented now | Not yet |
 | --- | --- | --- |
-| Real or cloud Kubernetes + existing substrates + online | Inputs, target-preflight, template-package, optional image-map target-ref adoption, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
+| Real or cloud Kubernetes + existing substrates + online | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
 | Real or cloud Kubernetes + existing substrates + airgap | Image-map mirror plan, local bundle assembler plus self-check, airgap bundle manifest/digest check, and read-only load plan summary for `existing_kubernetes/external_declared/airgap`. | Registry mirroring, image load/import, offline install, airgap deploy gate, deploy readiness, package readiness. |
-| Real or cloud Kubernetes + kit-installed substrates + online/airgap | Contract declaration, target-preflight substrate truth intake, and image-map planning for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`. | Substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
-| Kind rehearsal + kit-installed substrates + online | Contract declaration and target-preflight truth intake for `kind_rehearsal/kit_installed/online`. | Real deployment evidence, release readiness, mandatory pre-deploy rehearsal. |
+| Real or cloud Kubernetes + kit-installed substrates + online/airgap | Advanced contract declaration, target-preflight substrate/prerequisites intake, and image-map planning for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`. | Default operator deployment path, substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
+| Kind rehearsal + kit-installed substrates + online | Contract declaration and target-preflight truth/prerequisites intake for `kind_rehearsal/kit_installed/online`. | Real deployment evidence, release readiness, mandatory pre-deploy rehearsal. |
 
 ## Command Roles
 
@@ -37,6 +42,11 @@ exercise failure cases and fixture behavior while changing release-kit code.
 Operators should call `bash scripts/verify-release.sh --...` directly with the
 release contract, deploy template package, explicit target profile, and output
 directory for their chosen path.
+
+For target-preflight and the online focused chain, keep substrate connection
+truth and target prerequisites as separate files. Substrate truth stays neutral;
+target prerequisites carry namespace, RBAC policy/proof, ingress TLS, registry
+pull secret, storage policy, and substrate secret refs.
 
 For the online focused chain, confirmed apply can optionally add
 `--evidence-root <dir> --evidence-provenance <json>`. Use only remote
