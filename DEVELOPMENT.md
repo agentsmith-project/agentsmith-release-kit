@@ -19,6 +19,7 @@ bash scripts/test-registry-presence.sh
 bash scripts/test-bundle-create.sh
 bash scripts/test-airgap-bundle-check.sh
 bash scripts/test-airgap-image-archive-check.sh
+bash scripts/test-airgap-image-load.sh
 bash scripts/test-bundle-load-plan.sh
 bash scripts/test-airgap-bundle-render-check.sh
 bash scripts/test-apply.sh
@@ -257,6 +258,22 @@ kubectl, curl, or wget, does not log in, pull, push, mirror, load/import
 images, perform offline install, apply manifests, smoke routes, or claim
 package, deploy, registry, or release readiness.
 
+The current `--airgap-image-load` path is a focused airgap image load/import
+diagnostic only. It consumes an already assembled bundle and the same explicit
+inputs as `--airgap-image-archive-check`, including `--archive-probe
+<executable>`, plus `--image-loader <executable>`. It accepts only
+`existing_kubernetes/external_declared/airgap`, first runs the archive
+materiality diagnostic, then invokes the operator loader once per declared
+image archive as `<executable> <archive_path> <target_image> <target_digest>`.
+Loader stdout must be exactly one matching `sha256:<64>` digest. Its
+`airgap-image-load-report.json` keeps `readiness: false` and `scope:
+airgap_image_load_only`; it records only release identity, target profile,
+image ids, counts, and digest summaries. It omits loader path, archive paths,
+raw stdout/stderr, operator refs, proofs, and secrets, is not accepted by the
+evidence envelope validator, does not choose Docker/skopeo/oras/kubectl or
+credentials, and does not claim offline install, deploy, package, registry, or
+release readiness.
+
 The current `--bundle-load-plan` path is a focused read-only airgap bundle load
 plan diagnostic only. It consumes an already assembled bundle and the same
 explicit inputs as `--airgap-bundle-check`, accepts only
@@ -444,6 +461,9 @@ their combinations are not accepted release-kit evidence envelope outputs.
 envelope outputs. `airgap-image-archive-check-report.json` is also not
 accepted because it proves only local archive probe digest alignment, not
 load/import, offline install, package, deploy, registry, or release readiness.
+`airgap-image-load-report.json` is also not accepted because it proves only a
+focused operator-loader execution, not offline install, package, deploy,
+registry, or release readiness.
 `evidence_subject.files` must contain only `evidence.json` plus the mapped
 output files: `image-map.json`, `online-deployment-gate-report.json`, or
 `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json` plus

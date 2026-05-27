@@ -92,6 +92,10 @@ const INVALID_RELEASE_KIT_OUTPUT_VALUES = new Map([
     'airgap-image-archive-check-report.json is image-archive-content-check-only and is not accepted as release evidence'
   ],
   [
+    'airgap-image-load-report.json',
+    'airgap-image-load-report.json is image-load-only and is not accepted as release evidence'
+  ],
+  [
     'registry-presence-report.json',
     'registry-presence-report.json is registry-presence-only and is not accepted as release evidence'
   ]

@@ -17,6 +17,7 @@ Usage:
   bash scripts/verify-release.sh --bundle-create --release-contract <json> --deploy-template-package <json> --archive <tgz> --target-profile existing_kubernetes/external_declared/airgap --target-registry <registry-host[/namespace]> --image-archive <image_id=local-file> [--image-archive <image_id=local-file> ...] --runbook <file> --script <file> --profile-values-schema <file> [--profile-values-example <file>] --operator-prerequisites <json> --bundle-root <dir> --output-dir <dir>
   bash scripts/verify-release.sh --airgap-bundle-check --release-contract <json> --deploy-template-package <json> --archive <tgz> --image-map <json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <json> --output-dir <dir>
   bash scripts/verify-release.sh --airgap-image-archive-check --release-contract <json> --deploy-template-package <json> --archive <tgz> --image-map <json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <json> --archive-probe <executable> --output-dir <dir>
+  bash scripts/verify-release.sh --airgap-image-load --release-contract <json> --deploy-template-package <json> --archive <tgz> --image-map <json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <json> --archive-probe <executable> --image-loader <executable> --output-dir <dir>
   bash scripts/verify-release.sh --bundle-load-plan --release-contract <json> --deploy-template-package <json> --archive <tgz> --image-map <json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <json> --output-dir <dir>
   bash scripts/verify-release.sh --airgap-bundle-render-check --release-contract <bundle-local-json> --deploy-template-package <bundle-local-json> --archive <bundle-local-tgz> --image-map <bundle-local-json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <bundle-local-json> --render-values <bundle-local-json> --substrate-truth <bundle-local-json> --output-dir <dir>
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
@@ -40,6 +41,7 @@ Bootstrap status:
   --bundle-create assembles a local airgap bundle and immediately runs airgap-bundle-check only; it is not release readiness.
   --airgap-bundle-check checks an airgap bundle manifest, deploy template archive digest, payload/tool declarations, and declared file digests only; it is not release readiness.
   --airgap-image-archive-check checks already assembled airgap image archive file materiality through a local read-only probe only; it is not package, load/import, offline install, deploy, registry, or release readiness.
+  --airgap-image-load runs existing airgap image archive materiality first, then calls an operator-provided image loader once per image archive only; it is not offline install, deploy, package, registry, or release readiness.
   --bundle-load-plan checks an already assembled airgap bundle through airgap-bundle-check and writes a read-only load plan summary only; it is not release readiness or registry execution.
   --airgap-bundle-render-check renders an already assembled airgap bundle offline and runs rendered manifest image inventory check only; it is not package, offline install, deploy, registry, apply, smoke, or release readiness.
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
@@ -108,6 +110,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-airgap-image-archive-check.mjs" "$@"
     echo "airgap image archive check mode is not release readiness; readiness=false"
+    ;;
+  --airgap-image-load)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-airgap-image-load.mjs" "$@"
+    echo "airgap image load mode is not release readiness; readiness=false"
     ;;
   --bundle-load-plan)
     shift

@@ -439,6 +439,43 @@ registry topology, operator refs, locations, proofs, secrets, `verdict`,
 offline install readiness, package readiness, deploy readiness, or release
 readiness. It is not an accepted release-kit evidence envelope output.
 
+## Airgap Image Load Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-airgap-image-load.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--airgap-image-load`. It consumes an already assembled airgap bundle and first
+reuses `--airgap-image-archive-check`, so the existing bundle-check and archive
+materiality semantics must pass before any loader call. It accepts only
+`existing_kubernetes/external_declared/airgap`; online, kind rehearsal,
+`kit_installed`, non-canonical pre-GA target names, and synonym axes fail fast.
+
+The diagnostic requires both `--archive-probe <executable>` and
+`--image-loader <executable>`. The loader is operator-provided and is invoked
+once per declared image archive as:
+
+```text
+<executable> <archive_path> <target_image> <target_digest>
+```
+
+Loader stdout must be exactly one `sha256:<64>` digest matching
+`target_digest`; non-zero exit, digest mismatch, and extra stdout fail fast.
+Release-kit does not choose or depend on Docker, skopeo, oras, kubectl, or
+registry credentials. Those remain operator-owned behind the loader boundary.
+
+The generated `airgap-image-load-report.json` must keep `schema:
+agentsmith.airgap-image-load-report/v1`, `scope: airgap_image_load_only`,
+`readiness: false`, and `status: pass`. It may contain only release identity,
+target profile, image ids, digest summaries, and counts. It must not contain
+loader path, archive absolute paths, raw loader stdout/stderr, operator refs,
+proofs, locations, secrets, `verdict`, `release_verdict`, offline install
+readiness, package readiness, deploy readiness, registry readiness, or release
+readiness. It is not an accepted release-kit evidence envelope output.
+
 ## Airgap Bundle Load Plan Focused Diagnostic
 
 Run:
@@ -831,6 +868,9 @@ readiness, or release readiness.
 `airgap-image-archive-check-report.json` is intentionally not accepted because
 it proves only local archive probe digest alignment, not image load/import,
 offline install, package, deploy, registry, or release readiness.
+`airgap-image-load-report.json` is intentionally not accepted because it proves
+only this focused operator-loader execution, not offline install, package,
+deploy, registry, or release readiness.
 `registry-presence-report.json` is intentionally not accepted because it proves
 only focused target digest-ref presence through an operator probe, not deploy,
 package, or release readiness.

@@ -11,7 +11,7 @@ sign off deploy, package, offline install, or release readiness.
 | Path | Target profile | Operator command entry | Current result |
 | --- | --- | --- | --- |
 | Real or cloud Kubernetes, existing substrates, online | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]`; optional standalone `--registry-presence ... --image-map ... --registry-probe ...` | Runs the online focused chain for existing substrate endpoints and explicit target prerequisites; target-registry confirmed apply binds registry presence through the operator probe before render/apply. |
-| Real or cloud Kubernetes, existing substrates, airgap | `existing_kubernetes/external_declared/airgap` | `bash scripts/verify-release.sh --bundle-create ...` or `--image-map ... --target-registry ...`, then `--airgap-bundle-check ...`, optional `--bundle-load-plan ...`, and optional `--airgap-bundle-render-check ...` | Assembles a local bundle and immediately self-checks it, checks an already assembled bundle manifest/digests, writes a read-only load plan summary, or renders/checks bundle-local manifests offline. |
+| Real or cloud Kubernetes, existing substrates, airgap | `existing_kubernetes/external_declared/airgap` | `bash scripts/verify-release.sh --bundle-create ...` or `--image-map ... --target-registry ...`, then `--airgap-bundle-check ...`, optional `--airgap-image-load ... --archive-probe ... --image-loader ...`, optional `--bundle-load-plan ...`, and optional `--airgap-bundle-render-check ...` | Assembles a local bundle and immediately self-checks it, checks an already assembled bundle manifest/digests, can run a focused operator-loader image import diagnostic, writes a read-only load plan summary, or renders/checks bundle-local manifests offline. |
 
 Advanced intake-only paths:
 
@@ -30,7 +30,7 @@ Optional rehearsal path:
 | Path | Implemented now | Not yet |
 | --- | --- | --- |
 | Real or cloud Kubernetes + existing substrates + online | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, optional registry presence through an operator probe, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
-| Real or cloud Kubernetes + existing substrates + airgap | Image-map mirror plan, local bundle assembler plus self-check, airgap bundle manifest/digest check, read-only load plan summary, and offline bundle render-check for `existing_kubernetes/external_declared/airgap`. | Registry mirroring, image load/import, offline install, airgap deploy gate, deploy readiness, package readiness. |
+| Real or cloud Kubernetes + existing substrates + airgap | Image-map mirror plan, local bundle assembler plus self-check, airgap bundle manifest/digest check, focused operator-loader image load/import diagnostic, read-only load plan summary, and offline bundle render-check for `existing_kubernetes/external_declared/airgap`. | Registry mirroring, offline install, airgap deploy gate, deploy readiness, package readiness. |
 | Real or cloud Kubernetes + kit-installed substrates + online/airgap | Advanced contract declaration, target-preflight substrate/prerequisites intake, and image-map planning for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`. | Default operator deployment path, substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
 | Kind rehearsal + kit-installed substrates + online | Contract declaration and target-preflight truth/prerequisites intake for `kind_rehearsal/kit_installed/online`. | Real deployment evidence, release readiness, mandatory pre-deploy rehearsal. |
 
@@ -137,6 +137,17 @@ also rebound to `release_contract.deploy_image_inventory`. Stdout ends with
 manifest + `image-map.json` triplet with bundle-check-compatible components,
 image declarations, payload/tool counts, and digests; empty fake manifests are
 rejected.
+
+For airgap image load/import diagnostics, use `--airgap-image-load` only after
+a bundle has already been assembled. Pass the same inputs as
+`--airgap-image-archive-check`, including `--archive-probe <executable>`, plus
+`--image-loader <executable>`. The command first reruns archive materiality,
+then calls the loader once per image as
+`<executable> <archive_path> <target_image> <target_digest>`. Loader stdout
+must be exactly one matching sha256 digest. The report has `readiness=false`,
+omits loader/archive paths and raw stdout/stderr, is not evidence-envelope
+input, and does not prove offline install, deploy, package, registry, or
+release readiness.
 
 For airgap bundle load plans, use `--bundle-load-plan` only after a bundle has
 already been assembled. The command reuses `--airgap-bundle-check`, accepts

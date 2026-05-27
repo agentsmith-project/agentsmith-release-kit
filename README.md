@@ -6,10 +6,11 @@ This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
-airgap image archive materiality, registry presence, airgap bundle load-plan,
-airgap bundle render-check, apply-only, rollout/live digest, route smoke, and
-online focused chain orchestration diagnostics, plus operator signoff intake
-binding, but does not contain full deploy tooling yet.
+airgap image archive materiality, airgap image load, registry presence,
+airgap bundle load-plan, airgap bundle render-check, apply-only,
+rollout/live digest, route smoke, and online focused chain orchestration
+diagnostics, plus operator signoff intake binding, but does not contain full
+deploy tooling yet.
 
 ## Canonical Identity
 
@@ -384,6 +385,31 @@ wget, does not log in to a registry, does not pull, push, mirror, load, import,
 or install images, does not apply manifests or smoke routes, and is not an
 accepted evidence envelope output.
 
+Airgap image load focused diagnostic:
+
+```bash
+bash scripts/test-airgap-image-load.sh
+```
+
+`--airgap-image-load` consumes the same already assembled bundle inputs as
+`--airgap-image-archive-check`, plus `--archive-probe <executable>` and
+`--image-loader <executable>`. It accepts only
+`existing_kubernetes/external_declared/airgap`; online, kind, `kit_installed`,
+non-canonical pre-GA names, and synonym axes fail fast. It first reuses
+`--airgap-image-archive-check`, then invokes the operator-provided loader once
+per image as `<executable> <archive_path> <target_image> <target_digest>`.
+Loader stdout must be exactly one matching `sha256:<64>` digest. The report
+omits loader path, archive paths, raw stdout/stderr, operator refs, proofs,
+and secrets.
+
+`airgap-image-load-report.json` keeps `schema:
+agentsmith.airgap-image-load-report/v1`, `scope: airgap_image_load_only`,
+`readiness: false`, and `status: pass`. It records only release identity,
+target profile, image ids, counts, and digest summaries. The loader is
+operator-owned; release-kit does not choose Docker, skopeo, oras, kubectl, or
+registry credentials. This is not offline install, deploy, package, registry,
+or release readiness, and it is not an accepted evidence envelope output.
+
 Airgap bundle load-plan focused diagnostic:
 
 ```bash
@@ -620,14 +646,14 @@ contain only `evidence.json` plus the mapped output files: `image-map.json`,
 `evidence-validation-report.json` is written with `readiness: false`,
 `scope: release_kit_evidence_intake_only`, and `status: pass`; it is not
 render, apply, smoke, package, deploy, or release readiness.
-`airgap-bundle-load-plan-report.json` and
-`airgap-bundle-render-check-report.json` are intentionally not accepted:
-load-plan is plan-only, and render-check proves only offline render plus
-rendered manifest image inventory, not registry execution, package readiness,
-offline install readiness, deploy readiness, or release readiness.
-`airgap-image-archive-check-report.json` is also intentionally not accepted:
-it proves only local archive probe digest alignment, not load/import, offline
-install, package, deploy, registry, or release readiness.
+`airgap-bundle-load-plan-report.json`,
+`airgap-bundle-render-check-report.json`,
+`airgap-image-archive-check-report.json`, and
+`airgap-image-load-report.json` are intentionally not accepted. Load-plan is
+plan-only, render-check proves only offline render plus rendered manifest
+image inventory, archive-check proves only local archive probe digest
+alignment, and image-load proves only this focused operator-loader execution,
+not offline install, package, deploy, registry, or release readiness.
 `registry-presence-report.json` is also intentionally not accepted; it is a
 focused target digest-ref presence check only.
 

@@ -35,6 +35,8 @@ jobs:
         run: bash scripts/test-airgap-bundle-check.sh
       - name: Airgap image archive materiality focused guard
         run: bash scripts/test-airgap-image-archive-check.sh
+      - name: Airgap image load focused guard
+        run: bash scripts/test-airgap-image-load.sh
       - name: Airgap bundle load plan focused guard
         run: bash scripts/test-bundle-load-plan.sh
       - name: Airgap bundle render-check focused guard

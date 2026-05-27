@@ -19,6 +19,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Airgap bundle create diagnostic | Focused only | `bundle-create-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle manifest/digest diagnostic | Focused only | `airgap-bundle-check-report.json` keeps `readiness: false`. |
 | Airgap image archive materiality diagnostic | Focused only | `airgap-image-archive-check-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
+| Airgap image load diagnostic | Focused only | `airgap-image-load-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle load-plan diagnostic | Focused only | `airgap-bundle-load-plan-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle render-check diagnostic | Focused only | `airgap-bundle-render-check-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
@@ -173,6 +174,21 @@ only release identity, target profile, input/report digests, image ids, archive
 counts, and digest summaries, and is not accepted by the release-kit evidence
 envelope validator.
 
+Airgap image load output proves only that one already assembled bundle passed
+the existing archive materiality diagnostic and that each declared image
+archive was handed to an operator-provided loader as
+`<archive_path> <target_image> <target_digest>`. It accepts only
+`existing_kubernetes/external_declared/airgap`; online, kind, `kit_installed`,
+and synonym axes fail fast. Loader stdout must be exactly one matching
+`sha256:<64>` digest. The release kit does not choose Docker, skopeo, oras,
+kubectl, registry credentials, or target-network mechanics; those stay behind
+the operator loader boundary. `airgap-image-load-report.json` keeps
+`readiness: false`; it contains only release identity, target profile, image
+ids, counts, and digest summaries, omits loader/archive paths and raw
+stdout/stderr, and is not accepted by the release-kit evidence envelope
+validator. It is not offline install, package, deploy, registry, or release
+readiness evidence.
+
 Airgap bundle load-plan output proves only that one already assembled bundle
 passed the existing airgap bundle check and can be summarized as a read-only
 target-registry load plan. It accepts only
@@ -322,6 +338,9 @@ readiness, or release readiness.
 `airgap-image-archive-check-report.json` is intentionally not accepted because
 it proves only local archive probe digest alignment, not image load/import,
 offline install, package, deploy, registry, or release readiness.
+`airgap-image-load-report.json` is intentionally not accepted because it proves
+only this focused operator-loader execution, not offline install, package,
+deploy, registry, or release readiness.
 `registry-presence-report.json` is intentionally not accepted because it is a
 focused online distribution diagnostic only, not deploy, package, or release
 readiness.
