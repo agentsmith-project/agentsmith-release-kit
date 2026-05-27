@@ -874,6 +874,10 @@ deploy, registry, or release readiness.
 `registry-presence-report.json` is intentionally not accepted because it proves
 only focused target digest-ref presence through an operator probe, not deploy,
 package, or release readiness.
+`substrate-pack-check-report.json` is intentionally not accepted because it
+proves only kit-installed substrate pack manifest and substrate truth
+materiality, not substrate installation, package readiness, deploy readiness,
+or release readiness.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.
@@ -887,6 +891,58 @@ The generated `evidence-validation-report.json` must keep `readiness: false`,
 contain `verdict` or `release_verdict`. It is not release readiness, package
 readiness, Kubernetes render evidence, apply evidence, rollout evidence, smoke
 evidence, or operator signoff.
+
+## Substrate Pack Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-substrate-pack-check.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--substrate-pack-check`. It checks only a minimal kit-installed substrate pack
+manifest plus matching substrate truth for existing Kubernetes online or
+airgap targets. It does not install substrates, create databases, buckets, OIDC
+realms, or secrets, log in to registries, call Kubernetes, render, apply, roll
+out workloads, smoke product endpoints, build packages, or claim deploy,
+package, or release readiness.
+
+The only accepted target profiles are
+`existing_kubernetes/kit_installed/online` and
+`existing_kubernetes/kit_installed/airgap`. `external_declared`,
+`kind_rehearsal`, non-canonical pre-GA names such as `local-kind`,
+`existing-cluster`, `real-k8s`, and synonym axes such as `cluster` or
+`offline` fail fast.
+
+The substrate pack manifest schema is
+`agentsmith.substrate-pack-manifest/v1`. It must declare
+`installed_by: agentsmith-release-kit`, a plain semver `release_kit_version`,
+and a `target_profile` string that exactly matches the CLI target profile.
+`images` must include `postgresql`, `mongodb`, `redis`, `object_storage`, and
+`oidc`. Every image must be digest-pinned as `...@sha256:<64>` and must not use
+`latest`, URI syntax, localhost, loopback, local/source paths, or empty/relative
+repository path segments. `payload`, `templates`, `tools`, and `checksums`
+must contain only sha256 digests or safe relative pack paths. Public-download
+wording, `file://`, `local://`, `source://`, absolute paths, workspace source
+paths, kubeconfig text, and credential/secret-looking values fail fast.
+
+The substrate truth input is then validated through the shared
+`validateSubstrateConnectionTruth` path with required substrate source
+`kit_installed`; `assertNoUnsafeSubstratePayload` is applied before validation.
+That keeps service presence, endpoint fields, secret refs, TLS or sslmode,
+pgvector, reachability, target profile binding, `installed_by:
+agentsmith-release-kit`, and plain release-kit semver consistent with target
+preflight.
+
+The generated `substrate-pack-check-report.json` must keep `schema:
+agentsmith.substrate-pack-check-report/v1`, `scope:
+substrate_pack_check_only`, `readiness: false`, and `status: pass`. It may
+contain only target profile, input sha256 digests, and non-sensitive summary
+counts/service names. It must not contain raw secrets, kubeconfig content,
+release verdicts, deploy readiness, package readiness, product-flow fields, or
+operator signoff fields. It is not an accepted release-kit evidence envelope
+output.
 
 ## Target Preflight Focused Diagnostic
 

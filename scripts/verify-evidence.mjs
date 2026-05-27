@@ -98,6 +98,10 @@ const INVALID_RELEASE_KIT_OUTPUT_VALUES = new Map([
   [
     'registry-presence-report.json',
     'registry-presence-report.json is registry-presence-only and is not accepted as release evidence'
+  ],
+  [
+    'substrate-pack-check-report.json',
+    'substrate-pack-check-report.json is substrate-pack-check-only and is not accepted as release evidence'
   ]
 ]);
 const FORBIDDEN_RELEASE_KIT_OUTPUT_VALUES = new Set([

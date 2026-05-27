@@ -20,6 +20,7 @@ Usage:
   bash scripts/verify-release.sh --airgap-image-load --release-contract <json> --deploy-template-package <json> --archive <tgz> --image-map <json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <json> --archive-probe <executable> --image-loader <executable> --output-dir <dir>
   bash scripts/verify-release.sh --bundle-load-plan --release-contract <json> --deploy-template-package <json> --archive <tgz> --image-map <json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <json> --output-dir <dir>
   bash scripts/verify-release.sh --airgap-bundle-render-check --release-contract <bundle-local-json> --deploy-template-package <bundle-local-json> --archive <bundle-local-tgz> --image-map <bundle-local-json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <bundle-local-json> --render-values <bundle-local-json> --substrate-truth <bundle-local-json> --output-dir <dir>
+  bash scripts/verify-release.sh --substrate-pack-check --target-profile existing_kubernetes/kit_installed/<online|airgap> --substrate-pack-manifest <json> --substrate-truth <json> --output-dir <dir>
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> --mode apply --confirm-apply existing_kubernetes/external_declared/online --operator-run-id <id> [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --rollout --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/online --namespace <name> --output-dir <dir> [--timeout <duration>] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
@@ -44,6 +45,7 @@ Bootstrap status:
   --airgap-image-load runs existing airgap image archive materiality first, then calls an operator-provided image loader once per image archive only; it is not offline install, deploy, package, registry, or release readiness.
   --bundle-load-plan checks an already assembled airgap bundle through airgap-bundle-check and writes a read-only load plan summary only; it is not release readiness or registry execution.
   --airgap-bundle-render-check renders an already assembled airgap bundle offline and runs rendered manifest image inventory check only; it is not package, offline install, deploy, registry, apply, smoke, or release readiness.
+  --substrate-pack-check checks only a kit-installed substrate pack manifest and matching substrate truth for existing Kubernetes online/airgap targets; it is not substrate installation, deploy, package, or release readiness.
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
   --rollout checks Kubernetes rollout status and live image digests only; it is not release readiness.
   --smoke checks one route status after a bound rollout report only; it is not release readiness.
@@ -125,6 +127,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-airgap-bundle-render-check.mjs" "$@"
     echo "airgap bundle render check mode is not release readiness; readiness=false"
+    ;;
+  --substrate-pack-check)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-substrate-pack-check.mjs" "$@"
+    echo "substrate pack check mode is not release readiness; readiness=false"
     ;;
   --apply)
     shift

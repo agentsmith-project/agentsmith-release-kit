@@ -7,7 +7,7 @@ AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
 airgap image archive materiality, airgap image load, registry presence,
-airgap bundle load-plan, airgap bundle render-check, apply-only,
+airgap bundle load-plan, airgap bundle render-check, substrate pack check, apply-only,
 rollout/live digest, route smoke, and online focused chain orchestration
 diagnostics, plus operator signoff intake binding, but does not contain full
 deploy tooling yet.
@@ -457,6 +457,41 @@ manifests, smoke routes, prove registry presence, or claim package, offline
 install, deploy, registry, or release readiness. It is not an accepted evidence
 envelope output.
 
+Substrate pack focused diagnostic:
+
+```bash
+bash scripts/test-substrate-pack-check.sh
+```
+
+`--substrate-pack-check` validates only a minimal kit-installed substrate pack
+manifest plus matching `agentsmith.substrate-connection.truth/v1` substrate
+truth. It accepts only `existing_kubernetes/kit_installed/online` and
+`existing_kubernetes/kit_installed/airgap`; `external_declared`,
+`kind_rehearsal`, old names such as `local-kind`, `existing-cluster`,
+`real-k8s`, and synonym axes such as `cluster` or `offline` fail fast. The
+manifest schema is `agentsmith.substrate-pack-manifest/v1`, `installed_by`
+must be `agentsmith-release-kit`, `release_kit_version` must be plain semver,
+and `target_profile` must match the CLI exactly. Required images are
+`postgresql`, `mongodb`, `redis`, `object_storage`, and `oidc`; each image must
+be digest-pinned with `@sha256:<64>` and must not use `latest`, localhost,
+local/source paths, or URI syntax. Pack `payload`, `templates`, `tools`, and
+`checksums` entries may contain only sha256 digests or safe relative pack
+paths; public-download wording, file/local/source URIs, workspace source paths,
+absolute paths, kubeconfig text, and secret-looking values fail fast.
+
+The substrate truth is then checked by the shared substrate truth validator
+with `requiredSubstrateSource: kit_installed`, so service presence, endpoint
+shape, secret refs, TLS or sslmode, pgvector, reachability, target-profile
+binding, `installed_by`, and release-kit version semantics stay consistent
+with target preflight. `substrate-pack-check-report.json` keeps `schema:
+agentsmith.substrate-pack-check-report/v1`, `scope:
+substrate_pack_check_only`, `readiness: false`, and `status: pass`. It records
+only input digests and non-sensitive counts/summaries. It does not install
+substrates, create databases/buckets/realms, log in to registries, call
+Kubernetes, roll out workloads, smoke routes, build packages, or claim
+deploy/package/release readiness. It is not an accepted evidence envelope
+output.
+
 Kubernetes apply-only focused diagnostic:
 
 ```bash
@@ -649,11 +684,13 @@ render, apply, smoke, package, deploy, or release readiness.
 `airgap-bundle-load-plan-report.json`,
 `airgap-bundle-render-check-report.json`,
 `airgap-image-archive-check-report.json`, and
-`airgap-image-load-report.json` are intentionally not accepted. Load-plan is
-plan-only, render-check proves only offline render plus rendered manifest
-image inventory, archive-check proves only local archive probe digest
-alignment, and image-load proves only this focused operator-loader execution,
-not offline install, package, deploy, registry, or release readiness.
+`airgap-image-load-report.json`, and `substrate-pack-check-report.json` are
+intentionally not accepted. Load-plan is plan-only, render-check proves only
+offline render plus rendered manifest image inventory, archive-check proves
+only local archive probe digest alignment, image-load proves only this focused
+operator-loader execution, and substrate-pack-check proves only pack manifest
+and truth materiality, not offline install, package, deploy, registry, or
+release readiness.
 `registry-presence-report.json` is also intentionally not accepted; it is a
 focused target digest-ref presence check only.
 

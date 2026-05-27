@@ -41,6 +41,8 @@ jobs:
         run: bash scripts/test-bundle-load-plan.sh
       - name: Airgap bundle render-check focused guard
         run: bash scripts/test-airgap-bundle-render-check.sh
+      - name: Substrate pack focused guard
+        run: bash scripts/test-substrate-pack-check.sh
       - name: Kubernetes apply-only focused guard
         run: bash scripts/test-apply.sh
       - name: Kubernetes rollout/live imageID focused guard

@@ -22,6 +22,7 @@ exists. During bootstrap there is no release readiness evidence.
 | Airgap image load diagnostic | Focused only | `airgap-image-load-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle load-plan diagnostic | Focused only | `airgap-bundle-load-plan-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Airgap bundle render-check diagnostic | Focused only | `airgap-bundle-render-check-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
+| Substrate pack diagnostic | Focused only | `substrate-pack-check-report.json` keeps `readiness: false` and is not evidence-envelope supported. |
 | Kubernetes apply-only diagnostic | Focused only | `apply-report.json` keeps `readiness: false`. |
 | Kubernetes rollout/live digest diagnostic | Focused only | `rollout-report.json` keeps `readiness: false`. |
 | Route/service smoke diagnostic | Focused only | `smoke-report.json` keeps `readiness: false`. |
@@ -218,6 +219,20 @@ prove package/offline install readiness.
 only digest/count/relative-path summaries, omits `target_registry`, and is not
 accepted by the release-kit evidence envelope validator.
 
+Substrate pack output proves only that one
+`agentsmith.substrate-pack-manifest/v1` manifest for
+`existing_kubernetes/kit_installed/online` or
+`existing_kubernetes/kit_installed/airgap` has required digest-pinned substrate
+images, safe pack material references, and matching kit-installed substrate
+truth. It reuses the shared substrate truth validator for services, endpoint
+shape, secret refs, TLS or sslmode, pgvector, reachability, target axes, and
+`installed_by: agentsmith-release-kit`. It does not create or install
+substrates, create databases/buckets/realms, log in to registries, call
+Kubernetes, deploy, package, smoke, or prove release readiness.
+`substrate-pack-check-report.json` keeps `readiness: false`; it contains only
+input digests and non-sensitive count/service summaries and is not accepted by
+the release-kit evidence envelope validator.
+
 Kubernetes apply-only output proves only that already-rendered manifests passed
 the render/check image inventory guard and were accepted by `kubectl apply`
 against `existing_kubernetes/external_declared/online`. The default path is
@@ -344,6 +359,9 @@ deploy, registry, or release readiness.
 `registry-presence-report.json` is intentionally not accepted because it is a
 focused online distribution diagnostic only, not deploy, package, or release
 readiness.
+`substrate-pack-check-report.json` is intentionally not accepted because it is
+a focused kit-installed substrate pack/truth materiality diagnostic only, not
+substrate installation, deploy, package, or release readiness.
 Online gate evidence is accepted only for
 `existing_kubernetes/external_declared/online`; airgap bundle check evidence is
 accepted only for `existing_kubernetes/external_declared/airgap`. Raw

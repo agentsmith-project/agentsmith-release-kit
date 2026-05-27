@@ -17,7 +17,7 @@ Advanced intake-only paths:
 
 | Path | Target profile | Operator command entry | Current result |
 | --- | --- | --- | --- |
-| Real or cloud Kubernetes, kit-installed substrates, online or airgap | `existing_kubernetes/kit_installed/online` or `existing_kubernetes/kit_installed/airgap` | `bash scripts/verify-release.sh --inputs ...`, `--target-preflight ... --substrate-truth ... --target-prerequisites ...`, and `--image-map ...` | Advanced/intake-only. Accepts the declaration, substrate truth, target prerequisites, and image plan only; it is not a default operator deployment path. |
+| Real or cloud Kubernetes, kit-installed substrates, online or airgap | `existing_kubernetes/kit_installed/online` or `existing_kubernetes/kit_installed/airgap` | `bash scripts/verify-release.sh --inputs ...`, `--target-preflight ... --substrate-truth ... --target-prerequisites ...`, `--image-map ...`, and optional `--substrate-pack-check ... --substrate-pack-manifest ... --substrate-truth ...` | Advanced/intake-only. Accepts the declaration, substrate truth, target prerequisites, image plan, and focused substrate pack materiality only; it is not a default operator deployment path or installer. |
 
 Optional rehearsal path:
 
@@ -31,7 +31,7 @@ Optional rehearsal path:
 | --- | --- | --- |
 | Real or cloud Kubernetes + existing substrates + online | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, optional registry presence through an operator probe, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
 | Real or cloud Kubernetes + existing substrates + airgap | Image-map mirror plan, local bundle assembler plus self-check, airgap bundle manifest/digest check, focused operator-loader image load/import diagnostic, read-only load plan summary, and offline bundle render-check for `existing_kubernetes/external_declared/airgap`. | Registry mirroring, offline install, airgap deploy gate, deploy readiness, package readiness. |
-| Real or cloud Kubernetes + kit-installed substrates + online/airgap | Advanced contract declaration, target-preflight substrate/prerequisites intake, and image-map planning for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`. | Default operator deployment path, substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
+| Real or cloud Kubernetes + kit-installed substrates + online/airgap | Advanced contract declaration, target-preflight substrate/prerequisites intake, image-map planning, and substrate pack focused materiality check for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`. | Default operator deployment path, substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
 | Kind rehearsal + kit-installed substrates + online | Contract declaration and target-preflight truth/prerequisites intake for `kind_rehearsal/kit_installed/online`. | Real deployment evidence, release readiness, mandatory pre-deploy rehearsal. |
 
 ## Command Roles
@@ -165,6 +165,20 @@ bundle-local render values and substrate truth. The command reuses
 report has `readiness=false`, omits `target_registry`, is not
 evidence-envelope input, and does not prove registry presence, image
 load/import, offline install, deploy, package, or release readiness.
+
+For kit-installed substrate pack materiality, use `--substrate-pack-check`
+with `existing_kubernetes/kit_installed/online` or
+`existing_kubernetes/kit_installed/airgap`, an explicit
+`agentsmith.substrate-pack-manifest/v1`, and matching substrate truth. The
+manifest must use `installed_by: agentsmith-release-kit`, plain semver
+`release_kit_version`, digest-pinned PostgreSQL/MongoDB/Redis/object-storage/OIDC
+images, and only sha256 digests or safe relative pack paths for
+payload/templates/tools/checksums. The command reuses substrate truth
+validation for services, secret refs, TLS or sslmode, pgvector, reachability,
+and kit-installed identity. Its report has `readiness=false`, is not
+evidence-envelope input, and does not install substrates, create
+databases/buckets/realms, log in to registries, call Kubernetes, deploy,
+package, or prove release readiness.
 
 For route smoke, use `bash scripts/verify-release.sh --smoke` only after a
 passing focused `rollout-report.json`. Supply an HTTPS URL by default; local

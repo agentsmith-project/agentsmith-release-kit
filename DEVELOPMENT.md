@@ -22,6 +22,7 @@ bash scripts/test-airgap-image-archive-check.sh
 bash scripts/test-airgap-image-load.sh
 bash scripts/test-bundle-load-plan.sh
 bash scripts/test-airgap-bundle-render-check.sh
+bash scripts/test-substrate-pack-check.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
@@ -306,6 +307,26 @@ oras, kubectl, curl, or wget, does not log in, load/import images, apply
 manifests, smoke routes, verify registry presence, or claim package, offline
 install, deploy, or release readiness.
 
+The current `--substrate-pack-check` path is a focused diagnostic for
+kit-installed substrate pack/truth materiality only. It consumes an explicit
+`agentsmith.substrate-pack-manifest/v1` manifest, explicit
+`agentsmith.substrate-connection.truth/v1` substrate truth, target profile
+`existing_kubernetes/kit_installed/<online|airgap>`, and an output directory.
+It accepts only those two existing Kubernetes `kit_installed` profiles; legacy
+names and aliases such as `external_declared`, `kind_rehearsal`, `local-kind`,
+`existing-cluster`, `real-k8s`, `cluster`, or `offline` fail fast. The
+manifest requires `installed_by: agentsmith-release-kit`, plain semver
+`release_kit_version`, exact target-profile binding, digest-pinned
+PostgreSQL/MongoDB/Redis/object-storage/OIDC images, and payload/template/tool
+checksum material that is only sha256 digests or safe relative pack paths. It
+reuses the shared substrate truth validator for required services, secret
+refs, TLS or sslmode, pgvector, reachability, and kit-installed identity. It
+does not create or install substrates, create databases/buckets/realms, log in
+to registries, call Kubernetes, render, apply, roll out, smoke, package, or
+claim release readiness. `substrate-pack-check-report.json` keeps
+`readiness: false`, records only input digests and non-sensitive summaries, and
+is not accepted by the evidence envelope validator.
+
 The current `--apply` path is a focused diagnostic for Kubernetes apply-only
 validation. It consumes a release contract, an already-rendered manifests
 directory, explicit target profile `existing_kubernetes/external_declared/online`,
@@ -464,6 +485,9 @@ load/import, offline install, package, deploy, registry, or release readiness.
 `airgap-image-load-report.json` is also not accepted because it proves only a
 focused operator-loader execution, not offline install, package, deploy,
 registry, or release readiness.
+`substrate-pack-check-report.json` is also not accepted because it proves only
+kit-installed substrate pack manifest and truth materiality, not substrate
+installation, package, deploy, or release readiness.
 `evidence_subject.files` must contain only `evidence.json` plus the mapped
 output files: `image-map.json`, `online-deployment-gate-report.json`, or
 `airgap-bundle-check-report.json` plus `airgap-bundle-manifest.json` plus
