@@ -8,7 +8,7 @@ identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
 airgap image archive materiality, airgap image load, registry presence,
 airgap bundle load-plan, airgap bundle render-check, airgap deployment focused
-chain orchestration, substrate pack check, apply-only,
+chain orchestration, airgap consume rehearsal, substrate pack check, apply-only,
 rollout/live digest, route smoke, and online focused chain orchestration
 diagnostics, plus operator signoff intake binding, but does not contain full
 deploy tooling yet.
@@ -487,6 +487,37 @@ not accepted by evidence intake and does not perform registry mirror/login,
 push/pull, substrate installation, operator signature/identity checks,
 product-flow checks, package readiness, deploy readiness, or release
 readiness.
+
+Airgap consume rehearsal:
+
+```bash
+bash scripts/test-airgap-consume-rehearsal.sh
+```
+
+`--airgap-consume-rehearsal` is a thin offline consumption entry for an
+already assembled `existing_kubernetes/external_declared/airgap` bundle. It
+requires an explicit bundle root, bundle-local render values and substrate
+truth, target prerequisites, namespace, output directory, and Kubernetes
+client options. It discovers the release contract, deploy template package,
+deploy template archive, and image-map component paths from
+`airgap-bundle-manifest.json`, then reuses `--airgap-bundle-check` and the
+existing `--airgap-deployment-gate` chain. Default `server-dry-run` runs
+bundle check plus preflight/render-check/apply dry-run. `--mode apply`
+requires archive probe, image loader, matching confirm text, and operator run
+id, then reuses the existing image-load/apply/rollout path with optional
+smoke through the deployment gate.
+
+The optional `--rehearsal-target existing_kubernetes|kind_rehearsal` field
+labels the Kubernetes endpoint used by operator-provided `kubectl` settings;
+it does not create or manage a cluster and does not introduce a kind airgap
+target profile. Kind output remains a rehearsal evidence line only and does
+not replace real Kubernetes evidence. `airgap-consume-rehearsal-report.json`
+keeps `schema: agentsmith.airgap-consume-rehearsal/v1`, `scope:
+airgap_consume_rehearsal_only`, `readiness: false`, and `status: pass`. It
+lists only digest summaries, producer report digests, and the two main
+output-relative producer report paths. It is
+not accepted by evidence intake and does not prove registry mirror/login,
+offline install, package, deploy, operator signoff, or release readiness.
 
 Substrate pack focused diagnostic:
 

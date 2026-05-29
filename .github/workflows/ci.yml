@@ -43,6 +43,8 @@ jobs:
         run: bash scripts/test-airgap-bundle-render-check.sh
       - name: Airgap deployment gate focused guard
         run: bash scripts/test-airgap-deployment-gate.sh
+      - name: Airgap consume rehearsal focused guard
+        run: bash scripts/test-airgap-consume-rehearsal.sh
       - name: Substrate pack focused guard
         run: bash scripts/test-substrate-pack-check.sh
       - name: Substrate routability focused guard

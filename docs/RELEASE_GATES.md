@@ -578,6 +578,53 @@ airgap_deployment_gate_only`, `readiness: false`, and `status: pass`; it is
 not evidence-envelope input and does not prove registry mirror/login,
 offline install, package, deploy, operator signoff, or release readiness.
 
+## Airgap Consume Rehearsal Focused Chain
+
+Run:
+
+```bash
+bash scripts/test-airgap-consume-rehearsal.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--airgap-consume-rehearsal`. It is a KISS consumer-side entry for an already
+assembled `existing_kubernetes/external_declared/airgap` bundle. It does not
+create bundles, create or manage clusters, install substrates, mirror images,
+choose registry tooling, run product flows, or claim offline install, package,
+deploy, or release readiness.
+
+The runner requires `--bundle-root`, bundle-local `--render-values` and
+`--substrate-truth`, explicit `--target-prerequisites`, `--namespace`, and
+`--output-dir`. `--bundle-manifest` defaults to
+`<bundle-root>/airgap-bundle-manifest.json` and, when provided, must still be
+inside the bundle root. The manifest is used only to discover the four fixed
+component paths: release contract, deploy template package, deploy template
+archive, and image-map. Those component paths must be safe bundle-local files
+before any producer step runs. The selected target profile remains
+`existing_kubernetes/external_declared/airgap`.
+
+Default `server-dry-run` runs `--airgap-bundle-check`, then reuses
+`--airgap-deployment-gate` server dry-run for target preflight, bundle
+render-check, and Kubernetes apply dry-run. Confirmed `--mode apply` requires
+`--archive-probe`, `--image-loader`, matching `--confirm-apply
+existing_kubernetes/external_declared/airgap`, and `--operator-run-id`, then
+reuses the existing image-load, render-check, apply, rollout, and optional
+smoke steps inside the deployment gate. `--rehearsal-target
+existing_kubernetes|kind_rehearsal` labels whether the operator-provided
+Kubernetes endpoint is a real target or a local/CI kind rehearsal. The label
+does not alter target profile semantics and does not make kind evidence a
+replacement for real Kubernetes evidence.
+
+The generated `airgap-consume-rehearsal-report.json` must keep `schema:
+agentsmith.airgap-consume-rehearsal/v1`, `scope:
+airgap_consume_rehearsal_only`, `readiness: false`, and `status: pass`. It
+stores release identity, target profile, rehearsal target, input digest
+summaries, producer report digests, and only the two main output-relative
+report paths for `airgap-bundle-check` and `airgap-deployment-gate`. It must
+not contain `verdict`, `release_verdict`, deploy readiness, raw local paths,
+operator refs, registry login material, raw kubectl output, or product-flow
+fields. It is not an evidence-envelope input.
+
 ## Kubernetes Apply-Only Focused Diagnostic
 
 Run:

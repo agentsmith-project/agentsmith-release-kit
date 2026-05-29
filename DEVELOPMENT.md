@@ -23,6 +23,7 @@ bash scripts/test-airgap-image-load.sh
 bash scripts/test-bundle-load-plan.sh
 bash scripts/test-airgap-bundle-render-check.sh
 bash scripts/test-airgap-deployment-gate.sh
+bash scripts/test-airgap-consume-rehearsal.sh
 bash scripts/test-substrate-pack-check.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
@@ -325,6 +326,23 @@ image-load, bundle render-check, apply, rollout, and optional smoke only when
 accepted by evidence intake, and does not perform registry mirror/login,
 substrate install, operator signature/identity, product-flow, package,
 deploy, or release readiness checks.
+
+The current `--airgap-consume-rehearsal` path is a thin offline consumption
+entry for an already assembled `existing_kubernetes/external_declared/airgap`
+bundle. It derives the release contract, deploy template package, deploy
+template archive, and image-map component paths from the bundle manifest, then
+reuses `--airgap-bundle-check` and `--airgap-deployment-gate`. Default
+`server-dry-run` runs bundle check plus preflight/render-check/apply dry-run.
+Confirmed `--mode apply` requires archive probe, image loader, matching
+confirm text, and operator run id, then reuses the existing image-load,
+render-check, apply, rollout, and optional smoke path through the deployment
+gate. `--rehearsal-target existing_kubernetes|kind_rehearsal` only labels the
+operator-provided Kubernetes endpoint used for rehearsal evidence; it does not
+create or manage kind and does not add a new airgap target profile.
+`airgap-consume-rehearsal-report.json` keeps `readiness: false`, records only
+digest summaries and output-relative report paths, is not accepted by evidence
+intake, and does not claim offline install, package, deploy, operator signoff,
+or release readiness.
 
 The current `--substrate-pack-check` path is a focused diagnostic for
 kit-installed substrate pack/truth materiality only. It consumes an explicit

@@ -18,7 +18,7 @@ Current status is bootstrap-focused, not release-ready. The repository has
 identity and boundary docs plus focused diagnostics for inputs,
 template-package, render, render-check, image-map, registry presence, airgap
 bundle manifest checking, apply, rollout, smoke, online focused chain
-orchestration, evidence, and target-preflight.
+orchestration, airgap consume rehearsal, evidence, and target-preflight.
 
 These diagnostics produce `readiness: false` evidence. The repository still
 does not have full deploy readiness, package readiness, registry mirror
