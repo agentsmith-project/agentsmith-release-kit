@@ -25,7 +25,7 @@ The skeleton includes:
 - Canonical identity.
 - Scope and non-goals.
 - Contracts, runbooks, and ADR entry points.
-- Readiness evidence and risk register entry points.
+- Release gate, runbook, and contract entry points.
 - A quick governance guard.
 - A release gate entry that fails fast for full release readiness while
   allowing bootstrap quick checks.

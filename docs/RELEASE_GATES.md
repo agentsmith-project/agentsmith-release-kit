@@ -498,8 +498,8 @@ declarations must match image-map mappings one-to-one by id, target digests
 must match target image digest suffixes, and target images must be under
 `image_map.target_registry`. Operator prerequisites must declare the target
 registry proof ref and operator-prerequisite tool proofs, but those proof
-strings are not registry presence, signed load, push, import, or package
-readiness evidence.
+strings are not registry presence, signed load, push, import, package
+readiness, or release readiness proof.
 
 The generated `airgap-bundle-load-plan-report.json` must keep `schema:
 agentsmith.airgap-bundle-load-plan-report/v1`, `scope:

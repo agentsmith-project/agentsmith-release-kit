@@ -114,8 +114,6 @@ required_files=(
   docs/contracts/README.md
   docs/runbooks/README.md
   docs/adr/0001-bootstrap-boundary.md
-  docs/READINESS_EVIDENCE.md
-  docs/RISK_REGISTER.md
   .github/pull_request_template.md
   .github/workflows/ci.yml
   scripts/verify-release.sh

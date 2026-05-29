@@ -63,7 +63,7 @@ The current `--inputs` path is a focused diagnostic for contract intake only.
 Its `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` outputs must keep `readiness: false`;
 they prove contract/input digest readiness only and are not deploy, package, or
-release readiness evidence. Release contract inventory closure requires
+release readiness proof. Release contract inventory closure requires
 `release_contract.required_image_ids`,
 `deploy_template_package.required_image_ids`, and the
 `deploy_image_inventory` id set to be non-empty exact-set matches. The release
