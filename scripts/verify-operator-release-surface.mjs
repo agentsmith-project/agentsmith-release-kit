@@ -15,11 +15,15 @@ const REPORT_SCHEMA = 'agentsmith.operator-release-surface-report/v1';
 const REPORT_SCOPE = 'operator_release_surface_v0';
 const REPORT_FILE = 'operator-release-surface-report.json';
 const ONLINE_PRODUCER_REPORT_FILE = 'online-deployment-gate-report.json';
+const EVIDENCE_FILE = 'evidence.json';
+const EVIDENCE_SUBJECT_FILE = 'evidence-subject.json';
 const BUNDLE_CREATE_REPORT_FILE = 'bundle-create-report.json';
 const AIRGAP_BUNDLE_CHECK_REPORT_FILE = 'airgap-bundle-check-report.json';
 const AIRGAP_BUNDLE_MANIFEST_FILE = 'airgap-bundle-manifest.json';
 const ONLINE_PRODUCER_SCHEMA = 'agentsmith.online-deployment-gate/v1';
 const ONLINE_PRODUCER_SCOPE = 'online_deployment_gate_only';
+const EVIDENCE_SCHEMA = 'agentsmith.release-kit-evidence-envelope/v1';
+const EVIDENCE_SUBJECT_SCHEMA = 'agentsmith.release-kit-evidence-subject/v1';
 const BUNDLE_CREATE_SCHEMA = 'agentsmith.airgap-bundle-create-report/v1';
 const BUNDLE_CREATE_SCOPE = 'airgap_bundle_create_only';
 const AIRGAP_BUNDLE_CHECK_SCHEMA = 'agentsmith.airgap-bundle-check-report/v1';
@@ -28,6 +32,7 @@ const AIRGAP_BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const SAFE_RELATIVE_PATH_RE = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+const ONLINE_HANDOFF_PROVENANCE_KINDS = new Set(['ci_artifact', 'signed_operator_run']);
 const MAPPINGS = new Map([
   [
     'online/use_existing',
@@ -87,6 +92,7 @@ function usage() {
     --producer-mode online-deployment-gate|bundle-create \\
     --release-contract <json> \\
     --output-dir <dir> \\
+    [--evidence-root <dir>] \\
     [--bundle-root <dir> --target-registry <registry-host[/namespace]>]`;
 }
 
@@ -140,6 +146,9 @@ function parseArgs(argv) {
       case '--output-dir':
         parsed.outputDir = nextValue();
         break;
+      case '--evidence-root':
+        parsed.evidenceRoot = nextValue();
+        break;
       case '--bundle-root':
         parsed.bundleRoot = nextValue();
         break;
@@ -170,6 +179,24 @@ function parseArgs(argv) {
 
 function digestBuffer(buffer) {
   return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function canonicalDigest(value) {
+  return digestBuffer(Buffer.from(JSON.stringify(stableJson(value))));
 }
 
 async function readFileDigest(file, label) {
@@ -226,6 +253,14 @@ function requireDigest(value, label) {
   return digest;
 }
 
+function requireEnumString(value, label, allowed) {
+  const text = requireString(value, label);
+  if (!allowed.has(text)) {
+    fail(`${label} is not supported`);
+  }
+  return text;
+}
+
 function requireGitSha(value, label) {
   const gitSha = requireString(value, label).toLowerCase();
   if (!GIT_SHA_RE.test(gitSha)) {
@@ -272,6 +307,9 @@ function assertMapping(args) {
   }
   if (args.producerMode !== 'bundle-create' && (args.bundleRoot || args.targetRegistry)) {
     cliFail('online summaries do not accept --bundle-root or --target-registry');
+  }
+  if (args.evidenceRoot && args.producerMode !== 'online-deployment-gate') {
+    cliFail('--evidence-root is only accepted for online summaries');
   }
 }
 
@@ -400,6 +438,112 @@ async function fixedOutputStep(outputDir, name, reportPath) {
   };
 }
 
+function findSubjectFileDigest(subject, filePath) {
+  for (const [index, item] of requireArray(subject.files, 'evidence_subject.files').entries()) {
+    const entry = requireObject(item, `evidence_subject.files[${index}]`);
+    const pathValue = requireString(entry.path, `evidence_subject.files[${index}].path`);
+    if (pathValue === filePath) {
+      return requireDigest(entry.sha256, `evidence_subject.files[${index}].sha256`);
+    }
+  }
+  fail(`evidence_subject.files must include ${filePath}`);
+}
+
+async function buildOnlineHandoff(args, releaseIdentity) {
+  if (!args.evidenceRoot) {
+    return undefined;
+  }
+
+  const evidenceRoot = path.resolve(args.evidenceRoot);
+  const evidenceInput = await readJson(path.join(evidenceRoot, EVIDENCE_FILE), 'online evidence');
+  const subjectInput = await readJson(
+    path.join(evidenceRoot, EVIDENCE_SUBJECT_FILE),
+    'online evidence subject'
+  );
+  const evidenceReportInput = await readJson(
+    path.join(evidenceRoot, ONLINE_PRODUCER_REPORT_FILE),
+    'online evidence gate report'
+  );
+  const evidence = requireObject(evidenceInput.value, 'online_evidence');
+  const subject = requireObject(subjectInput.value, 'online_evidence_subject');
+  const evidenceReport = requireObject(
+    evidenceReportInput.value,
+    'online_evidence_gate_report'
+  );
+
+  assertStringEquals(
+    evidence.schema_version,
+    EVIDENCE_SCHEMA,
+    'online_evidence.schema_version'
+  );
+  assertStringEquals(
+    evidence.release_kit_output,
+    ONLINE_PRODUCER_REPORT_FILE,
+    'online_evidence.release_kit_output'
+  );
+  assertStringEquals(evidence.release_id, releaseIdentity.releaseId, 'online_evidence.release_id');
+  const evidenceGitSha = requireGitSha(evidence.git_sha, 'online_evidence.git_sha');
+  if (evidenceGitSha !== releaseIdentity.gitSha) {
+    fail('online_evidence.git_sha must match release contract');
+  }
+  const evidenceReleaseContractDigest = requireDigest(
+    evidence.release_contract_digest,
+    'online_evidence.release_contract_digest'
+  );
+  if (evidenceReleaseContractDigest !== releaseIdentity.releaseContractDigest) {
+    fail('online_evidence.release_contract_digest must match release contract input');
+  }
+
+  assertStringEquals(
+    subject.schema_version,
+    EVIDENCE_SUBJECT_SCHEMA,
+    'online_evidence_subject.schema_version'
+  );
+  findSubjectFileDigest(subject, EVIDENCE_FILE);
+  const subjectGateReportDigest = findSubjectFileDigest(subject, ONLINE_PRODUCER_REPORT_FILE);
+  if (subjectGateReportDigest !== evidenceReportInput.digest) {
+    fail('online_evidence_subject gate report digest must match evidence root gate report');
+  }
+
+  assertProducerBase({
+    report: evidenceReport,
+    label: 'online_evidence_gate_report',
+    schema: ONLINE_PRODUCER_SCHEMA,
+    scope: ONLINE_PRODUCER_SCOPE,
+    args,
+    releaseIdentity
+  });
+  assertReleaseContractDigest(evidenceReport, 'online_evidence_gate_report', releaseIdentity);
+
+  const provenance = requireObject(
+    evidence.artifact_provenance,
+    'online_evidence.artifact_provenance'
+  );
+  const subjectSha256 = requireDigest(
+    provenance.subject_sha256,
+    'online_evidence.artifact_provenance.subject_sha256'
+  );
+  if (subjectSha256 !== canonicalDigest(subject)) {
+    fail('online_evidence.artifact_provenance.subject_sha256 must match evidence subject');
+  }
+
+  return {
+    evidence_digest: evidenceInput.digest,
+    evidence_subject_digest: subjectInput.digest,
+    online_deployment_gate_report_digest: evidenceReportInput.digest,
+    artifact_uri: requireString(
+      provenance.artifact_uri,
+      'online_evidence.artifact_provenance.artifact_uri'
+    ),
+    provenance_kind: requireEnumString(
+      provenance.provenance_kind,
+      'online_evidence.artifact_provenance.provenance_kind',
+      ONLINE_HANDOFF_PROVENANCE_KINDS
+    ),
+    subject_sha256: subjectSha256
+  };
+}
+
 function parseTargetRegistry(value) {
   const text = requireString(value, 'target_registry');
   const parts = text.split('/');
@@ -472,12 +616,14 @@ async function buildOnlineSummary(args, releaseIdentity) {
     'online_deployment_gate_report',
     releaseIdentity
   );
+  const onlineHandoff = await buildOnlineHandoff(args, releaseIdentity);
 
   return {
     producer_report_digests: {
       online_deployment_gate_report: producerReportInput.digest
     },
-    steps: await sanitizeProducerSteps(outputDir, producerReport.steps)
+    steps: await sanitizeProducerSteps(outputDir, producerReport.steps),
+    ...(onlineHandoff ? { online_handoff: onlineHandoff } : {})
   };
 }
 
@@ -593,6 +739,9 @@ async function main(argv) {
     release_contract_digest: releaseIdentity.releaseContractDigest,
     producer_report_digests: producerSummary.producer_report_digests,
     steps: producerSummary.steps,
+    ...(producerSummary.online_handoff
+      ? { online_handoff: producerSummary.online_handoff }
+      : {}),
     ...(producerSummary.airgap_handoff
       ? { airgap_handoff: producerSummary.airgap_handoff }
       : {})

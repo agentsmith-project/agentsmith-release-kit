@@ -62,6 +62,13 @@ remove_operator_summary_if_requested() {
   fi
 }
 
+is_machine_profile_vocabulary() {
+  local value="$1"
+
+  [[ "$value" =~ ^(existing_kubernetes|kind_rehearsal)/(external_declared|kit_installed)/(online|airgap)$ ]] ||
+    [[ "$value" =~ ^(kind|local-kind|existing-cluster)/ ]]
+}
+
 reject_producer_vocabulary() {
   local arg
 
@@ -73,12 +80,53 @@ reject_producer_vocabulary() {
       external_declared|kit_installed|kind|local-kind|existing-cluster)
         fail "operator surface does not accept producer vocabulary parameter: $arg"
         ;;
+      --confirm-apply=*)
+        if is_machine_profile_vocabulary "${arg#*=}"; then
+          fail "operator surface does not accept machine profile vocabulary parameter: ${arg#*=}"
+        fi
+        ;;
     esac
 
-    if [[ "$arg" =~ ^(existing_kubernetes|kind_rehearsal)/(external_declared|kit_installed)/(online|airgap)$ ]] ||
-      [[ "$arg" =~ ^(kind|local-kind|existing-cluster)/ ]]; then
+    if is_machine_profile_vocabulary "$arg"; then
       fail "operator surface does not accept machine profile vocabulary parameter: $arg"
     fi
+  done
+}
+
+translate_operator_confirm_apply() {
+  local operator_confirm="$1"
+  local mapped_confirm="$2"
+  shift 2
+  translated_args=()
+
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --confirm-apply)
+        if [[ "$#" -lt 2 || -z "${2:-}" || "${2:-}" == --* ]]; then
+          fail "missing value for --confirm-apply"
+        fi
+        if [[ "$2" != "$operator_confirm" ]]; then
+          fail "--confirm-apply must use operator confirmation: $operator_confirm"
+        fi
+        translated_args+=(--confirm-apply "$mapped_confirm")
+        shift 2
+        ;;
+      --confirm-apply=*)
+        local value="${1#*=}"
+        if [[ -z "$value" ]]; then
+          fail "missing value for --confirm-apply"
+        fi
+        if [[ "$value" != "$operator_confirm" ]]; then
+          fail "--confirm-apply must use operator confirmation: $operator_confirm"
+        fi
+        translated_args+=(--confirm-apply "$mapped_confirm")
+        shift
+        ;;
+      *)
+        translated_args+=("$1")
+        shift
+        ;;
+    esac
   done
 }
 
@@ -141,11 +189,21 @@ case "$surface/$substrate_strategy" in
 esac
 
 reject_producer_vocabulary "$@"
+operator_confirm="$surface/$substrate_strategy"
+translated_args=()
+translate_operator_confirm_apply "$operator_confirm" "$machine_profile" "$@"
 
 release_contract="$(require_arg_value --release-contract "$@")"
 output_dir="$(require_arg_value --output-dir "$@")"
 bundle_root=""
 target_registry=""
+evidence_root=""
+
+if evidence_root="$(find_arg_value --evidence-root "$@")"; then
+  :
+else
+  evidence_root=""
+fi
 
 if [[ "$producer_name" == "bundle-create" ]]; then
   bundle_root="$(require_arg_value --bundle-root "$@")"
@@ -157,7 +215,7 @@ remove_operator_summary_if_requested "$output_dir"
 producer_args=(
   "$producer_mode"
   --target-profile "$machine_profile"
-  "$@"
+  "${translated_args[@]}"
 )
 
 bash "$ROOT_DIR/scripts/verify-release.sh" "${producer_args[@]}"
@@ -175,6 +233,12 @@ if [[ "$producer_name" == "bundle-create" ]]; then
   summary_args+=(
     --bundle-root "$bundle_root"
     --target-registry "$target_registry"
+  )
+fi
+
+if [[ "$producer_name" == "online-deployment-gate" && -n "$evidence_root" ]]; then
+  summary_args+=(
+    --evidence-root "$evidence_root"
   )
 fi
 

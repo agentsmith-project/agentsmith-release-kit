@@ -247,12 +247,12 @@ an image-map and passes it to render for image reference adoption only. The
 external-declared online path may optionally check target-registry presence in
 confirmed apply mode. The kit-installed online path requires
 `--substrate-pack-manifest <json>` and `--routability-probe <executable>` and
-rejects `--target-registry`, `--registry-probe`, and `--evidence-root`.
+rejects `--target-registry` and `--registry-probe`.
 The report lists only step names, relative report paths, and a capability map
-keyed by the selected supported profile. External-declared confirmed apply may
-optionally write a release-kit evidence root from explicit remote provenance
-and then validate it through `--evidence`; this emits exactly three managed
-evidence-root files: `evidence.json`, `evidence-subject.json`, and
+keyed by the selected supported profile. External-declared and kit-installed
+confirmed apply may optionally write a release-kit evidence root from explicit
+remote provenance and then validate it through `--evidence`; this emits exactly
+three managed evidence-root files: `evidence.json`, `evidence-subject.json`, and
 `online-deployment-gate-report.json`. For this output,
 `evidence_subject.files` contains exactly two subject entries:
 `evidence.json` and `online-deployment-gate-report.json`; it does not list

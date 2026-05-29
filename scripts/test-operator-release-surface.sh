@@ -24,7 +24,8 @@ NODE
 )
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+SERVER_PID=""
+trap 'if [[ -n "$SERVER_PID" ]]; then kill "$SERVER_PID" 2>/dev/null || true; fi; rm -rf "$TMP_DIR"' EXIT
 
 fail() {
   echo "FAIL: $*" >&2
@@ -312,6 +313,37 @@ fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
 NODE
 }
 
+write_evidence_provenance() {
+  local output="$1"
+  local operator_run_id="$2"
+
+  "$NODE_BIN" --input-type=module - "$output" "$operator_run_id" <<'NODE'
+import fs from 'node:fs';
+
+const [output, operatorRunId] = process.argv.slice(2);
+
+const provenance = {
+  schema_version: 'agentsmith.artifact-provenance/v1',
+  provenance_kind: 'signed_operator_run',
+  producer_repo: 'github.com/agentsmith-project/agentsmith-release-kit',
+  normalized_remote: 'github.com/agentsmith-project/agentsmith-release-kit',
+  commit_sha: 'fedcba9876543210fedcba9876543210fedcba98',
+  artifact_uri:
+    `signed-operator-run://agentsmith-release-kit/evidence/${operatorRunId}/online-deployment-gate-evidence.tgz`,
+  generated_at: '2026-05-23T12:00:00.000Z',
+  generator_command: 'bash scripts/verify-release.sh --online-deployment-gate --evidence-root',
+  generator_version: '0.1.0',
+  attestation: 'none',
+  operator_run_id: operatorRunId,
+  operator_identity: 'release-operator@example.com',
+  signature_uri: `https://signatures.example.com/agentsmith-release-kit/${operatorRunId}.sig`,
+  signature_sha256: `sha256:${'a'.repeat(64)}`
+};
+
+fs.writeFileSync(output, `${JSON.stringify(provenance, null, 2)}\n`);
+NODE
+}
+
 write_fake_kubectl() {
   local fake_kubectl="$1"
 
@@ -328,7 +360,7 @@ printf '%s\\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
     command_name="$arg"
     break
   fi
@@ -342,6 +374,42 @@ fi
 if [[ "$command_name" == "apply" ]]; then
   printf '%s\\n' "deployment.apps/agentsmith-web"
   exit 0
+fi
+
+if [[ "$command_name" == "rollout" ]]; then
+  printf '%s\\n' "deployment.apps/agentsmith-web rolled out"
+  exit 0
+fi
+
+if [[ "$command_name" == "get" ]]; then
+  get_target=""
+  previous=""
+  for arg in "$@"; do
+    if [[ "$previous" == "get" ]]; then
+      get_target="$arg"
+    fi
+    previous="$arg"
+  done
+
+  if [[ "$get_target" == "Deployment/agentsmith-web" ]]; then
+    cat <<'JSON'
+{"spec":{"selector":{"matchLabels":{"app.kubernetes.io/name":"agentsmith-web","app.kubernetes.io/part":"web"}}}}
+JSON
+    exit 0
+  fi
+
+  if [[ "$get_target" == "pods" ]]; then
+    live_image="\${FAKE_KUBECTL_LIVE_IMAGE:-ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
+    live_image_id="\${FAKE_KUBECTL_LIVE_IMAGE_ID:-docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
+    live_init_image="\${FAKE_KUBECTL_LIVE_INIT_IMAGE:-$live_image}"
+    live_init_image_id="\${FAKE_KUBECTL_LIVE_INIT_IMAGE_ID:-$live_image_id}"
+    live_container_image="\${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE:-$live_image}"
+    live_container_image_id="\${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID:-$live_image_id}"
+    cat <<JSON
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"$live_init_image","imageID":"$live_init_image_id"}],"containerStatuses":[{"name":"web","image":"$live_container_image","imageID":"$live_container_image_id"}]}}]}
+JSON
+    exit 0
+  fi
 fi
 
 echo "unexpected fake kubectl args: $*" >&2
@@ -439,6 +507,62 @@ fs.chmodSync(routabilityProbe, 0o755);
 NODE
 }
 
+start_server() {
+  local ready_file="$TMP_DIR/server-ready"
+  local log_file="$TMP_DIR/server-hits.log"
+  local stdout_file="$TMP_DIR/server.out"
+  local stderr_file="$TMP_DIR/server.err"
+
+  "$NODE_BIN" --input-type=module - "$ready_file" "$log_file" >"$stdout_file" 2>"$stderr_file" <<'NODE' &
+import fs from 'node:fs';
+import http from 'node:http';
+
+const [readyFile, logFile] = process.argv.slice(2);
+
+const server = http.createServer((request, response) => {
+  const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
+  fs.appendFileSync(logFile, `${request.method} ${url.pathname}\n`);
+  response.statusCode = url.pathname === '/ok' ? 200 : 404;
+  response.end(url.pathname === '/ok' ? 'route ok' : 'not found');
+});
+
+server.listen(0, '127.0.0.1', () => {
+  fs.writeFileSync(readyFile, String(server.address().port));
+});
+
+process.on('SIGTERM', () => {
+  server.close(() => process.exit(0));
+});
+NODE
+  SERVER_PID=$!
+
+  for _ in {1..50}; do
+    if [[ -s "$ready_file" ]]; then
+      SERVER_PORT="$(<"$ready_file")"
+      SERVER_LOG="$log_file"
+      return
+    fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      cat "$stdout_file" >&2 || true
+      cat "$stderr_file" >&2 || true
+      fail "operator surface smoke server exited before ready"
+    fi
+    sleep 0.1
+  done
+
+  cat "$stdout_file" >&2 || true
+  cat "$stderr_file" >&2 || true
+  fail "operator surface smoke server did not become ready"
+}
+
+hit_count() {
+  if [[ -f "$SERVER_LOG" ]]; then
+    wc -l <"$SERVER_LOG" | tr -d '[:space:]'
+    return
+  fi
+  echo 0
+}
+
 create_payloads() {
   local payload_dir="$1"
   local tool_file="$2"
@@ -517,6 +641,7 @@ assert_operator_report() {
   local expected_steps="$5"
   local expected_digest_keys="$6"
   local expect_airgap="${7:-false}"
+  local expect_online_handoff="${8:-false}"
 
   "$NODE_BIN" --input-type=module - \
     "$output_dir/$REPORT_FILE" \
@@ -526,7 +651,8 @@ assert_operator_report() {
     "$machine_profile" \
     "$expected_steps" \
     "$expected_digest_keys" \
-    "$expect_airgap" <<'NODE'
+    "$expect_airgap" \
+    "$expect_online_handoff" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -538,13 +664,15 @@ const [
   machineProfile,
   expectedStepsText,
   expectedDigestKeysText,
-  expectAirgapText
+  expectAirgapText,
+  expectOnlineHandoffText
 ] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
 const expectedSteps = expectedStepsText.split(',');
 const expectedDigestKeys = expectedDigestKeysText.split(',');
 const expectAirgap = expectAirgapText === 'true';
+const expectOnlineHandoff = expectOnlineHandoffText === 'true';
 const allowedTopLevelKeys = new Set([
   'schema',
   'scope',
@@ -558,7 +686,8 @@ const allowedTopLevelKeys = new Set([
   'release_contract_digest',
   'producer_report_digests',
   'steps',
-  ...(expectAirgap ? ['airgap_handoff'] : [])
+  ...(expectAirgap ? ['airgap_handoff'] : []),
+  ...(expectOnlineHandoff ? ['online_handoff'] : [])
 ]);
 const forbiddenKeys = new Set([
   'verdict',
@@ -675,6 +804,40 @@ if (expectAirgap) {
     throw new Error('airgap handoff must include sanitized target registry host');
   }
 }
+if (expectOnlineHandoff) {
+  const handoff = report.online_handoff;
+  if (!handoff || typeof handoff !== 'object' || Array.isArray(handoff)) {
+    throw new Error('online summary must include evidence handoff digest summary');
+  }
+  const expectedHandoffKeys = [
+    'artifact_uri',
+    'evidence_digest',
+    'evidence_subject_digest',
+    'online_deployment_gate_report_digest',
+    'provenance_kind',
+    'subject_sha256'
+  ];
+  const actualHandoffKeys = Object.keys(handoff).sort();
+  if (JSON.stringify(actualHandoffKeys) !== JSON.stringify(expectedHandoffKeys.sort())) {
+    throw new Error(`unexpected online handoff keys: ${actualHandoffKeys.join(',')}`);
+  }
+  for (const key of [
+    'evidence_digest',
+    'evidence_subject_digest',
+    'online_deployment_gate_report_digest',
+    'subject_sha256'
+  ]) {
+    if (!/^sha256:[0-9a-f]{64}$/.test(handoff[key] || '')) {
+      throw new Error(`online handoff missing digest: ${key}`);
+    }
+  }
+  if (handoff.provenance_kind !== 'signed_operator_run') {
+    throw new Error(`unexpected online handoff provenance kind: ${handoff.provenance_kind}`);
+  }
+  if (!/^signed-operator-run:\/\/agentsmith-release-kit\/evidence\/operator-run-1003\//.test(handoff.artifact_uri || '')) {
+    throw new Error('online handoff must include sanitized artifact uri');
+  }
+}
 if (/\/tmp\/|\/home\/|secretRef:|operator held|operator workstation|signed operator prerequisite|kubeconfig|kubectl|probe|TOKEN|Bearer/i.test(serialized)) {
   throw new Error('operator summary leaked local paths, operator refs, tools, probes, or secret-ish payloads');
 }
@@ -752,6 +915,7 @@ PAYLOAD_DIR="$TMP_DIR/payload"
 IMAGE_DIR="$TMP_DIR/image-archives"
 BUNDLED_TOOL="$TMP_DIR/kubectl-local"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
+VALID_PROVENANCE="$TMP_DIR/evidence-provenance.signed-operator-run.json"
 
 manifest_sha="$(create_archive "$VALID_ARCHIVE")"
 archive_sha="$(sha256_file "$VALID_ARCHIVE")"
@@ -767,8 +931,11 @@ write_routability_probe "$ROUTABILITY_PROBE"
 create_payloads "$PAYLOAD_DIR" "$BUNDLED_TOOL"
 create_image_archives "$IMAGE_DIR"
 write_operator_prerequisites "$OPERATOR_PREREQUISITES" "$BUNDLED_TOOL"
+write_evidence_provenance "$VALID_PROVENANCE" operator-run-1003
 : >"$KUBECTL_LOG"
 : >"$ROUTABILITY_PROBE_LOG"
+start_server
+BASE_URL="http://127.0.0.1:$SERVER_PORT"
 
 image_args=()
 for id in "${RELEASE_IMAGE_IDS[@]}"; do
@@ -798,6 +965,54 @@ assert_operator_report \
   "inputs,target-preflight,template-package,render,render-check,apply" \
   "online_deployment_gate_report"
 pass "operator online/use_existing maps to external-declared online producer gate"
+
+external_online_apply_output="$TMP_DIR/out-online-use-existing-apply"
+external_online_evidence_root="$TMP_DIR/evidence-online-use-existing-apply"
+: >"$KUBECTL_LOG"
+before_online_apply="$(hit_count)"
+FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+  --release-contract "$VALID_CONTRACT" \
+  --deploy-template-package "$VALID_PACKAGE" \
+  --archive "$VALID_ARCHIVE" \
+  --render-values "$VALID_VALUES" \
+  --substrate-truth "$EXTERNAL_TRUTH" \
+  --target-prerequisites "$EXTERNAL_PREREQUISITES" \
+  --namespace agentsmith \
+  --output-dir "$external_online_apply_output" \
+  --kubectl "$FAKE_KUBECTL" \
+  --mode apply \
+  --confirm-apply online/use_existing \
+  --operator-run-id operator-run-1003 \
+  --timeout 120s \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost \
+  --evidence-root "$external_online_evidence_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/online-use-existing-apply.out"
+after_online_apply="$(hit_count)"
+
+[[ "$after_online_apply" -eq $((before_online_apply + 1)) ]] || fail "operator online apply smoke should issue one request"
+if grep -q -- '--dry-run=server' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "operator online apply must not dry-run confirmed apply"
+fi
+grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" || fail "operator online apply did not call rollout"
+grep -q 'get pods' "$KUBECTL_LOG" || fail "operator online apply did not check live pods"
+[[ -f "$external_online_evidence_root/evidence.json" ]] || fail "operator online apply evidence missing evidence.json"
+[[ -f "$external_online_evidence_root/evidence-subject.json" ]] || fail "operator online apply evidence missing evidence-subject.json"
+[[ -f "$external_online_evidence_root/online-deployment-gate-report.json" ]] || fail "operator online apply evidence missing gate report"
+assert_producer_profile "$external_online_apply_output/online-deployment-gate-report.json" "$EXTERNAL_ONLINE_PROFILE"
+assert_operator_report \
+  "$external_online_apply_output" \
+  online \
+  use_existing \
+  "$EXTERNAL_ONLINE_PROFILE" \
+  "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke" \
+  "online_deployment_gate_report" \
+  false \
+  true
+pass "operator online/use_existing confirmed apply accepts operator confirmation and writes handoff summary"
 
 kit_online_output="$TMP_DIR/out-online-install-substrates"
 : >"$KUBECTL_LOG"
@@ -867,6 +1082,40 @@ expect_operator_fail_preserves_summary rejected-target-profile "$target_profile_
   bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
     --target-profile "$EXTERNAL_ONLINE_PROFILE" \
     --output-dir "$target_profile_output"
+
+raw_confirm_output="$TMP_DIR/out-raw-confirm-apply"
+expect_operator_fail_preserves_summary raw-confirm-apply "$raw_confirm_output" \
+  env FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+    --release-contract "$VALID_CONTRACT" \
+    --deploy-template-package "$VALID_PACKAGE" \
+    --archive "$VALID_ARCHIVE" \
+    --render-values "$VALID_VALUES" \
+    --substrate-truth "$EXTERNAL_TRUTH" \
+    --target-prerequisites "$EXTERNAL_PREREQUISITES" \
+    --namespace agentsmith \
+    --output-dir "$raw_confirm_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --confirm-apply "$EXTERNAL_ONLINE_PROFILE" \
+    --operator-run-id operator-run-raw
+
+raw_confirm_equals_output="$TMP_DIR/out-raw-confirm-apply-equals"
+expect_operator_fail_preserves_summary raw-confirm-apply-equals "$raw_confirm_equals_output" \
+  env FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+    --release-contract "$VALID_CONTRACT" \
+    --deploy-template-package "$VALID_PACKAGE" \
+    --archive "$VALID_ARCHIVE" \
+    --render-values "$VALID_VALUES" \
+    --substrate-truth "$EXTERNAL_TRUTH" \
+    --target-prerequisites "$EXTERNAL_PREREQUISITES" \
+    --namespace agentsmith \
+    --output-dir "$raw_confirm_equals_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --confirm-apply="$EXTERNAL_ONLINE_PROFILE" \
+    --operator-run-id operator-run-raw-equals
 
 missing_release_contract_output="$TMP_DIR/out-missing-release-contract"
 expect_operator_fail_preserves_summary missing-release-contract "$missing_release_contract_output" \

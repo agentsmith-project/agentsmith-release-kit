@@ -10,7 +10,7 @@ sign off deploy, package, offline install, or release readiness.
 
 | Operator choice | Machine profile mapping | Operator command entry | Current result |
 | --- | --- | --- | --- |
-| `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/operator-release.sh online use_existing ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]` | Runs the existing online focused chain for declared substrate endpoints and explicit target prerequisites; target-registry confirmed apply still binds registry presence through the operator probe before render/apply. |
+| `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/operator-release.sh online use_existing ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]` | Runs the existing online focused chain for declared substrate endpoints and explicit target prerequisites. Confirmed apply uses `--confirm-apply online/use_existing`; the facade maps it internally. Target-registry confirmed apply still binds registry presence through the operator probe before render/apply. |
 | `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the existing local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
 | `online/install_substrates` | `existing_kubernetes/kit_installed/online` | `bash scripts/operator-release.sh online install_substrates ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the existing online focused chain for kit-installed substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope. It is source-registry only, rejects `--target-registry` and `--registry-probe`, and is not a substrate installer or release readiness. |
 | `airgap-bundle/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle install_substrates ...` | Fails fast in v0. There is no kit-installed airgap facade success path yet. |
@@ -47,6 +47,9 @@ Operators should call `bash scripts/operator-release.sh <surface>
 producer diagnostic, and writes `operator-release-surface-report.json` with a
 minimal `readiness=false` summary. That summary is not accepted by
 `--evidence`.
+For confirmed apply, keep using the operator choice as the confirmation value,
+for example `--confirm-apply online/use_existing`; raw machine profiles are
+rejected at the facade.
 
 `bash scripts/verify-release.sh --...` remains the producer catalog and
 maintainer/focused diagnostic entry. Use it when changing release-kit internals
@@ -75,6 +78,9 @@ still `readiness=false` and is not deploy or release signoff. Evidence intake
 accepts only this confirmed-apply envelope; server dry-run reports,
 empty-step online gate reports, missing kit substrate steps, and external/kit
 profile mixes are rejected.
+When this runs through `operator-release.sh`, the operator surface summary may
+include a digest-only `online_handoff` block for the evidence root. It is a
+handoff summary only, not release, deploy, or package readiness.
 External-declared online `--target-registry <registry-host[/namespace]>` asks
 the gate to generate an image-map and render target image references. In confirmed
 `--mode apply`, it also requires `--registry-probe <executable>` and runs

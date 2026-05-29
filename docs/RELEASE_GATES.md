@@ -49,12 +49,19 @@ diagnostic:
   `existing_kubernetes/external_declared/airgap`.
 - `airgap-bundle/install_substrates` fails fast in v0.
 
+For confirmed apply, the operator passes the same operator choice to
+`--confirm-apply`, for example `--confirm-apply online/use_existing`; the facade
+maps that value to the producer target profile internally. Raw producer machine
+profiles are rejected before producer reports or summaries are written.
+
 The generated `operator-release-surface-report.json` must keep `schema:
 agentsmith.operator-release-surface-report/v1`, `scope:
 operator_release_surface_v0`, `readiness: false`, and `status: pass`. It stores
 only release identity, release contract digest, producer report digests, and
 output-relative step paths, with a small airgap handoff digest/count summary
-for bundle creation. It is not accepted by `--evidence`.
+for bundle creation. Online confirmed apply with `--evidence-root` may also add
+a digest/provenance-only `online_handoff` summary. It is not accepted by
+`--evidence` and is not deploy, package, or release readiness.
 
 ## Contract Intake Focused Diagnostic
 

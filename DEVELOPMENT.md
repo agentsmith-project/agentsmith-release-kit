@@ -460,9 +460,8 @@ and before render, apply, smoke, or evidence closure. Its
 `online-deployment-gate-report.json` must keep
 `readiness: false` and `scope: online_deployment_gate_only`; it records only
 release identity, target profile, mode, step names, relative report paths, and
-a small capability map for the current online profile. External online marks
-evidence envelope support as `optional`; kit-installed online marks it as
-`unsupported`. `server-dry-run`
+a small capability map for the current online profile. External and
+kit-installed online mark evidence envelope support as `optional`. `server-dry-run`
 reports must not include `operator_run_id`; confirmed apply reports include
 top-level `operator_run_id` copied from `--operator-run-id`.
 Confirmed apply may optionally write a focused evidence root with
