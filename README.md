@@ -507,15 +507,17 @@ requires archive probe, image loader, matching confirm text, and operator run
 id, then reuses the existing image-load/apply/rollout path with optional
 smoke through the deployment gate.
 
-The optional `--rehearsal-target existing_kubernetes|kind_rehearsal` field
-labels the Kubernetes endpoint used by operator-provided `kubectl` settings;
-it does not create or manage a cluster and does not introduce a kind airgap
-target profile. Kind output remains a rehearsal evidence line only and does
-not replace real Kubernetes evidence. `airgap-consume-rehearsal-report.json`
+The optional `--rehearsal-label existing_kubernetes|kind_rehearsal` value is
+operator-provided label-only metadata for the Kubernetes endpoint used by
+`kubectl` settings. It does not change the
+`existing_kubernetes/external_declared/airgap` target profile, create or
+manage kind, or prove the endpoint is kind. Kind output remains optional
+rehearsal evidence only and does not replace real Kubernetes evidence.
+`airgap-consume-rehearsal-report.json`
 keeps `schema: agentsmith.airgap-consume-rehearsal/v1`, `scope:
 airgap_consume_rehearsal_only`, `readiness: false`, and `status: pass`. It
-lists only digest summaries, producer report digests, and the two main
-output-relative producer report paths. It is
+lists only `rehearsal_label`, digest summaries, producer report digests, and
+the two main output-relative producer report paths. It is
 not accepted by evidence intake and does not prove registry mirror/login,
 offline install, package, deploy, operator signoff, or release readiness.
 

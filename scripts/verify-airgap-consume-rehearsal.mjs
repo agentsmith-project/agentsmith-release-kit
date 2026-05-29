@@ -26,7 +26,7 @@ const COMPONENT_KINDS = [
   'image_map'
 ];
 const SUPPORTED_MODES = new Set(['server-dry-run', 'apply']);
-const SUPPORTED_REHEARSAL_TARGETS = new Set(['existing_kubernetes', 'kind_rehearsal']);
+const SUPPORTED_REHEARSAL_LABELS = new Set(['existing_kubernetes', 'kind_rehearsal']);
 const MANAGED_OUTPUT_ENTRIES = [
   REPORT_FILE,
   'airgap-bundle-check',
@@ -66,7 +66,7 @@ function usage() {
     --target-prerequisites <json> \\
     --namespace <name> \\
     --output-dir <dir> \\
-    [--rehearsal-target existing_kubernetes|kind_rehearsal] \\
+    [--rehearsal-label existing_kubernetes|kind_rehearsal] \\
     [--mode server-dry-run|apply] \\
     [--kubeconfig <path>] \\
     [--context <name>] \\
@@ -81,7 +81,10 @@ function usage() {
     [--expected-status <code>] \\
     [--timeout-ms <ms>] \\
     [--allow-http] \\
-    [--allow-localhost]`;
+    [--allow-localhost]
+
+Rehearsal label is operator-provided label-only metadata. It does not change
+the existing_kubernetes/external_declared/airgap target profile or prove kind.`;
 }
 
 function cliFail(message) {
@@ -108,7 +111,7 @@ function parseArgs(argv) {
   const parsed = {
     mode: 'server-dry-run',
     kubectl: 'kubectl',
-    rehearsalTarget: 'existing_kubernetes',
+    rehearsalLabel: 'existing_kubernetes',
     forbiddenSourceRoots: [],
     allowHttp: false,
     allowLocalhost: false
@@ -126,8 +129,8 @@ function parseArgs(argv) {
       parsed.mode = arg.slice('--mode='.length);
       continue;
     }
-    if (arg.startsWith('--rehearsal-target=')) {
-      parsed.rehearsalTarget = arg.slice('--rehearsal-target='.length);
+    if (arg.startsWith('--rehearsal-label=')) {
+      parsed.rehearsalLabel = arg.slice('--rehearsal-label='.length);
       continue;
     }
 
@@ -153,8 +156,8 @@ function parseArgs(argv) {
       case '--output-dir':
         parsed.outputDir = nextValue();
         break;
-      case '--rehearsal-target':
-        parsed.rehearsalTarget = nextValue();
+      case '--rehearsal-label':
+        parsed.rehearsalLabel = nextValue();
         break;
       case '--mode':
         parsed.mode = nextValue();
@@ -226,8 +229,8 @@ function validateArgs(args) {
   if (!SUPPORTED_MODES.has(args.mode)) {
     cliFail('--mode must be server-dry-run or apply');
   }
-  if (!SUPPORTED_REHEARSAL_TARGETS.has(args.rehearsalTarget)) {
-    cliFail('--rehearsal-target must be existing_kubernetes or kind_rehearsal');
+  if (!SUPPORTED_REHEARSAL_LABELS.has(args.rehearsalLabel)) {
+    cliFail('--rehearsal-label must be existing_kubernetes or kind_rehearsal');
   }
 }
 
@@ -515,10 +518,16 @@ function targetProfile() {
   };
 }
 
-function rehearsalTarget(value) {
+function rehearsalLabel(value) {
   return {
-    target_cluster: value,
-    evidence_line: value === 'kind_rehearsal' ? 'kind_rehearsal_only' : 'existing_kubernetes_target'
+    value,
+    provided_by: 'operator',
+    semantics: 'label_only',
+    target_profile_effect: 'none',
+    evidence_line:
+      value === 'kind_rehearsal'
+        ? 'operator_labeled_kind_rehearsal'
+        : 'operator_labeled_existing_kubernetes'
   };
 }
 
@@ -626,7 +635,7 @@ async function main(argv) {
     release_id: releaseIdentity.release_id,
     git_sha: releaseIdentity.git_sha,
     target_profile: targetProfile(),
-    rehearsal_target: rehearsalTarget(args.rehearsalTarget),
+    rehearsal_label: rehearsalLabel(args.rehearsalLabel),
     input_digests: {
       release_contract: releaseIdentity.input_sha256,
       deploy_template_package: await digestFile(

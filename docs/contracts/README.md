@@ -233,8 +233,9 @@ custom token payloads, product-flow fields, `verdict`, `release_verdict`, or
 deploy readiness fields.
 
 The current `--online-deployment-gate` validator is a focused online
-orchestration runner only. It accepts only
-`existing_kubernetes/external_declared/online`, requires explicit
+orchestration runner only. It accepts
+`existing_kubernetes/external_declared/online` and
+`existing_kubernetes/kit_installed/online`, requires explicit
 `--substrate-truth <json>` and `--target-prerequisites <json>`, calls existing
 validators in order, and writes `online-deployment-gate-report.json` with
 `schema: agentsmith.online-deployment-gate/v1`, `readiness: false`, and
@@ -243,8 +244,12 @@ dry-run apply and must not write `operator_run_id`; confirmed apply runs
 rollout and optional smoke and writes top-level `operator_run_id`. When
 `--target-registry <registry-host[/namespace]>` is supplied, it first generates
 an image-map and passes it to render for image reference adoption only. The
-report lists only step names, relative report paths, and a capability map keyed
-only by `existing_kubernetes/external_declared/online`. Confirmed apply may
+external-declared online path may optionally check target-registry presence in
+confirmed apply mode. The kit-installed online path requires
+`--substrate-pack-manifest <json>` and `--routability-probe <executable>` and
+rejects `--target-registry`, `--registry-probe`, and `--evidence-root`.
+The report lists only step names, relative report paths, and a capability map
+keyed by the selected supported profile. External-declared confirmed apply may
 optionally write a release-kit evidence root from explicit remote provenance
 and then validate it through `--evidence`; this emits exactly three managed
 evidence-root files: `evidence.json`, `evidence-subject.json`, and

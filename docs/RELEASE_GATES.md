@@ -609,16 +609,16 @@ render-check, and Kubernetes apply dry-run. Confirmed `--mode apply` requires
 `--archive-probe`, `--image-loader`, matching `--confirm-apply
 existing_kubernetes/external_declared/airgap`, and `--operator-run-id`, then
 reuses the existing image-load, render-check, apply, rollout, and optional
-smoke steps inside the deployment gate. `--rehearsal-target
-existing_kubernetes|kind_rehearsal` labels whether the operator-provided
-Kubernetes endpoint is a real target or a local/CI kind rehearsal. The label
-does not alter target profile semantics and does not make kind evidence a
-replacement for real Kubernetes evidence.
+smoke steps inside the deployment gate. `--rehearsal-label
+existing_kubernetes|kind_rehearsal` is operator-provided label-only metadata
+for the Kubernetes endpoint. It does not alter target profile semantics,
+create or manage kind, prove the endpoint is kind, or make kind-labeled
+evidence a replacement for real Kubernetes evidence.
 
 The generated `airgap-consume-rehearsal-report.json` must keep `schema:
 agentsmith.airgap-consume-rehearsal/v1`, `scope:
 airgap_consume_rehearsal_only`, `readiness: false`, and `status: pass`. It
-stores release identity, target profile, rehearsal target, input digest
+stores release identity, target profile, `rehearsal_label`, input digest
 summaries, producer report digests, and only the two main output-relative
 report paths for `airgap-bundle-check` and `airgap-deployment-gate`. It must
 not contain `verdict`, `release_verdict`, deploy readiness, raw local paths,

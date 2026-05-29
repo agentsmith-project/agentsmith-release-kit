@@ -589,14 +589,14 @@ assert_no_side_effects() {
 assert_report() {
   local report_file="$1"
   local expected_mode="$2"
-  local expected_rehearsal_target="$3"
+  local expected_rehearsal_label="$3"
   local expected_steps_csv="$4"
   local expected_operator_run_id="${5:-}"
 
   "$NODE_BIN" --input-type=module - \
     "$report_file" \
     "$expected_mode" \
-    "$expected_rehearsal_target" \
+    "$expected_rehearsal_label" \
     "$expected_steps_csv" \
     "$expected_operator_run_id" \
     "$AIRGAP_PROFILE" <<'NODE'
@@ -605,7 +605,7 @@ import fs from 'node:fs';
 const [
   reportFile,
   expectedMode,
-  expectedRehearsalTarget,
+  expectedRehearsalLabel,
   expectedStepsCsv,
   expectedOperatorRunId,
   expectedProfile
@@ -632,14 +632,27 @@ if (report.mode !== expectedMode) {
 if (report.target_profile?.value !== expectedProfile) {
   throw new Error(`unexpected target profile: ${report.target_profile?.value}`);
 }
-if (report.rehearsal_target?.target_cluster !== expectedRehearsalTarget) {
-  throw new Error(`unexpected rehearsal target: ${report.rehearsal_target?.target_cluster}`);
+if ('rehearsal_target' in report) {
+  throw new Error('legacy rehearsal_target field must not be emitted');
+}
+const rehearsalLabel = report.rehearsal_label;
+if (
+  !rehearsalLabel ||
+  rehearsalLabel.value !== expectedRehearsalLabel ||
+  rehearsalLabel.provided_by !== 'operator' ||
+  rehearsalLabel.semantics !== 'label_only' ||
+  rehearsalLabel.target_profile_effect !== 'none'
+) {
+  throw new Error(`unexpected rehearsal label: ${JSON.stringify(rehearsalLabel)}`);
+}
+if ('target_cluster' in rehearsalLabel) {
+  throw new Error('rehearsal label must not masquerade as a target_cluster');
 }
 if (
-  expectedRehearsalTarget === 'kind_rehearsal' &&
-  report.rehearsal_target?.evidence_line !== 'kind_rehearsal_only'
+  expectedRehearsalLabel === 'kind_rehearsal' &&
+  rehearsalLabel.evidence_line !== 'operator_labeled_kind_rehearsal'
 ) {
-  throw new Error('kind rehearsal report must use the kind-only evidence line');
+  throw new Error('kind rehearsal label must use the operator-labeled evidence line');
 }
 if (stepNames.join(',') !== expectedSteps.join(',')) {
   throw new Error(`unexpected steps: ${stepNames.join(',')}`);
@@ -716,7 +729,7 @@ export FAKE_KUBECTL_TARGET_IMAGE="$TARGET_APP_IMAGE"
 dry_run_output="$TMP_DIR/out-dry-run-kind"
 reset_logs
 run_consume_rehearsal "$VALID_BUNDLE_ROOT" "$dry_run_output" \
-  --rehearsal-target kind_rehearsal \
+  --rehearsal-label kind_rehearsal \
   --mode server-dry-run >"$TMP_DIR/dry-run-kind.out"
 grep -q 'apply .*--dry-run=server' "$KUBECTL_LOG" || fail "server dry-run must call kubectl apply --dry-run=server"
 if grep -q 'rollout status' "$KUBECTL_LOG"; then
@@ -733,7 +746,7 @@ if ! tail -n 1 "$TMP_DIR/dry-run-kind.out" | grep -q 'airgap consume rehearsal m
   cat "$TMP_DIR/dry-run-kind.out" >&2
   fail "consume rehearsal stdout must end with non-readiness wording"
 fi
-pass "airgap consume rehearsal server dry-run accepted kind rehearsal target"
+pass "airgap consume rehearsal server dry-run accepted kind rehearsal label"
 
 apply_output="$TMP_DIR/out-apply"
 reset_logs
@@ -761,12 +774,24 @@ reset_logs
 STALE_VALIDATE_OUTPUT="$TMP_DIR/out-bad-target"
 mkdir -p "$STALE_VALIDATE_OUTPUT"
 printf '%s\n' '{"stale":true}' >"$STALE_VALIDATE_OUTPUT/$REPORT_FILE"
-expect_rehearsal_fail "unsupported-rehearsal-target" "$TMP_DIR/out-bad-target" \
+expect_rehearsal_fail "unsupported-rehearsal-label" "$TMP_DIR/out-bad-target" \
   run_consume_rehearsal "$VALID_BUNDLE_ROOT" "$TMP_DIR/out-bad-target" \
-    --rehearsal-target cluster \
+    --rehearsal-label cluster \
     --mode server-dry-run
-assert_no_side_effects "unsupported rehearsal target"
+assert_no_side_effects "unsupported rehearsal label"
 grep -q '"stale":true' "$STALE_VALIDATE_OUTPUT/$REPORT_FILE" || fail "basic validation failure must not clean stale output"
+
+reset_logs
+STALE_LEGACY_OUTPUT="$TMP_DIR/out-legacy-target"
+mkdir -p "$STALE_LEGACY_OUTPUT"
+printf '%s\n' '{"stale":true}' >"$STALE_LEGACY_OUTPUT/$REPORT_FILE"
+expect_rehearsal_fail "legacy-rehearsal-target" "$STALE_LEGACY_OUTPUT" \
+  run_consume_rehearsal "$VALID_BUNDLE_ROOT" "$STALE_LEGACY_OUTPUT" \
+    --rehearsal-target kind_rehearsal \
+    --mode server-dry-run
+assert_no_side_effects "legacy rehearsal target"
+grep -q 'unknown argument: --rehearsal-target' "$TMP_DIR/legacy-rehearsal-target.err" || fail "legacy rehearsal target must fail as an unknown argument"
+grep -q '"stale":true' "$STALE_LEGACY_OUTPUT/$REPORT_FILE" || fail "legacy argument failure must not clean stale output"
 
 OUTSIDE_RENDER_VALUES="$TMP_DIR/outside-render-values.json"
 printf '%s\n' '{"namespace":"agentsmith"}' >"$OUTSIDE_RENDER_VALUES"
