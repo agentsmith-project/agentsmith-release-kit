@@ -15,7 +15,10 @@ const ROLLOUT_REPORT_SCHEMA = 'agentsmith.kubernetes-rollout-report/v1';
 const REPORT_SCHEMA = 'agentsmith.route-smoke-report/v1';
 const SMOKE_SCOPE = 'route_smoke_only';
 const ROLLOUT_SCOPE = 'kubernetes_rollout_imageid_only';
-const SUPPORTED_TARGET_PROFILE = 'existing_kubernetes/external_declared/online';
+const SUPPORTED_TARGET_PROFILES = new Set([
+  'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/external_declared/airgap'
+]);
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const FORBIDDEN_ROUTE_TEXT_RE = /(?:required_product_flows|product_flows|product_flow_results|deploy_readiness|release_verdict|\bverdict\b|\bkubeconfig\b)/i;
@@ -49,7 +52,7 @@ function usage() {
   node scripts/verify-smoke.mjs \\
     --release-contract <json> \\
     --rollout-report <json> \\
-    --target-profile existing_kubernetes/external_declared/online \\
+    --target-profile existing_kubernetes/external_declared/<online|airgap> \\
     --url <https-url> \\
     --output-dir <dir> \\
     [--expected-status <code>] \\
@@ -229,8 +232,8 @@ function parseTargetProfile(value) {
 
   const [targetCluster, substrateSource, distribution] = tuple;
   const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
-  if (normalized !== SUPPORTED_TARGET_PROFILE) {
-    fail(`--smoke only accepts ${SUPPORTED_TARGET_PROFILE}`);
+  if (!SUPPORTED_TARGET_PROFILES.has(normalized)) {
+    fail(`--smoke only accepts ${[...SUPPORTED_TARGET_PROFILES].join(', ')}`);
   }
 
   return {

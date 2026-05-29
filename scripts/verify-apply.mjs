@@ -17,7 +17,10 @@ const REQUIRED_ARGS = [
 ];
 const REPORT_SCHEMA = 'agentsmith.kubernetes-apply-report/v1';
 const APPLY_SCOPE = 'kubernetes_apply_only';
-const SUPPORTED_TARGET_PROFILE = 'existing_kubernetes/external_declared/online';
+const SUPPORTED_TARGET_PROFILES = new Set([
+  'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/external_declared/airgap'
+]);
 const SUPPORTED_MODES = new Set(['server-dry-run', 'apply']);
 const NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const OPERATOR_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
@@ -41,7 +44,7 @@ function usage() {
   node scripts/verify-apply.mjs \\
     --release-contract <json> \\
     --rendered-manifests <dir> \\
-    --target-profile existing_kubernetes/external_declared/online \\
+    --target-profile existing_kubernetes/external_declared/<online|airgap> \\
     --namespace <name> \\
     --output-dir <dir> \\
     [--mode server-dry-run|apply] \\
@@ -52,7 +55,7 @@ function usage() {
 
   Real apply requires:
     --mode apply \\
-    --confirm-apply existing_kubernetes/external_declared/online \\
+    --confirm-apply <matching-target-profile> \\
     --operator-run-id <id>`;
 }
 
@@ -174,8 +177,8 @@ function parseTargetProfile(value) {
 
   const [targetCluster, substrateSource, distribution] = tuple;
   const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
-  if (normalized !== SUPPORTED_TARGET_PROFILE) {
-    fail(`--apply only accepts ${SUPPORTED_TARGET_PROFILE}`);
+  if (!SUPPORTED_TARGET_PROFILES.has(normalized)) {
+    fail(`--apply only accepts ${[...SUPPORTED_TARGET_PROFILES].join(', ')}`);
   }
 
   return {
@@ -211,8 +214,8 @@ function validateArgs(args) {
   }
 
   if (args.mode === 'apply') {
-    if (args.confirmApply !== SUPPORTED_TARGET_PROFILE) {
-      cliFail(`--mode apply requires --confirm-apply ${SUPPORTED_TARGET_PROFILE}`);
+    if (args.confirmApply !== args.targetProfile.value) {
+      cliFail(`--mode apply requires --confirm-apply ${args.targetProfile.value}`);
     }
     if (!args.operatorRunId) {
       cliFail('--mode apply requires --operator-run-id <id>');

@@ -11,11 +11,11 @@ permissions:
   contents: read
 
 jobs:
-  quick-governance:
+  quick-boundary:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Quick governance guard
+      - name: Quick identity and boundary guard
         run: bash scripts/verify-release.sh --quick
       - name: Contract intake focused guard
         run: bash scripts/test-inputs.sh
@@ -41,6 +41,8 @@ jobs:
         run: bash scripts/test-bundle-load-plan.sh
       - name: Airgap bundle render-check focused guard
         run: bash scripts/test-airgap-bundle-render-check.sh
+      - name: Airgap deployment gate focused guard
+        run: bash scripts/test-airgap-deployment-gate.sh
       - name: Substrate pack focused guard
         run: bash scripts/test-substrate-pack-check.sh
       - name: Kubernetes apply-only focused guard

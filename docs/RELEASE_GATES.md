@@ -10,8 +10,8 @@ Run:
 bash scripts/verify-release.sh --quick
 ```
 
-The quick gate is not release readiness. It only checks that the bootstrap
-governance skeleton and boundary guardrails are intact.
+The quick gate is not release readiness. It only checks repo identity and
+boundary guardrails.
 
 Current quick checks:
 
@@ -548,6 +548,30 @@ oras, kubectl, curl, or wget, does not log in to a registry, load or import
 images, apply manifests, deploy, or smoke. It is not an accepted release-kit
 evidence envelope output.
 
+## Airgap Deployment Focused Chain
+
+Run:
+
+```bash
+bash scripts/test-airgap-deployment-gate.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--airgap-deployment-gate` for `existing_kubernetes/external_declared/airgap`
+only. `server-dry-run` runs target-preflight, airgap bundle render-check, and
+apply server dry-run, and rejects archive/image loader, confirmed apply,
+operator run, and smoke options.
+
+Confirmed `--mode apply` requires `--archive-probe`, `--image-loader`,
+matching `--confirm-apply existing_kubernetes/external_declared/airgap`, and
+`--operator-run-id`; it then runs image-load, bundle render-check, apply,
+rollout, and optional smoke only when `--smoke-url` is supplied.
+`airgap-deployment-gate-report.json` has `schema:
+agentsmith.airgap-deployment-gate/v1`, `scope:
+airgap_deployment_gate_only`, `readiness: false`, and `status: pass`; it is
+not evidence-envelope input and does not prove registry mirror/login,
+offline install, package, deploy, operator signoff, or release readiness.
+
 ## Kubernetes Apply-Only Focused Diagnostic
 
 Run:
@@ -562,9 +586,10 @@ with server-side dry-run. It does not render templates, roll out workloads,
 smoke routes, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
-`--apply` accepts only `existing_kubernetes/external_declared/online`.
-Canonical profiles only: `kind_rehearsal`, `airgap`, non-canonical pre-GA
-names, and synonym axes fail fast.
+`--apply` accepts only `existing_kubernetes/external_declared/online` and
+`existing_kubernetes/external_declared/airgap`. `kind_rehearsal`,
+`kit_installed`, aliases such as `offline`, non-canonical pre-GA names, and
+synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--kubeconfig`, `--context`, `--kubectl`, and `--forbidden-source-root`.
@@ -574,7 +599,7 @@ passes it as a default forbidden source root to render/check.
 Before any `kubectl` call, the apply diagnostic must pass the render/check
 image inventory guard. The default mode is `server-dry-run`, which runs
 `kubectl apply --server-side --dry-run=server`. Real apply requires all of:
-`--mode apply`, `--confirm-apply existing_kubernetes/external_declared/online`,
+`--mode apply`, `--confirm-apply <matching-target-profile>`,
 and `--operator-run-id <id>`.
 
 The generated `apply-report.json` must keep `schema_version:
@@ -599,9 +624,10 @@ already-rendered manifests. It does not render templates, apply resources,
 smoke routes, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
-`--rollout` accepts only `existing_kubernetes/external_declared/online`.
-Canonical profiles only: `kind_rehearsal`, `airgap`, non-canonical pre-GA
-names, and synonym axes fail fast.
+`--rollout` accepts only `existing_kubernetes/external_declared/online` and
+`existing_kubernetes/external_declared/airgap`. `kind_rehearsal`,
+`kit_installed`, aliases such as `offline`, non-canonical pre-GA names, and
+synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--timeout` (default `120s`), `--kubeconfig`, `--context`, `--kubectl`, and
@@ -651,7 +677,8 @@ does not call Kubernetes, render templates, apply resources, roll out
 workloads, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
-`--smoke` accepts only `existing_kubernetes/external_declared/online`.
+`--smoke` accepts only `existing_kubernetes/external_declared/online` and
+`existing_kubernetes/external_declared/airgap`.
 Required inputs are `--release-contract`, `--rollout-report`,
 `--target-profile`, `--url`, and `--output-dir`. Optional inputs are
 `--expected-status` (default `200`), `--timeout-ms` (default `5000`),
@@ -871,6 +898,9 @@ offline install, package, deploy, registry, or release readiness.
 `airgap-image-load-report.json` is intentionally not accepted because it proves
 only this focused operator-loader execution, not offline install, package,
 deploy, registry, or release readiness.
+`airgap-deployment-gate-report.json` is intentionally not accepted because it
+proves only the focused airgap chain, not offline install, package, deploy,
+registry, operator signoff, or release readiness.
 `registry-presence-report.json` is intentionally not accepted because it proves
 only focused target digest-ref presence through an operator probe, not deploy,
 package, or release readiness.

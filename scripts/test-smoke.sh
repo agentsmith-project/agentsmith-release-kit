@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
+AIRGAP_TARGET_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_AIRGAP_TARGET_PROFILE="existing_kubernetes/kit_installed/airgap"
+ALIAS_OFFLINE_TARGET_PROFILE="existing_kubernetes/external_declared/offline"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 
 TMP_DIR="$(mktemp -d)"
@@ -22,8 +25,9 @@ pass() {
 write_rollout_report() {
   local output="$1"
   local mutation="${2:-valid}"
+  local target_profile="${3:-$TARGET_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$VALID_CONTRACT" "$output" "$TARGET_PROFILE" "$mutation" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$VALID_CONTRACT" "$output" "$target_profile" "$mutation" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
@@ -241,8 +245,9 @@ assert_smoke_report() {
   local report_file="$1"
   local expected_origin="$2"
   local expected_host="$3"
+  local expected_profile="${4:-$TARGET_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$TARGET_PROFILE" "$expected_origin" "$expected_host" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$expected_profile" "$expected_origin" "$expected_host" <<'NODE'
 import fs from 'node:fs';
 
 const [reportFile, expectedProfile, expectedOrigin, expectedHost] = process.argv.slice(2);
@@ -310,8 +315,10 @@ NODE
 }
 
 VALID_ROLLOUT="$TMP_DIR/rollout-report.valid.json"
+AIRGAP_ROLLOUT="$TMP_DIR/rollout-report.airgap.json"
 BAD_ROLLOUT="$TMP_DIR/rollout-report.bad.json"
 write_rollout_report "$VALID_ROLLOUT" valid
+write_rollout_report "$AIRGAP_ROLLOUT" valid "$AIRGAP_TARGET_PROFILE"
 write_rollout_report "$BAD_ROLLOUT" bad_status
 start_server
 
@@ -327,6 +334,17 @@ if [[ "$after_valid" -ne $((before_valid + 1)) ]]; then
 fi
 assert_smoke_report "$valid_output/smoke-report.json" "$BASE_URL" "127.0.0.1:$SERVER_PORT"
 pass "route smoke happy path writes normalized non-readiness report"
+
+airgap_output="$TMP_DIR/out-airgap"
+before_airgap="$(hit_count)"
+run_smoke_raw "$VALID_CONTRACT" "$AIRGAP_ROLLOUT" "$BASE_URL/ok" "$airgap_output" "$AIRGAP_TARGET_PROFILE" --allow-http --allow-localhost >/dev/null
+after_airgap="$(hit_count)"
+if [[ "$after_airgap" -ne $((before_airgap + 1)) ]]; then
+  cat "$SERVER_LOG" >&2
+  fail "airgap happy path should issue exactly one GET"
+fi
+assert_smoke_report "$airgap_output/smoke-report.json" "$BASE_URL" "127.0.0.1:$SERVER_PORT" "$AIRGAP_TARGET_PROFILE"
+pass "airgap route smoke accepted without enabling kind, kit, or aliases"
 
 mismatch_output="$TMP_DIR/out-status-mismatch"
 mkdir -p "$mismatch_output"
@@ -348,6 +366,8 @@ expect_no_network_fail dotted-localhost "https://localhost./ok" "$TMP_DIR/out-do
 expect_no_network_fail mapped-loopback-decimal "http://[::ffff:127.0.0.1]:$SERVER_PORT/ok" "$TMP_DIR/out-mapped-loopback-decimal" "$TARGET_PROFILE" --allow-http
 expect_no_network_fail mapped-loopback-hex "http://[::ffff:7f00:1]:$SERVER_PORT/ok" "$TMP_DIR/out-mapped-loopback-hex" "$TARGET_PROFILE" --allow-http
 expect_no_network_fail unsupported-target "$BASE_URL/ok" "$TMP_DIR/out-unsupported-target" "kind_rehearsal/kit_installed/online" --allow-http --allow-localhost
+expect_no_network_fail kit-airgap-target "$BASE_URL/ok" "$TMP_DIR/out-kit-airgap-target" "$KIT_AIRGAP_TARGET_PROFILE" --allow-http --allow-localhost
+expect_no_network_fail alias-offline-target "$BASE_URL/ok" "$TMP_DIR/out-alias-offline-target" "$ALIAS_OFFLINE_TARGET_PROFILE" --allow-http --allow-localhost
 
 before_bad_rollout="$(hit_count)"
 if run_smoke_raw "$VALID_CONTRACT" "$BAD_ROLLOUT" "$BASE_URL/ok" "$TMP_DIR/out-bad-rollout" "$TARGET_PROFILE" --allow-http --allow-localhost >"$TMP_DIR/bad-rollout.out" 2>"$TMP_DIR/bad-rollout.err"; then

@@ -22,6 +22,7 @@ bash scripts/test-airgap-image-archive-check.sh
 bash scripts/test-airgap-image-load.sh
 bash scripts/test-bundle-load-plan.sh
 bash scripts/test-airgap-bundle-render-check.sh
+bash scripts/test-airgap-deployment-gate.sh
 bash scripts/test-substrate-pack-check.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
@@ -307,13 +308,25 @@ oras, kubectl, curl, or wget, does not log in, load/import images, apply
 manifests, smoke routes, verify registry presence, or claim package, offline
 install, deploy, or release readiness.
 
+The current `--airgap-deployment-gate` path is a focused airgap chain runner
+for `existing_kubernetes/external_declared/airgap` only. Default
+`server-dry-run` runs target-preflight, airgap bundle render-check, and apply
+server dry-run; it rejects archive/image loader, confirmed apply, operator run,
+and smoke options. Confirmed `--mode apply` requires archive probe, image
+loader, matching `--confirm-apply`, and `--operator-run-id`, then runs
+image-load, bundle render-check, apply, rollout, and optional smoke only when
+`--smoke-url` is supplied. Its report keeps `readiness: false`, is not
+accepted by evidence intake, and does not perform registry mirror/login,
+substrate install, operator signature/identity, product-flow, package,
+deploy, or release readiness checks.
+
 The current `--substrate-pack-check` path is a focused diagnostic for
 kit-installed substrate pack/truth materiality only. It consumes an explicit
 `agentsmith.substrate-pack-manifest/v1` manifest, explicit
 `agentsmith.substrate-connection.truth/v1` substrate truth, target profile
 `existing_kubernetes/kit_installed/<online|airgap>`, and an output directory.
-It accepts only those two existing Kubernetes `kit_installed` profiles; legacy
-names and aliases such as `external_declared`, `kind_rehearsal`, `local-kind`,
+It accepts only those two existing Kubernetes `kit_installed` profiles; unsupported
+input names and aliases such as `external_declared`, `kind_rehearsal`, `local-kind`,
 `existing-cluster`, `real-k8s`, `cluster`, or `offline` fail fast. The
 manifest requires `installed_by: agentsmith-release-kit`, plain semver
 `release_kit_version`, exact target-profile binding, digest-pinned
@@ -329,13 +342,14 @@ is not accepted by the evidence envelope validator.
 
 The current `--apply` path is a focused diagnostic for Kubernetes apply-only
 validation. It consumes a release contract, an already-rendered manifests
-directory, explicit target profile `existing_kubernetes/external_declared/online`,
-namespace, and output directory. It accepts canonical profiles only:
-`kind_rehearsal`, `airgap`, non-canonical pre-GA names, and synonym axes fail
-fast. It first runs the render/check image inventory
+directory, explicit target profile
+`existing_kubernetes/external_declared/<online|airgap>`, namespace, and output
+directory. It rejects `kind_rehearsal`, `kit_installed`, aliases such as
+`offline`, non-canonical pre-GA names, and synonym axes. It first runs the
+render/check image inventory
 guard, then uses `kubectl` against the target API. Default mode is
 `server-dry-run`, which runs server-side dry-run apply. True apply requires
-`--mode apply`, `--confirm-apply existing_kubernetes/external_declared/online`,
+`--mode apply`, a `--confirm-apply` value exactly matching the target profile,
 and `--operator-run-id <id>`. It accepts `--forbidden-source-root` and treats
 an existing sibling `../agentsmith` checkout as a default forbidden source
 root for the render/check guard. Its `apply-report.json` must keep
@@ -346,10 +360,11 @@ deploy or release readiness.
 The current `--rollout` path is a focused diagnostic for Kubernetes
 rollout/live digest validation. It consumes a release contract,
 already-rendered manifests, explicit target profile
-`existing_kubernetes/external_declared/online`, namespace, output directory,
-and optional Kubernetes client settings. It accepts canonical profiles only:
-`kind_rehearsal`, `airgap`, non-canonical pre-GA names, and synonym axes fail
-fast, and it rejects non-rollout workload kinds before rollout
+`existing_kubernetes/external_declared/<online|airgap>`, namespace, output
+directory, and optional Kubernetes client settings. It rejects
+`kind_rehearsal`, `kit_installed`, aliases such as `offline`, non-canonical
+pre-GA names, and synonym axes, and it rejects non-rollout workload kinds
+before rollout
 commands. It first runs the render/check image inventory guard, then runs
 `kubectl rollout status` for Deployment, StatefulSet, and DaemonSet resources
 and reads each workload's selector through `kubectl get <kind>/<name> -o json`.
@@ -370,8 +385,8 @@ deploy or release readiness.
 
 The current `--smoke` path is a focused diagnostic for route/service smoke
 only. It consumes a release contract, a prior `rollout-report.json`, explicit
-target profile `existing_kubernetes/external_declared/online`, one URL, and an
-output directory. It does not call Kubernetes, render, apply, roll out
+target profile `existing_kubernetes/external_declared/<online|airgap>`, one
+URL, and an output directory. It does not call Kubernetes, render, apply, roll out
 workloads, run product flows, or claim deploy or release readiness. Before any
 network request, it validates the target, URL, expected status, timeout,
 release contract, and rollout binding. The rollout report must have
@@ -485,6 +500,9 @@ load/import, offline install, package, deploy, registry, or release readiness.
 `airgap-image-load-report.json` is also not accepted because it proves only a
 focused operator-loader execution, not offline install, package, deploy,
 registry, or release readiness.
+`airgap-deployment-gate-report.json` is also not accepted because it proves
+only the focused airgap chain, not offline install, package, deploy, registry,
+operator signoff, or release readiness.
 `substrate-pack-check-report.json` is also not accepted because it proves only
 kit-installed substrate pack manifest and truth materiality, not substrate
 installation, package, deploy, or release readiness.

@@ -1,13 +1,14 @@
 # AgentSmith Release Kit
 
-Status: bootstrap-only, docs-governance-first skeleton.
+Status: bootstrap-only, focused deploy/package diagnostics.
 
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
 airgap image archive materiality, airgap image load, registry presence,
-airgap bundle load-plan, airgap bundle render-check, substrate pack check, apply-only,
+airgap bundle load-plan, airgap bundle render-check, airgap deployment focused
+chain orchestration, substrate pack check, apply-only,
 rollout/live digest, route smoke, and online focused chain orchestration
 diagnostics, plus operator signoff intake binding, but does not contain full
 deploy tooling yet.
@@ -89,8 +90,8 @@ Bootstrap quick gate:
 bash scripts/verify-release.sh --quick
 ```
 
-The quick gate checks only the governance skeleton and boundary guardrails. It
-is not release readiness and must not be used as a deploy, package, or release
+The quick gate checks only repo identity and boundary guardrails. It is not
+release readiness and must not be used as a deploy, package, or release
 verdict.
 
 Contract intake focused diagnostic:
@@ -457,6 +458,29 @@ manifests, smoke routes, prove registry presence, or claim package, offline
 install, deploy, registry, or release readiness. It is not an accepted evidence
 envelope output.
 
+Airgap deployment focused chain orchestration:
+
+```bash
+bash scripts/test-airgap-deployment-gate.sh
+```
+
+`--airgap-deployment-gate` is a small runner for
+`existing_kubernetes/external_declared/airgap` only. Default
+`server-dry-run` runs target-preflight, airgap bundle render-check, and
+Kubernetes apply server dry-run; it does not run archive probing, image
+loading, rollout, or smoke. `--mode apply` requires
+`--archive-probe <executable>`, `--image-loader <executable>`,
+`--confirm-apply existing_kubernetes/external_declared/airgap`, and
+`--operator-run-id <id>`; it runs image-load, bundle render-check, apply, and
+rollout, with route smoke only when `--smoke-url` is supplied.
+`airgap-deployment-gate-report.json` keeps `schema:
+agentsmith.airgap-deployment-gate/v1`, `scope:
+airgap_deployment_gate_only`, `readiness: false`, and `status: pass`. It is
+not accepted by evidence intake and does not perform registry mirror/login,
+push/pull, substrate installation, operator signature/identity checks,
+product-flow checks, package readiness, deploy readiness, or release
+readiness.
+
 Substrate pack focused diagnostic:
 
 ```bash
@@ -499,8 +523,9 @@ bash scripts/test-apply.sh
 ```
 
 `--apply` validates already-rendered manifests against a real Kubernetes API.
-It accepts only `existing_kubernetes/external_declared/online`; canonical
-profiles only: `kind_rehearsal`, `airgap`, non-canonical pre-GA names, and
+It accepts only `existing_kubernetes/external_declared/online` and
+`existing_kubernetes/external_declared/airgap`; `kind_rehearsal`,
+`kit_installed`, aliases such as `offline`, non-canonical pre-GA names, and
 synonym axes fail fast. Required inputs are
 `--release-contract`, `--rendered-manifests`, `--target-profile`,
 `--namespace`, and `--output-dir`; optional inputs are `--kubeconfig`,
@@ -511,8 +536,8 @@ default forbidden source root before running render/check.
 Before any `kubectl` call, `--apply` runs the render/check image inventory
 guard. The default `--mode server-dry-run` runs `kubectl apply --server-side
 --dry-run=server` and writes `apply-report.json` only after success. Real
-apply requires `--mode apply --confirm-apply
-existing_kubernetes/external_declared/online --operator-run-id <id>`.
+apply requires `--mode apply --confirm-apply <matching-target-profile>
+--operator-run-id <id>`.
 `apply-report.json` keeps `readiness: false`, `scope:
 kubernetes_apply_only`, and `status: pass`; it is not deploy readiness,
 release readiness, rollout evidence, route smoke evidence, product-flow
@@ -527,9 +552,10 @@ bash scripts/test-rollout.sh
 `--rollout` validates only Kubernetes rollout status for already-rendered
 rollout-capable workloads and checks that live pod image digests match the
 render/check image inventory. It accepts only
-`existing_kubernetes/external_declared/online`; canonical profiles only:
-`kind_rehearsal`, `airgap`, non-canonical pre-GA names, and synonym axes fail
-fast. Required inputs are
+`existing_kubernetes/external_declared/online` and
+`existing_kubernetes/external_declared/airgap`; `kind_rehearsal`,
+`kit_installed`, aliases such as `offline`, non-canonical pre-GA names, and
+synonym axes fail fast. Required inputs are
 `--release-contract`, `--rendered-manifests`, `--target-profile`,
 `--namespace`, and `--output-dir`; optional inputs are `--timeout` (default
 `120s`), `--kubeconfig`, `--context`, `--kubectl`, and
@@ -566,7 +592,8 @@ bash scripts/test-smoke.sh
 
 `--smoke` validates only one already-deployed route status after a bound
 rollout report. It accepts only
-`existing_kubernetes/external_declared/online`. Required inputs are
+`existing_kubernetes/external_declared/online` and
+`existing_kubernetes/external_declared/airgap`. Required inputs are
 `--release-contract`, `--rollout-report`, `--target-profile`, `--url`, and
 `--output-dir`; optional inputs are `--expected-status` (default `200`),
 `--timeout-ms` (default `5000`), `--allow-http`, and `--allow-localhost`.
@@ -689,13 +716,15 @@ render, apply, smoke, package, deploy, or release readiness.
 `airgap-bundle-load-plan-report.json`,
 `airgap-bundle-render-check-report.json`,
 `airgap-image-archive-check-report.json`, and
-`airgap-image-load-report.json`, and `substrate-pack-check-report.json` are
+`airgap-image-load-report.json`, `airgap-deployment-gate-report.json`, and
+`substrate-pack-check-report.json` are
 intentionally not accepted. Load-plan is plan-only, render-check proves only
 offline render plus rendered manifest image inventory, archive-check proves
 only local archive probe digest alignment, image-load proves only this focused
-operator-loader execution, and substrate-pack-check proves only pack manifest
-and truth materiality, not offline install, package, deploy, registry, or
-release readiness.
+operator-loader execution, airgap deployment gate proves only the focused
+airgap chain, and substrate-pack-check proves only pack manifest and truth
+materiality, not offline install, package, deploy, registry, or release
+readiness.
 `registry-presence-report.json` is also intentionally not accepted; it is a
 focused target digest-ref presence check only.
 

@@ -16,7 +16,10 @@ const REQUIRED_ARGS = [
 ];
 const REPORT_SCHEMA = 'agentsmith.kubernetes-rollout-report/v1';
 const ROLLOUT_SCOPE = 'kubernetes_rollout_imageid_only';
-const SUPPORTED_TARGET_PROFILE = 'existing_kubernetes/external_declared/online';
+const SUPPORTED_TARGET_PROFILES = new Set([
+  'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/external_declared/airgap'
+]);
 const ROLLOUT_WORKLOAD_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet']);
 const NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const TIMEOUT_RE = /^(?:0|[1-9][0-9]*(?:ms|s|m|h))$/;
@@ -44,7 +47,7 @@ function usage() {
   node scripts/verify-rollout.mjs \\
     --release-contract <json> \\
     --rendered-manifests <dir> \\
-    --target-profile existing_kubernetes/external_declared/online \\
+    --target-profile existing_kubernetes/external_declared/<online|airgap> \\
     --namespace <name> \\
     --output-dir <dir> \\
     [--timeout <duration>] \\
@@ -161,8 +164,8 @@ function parseTargetProfile(value) {
 
   const [targetCluster, substrateSource, distribution] = tuple;
   const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
-  if (normalized !== SUPPORTED_TARGET_PROFILE) {
-    fail(`--rollout only accepts ${SUPPORTED_TARGET_PROFILE}`);
+  if (!SUPPORTED_TARGET_PROFILES.has(normalized)) {
+    fail(`--rollout only accepts ${[...SUPPORTED_TARGET_PROFILES].join(', ')}`);
   }
 
   return {

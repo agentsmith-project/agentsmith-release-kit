@@ -234,4 +234,4 @@ reject_scan \
 require_text docs/RELEASE_GATES.md "No mutable image or non-digest release claim is present"
 pass "boundary scans"
 
-echo "PASS: bootstrap quick governance guard"
+echo "PASS: quick identity and boundary guard"

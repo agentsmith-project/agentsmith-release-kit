@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
+AIRGAP_TARGET_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_AIRGAP_TARGET_PROFILE="existing_kubernetes/kit_installed/airgap"
+ALIAS_OFFLINE_TARGET_PROFILE="existing_kubernetes/external_declared/offline"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 
 TMP_DIR="$(mktemp -d)"
@@ -267,8 +270,9 @@ run_rollout_from_release_kit() {
 
 assert_rollout_report() {
   local report_file="$1"
+  local expected_profile="${2:-$TARGET_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$TARGET_PROFILE" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$expected_profile" <<'NODE'
 import fs from 'node:fs';
 
 const [reportFile, expectedProfile] = process.argv.slice(2);
@@ -376,6 +380,13 @@ grep -q 'get pods --namespace agentsmith --selector app.kubernetes.io/name=agent
 assert_rollout_report "$valid_output/rollout-report.json"
 pass "rollout happy path calls kubectl and writes non-readiness report"
 
+airgap_output="$TMP_DIR/out-airgap"
+reset_kubectl_log
+run_rollout "$valid_manifests" "$airgap_output" "$AIRGAP_TARGET_PROFILE" >/dev/null
+grep -q 'rollout status Deployment/agentsmith-web --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" || fail "fake kubectl did not receive airgap rollout status call"
+assert_rollout_report "$airgap_output/rollout-report.json" "$AIRGAP_TARGET_PROFILE"
+pass "airgap rollout accepted without enabling kind, kit, or aliases"
+
 rewritten_ref_output="$TMP_DIR/out-rewritten-ref"
 reset_kubectl_log
 FAKE_KUBECTL_PODS_MODE=rewritten_ref_same_digest run_rollout "$valid_manifests" "$rewritten_ref_output" "$TARGET_PROFILE" >/dev/null
@@ -443,7 +454,8 @@ expect_profile_fail() {
 }
 
 expect_profile_fail kind-rehearsal "kind_rehearsal/kit_installed/online"
-expect_profile_fail airgap "existing_kubernetes/external_declared/airgap"
+expect_profile_fail kit-airgap "$KIT_AIRGAP_TARGET_PROFILE"
+expect_profile_fail alias-offline "$ALIAS_OFFLINE_TARGET_PROFILE"
 expect_profile_fail noncanonical-local-kind "local-kind/external_declared/online"
 expect_profile_fail synonym-cluster "existing_kubernetes/cluster/online"
 
