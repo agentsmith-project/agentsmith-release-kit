@@ -471,8 +471,10 @@ and secret-looking fields fail before Kubernetes. The gate computes
 `subject_name`, `subject_uri`, and `subject_sha256`, writes only
 `evidence.json`, `evidence-subject.json`, and
 `online-deployment-gate-report.json` as managed evidence files, and validates
-the root through the existing `--evidence` diagnostic. This evidence path
-remains external-declared online only.
+the root through the existing `--evidence` diagnostic. This evidence root is
+supported for both external-declared online confirmed apply and kit-installed
+online confirmed apply; target-registry behavior remains exclusive to
+external-declared online.
 It does not provision cloud resources, mirror images, build airgap bundles,
 import images into kind, roll back changes, run product flows, or claim deploy
 or release readiness. `--target-registry` only makes the gate generate an
@@ -521,9 +523,12 @@ source refs; mirrored refs must be deterministic under `target_registry`) and
 is accepted only for `existing_kubernetes/external_declared/online` or
 `existing_kubernetes/external_declared/airgap`;
 `online-deployment-gate-report.json` is accepted only when it is the confirmed
-apply output for `existing_kubernetes/external_declared/online` with
-`mode: apply`, top-level `operator_run_id`, and non-empty producer steps
-including apply and rollout; when provenance is `signed_operator_run`, the
+apply output for `existing_kubernetes/external_declared/online` or
+`existing_kubernetes/kit_installed/online` with `mode: apply`, top-level
+`operator_run_id`, and non-empty producer steps including apply and rollout;
+kit-installed online reports must also include `substrate-pack-check` and
+`substrate-routability` steps and remain evidence intake only, not deploy or
+release readiness; when provenance is `signed_operator_run`, the
 report `operator_run_id` must match the provenance `operator_run_id`; and
 the airgap triplet must be a real bundle-check report, manifest, and image-map
 set with required component kinds, image artifact declarations, payload/tool

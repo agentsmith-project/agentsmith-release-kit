@@ -297,9 +297,12 @@ schema/scope/readiness/status, release identity, target profile, and
 digest-pinned mappings to `deploy_image_inventory` and follow the same
 `target_registry`/`use_source`/deterministic mirror ref rule as render;
 online gate reports are accepted only from confirmed apply output for
-`existing_kubernetes/external_declared/online` with `mode: apply` and
-top-level `operator_run_id`, plus non-empty producer steps including apply and
-rollout; when provenance is `signed_operator_run`, the report
+`existing_kubernetes/external_declared/online` or
+`existing_kubernetes/kit_installed/online` with `mode: apply` and top-level
+`operator_run_id`, plus non-empty producer steps including apply and rollout;
+kit-installed online reports must also include `substrate-pack-check` and
+`substrate-routability` steps and remain evidence intake only, not deploy or
+release readiness; when provenance is `signed_operator_run`, the report
 `operator_run_id` must match the provenance `operator_run_id`; and the airgap
 triplet must be compatible with `--airgap-bundle-check`, binding the check
 report to an `agentsmith.airgap-bundle-manifest/v1` manifest and re-read
