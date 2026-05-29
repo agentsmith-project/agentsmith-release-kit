@@ -80,7 +80,13 @@ profiles must be covered by the current canonical focused set:
 `kind_rehearsal/kit_installed/online`. `kind_rehearsal` is supported only as
 focused rehearsal and must not be `required: true`. `min_release_kit_version`
 must be plain `x.y.z` semver and cannot exceed the current release-kit
-version.
+version. In `target-profile-coverage-report.json`, `executable_profiles`
+means currently executable focused deployment profiles:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/kit_installed/online`. It must not include
+`existing_kubernetes/kit_installed/airgap`, kind rehearsal, or aliases, and it
+does not expand the narrower evidence-supported set.
 
 The current `--template-package` path is a focused diagnostic for deploy
 template package archive intake only. It consumes the release contract, the

@@ -872,14 +872,14 @@ for (const value of [
 }
 const executableValues = new Set((report.executable_profiles || []).map((profile) => profile.value));
 if (
-  executableValues.size !== 2 ||
+  executableValues.size !== 3 ||
   !executableValues.has('existing_kubernetes/external_declared/online') ||
+  !executableValues.has('existing_kubernetes/external_declared/airgap') ||
   !executableValues.has('existing_kubernetes/kit_installed/online')
 ) {
-  throw new Error('external-declared online and kit-installed online profiles must be executable in pre-GA');
+  throw new Error('current focused deployment profiles must be listed as executable in pre-GA');
 }
 for (const value of [
-  'existing_kubernetes/external_declared/airgap',
   'existing_kubernetes/kit_installed/airgap',
   'kind_rehearsal/kit_installed/online'
 ]) {

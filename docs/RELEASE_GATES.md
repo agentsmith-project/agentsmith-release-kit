@@ -67,12 +67,17 @@ The generated `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` must keep `readiness: false`. The
 coverage report separates `declarable_profiles`,
 `intake_supported_profiles`, `executable_profiles`, and
-`evidence_supported_profiles`. `existing_kubernetes/kit_installed/online` is
-executable for the focused online chain, while evidence-supported profiles
-remain limited to external-declared online/airgap in this slice. They prove
-contract/input digest readiness only. They are not deploy readiness, package
-readiness, release readiness, rollout evidence, or operator signoff. The
-coverage report must not contain `verdict` or `release_verdict`.
+`evidence_supported_profiles`. `executable_profiles` means currently
+executable focused deployment profiles:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/kit_installed/online`; it does not include
+`existing_kubernetes/kit_installed/airgap`, kind rehearsal, or aliases.
+Evidence-supported profiles remain limited to external-declared online/airgap
+in this slice. They prove contract/input digest readiness only. They are not
+deploy readiness, package readiness, release readiness, rollout evidence, or
+operator signoff. The coverage report must not contain `verdict` or
+`release_verdict`.
 
 ## Template Package Archive Focused Diagnostic
 

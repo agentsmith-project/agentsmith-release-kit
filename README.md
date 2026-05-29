@@ -119,7 +119,14 @@ true` fails fast because full deploy/package evidence is not implemented for
 every path. `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` are written with `readiness: false`;
 they prove only contract/input digest readiness, not deploy, package, or
-release readiness.
+release readiness. In that coverage report, `executable_profiles` means the
+currently executable focused deployment profiles:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/kit_installed/online`; it does not include
+`existing_kubernetes/kit_installed/airgap`, kind rehearsal, or aliases.
+Evidence-supported profiles remain narrower and do not expand kit-installed
+evidence.
 
 Deploy template package archive focused diagnostic:
 
