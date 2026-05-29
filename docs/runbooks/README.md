@@ -17,7 +17,7 @@ Advanced intake-only paths:
 
 | Path | Target profile | Operator command entry | Current result |
 | --- | --- | --- | --- |
-| Real or cloud Kubernetes, kit-installed substrates, online or airgap | `existing_kubernetes/kit_installed/online` or `existing_kubernetes/kit_installed/airgap` | `bash scripts/verify-release.sh --inputs ...`, `--target-preflight ... --substrate-truth ... --target-prerequisites ...`, `--image-map ...`, and optional `--substrate-pack-check ... --substrate-pack-manifest ... --substrate-truth ...` | Advanced/intake-only. Accepts the declaration, substrate truth, target prerequisites, image plan, and focused substrate pack materiality only; it is not a default operator deployment path or installer. |
+| Real or cloud Kubernetes, kit-installed substrates, online or airgap | `existing_kubernetes/kit_installed/online` or `existing_kubernetes/kit_installed/airgap` | `bash scripts/verify-release.sh --inputs ...`, `--target-preflight ... --substrate-truth ... --target-prerequisites ...`, `--image-map ...`, optional `--substrate-pack-check ... --substrate-pack-manifest ... --substrate-truth ...`, and for online only optional `--substrate-routability ... --substrate-pack-check-report ... --routability-probe ...` | Advanced/focused only. Accepts the declaration, substrate truth, target prerequisites, image plan, focused substrate pack materiality, and online Pod-network substrate routability only; it is not a default operator deployment path or installer. |
 
 Optional rehearsal path:
 
@@ -31,7 +31,7 @@ Optional rehearsal path:
 | --- | --- | --- |
 | Real or cloud Kubernetes + existing substrates + online | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, optional registry presence through an operator probe, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
 | Real or cloud Kubernetes + existing substrates + airgap | Image-map mirror plan, local bundle assembler plus self-check, airgap bundle manifest/digest check, focused operator-loader image load/import diagnostic, read-only load plan summary, offline bundle render-check, and focused airgap deployment gate for `existing_kubernetes/external_declared/airgap`. | Registry mirroring, offline install, deploy readiness, package readiness. |
-| Real or cloud Kubernetes + kit-installed substrates + online/airgap | Advanced contract declaration, target-preflight substrate/prerequisites intake, image-map planning, and substrate pack focused materiality check for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`. | Default operator deployment path, substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
+| Real or cloud Kubernetes + kit-installed substrates + online/airgap | Advanced contract declaration, target-preflight substrate/prerequisites intake, image-map planning, substrate pack focused materiality check for `existing_kubernetes/kit_installed/online` and `existing_kubernetes/kit_installed/airgap`, plus online-only Pod-network substrate routability for `existing_kubernetes/kit_installed/online`. | Default operator deployment path, substrate installer, kit-installed apply/rollout/smoke chain, kit-installed airgap deploy, deploy readiness, package readiness. |
 | Kind rehearsal + kit-installed substrates + online | Contract declaration and target-preflight truth/prerequisites intake for `kind_rehearsal/kit_installed/online`. | Real deployment evidence and release readiness; kind remains optional rehearsal only, not a real deployment prerequisite. |
 
 ## Command Roles
@@ -191,6 +191,19 @@ and kit-installed identity. Its report has `readiness=false`, is not
 evidence-envelope input, and does not install substrates, create
 databases/buckets/realms, log in to registries, call Kubernetes, deploy,
 package, or prove release readiness.
+
+For kit-installed online substrate routability, use `--substrate-routability`
+only after a passing `--substrate-pack-check` for
+`existing_kubernetes/kit_installed/online`. Pass the matching substrate truth,
+target prerequisites, namespace, explicit kubectl input, and an
+operator-provided `--routability-probe`. The producer runs `kubectl version`
+and calls the probe once per PostgreSQL, MongoDB, Redis, object storage, and
+OIDC endpoint. The probe must perform the actual target Kubernetes Pod-network
+check and echo the expected sha256 endpoint fingerprint. The report has
+`readiness=false`, stores only input digests, kubectl version summary, service
+ids, and fingerprints, is not evidence-envelope input, and does not install
+substrates, create databases/buckets/realms, deploy, package, or prove release
+readiness.
 
 For route smoke, use `bash scripts/verify-release.sh --smoke` only after a
 passing focused `rollout-report.json`. Supply an HTTPS URL by default; local

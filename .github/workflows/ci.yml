@@ -45,6 +45,8 @@ jobs:
         run: bash scripts/test-airgap-deployment-gate.sh
       - name: Substrate pack focused guard
         run: bash scripts/test-substrate-pack-check.sh
+      - name: Substrate routability focused guard
+        run: bash scripts/test-substrate-routability.sh
       - name: Kubernetes apply-only focused guard
         run: bash scripts/test-apply.sh
       - name: Kubernetes rollout/live imageID focused guard

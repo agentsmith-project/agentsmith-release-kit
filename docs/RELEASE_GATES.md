@@ -908,6 +908,10 @@ package, or release readiness.
 proves only kit-installed substrate pack manifest and substrate truth
 materiality, not substrate installation, package readiness, deploy readiness,
 or release readiness.
+`substrate-routability-report.json` is intentionally not accepted because it
+proves only focused existing Kubernetes Pod-network substrate endpoint
+routability for `existing_kubernetes/kit_installed/online`, not substrate
+installation, package readiness, deploy readiness, or release readiness.
 `evidence.git_sha` is the AgentSmith product release commit and must match the
 release contract; `artifact_provenance.commit_sha` is the release-kit producer
 commit and is validated as its own 40-character git sha.
@@ -973,6 +977,49 @@ counts/service names. It must not contain raw secrets, kubeconfig content,
 release verdicts, deploy readiness, package readiness, product-flow fields, or
 operator signoff fields. It is not an accepted release-kit evidence envelope
 output.
+
+## Substrate Routability Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-substrate-routability.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--substrate-routability`. It accepts only
+`existing_kubernetes/kit_installed/online` and checks a previously passing
+`substrate-pack-check-report.json`, matching substrate truth, matching target
+prerequisites, namespace, explicit kubectl input, and an operator-provided
+Pod-network routability probe. It does not install substrates, create
+databases, buckets, OIDC realms, or secrets, render, apply, roll out workloads,
+smoke product endpoints, build packages, or claim deploy, package, or release
+readiness.
+
+The producer revalidates substrate truth through the shared
+`validateSubstrateConnectionTruth` path with required substrate source
+`kit_installed`, revalidates target prerequisites with the expected namespace,
+and binds the substrate truth sha256 to the upstream substrate pack check
+report. `external_declared`, `kind_rehearsal`, `airgap`, missing pack reports,
+profile mismatches, and digest mismatches fail fast.
+
+The probe interface is explicit and narrow: the release kit runs `kubectl
+version --output=json`, then calls `--routability-probe` once per required
+substrate service with kubectl, namespace, optional context/kubeconfig path,
+service id, endpoint kind, raw endpoint value, optional port, expected endpoint
+fingerprint, and timeout. The probe must verify routability from the target
+Kubernetes Pod network and print exactly the expected sha256 fingerprint. The
+report stores only kubectl version summary, input digests, service ids,
+endpoint fingerprints, and probe fingerprints; it omits raw endpoints, raw
+probe stdout/stderr, probe path, kubectl path, kubeconfig content, and
+credentials.
+
+The generated `substrate-routability-report.json` must keep `schema:
+agentsmith.substrate-routability-report/v1`, `scope:
+substrate_routability_probe_only`, `readiness: false`, and `status: pass`.
+It must not contain raw secrets, kubeconfig content, release verdicts, deploy
+readiness, package readiness, product-flow fields, or operator signoff fields.
+It is not an accepted release-kit evidence envelope output.
 
 ## Target Preflight Focused Diagnostic
 

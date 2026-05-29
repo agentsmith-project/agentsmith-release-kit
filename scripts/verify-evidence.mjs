@@ -106,6 +106,10 @@ const INVALID_RELEASE_KIT_OUTPUT_VALUES = new Map([
   [
     'substrate-pack-check-report.json',
     'substrate-pack-check-report.json is substrate-pack-check-only and is not accepted as release evidence'
+  ],
+  [
+    'substrate-routability-report.json',
+    'substrate-routability-report.json is substrate-routability-probe-only and is not accepted as release evidence'
   ]
 ]);
 const FORBIDDEN_RELEASE_KIT_OUTPUT_VALUES = new Set([
