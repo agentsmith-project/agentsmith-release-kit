@@ -709,6 +709,32 @@ expect_operator_fail() {
   pass "operator surface rejected invalid case: $label"
 }
 
+expect_operator_fail_preserves_summary() {
+  local label="$1"
+  local output_dir="$2"
+  shift 2
+  local sentinel='{"sentinel":"operator fail-fast should preserve existing summary"}'
+  local producer_report
+
+  mkdir -p "$output_dir"
+  printf '%s' "$sentinel" >"$output_dir/$REPORT_FILE"
+
+  if "$@" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected operator surface failure: $label"
+  fi
+
+  [[ -f "$output_dir/$REPORT_FILE" ]] || fail "invalid case removed existing operator summary: $label"
+  [[ "$(<"$output_dir/$REPORT_FILE")" == "$sentinel" ]] ||
+    fail "invalid case modified existing operator summary: $label"
+
+  producer_report="$(find "$output_dir" -type f -name '*-report.json' ! -name "$REPORT_FILE" -print -quit)"
+  [[ -z "$producer_report" ]] || fail "invalid case created producer report: $label: $producer_report"
+
+  pass "operator surface rejected invalid case without side effects: $label"
+}
+
 VALID_ARCHIVE="$TMP_DIR/agentsmith-deploy-template-package.tgz"
 VALID_CONTRACT="$TMP_DIR/release-contract.valid-material.json"
 VALID_PACKAGE="$TMP_DIR/deploy-template-package.valid-material.json"
@@ -831,11 +857,21 @@ assert_operator_report \
 pass "operator airgap-bundle/use_existing maps to bundle-create and writes handoff summary"
 
 unsupported_output="$TMP_DIR/out-airgap-install-substrates"
-expect_operator_fail airgap-install-substrates \
+expect_operator_fail_preserves_summary airgap-install-substrates "$unsupported_output" \
   bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
     --output-dir "$unsupported_output"
-[[ ! -e "$unsupported_output/$REPORT_FILE" ]] || fail "unsupported airgap install path left operator summary"
 [[ ! -e "$unsupported_output/bundle-create-report.json" ]] || fail "unsupported airgap install path called bundle-create"
+
+target_profile_output="$TMP_DIR/out-target-profile"
+expect_operator_fail_preserves_summary rejected-target-profile "$target_profile_output" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+    --target-profile "$EXTERNAL_ONLINE_PROFILE" \
+    --output-dir "$target_profile_output"
+
+missing_release_contract_output="$TMP_DIR/out-missing-release-contract"
+expect_operator_fail_preserves_summary missing-release-contract "$missing_release_contract_output" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+    --output-dir "$missing_release_contract_output"
 
 for vocabulary in \
   "--target-profile" \
@@ -850,9 +886,10 @@ for vocabulary in \
       --output-dir "$TMP_DIR/out-producer-vocabulary"
 done
 
-expect_operator_fail unknown-surface \
+unknown_surface_output="$TMP_DIR/out-unknown-surface"
+expect_operator_fail_preserves_summary unknown-surface "$unknown_surface_output" \
   bash "$ROOT_DIR/scripts/operator-release.sh" deploy use_existing \
-    --output-dir "$TMP_DIR/out-unknown-surface"
+    --output-dir "$unknown_surface_output"
 expect_operator_fail unknown-strategy \
   bash "$ROOT_DIR/scripts/operator-release.sh" online external_declared \
     --output-dir "$TMP_DIR/out-unknown-strategy"

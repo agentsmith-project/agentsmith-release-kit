@@ -106,9 +106,6 @@ surface="$1"
 substrate_strategy="$2"
 shift 2
 
-startup_output_dir="$(find_arg_value --output-dir "$@" || true)"
-remove_operator_summary_if_requested "$startup_output_dir"
-
 producer_mode=""
 producer_name=""
 machine_profile=""
@@ -147,6 +144,15 @@ reject_producer_vocabulary "$@"
 
 release_contract="$(require_arg_value --release-contract "$@")"
 output_dir="$(require_arg_value --output-dir "$@")"
+bundle_root=""
+target_registry=""
+
+if [[ "$producer_name" == "bundle-create" ]]; then
+  bundle_root="$(require_arg_value --bundle-root "$@")"
+  target_registry="$(require_arg_value --target-registry "$@")"
+fi
+
+remove_operator_summary_if_requested "$output_dir"
 
 producer_args=(
   "$producer_mode"
@@ -166,8 +172,6 @@ summary_args=(
 )
 
 if [[ "$producer_name" == "bundle-create" ]]; then
-  bundle_root="$(require_arg_value --bundle-root "$@")"
-  target_registry="$(require_arg_value --target-registry "$@")"
   summary_args+=(
     --bundle-root "$bundle_root"
     --target-registry "$target_registry"
