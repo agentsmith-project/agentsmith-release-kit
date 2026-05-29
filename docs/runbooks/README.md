@@ -10,10 +10,10 @@ sign off deploy, package, offline install, or release readiness.
 
 | Operator choice | Machine profile mapping | Operator command entry | Current result |
 | --- | --- | --- | --- |
-| `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/verify-release.sh --online-deployment-gate ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]`; optional standalone `--registry-presence ... --image-map ... --registry-probe ...` | Runs the online focused chain for existing substrate endpoints and explicit target prerequisites; target-registry confirmed apply binds registry presence through the operator probe before render/apply. |
-| `airgap/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/verify-release.sh --bundle-create ...` or `--image-map ... --target-registry ...`, then `--airgap-bundle-check ...`, optional `--airgap-image-load ... --archive-probe ... --image-loader ...`, optional `--bundle-load-plan ...`, optional `--airgap-bundle-render-check ...`, optional `--airgap-deployment-gate ...`, or the thin consumer entry `--airgap-consume-rehearsal ... --bundle-root ...` | Assembles a local bundle and immediately self-checks it, checks an already assembled bundle manifest/digests, can run a focused operator-loader image import diagnostic, writes a read-only load plan summary, renders/checks bundle-local manifests offline, runs the focused airgap apply/rollout chain, or consumes an already assembled bundle through the rehearsal wrapper. |
-| `online/install_substrates` | `existing_kubernetes/kit_installed/online` | `bash scripts/verify-release.sh --online-deployment-gate ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the online focused chain for kit-installed substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, and optional route smoke. It is source-registry only and rejects `--target-registry`, `--registry-probe`, and `--evidence-root`; it is not a substrate installer or release readiness. |
-| `airgap/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/verify-release.sh --inputs ...`, `--target-preflight ... --substrate-truth ... --target-prerequisites ...`, `--image-map ... --target-registry ...`, and optional `--substrate-pack-check ... --substrate-pack-manifest ... --substrate-truth ...` | Advanced/focused intake only. Accepts the declaration, substrate truth, target prerequisites, image plan, and focused substrate pack materiality; it is not an airgap deploy path, substrate installer, or release readiness. |
+| `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/operator-release.sh online use_existing ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]` | Runs the existing online focused chain for declared substrate endpoints and explicit target prerequisites; target-registry confirmed apply still binds registry presence through the operator probe before render/apply. |
+| `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the existing local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
+| `online/install_substrates` | `existing_kubernetes/kit_installed/online` | `bash scripts/operator-release.sh online install_substrates ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the existing online focused chain for kit-installed substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, and optional route smoke. It is source-registry only and rejects `--target-registry`, `--registry-probe`, and `--evidence-root`; it is not a substrate installer or release readiness. |
+| `airgap-bundle/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle install_substrates ...` | Fails fast in v0. There is no kit-installed airgap facade success path yet. |
 
 ## Optional Rehearsal
 
@@ -32,18 +32,26 @@ endpoint is kind.
 | Operator choice | Implemented now | Not yet |
 | --- | --- | --- |
 | `online/use_existing` | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, optional registry presence through an operator probe, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
-| `airgap/use_existing` | Image-map mirror plan, local bundle assembler plus self-check, airgap bundle manifest/digest check, focused operator-loader image load/import diagnostic, read-only load plan summary, offline bundle render-check, focused airgap deployment gate, and thin consume rehearsal for an already assembled bundle. | Registry mirroring, offline install, deploy readiness, package readiness. |
+| `airgap-bundle/use_existing` | Image-map mirror plan through the bundle-create producer, local bundle assembler plus self-check, and operator surface summary. Other airgap checks remain focused producer diagnostics. | Registry mirroring, offline install, deploy readiness, package readiness. |
 | `online/install_substrates` | Contract declaration, target-preflight substrate/prerequisites intake, standalone image-map planning, substrate pack focused materiality, Pod-network substrate routability, template-package, render, render-check, apply dry-run or confirmed apply, rollout, and optional route smoke through the online focused chain. | Substrate installer, target-registry/registry-probe/evidence-root support, deploy readiness, package readiness, release readiness. |
-| `airgap/install_substrates` | Advanced contract declaration, target-preflight substrate/prerequisites intake, image-map planning, and substrate pack focused materiality check for `existing_kubernetes/kit_installed/airgap`. | Substrate installer, kit-installed airgap deploy, deploy readiness, package readiness, release readiness. |
+| `airgap-bundle/install_substrates` | No facade success path in v0; the command fails fast. | Substrate installer, kit-installed airgap deploy, deploy readiness, package readiness, release readiness. |
 
 ## Command Roles
 
 `scripts/test-*.sh` files are maintainer self-tests for this repository. They
 exercise failure cases and fixture behavior while changing release-kit code.
 
-Operators should call `bash scripts/verify-release.sh --...` directly with the
-release contract, deploy template package, explicit target profile, and output
-directory for their chosen path.
+Operators should call `bash scripts/operator-release.sh <surface>
+<substrate_strategy> ...`. The facade rejects producer vocabulary such as
+`--target-profile`, maps the operator choice internally, calls the existing
+producer diagnostic, and writes `operator-release-surface-report.json` with a
+minimal `readiness=false` summary. That summary is not accepted by
+`--evidence`.
+
+`bash scripts/verify-release.sh --...` remains the producer catalog and
+maintainer/focused diagnostic entry. Use it when changing release-kit internals
+or running a specific downstream check, not as the first operator-facing
+command.
 
 For a concrete real Kubernetes plus existing substrates online example, copy
 and edit `examples/online-existing-kubernetes/`. It demonstrates the

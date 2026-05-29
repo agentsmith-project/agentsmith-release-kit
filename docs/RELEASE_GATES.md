@@ -28,6 +28,34 @@ Current quick checks:
 Passing the quick gate means repo-local workstreams can proceed. It does not
 approve deploy tooling, package output, evidence, publishing, or adoption.
 
+## Operator Release Surface v0 Focused Guard
+
+Run:
+
+```bash
+bash scripts/test-operator-release-surface.sh
+```
+
+This focused guard exercises `bash scripts/operator-release.sh`. The facade
+accepts operator choices only, rejects producer vocabulary such as
+`--target-profile`, maps the choice internally, and calls the existing producer
+diagnostic:
+
+- `online/use_existing` -> `--online-deployment-gate` with
+  `existing_kubernetes/external_declared/online`.
+- `online/install_substrates` -> `--online-deployment-gate` with
+  `existing_kubernetes/kit_installed/online`.
+- `airgap-bundle/use_existing` -> `--bundle-create` with
+  `existing_kubernetes/external_declared/airgap`.
+- `airgap-bundle/install_substrates` fails fast in v0.
+
+The generated `operator-release-surface-report.json` must keep `schema:
+agentsmith.operator-release-surface-report/v1`, `scope:
+operator_release_surface_v0`, `readiness: false`, and `status: pass`. It stores
+only release identity, release contract digest, producer report digests, and
+output-relative step paths, with a small airgap handoff digest/count summary
+for bundle creation. It is not accepted by `--evidence`.
+
 ## Contract Intake Focused Diagnostic
 
 Run:

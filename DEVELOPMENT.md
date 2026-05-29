@@ -29,12 +29,17 @@ bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
 bash scripts/test-online-deployment-gate.sh
+bash scripts/test-operator-release-surface.sh
 bash scripts/test-operator-signoff-intake.sh
 bash scripts/test-evidence.sh
 bash scripts/test-target-preflight.sh
 ```
 
 There is intentionally no `package.json` in this repository.
+
+Operator-facing runs should start from `scripts/operator-release.sh` for the
+supported v0 surfaces. `scripts/verify-release.sh` remains the producer catalog
+for focused diagnostics and maintainer work.
 
 ## Development Principles
 

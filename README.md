@@ -84,6 +84,21 @@ network prerequisite, but this repository does not create cloud resources.
 
 ## Current Verification
 
+Operator release surface v0:
+
+```bash
+bash scripts/operator-release.sh online use_existing ...
+bash scripts/operator-release.sh online install_substrates ...
+bash scripts/operator-release.sh airgap-bundle use_existing ...
+bash scripts/operator-release.sh airgap-bundle install_substrates ...
+```
+
+The first three commands map operator choices to the existing producer
+diagnostics and write `operator-release-surface-report.json` with
+`readiness: false`. `airgap-bundle/install_substrates` fails fast in v0.
+`verify-release.sh` remains the producer catalog and maintainer/focused
+diagnostic entry.
+
 Bootstrap quick gate:
 
 ```bash

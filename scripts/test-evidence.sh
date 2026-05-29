@@ -1031,6 +1031,9 @@ switch (mutation) {
   case 'substrate_routability_report_release_kit_output':
     evidence.release_kit_output = 'substrate-routability-report.json';
     break;
+  case 'operator_release_surface_report_release_kit_output':
+    evidence.release_kit_output = 'operator-release-surface-report.json';
+    break;
   case 'product_flow_release_kit_output':
     evidence.release_kit_output = 'AgentSmith product flow aggregate';
     break;
@@ -1449,6 +1452,7 @@ expect_fail airgap-deployment-gate-report-release-kit-output ci_artifact airgap_
 expect_fail registry-presence-report-release-kit-output ci_artifact registry_presence_report_release_kit_output
 expect_fail substrate-pack-check-report-release-kit-output ci_artifact substrate_pack_check_report_release_kit_output
 expect_fail substrate-routability-report-release-kit-output ci_artifact substrate_routability_report_release_kit_output
+expect_fail operator-release-surface-report-release-kit-output ci_artifact operator_release_surface_report_release_kit_output
 expect_fail product-flow-release-kit-output ci_artifact product_flow_release_kit_output
 expect_fail online-gate-wrong-schema ci_artifact online_gate_wrong_schema
 expect_fail online-gate-wrong-scope ci_artifact online_gate_wrong_scope

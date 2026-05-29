@@ -7,6 +7,11 @@ NODE_BIN="${NODE:-node}"
 usage() {
   cat <<'USAGE'
 Usage:
+  # Operator-facing v0 facade:
+  #   bash scripts/operator-release.sh online use_existing ...
+  #   bash scripts/operator-release.sh online install_substrates ...
+  #   bash scripts/operator-release.sh airgap-bundle use_existing ...
+  # verify-release.sh remains the producer catalog and focused diagnostic entry.
   bash scripts/verify-release.sh --quick
   bash scripts/verify-release.sh --inputs --release-contract <json> --deploy-template-package <json> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --template-package --release-contract <json> --deploy-template-package <json> --archive <tgz> --output-dir <dir>
