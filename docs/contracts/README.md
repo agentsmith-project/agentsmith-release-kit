@@ -219,9 +219,10 @@ product-flow fields, raw kubectl stdout/stderr, kubeconfig content, `verdict`,
 
 The current `--smoke` validator is a focused route/service smoke diagnostic
 only. It consumes the release contract, a prior rollout report, explicit target
-profile `existing_kubernetes/external_declared/online`, one URL, and an output
-directory. It does not call Kubernetes, render, apply, roll out workloads, or
-run product flows. It requires the rollout report to have `status: pass`,
+profile `existing_kubernetes/external_declared/<online|airgap>` or
+`existing_kubernetes/kit_installed/online`, one URL, and an output directory.
+It does not call Kubernetes, render, apply, roll out workloads, or run product
+flows. It requires the rollout report to have `status: pass`,
 `readiness: false`, `scope: kubernetes_rollout_imageid_only`, and matching
 release id, git sha, release contract digest, and target profile. URLs are
 HTTPS-only by default and must not include userinfo, query, hash, localhost,
