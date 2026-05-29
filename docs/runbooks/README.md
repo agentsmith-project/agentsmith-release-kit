@@ -12,7 +12,7 @@ sign off deploy, package, offline install, or release readiness.
 | --- | --- | --- | --- |
 | `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/operator-release.sh online use_existing ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]` | Runs the existing online focused chain for declared substrate endpoints and explicit target prerequisites; target-registry confirmed apply still binds registry presence through the operator probe before render/apply. |
 | `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the existing local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
-| `online/install_substrates` | `existing_kubernetes/kit_installed/online` | `bash scripts/operator-release.sh online install_substrates ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the existing online focused chain for kit-installed substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, and optional route smoke. It is source-registry only and rejects `--target-registry`, `--registry-probe`, and `--evidence-root`; it is not a substrate installer or release readiness. |
+| `online/install_substrates` | `existing_kubernetes/kit_installed/online` | `bash scripts/operator-release.sh online install_substrates ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the existing online focused chain for kit-installed substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope. It is source-registry only, rejects `--target-registry` and `--registry-probe`, and is not a substrate installer or release readiness. |
 | `airgap-bundle/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle install_substrates ...` | Fails fast in v0. There is no kit-installed airgap facade success path yet. |
 
 ## Optional Rehearsal
@@ -33,7 +33,7 @@ endpoint is kind.
 | --- | --- | --- |
 | `online/use_existing` | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, optional registry presence through an operator probe, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
 | `airgap-bundle/use_existing` | Image-map mirror plan through the bundle-create producer, local bundle assembler plus self-check, and operator surface summary. Other airgap checks remain focused producer diagnostics. | Registry mirroring, offline install, deploy readiness, package readiness. |
-| `online/install_substrates` | Contract declaration, target-preflight substrate/prerequisites intake, standalone image-map planning, substrate pack focused materiality, Pod-network substrate routability, template-package, render, render-check, apply dry-run or confirmed apply, rollout, and optional route smoke through the online focused chain. | Substrate installer, target-registry/registry-probe/evidence-root support, deploy readiness, package readiness, release readiness. |
+| `online/install_substrates` | Contract declaration, target-preflight substrate/prerequisites intake, standalone image-map planning, substrate pack focused materiality, Pod-network substrate routability, template-package, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope through the online focused chain. | Substrate installer, target-registry/registry-probe support, deploy readiness, package readiness, release readiness. |
 | `airgap-bundle/install_substrates` | No facade success path in v0; the command fails fast. | Substrate installer, kit-installed airgap deploy, deploy readiness, package readiness, release readiness. |
 
 ## Command Roles
@@ -65,13 +65,16 @@ pull secret, storage policy, and substrate secret refs. The registry object is
 limited to `pull_secret_ref`; do not add `preloaded`, `mirror_done`, `verdict`,
 `token`, or other pseudo-proof fields.
 
-For the external-declared online focused chain, confirmed apply can optionally add
-`--evidence-root <dir> --evidence-provenance <json>`. Use only remote
-release-kit provenance such as CI artifact or signed operator-run metadata.
-The gate writes a focused evidence envelope and revalidates it through
-`--evidence`; it is still `readiness=false` and is not deploy or release
-signoff. Evidence intake accepts only this confirmed-apply envelope; server
-dry-run reports and empty-step online gate reports are rejected.
+For the online focused chain, confirmed apply can optionally add
+`--evidence-root <dir> --evidence-provenance <json>` on
+`existing_kubernetes/external_declared/online` or
+`existing_kubernetes/kit_installed/online`. Use only remote release-kit
+provenance such as CI artifact or signed operator-run metadata. The gate writes
+a focused evidence envelope and revalidates it through `--evidence`; it is
+still `readiness=false` and is not deploy or release signoff. Evidence intake
+accepts only this confirmed-apply envelope; server dry-run reports,
+empty-step online gate reports, missing kit substrate steps, and external/kit
+profile mixes are rejected.
 External-declared online `--target-registry <registry-host[/namespace]>` asks
 the gate to generate an image-map and render target image references. In confirmed
 `--mode apply`, it also requires `--registry-probe <executable>` and runs
@@ -80,7 +83,9 @@ smoke, or evidence closure. Server dry-run target-registry does not require and
 does not allow the probe.
 Kit-installed online is source-registry only: it requires
 `--substrate-pack-manifest <json>` plus `--routability-probe <executable>` and
-rejects `--target-registry`, `--registry-probe`, and `--evidence-root`.
+rejects `--target-registry` and `--registry-probe`. Its evidence envelope keeps
+the substrate-pack-check and substrate-routability steps but does not change
+deploy/package/release readiness.
 
 For standalone online target registry presence diagnostics, run
 `--registry-presence` separately with the generated mirror-required

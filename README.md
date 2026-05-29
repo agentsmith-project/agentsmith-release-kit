@@ -140,8 +140,9 @@ currently executable focused deployment profiles:
 `existing_kubernetes/external_declared/airgap`, and
 `existing_kubernetes/kit_installed/online`; it does not include
 `existing_kubernetes/kit_installed/airgap`, kind rehearsal, or aliases.
-Evidence-supported profiles remain narrower and do not expand kit-installed
-evidence.
+Evidence-supported profiles include external-declared online/airgap plus
+kit-installed online confirmed-apply envelopes, but still do not claim
+deploy/package/release readiness.
 
 Deploy template package archive focused diagnostic:
 
@@ -719,11 +720,10 @@ release-kit provenance without local/file URIs, source paths, or
 secret-looking fields; the gate computes the evidence subject sha itself,
 writes `evidence.json`, `evidence-subject.json`, and
 `online-deployment-gate-report.json` under the evidence root, then reuses
-`--evidence` to validate the root. `server-dry-run`, kit-installed online, and
-unsupported profiles reject evidence output before Kubernetes or network calls
-and remove stale managed evidence files. The capability map marks external
-online evidence envelope support as `optional` and kit-installed online as
-`unsupported`.
+`--evidence` to validate the root. `server-dry-run` and unsupported profiles
+reject evidence output before Kubernetes or network calls and remove stale
+managed evidence files. The capability map marks both external online and
+kit-installed online evidence envelope support as `optional`.
 
 This runner does not provision cloud resources, install substrates, mirror
 images, build airgap bundles, import images into kind, perform rollback, or
@@ -759,10 +759,12 @@ deterministic target-registry mirror ref. Standalone image-map evidence is
 accepted only for `existing_kubernetes/external_declared/online` or
 `existing_kubernetes/external_declared/airgap`. Online gate evidence is
 accepted only from confirmed apply output on
-`existing_kubernetes/external_declared/online`:
+`existing_kubernetes/external_declared/online` or
+`existing_kubernetes/kit_installed/online`:
 `mode` must be `apply`, top-level `operator_run_id` must be present, producer
 steps must be non-empty and include apply plus rollout, and `server-dry-run`
-reports are rejected. Airgap bundle evidence must
+reports are rejected. Kit-installed online evidence must also include the
+canonical substrate-pack-check and substrate-routability steps. Airgap bundle evidence must
 be a real bundle-check triplet: the report, `airgap-bundle-manifest.json`, and
 `image-map.json` must agree on required component, image artifact, payload/tool
 count, and digest bindings; `components: []` is invalid. The old two-file
@@ -773,9 +775,11 @@ accepted release-kit evidence envelope outputs. `evidence_subject.files` must
 contain only `evidence.json` plus the mapped output files: `image-map.json`,
 `online-deployment-gate-report.json`, or `airgap-bundle-check-report.json` plus
 `airgap-bundle-manifest.json` plus `image-map.json`. Its provenance
-`subject_name` is `release-kit-evidence-subject`. For
-`external_declared` targets, the envelope must include inline
-`agentsmith.substrate-connection.truth/v1` connection truth.
+`subject_name` is `release-kit-evidence-subject`. For online evidence, the
+envelope must include matching inline
+`agentsmith.substrate-connection.truth/v1` connection truth; kit-installed
+truth keeps the kit installation identity fields. This parity is still focused
+evidence with `readiness: false`, not deploy/package/release readiness.
 `evidence-validation-report.json` is written with `readiness: false`,
 `scope: release_kit_evidence_intake_only`, and `status: pass`; it is not
 render, apply, smoke, package, deploy, or release readiness.

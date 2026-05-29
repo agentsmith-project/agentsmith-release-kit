@@ -101,8 +101,9 @@ executable focused deployment profiles:
 `existing_kubernetes/external_declared/airgap`, and
 `existing_kubernetes/kit_installed/online`; it does not include
 `existing_kubernetes/kit_installed/airgap`, kind rehearsal, or aliases.
-Evidence-supported profiles remain limited to external-declared online/airgap
-in this slice. They prove contract/input digest readiness only. They are not
+Evidence-supported profiles include external-declared online/airgap plus
+kit-installed online confirmed-apply envelopes in this slice. They prove
+contract/input digest readiness only. They are not
 deploy readiness, package readiness, release readiness, rollout evidence, or
 operator signoff. The coverage report must not contain `verdict` or
 `release_verdict`.
@@ -831,16 +832,16 @@ execution or registry login; registry presence and routability remain focused
 read-only probe prerequisites and are not standalone release evidence.
 
 Confirmed apply mode can optionally add `--evidence-root <dir>` and
-`--evidence-provenance <json>`. The provenance input must be explicit remote
-release-kit provenance; local/file URIs, source paths, and secret-looking
-fields fail before Kubernetes calls. The gate computes the fixed
-`release-kit-evidence-subject` metadata, writes `evidence.json`,
-`evidence-subject.json`, and `online-deployment-gate-report.json` under the
-evidence root, and validates that root with the existing `--evidence`
-diagnostic. `server-dry-run`, kit-installed online evidence requests, and
-unsupported profiles fail fast and remove stale managed evidence files.
-The capability map marks external online evidence envelope support as
-`optional` and kit-installed online as `unsupported`.
+`--evidence-provenance <json>` for external-declared online or kit-installed
+online. The provenance input must be explicit remote release-kit provenance;
+local/file URIs, source paths, and secret-looking fields fail before
+Kubernetes calls. The gate computes the fixed `release-kit-evidence-subject`
+metadata, writes `evidence.json`, `evidence-subject.json`, and
+`online-deployment-gate-report.json` under the evidence root, and validates
+that root with the existing `--evidence` diagnostic. `server-dry-run` and
+unsupported profiles fail fast and remove stale managed evidence files. The
+capability map marks external online and kit-installed online evidence
+envelope support as `optional`.
 
 The generated `online-deployment-gate-report.json` must keep `schema:
 agentsmith.online-deployment-gate/v1`, `scope:
@@ -954,13 +955,16 @@ from the source image, and mirrored targets must match the deterministic target
 registry ref. The standalone image-map output is accepted only for
 `existing_kubernetes/external_declared/online` or
 `existing_kubernetes/external_declared/airgap`. The online gate output is
-accepted only for `existing_kubernetes/external_declared/online` confirmed
-apply output:
+accepted only for `existing_kubernetes/external_declared/online` or
+`existing_kubernetes/kit_installed/online` confirmed apply output:
 `mode` must be `apply`, top-level `operator_run_id` must be present, steps
 must be non-empty, and apply plus rollout steps must be present. Only the same
-canonical source-registry or target-registry confirmed-apply producer order is
-accepted; reports such as `image-map,registry-presence,inputs,...` are
-rejected even if all required steps are present. The airgap
+canonical source-registry, target-registry, or kit-installed confirmed-apply
+producer order is accepted; kit-installed evidence must include
+substrate-pack-check before template-package and substrate-routability before
+render. Reports such as `image-map,registry-presence,inputs,...` or
+external/kit profile mixes are rejected even if all required steps are
+present. The airgap
 bundle output is accepted only for
 `existing_kubernetes/external_declared/airgap` and must bind
 `airgap-bundle-check-report.json` to a bundle-check-compatible

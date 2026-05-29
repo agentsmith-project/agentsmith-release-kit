@@ -888,19 +888,19 @@ for (const value of [
   }
 }
 const evidenceValues = new Set((report.evidence_supported_profiles || []).map((profile) => profile.value));
-if (evidenceValues.size !== 2) {
+if (evidenceValues.size !== 3) {
   throw new Error('pre-GA evidence-supported profile set must stay narrow');
 }
 for (const value of [
   'existing_kubernetes/external_declared/online',
-  'existing_kubernetes/external_declared/airgap'
+  'existing_kubernetes/external_declared/airgap',
+  'existing_kubernetes/kit_installed/online'
 ]) {
   if (!evidenceValues.has(value)) {
     throw new Error(`evidence-supported profile missing from report: ${value}`);
   }
 }
 for (const value of [
-  'existing_kubernetes/kit_installed/online',
   'existing_kubernetes/kit_installed/airgap',
   'kind_rehearsal/kit_installed/online'
 ]) {

@@ -435,9 +435,6 @@ function validateArgs(args) {
     if (!args.routabilityProbe) {
       cliFail('--target-profile existing_kubernetes/kit_installed/online requires --routability-probe <executable>');
     }
-    if (args.evidenceRoot) {
-      cliFail('--evidence-root is not supported for existing_kubernetes/kit_installed/online');
-    }
   }
 
   const hasSmokeOption =
@@ -1022,9 +1019,6 @@ async function writeJsonFile(file, value) {
 }
 
 function buildCapabilityMap(targetProfile) {
-  const evidenceEnvelope =
-    targetProfile.value === KIT_ONLINE_TARGET_PROFILE ? 'unsupported' : 'optional';
-
   return {
     [targetProfile.value]: {
       declared: 'supported',
@@ -1034,7 +1028,7 @@ function buildCapabilityMap(targetProfile) {
       apply: 'supported',
       rollout: 'supported',
       smoke: 'optional',
-      evidence_envelope: evidenceEnvelope
+      evidence_envelope: 'optional'
     }
   };
 }

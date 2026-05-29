@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
 KIND_PROFILE="kind_rehearsal/kit_installed/online"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 
@@ -115,6 +116,7 @@ const contract = JSON.parse(contractRaw.toString('utf8'));
 const contractDigest = digestBuffer(contractRaw);
 const ONLINE_PROFILE = 'existing_kubernetes/external_declared/online';
 const AIRGAP_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const KIT_ONLINE_PROFILE = 'existing_kubernetes/kit_installed/online';
 const KIND_PROFILE = 'kind_rehearsal/kit_installed/online';
 const AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
   'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json';
@@ -237,10 +239,11 @@ function buildImageMap(profile = ONLINE_PROFILE, targetRegistry) {
   return report;
 }
 
-function buildGateSteps(includeSmoke = true, preRenderSteps = []) {
+function buildGateSteps(includeSmoke = true, preRenderSteps = [], preTemplateSteps = []) {
   const names = [
     'inputs',
     'target-preflight',
+    ...preTemplateSteps,
     'template-package',
     ...preRenderSteps,
     'render',
@@ -252,7 +255,9 @@ function buildGateSteps(includeSmoke = true, preRenderSteps = []) {
   const reportByStep = {
     inputs: 'inputs/target-profile-coverage-report.json',
     'target-preflight': 'target-preflight/target-preflight-report.json',
+    'substrate-pack-check': 'substrate-pack-check/substrate-pack-check-report.json',
     'template-package': 'template-package/template-package-report.json',
+    'substrate-routability': 'substrate-routability/substrate-routability-report.json',
     'image-map': 'image-map/image-map.json',
     'registry-presence': 'registry-presence/registry-presence-report.json',
     render: 'render/manifest-render-report.json',
@@ -637,11 +642,50 @@ function useTargetProfile(profile) {
   evidence.substrate_connection_truth.target_cluster = targetCluster;
   evidence.substrate_connection_truth.substrate_source = substrateSource;
   evidence.substrate_connection_truth.distribution = distribution;
+  if (substrateSource === 'kit_installed') {
+    evidence.substrate_connection_truth.installed_by = 'agentsmith-release-kit';
+    evidence.substrate_connection_truth.release_kit_version = '0.1.0';
+    evidence.substrate_connection_truth.installation_id = 'kit-install-10001';
+  } else {
+    delete evidence.substrate_connection_truth.installed_by;
+    delete evidence.substrate_connection_truth.release_kit_version;
+    delete evidence.substrate_connection_truth.installation_id;
+  }
 }
 
 function useOnlineGateOutput() {
   releaseKitOutput = 'online-deployment-gate-report.json';
   evidence.release_kit_output = releaseKitOutput;
+  outputFiles = [
+    {
+      path: 'online-deployment-gate-report.json',
+      value: onlineDeploymentGateReport
+    }
+  ];
+}
+
+function useKitOnlineGateOutput() {
+  useTargetProfile(KIT_ONLINE_PROFILE);
+  releaseKitOutput = 'online-deployment-gate-report.json';
+  evidence.release_kit_output = releaseKitOutput;
+  onlineDeploymentGateReport.target_profile = targetProfileObject(KIT_ONLINE_PROFILE);
+  onlineDeploymentGateReport.capability_map = {
+    [KIT_ONLINE_PROFILE]: {
+      declared: 'supported',
+      intake: 'supported',
+      preflight: 'supported',
+      render: 'supported',
+      apply: 'supported',
+      rollout: 'supported',
+      smoke: 'optional',
+      evidence_envelope: 'optional'
+    }
+  };
+  onlineDeploymentGateReport.steps = buildGateSteps(
+    true,
+    ['substrate-routability'],
+    ['substrate-pack-check']
+  );
   outputFiles = [
     {
       path: 'online-deployment-gate-report.json',
@@ -837,6 +881,35 @@ switch (mutation) {
     break;
   case 'valid_online_deployment_gate_output':
     useOnlineGateOutput();
+    break;
+  case 'valid_kit_online_deployment_gate_output':
+    useKitOnlineGateOutput();
+    break;
+  case 'kit_online_gate_missing_substrate_pack_check':
+    useKitOnlineGateOutput();
+    onlineDeploymentGateReport.steps = onlineDeploymentGateReport.steps.filter(
+      (step) => step.name !== 'substrate-pack-check'
+    );
+    break;
+  case 'kit_online_gate_missing_substrate_routability':
+    useKitOnlineGateOutput();
+    onlineDeploymentGateReport.steps = onlineDeploymentGateReport.steps.filter(
+      (step) => step.name !== 'substrate-routability'
+    );
+    break;
+  case 'kit_online_gate_wrong_step_order':
+    useKitOnlineGateOutput();
+    onlineDeploymentGateReport.steps = buildGateSteps(
+      true,
+      ['substrate-routability', 'substrate-pack-check']
+    );
+    break;
+  case 'kit_online_gate_external_report_profile_mix':
+    useKitOnlineGateOutput();
+    onlineDeploymentGateReport.target_profile = targetProfileObject(ONLINE_PROFILE);
+    onlineDeploymentGateReport.capability_map = {
+      [ONLINE_PROFILE]: onlineDeploymentGateReport.capability_map[KIT_ONLINE_PROFILE]
+    };
     break;
   case 'valid_airgap_bundle_output':
     useAirgapBundleOutput();
@@ -1407,6 +1480,13 @@ run_evidence "$VALID_ONLINE_GATE_ROOT" "$VALID_ONLINE_GATE_OUT" >/dev/null
 assert_pass_report "$VALID_ONLINE_GATE_OUT/evidence-validation-report.json" "online-deployment-gate-report.json"
 pass "valid online deployment gate release_kit_output evidence accepted"
 
+VALID_KIT_ONLINE_GATE_ROOT="$TMP_DIR/evidence-valid-kit-online-gate"
+VALID_KIT_ONLINE_GATE_OUT="$TMP_DIR/out-valid-kit-online-gate"
+write_evidence "$VALID_KIT_ONLINE_GATE_ROOT" ci_artifact valid_kit_online_deployment_gate_output
+run_evidence "$VALID_KIT_ONLINE_GATE_ROOT" "$VALID_KIT_ONLINE_GATE_OUT" "$KIT_ONLINE_PROFILE" >/dev/null
+assert_pass_report "$VALID_KIT_ONLINE_GATE_OUT/evidence-validation-report.json" "online-deployment-gate-report.json"
+pass "valid kit-installed online deployment gate release_kit_output evidence accepted"
+
 VALID_AIRGAP_BUNDLE_ROOT="$TMP_DIR/evidence-valid-airgap-bundle"
 VALID_AIRGAP_BUNDLE_OUT="$TMP_DIR/out-valid-airgap-bundle"
 write_evidence "$VALID_AIRGAP_BUNDLE_ROOT" ci_artifact valid_airgap_bundle_output
@@ -1471,6 +1551,10 @@ expect_fail online-gate-registry-presence-wrong-order ci_artifact online_gate_re
 expect_fail online-gate-registry-presence-without-image-map ci_artifact online_gate_registry_presence_without_image_map
 expect_fail online-gate-duplicate-registry-presence ci_artifact online_gate_duplicate_registry_presence
 expect_fail online-gate-image-map-prefix-before-inputs ci_artifact online_gate_image_map_prefix_before_inputs
+expect_fail kit-online-gate-missing-substrate-pack-check ci_artifact kit_online_gate_missing_substrate_pack_check "$KIT_ONLINE_PROFILE"
+expect_fail kit-online-gate-missing-substrate-routability ci_artifact kit_online_gate_missing_substrate_routability "$KIT_ONLINE_PROFILE"
+expect_fail kit-online-gate-wrong-step-order ci_artifact kit_online_gate_wrong_step_order "$KIT_ONLINE_PROFILE"
+expect_fail kit-online-gate-external-report-profile-mix ci_artifact kit_online_gate_external_report_profile_mix "$KIT_ONLINE_PROFILE"
 expect_fail image-map-mapping-missing ci_artifact image_map_mapping_missing
 expect_fail image-map-digest-drift ci_artifact image_map_digest_drift
 expect_fail image-map-target-registry-with-use-source ci_artifact image_map_target_registry_with_use_source
@@ -1504,7 +1588,7 @@ if run_evidence "$WRONG_ONLINE_GATE_PROFILE_ROOT" "$WRONG_ONLINE_GATE_PROFILE_OU
   cat "$TMP_DIR/online-gate-wrong-profile.err" >&2
   fail "expected online gate output on kit-installed profile to fail"
 fi
-pass "online gate evidence output rejects kit-installed profile"
+pass "online gate evidence output rejects CLI/evidence profile mismatch"
 expect_fail missing-substrate-connection-truth ci_artifact missing_substrate_connection_truth
 expect_fail release-kit-output-missing-subject-file ci_artifact release_kit_output_missing_subject_file
 expect_fail release-kit-output-extra-subject-file ci_artifact release_kit_output_extra_subject_file

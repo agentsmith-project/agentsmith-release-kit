@@ -943,8 +943,6 @@ if (capabilityProfiles.length !== 1 || capabilityProfiles[0] !== expectedProfile
   throw new Error(`capability map must only declare the current target profile: ${capabilityProfiles.join(',')}`);
 }
 const capability = capabilityMap[expectedProfile];
-const expectedEvidenceEnvelope =
-  expectedProfile === 'existing_kubernetes/kit_installed/online' ? 'unsupported' : 'optional';
 const expectedCapability = {
   declared: 'supported',
   intake: 'supported',
@@ -953,7 +951,7 @@ const expectedCapability = {
   apply: 'supported',
   rollout: 'supported',
   smoke: 'optional',
-  evidence_envelope: expectedEvidenceEnvelope
+  evidence_envelope: 'optional'
 };
 const expectedCapabilityKeys = Object.keys(expectedCapability).sort();
 const actualCapabilityKeys = Object.keys(capability || {}).sort();
@@ -1064,12 +1062,14 @@ NODE
 
 assert_generated_evidence() {
   local evidence_root="$1"
+  local expected_profile="${2:-$TARGET_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$evidence_root" "$TARGET_PROFILE" "$BASE_URL" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$evidence_root" "$expected_profile" "$BASE_URL" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
 const [evidenceRoot, targetProfile, localSmokeUrl] = process.argv.slice(2);
+const [targetCluster, substrateSource, distribution] = targetProfile.split('/');
 const evidence = JSON.parse(fs.readFileSync(path.join(evidenceRoot, 'evidence.json'), 'utf8'));
 const subject = JSON.parse(fs.readFileSync(path.join(evidenceRoot, 'evidence-subject.json'), 'utf8'));
 const gateReport = JSON.parse(fs.readFileSync(path.join(evidenceRoot, 'online-deployment-gate-report.json'), 'utf8'));
@@ -1088,8 +1088,27 @@ if (evidence.release_kit_output !== 'online-deployment-gate-report.json') {
 if (evidence.status !== 'passed' || evidence.failure_class !== 'none') {
   throw new Error('online gate evidence must be a passed focused diagnostic');
 }
-if (evidence.target_cluster !== 'existing_kubernetes' || evidence.substrate_source !== 'external_declared' || evidence.distribution !== 'online') {
+if (
+  evidence.target_cluster !== targetCluster ||
+  evidence.substrate_source !== substrateSource ||
+  evidence.distribution !== distribution
+) {
   throw new Error('online gate evidence target axes drifted');
+}
+if (
+  evidence.substrate_connection_truth?.target_cluster !== targetCluster ||
+  evidence.substrate_connection_truth?.substrate_source !== substrateSource ||
+  evidence.substrate_connection_truth?.distribution !== distribution
+) {
+  throw new Error('online gate evidence substrate truth target axes drifted');
+}
+if (substrateSource === 'kit_installed') {
+  if (evidence.substrate_connection_truth.installed_by !== 'agentsmith-release-kit') {
+    throw new Error('kit online evidence must retain kit-installed substrate truth');
+  }
+  if (evidence.substrate_connection_truth.release_kit_version !== '0.1.0') {
+    throw new Error('kit online evidence must retain substrate release kit version');
+  }
 }
 if (evidence.target?.namespace !== 'agentsmith') {
   throw new Error('online gate evidence target must include namespace');
@@ -1859,23 +1878,35 @@ pass "kit online rejects registry probe before probe/kubectl"
 
 kit_evidence_root="$TMP_DIR/evidence-kit-online"
 kit_evidence_output="$TMP_DIR/out-kit-online-evidence"
+kit_evidence_validation="$TMP_DIR/out-kit-online-evidence-validation"
 write_stale_evidence_files "$kit_evidence_root"
 reset_kubectl_log
 reset_routability_probe_log
-if TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_evidence_output" "$KIT_ONLINE_PROFILE" \
+before_kit_evidence="$(hit_count)"
+TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_evidence_output" "$KIT_ONLINE_PROFILE" \
   --mode apply \
   --confirm-apply "$KIT_ONLINE_PROFILE" \
   --operator-run-id operator-run-kit-online-evidence \
+  --timeout 120s \
   --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
   --routability-probe "$PASS_ROUTABILITY_PROBE" \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost \
   --evidence-root "$kit_evidence_root" \
-  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/kit-online-evidence.out" 2>"$TMP_DIR/kit-online-evidence.err"; then
-  fail "expected kit online evidence output to fail"
-fi
-assert_kubectl_not_called
-assert_no_gate_report "$kit_evidence_output"
-assert_no_evidence_files "$kit_evidence_root"
-pass "kit online rejects evidence output before kubectl and clears stale evidence"
+  --evidence-provenance "$VALID_PROVENANCE" >/dev/null
+after_kit_evidence="$(hit_count)"
+[[ "$after_kit_evidence" -eq $((before_kit_evidence + 1)) ]] || fail "kit apply evidence gate smoke should issue one request"
+assert_routability_probe_called 5
+[[ -f "$kit_evidence_root/evidence.json" ]] || fail "kit apply evidence gate did not write evidence.json"
+[[ -f "$kit_evidence_root/evidence-subject.json" ]] || fail "kit apply evidence gate did not write evidence-subject.json"
+[[ -f "$kit_evidence_root/online-deployment-gate-report.json" ]] || fail "kit apply evidence gate did not write evidence root gate report"
+[[ ! -e "$kit_evidence_output/registry-presence/registry-presence-report.json" ]] || fail "kit apply evidence must not write registry-presence report"
+assert_gate_report "$kit_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,render,render-check,apply,rollout,smoke" operator-run-kit-online-evidence "$KIT_ONLINE_PROFILE"
+assert_generated_evidence "$kit_evidence_root" "$KIT_ONLINE_PROFILE"
+run_evidence "$VALID_CONTRACT_MATERIAL" "$kit_evidence_root" "$kit_evidence_validation" "$KIT_ONLINE_PROFILE" >/dev/null
+[[ -f "$kit_evidence_output/evidence-validation/evidence-validation-report.json" ]] || fail "kit apply evidence gate did not internally validate evidence root"
+pass "kit-installed online confirmed apply rollout smoke can generate validator-accepted evidence root"
 
 kit_dry_output="$TMP_DIR/out-kit-online-dry"
 reset_kubectl_log

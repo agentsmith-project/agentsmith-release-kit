@@ -42,7 +42,13 @@ const IMAGE_MAP_TARGET_PROFILES = new Set([
   'existing_kubernetes/external_declared/online',
   'existing_kubernetes/external_declared/airgap'
 ]);
-const ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE = 'existing_kubernetes/external_declared/online';
+const EXTERNAL_ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE =
+  'existing_kubernetes/external_declared/online';
+const KIT_ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE = 'existing_kubernetes/kit_installed/online';
+const ONLINE_DEPLOYMENT_GATE_TARGET_PROFILES = new Set([
+  EXTERNAL_ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE,
+  KIT_ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE
+]);
 const AIRGAP_BUNDLE_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
 const AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
   'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json';
@@ -68,7 +74,7 @@ const RELEASE_KIT_OUTPUT_TARGET_PROFILE_VALUES = new Map([
   ],
   [
     'online-deployment-gate-report.json',
-    new Set([ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE])
+    ONLINE_DEPLOYMENT_GATE_TARGET_PROFILES
   ],
   [
     AIRGAP_BUNDLE_EVIDENCE_OUTPUT,
@@ -186,7 +192,7 @@ const SECRET_VALUE_RE = [
 const DOWNLOAD_SEMANTICS_RE = /\b(?:public\s+download|public\s+url|https?\s+url|curl|wget|docker\s+pull|oras\s+pull|skopeo\s+copy)\b/i;
 const SAFE_REDACTED_SECRET_RE = /^(redacted|\*+)$/i;
 const FORBIDDEN_RELEASE_KIT_KEYS = new Set(['product_flows', 'product_flow_results']);
-const ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS = [
+const EXTERNAL_ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS = [
   'inputs',
   'target-preflight',
   'template-package',
@@ -195,13 +201,25 @@ const ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS = [
   'apply',
   'rollout'
 ];
+const KIT_ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS = [
+  'inputs',
+  'target-preflight',
+  'substrate-pack-check',
+  'template-package',
+  'substrate-routability',
+  'render',
+  'render-check',
+  'apply',
+  'rollout'
+];
 const ONLINE_DEPLOYMENT_GATE_ALLOWED_STEPS = new Set([
-  ...ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS,
+  ...EXTERNAL_ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS,
+  ...KIT_ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS,
   'image-map',
   'registry-presence',
   'smoke'
 ]);
-const ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES = [
+const EXTERNAL_ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES = [
   [
     'inputs',
     'target-preflight',
@@ -238,6 +256,31 @@ const ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES = [
     'template-package',
     'image-map',
     'registry-presence',
+    'render',
+    'render-check',
+    'apply',
+    'rollout',
+    'smoke'
+  ]
+];
+const KIT_ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES = [
+  [
+    'inputs',
+    'target-preflight',
+    'substrate-pack-check',
+    'template-package',
+    'substrate-routability',
+    'render',
+    'render-check',
+    'apply',
+    'rollout'
+  ],
+  [
+    'inputs',
+    'target-preflight',
+    'substrate-pack-check',
+    'template-package',
+    'substrate-routability',
     'render',
     'render-check',
     'apply',
@@ -978,11 +1021,7 @@ function assertReleaseKitOutputTarget(releaseKitOutput, targetProfile) {
   );
 }
 
-function assertExternalDeclaredSubstrateConnectionTruth(evidence, targetProfile) {
-  if (evidence.substrate_source !== 'external_declared') {
-    return;
-  }
-
+function assertSubstrateConnectionTruth(evidence, targetProfile) {
   const truth = requireObject(
     evidence.substrate_connection_truth,
     'evidence.substrate_connection_truth'
@@ -994,7 +1033,7 @@ function assertExternalDeclaredSubstrateConnectionTruth(evidence, targetProfile)
   );
   validateSubstrateConnectionTruth(truth, targetProfile, {
     label: 'evidence.substrate_connection_truth',
-    requiredSubstrateSource: 'external_declared'
+    requiredSubstrateSource: targetProfile.substrate_source
   });
 }
 
@@ -1654,8 +1693,12 @@ function assertOnlineDeploymentGateOutput({
   targetProfile,
   provenance
 }) {
-  if (targetProfile.value !== ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE) {
-    fail(`online_deployment_gate target_profile must be ${ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE}`);
+  if (!ONLINE_DEPLOYMENT_GATE_TARGET_PROFILES.has(targetProfile.value)) {
+    fail(
+      `online_deployment_gate target_profile must be one of: ${[
+        ...ONLINE_DEPLOYMENT_GATE_TARGET_PROFILES
+      ].join(', ')}`
+    );
   }
   assertFocusedReportHeader(report, {
     schema: ONLINE_DEPLOYMENT_GATE_SCHEMA,
@@ -1688,10 +1731,19 @@ function assertOnlineDeploymentGateOutput({
   const capabilityProfiles = Object.keys(capabilityMap);
   if (
     capabilityProfiles.length !== 1 ||
-    capabilityProfiles[0] !== ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE
+    capabilityProfiles[0] !== targetProfile.value
   ) {
     fail('online_deployment_gate.capability_map must bind only the evidence target_profile');
   }
+  const capability = requireObject(
+    capabilityMap[targetProfile.value],
+    `online_deployment_gate.capability_map.${targetProfile.value}`
+  );
+  assertStringEquals(
+    capability.evidence_envelope,
+    'optional',
+    `online_deployment_gate.capability_map.${targetProfile.value}.evidence_envelope`
+  );
 
   const steps = requireArray(report.steps, 'online_deployment_gate.steps');
   if (steps.length === 0) {
@@ -1722,13 +1774,21 @@ function assertOnlineDeploymentGateOutput({
     }
   }
 
-  for (const name of ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS) {
+  const requiredSteps =
+    targetProfile.value === KIT_ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE
+      ? KIT_ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS
+      : EXTERNAL_ONLINE_DEPLOYMENT_GATE_REQUIRED_APPLY_STEPS;
+  for (const name of requiredSteps) {
     if (!seenSteps.has(name)) {
       fail(`online_deployment_gate.steps is missing confirmed apply step: ${name}`);
     }
   }
 
-  const isCanonicalSequence = ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES.some(
+  const allowedSequences =
+    targetProfile.value === KIT_ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE
+      ? KIT_ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES
+      : EXTERNAL_ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES;
+  const isCanonicalSequence = allowedSequences.some(
     (sequence) =>
       sequence.length === stepOrder.length &&
       sequence.every((expectedStep, index) => stepOrder[index] === expectedStep)
@@ -2378,7 +2438,7 @@ async function main() {
   assertTarget(evidence, targetProfile);
   assertReleaseContractIncludesTargetProfile(releaseContractInput.value, targetProfile);
   assertReleaseKitOutputTarget(releaseKitOutput, targetProfile);
-  assertExternalDeclaredSubstrateConnectionTruth(evidence, targetProfile);
+  assertSubstrateConnectionTruth(evidence, targetProfile);
   assertStatus(evidence);
 
   const subjectFiles = await assertSubjectFiles(
