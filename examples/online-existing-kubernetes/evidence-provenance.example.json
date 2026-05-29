@@ -1,0 +1,16 @@
+{
+  "schema_version": "agentsmith.artifact-provenance/v1",
+  "provenance_kind": "ci_artifact",
+  "producer_repo": "github.com/agentsmith-project/agentsmith-release-kit",
+  "normalized_remote": "github.com/agentsmith-project/agentsmith-release-kit",
+  "commit_sha": "fedcba9876543210fedcba9876543210fedcba98",
+  "artifact_uri": "gh-artifact://agentsmith-release-kit/evidence/20001/online-deployment-gate-evidence.tgz",
+  "generated_at": "2026-05-23T12:00:00.000Z",
+  "generator_command": "bash scripts/verify-release.sh --online-deployment-gate --mode apply --evidence-root",
+  "generator_version": "0.1.0",
+  "attestation": "none",
+  "workflow_name": "online-operator-example",
+  "run_id": "20001",
+  "run_attempt": "1",
+  "job": "online-operator-example"
+}

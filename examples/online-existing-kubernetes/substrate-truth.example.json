@@ -1,0 +1,85 @@
+{
+  "schema_version": "agentsmith.substrate-connection.truth/v1",
+  "target_cluster": "existing_kubernetes",
+  "substrate_source": "external_declared",
+  "distribution": "online",
+  "declared_at": "2026-05-23T12:00:00.000Z",
+  "declared_by": "release-operator@example.com",
+  "services": {
+    "postgresql": {
+      "host": "postgresql.ops.example.com",
+      "port": 5432,
+      "database": "agentsmith",
+      "credential_secret_ref": "secretRef:agentsmith/postgresql-app",
+      "admin_secret_ref": "secretRef:agentsmith/postgresql-admin",
+      "sslmode": "verify-full",
+      "tls": {
+        "mode": "verify-full",
+        "ca_secret_ref": "secretRef:agentsmith/postgresql-ca"
+      },
+      "reachability": {
+        "status": "declared_reachable",
+        "proof": "operator connectivity check 2026-05-23T12:00:00Z"
+      },
+      "extensions": {
+        "pgvector": {
+          "status": "installed",
+          "version": "0.7.4"
+        }
+      }
+    },
+    "mongodb": {
+      "host": "mongodb.ops.example.com",
+      "port": 27017,
+      "credential_secret_ref": "secretRef:agentsmith/mongodb-app",
+      "tls": {
+        "mode": "verify-full",
+        "ca_secret_ref": "secretRef:agentsmith/mongodb-ca"
+      },
+      "reachability": {
+        "status": "declared_reachable",
+        "proof": "operator connectivity check 2026-05-23T12:00:00Z"
+      }
+    },
+    "redis": {
+      "host": "redis.ops.example.com",
+      "port": 6379,
+      "credential_secret_ref": "secretRef:agentsmith/redis-app",
+      "tls": {
+        "mode": "verify-full",
+        "ca_secret_ref": "secretRef:agentsmith/redis-ca"
+      },
+      "reachability": {
+        "status": "declared_reachable",
+        "proof": "operator connectivity check 2026-05-23T12:00:00Z"
+      }
+    },
+    "object_storage": {
+      "url": "https://objects.ops.example.com",
+      "bucket": "agentsmith-release-artifacts",
+      "region": "us-west-2",
+      "credential_secret_ref": "secretRef:agentsmith/object-storage-app",
+      "tls": {
+        "mode": "https",
+        "ca_secret_ref": "secretRef:agentsmith/object-storage-ca"
+      },
+      "reachability": {
+        "status": "declared_reachable",
+        "proof": "operator bucket check 2026-05-23T12:00:00Z"
+      }
+    },
+    "oidc": {
+      "issuer_url": "https://oidc.ops.example.com/realms/agentsmith",
+      "client_id": "agentsmith-web",
+      "client_secret_ref": "secretRef:agentsmith/oidc-client",
+      "tls": {
+        "mode": "https",
+        "ca_secret_ref": "secretRef:agentsmith/oidc-ca"
+      },
+      "reachability": {
+        "status": "declared_reachable",
+        "proof": "operator oidc check 2026-05-23T12:00:00Z"
+      }
+    }
+  }
+}

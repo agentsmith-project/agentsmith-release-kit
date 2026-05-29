@@ -1,0 +1,33 @@
+{
+  "schema_version": "agentsmith.target-prerequisites.truth/v1",
+  "target_profile": "existing_kubernetes/external_declared/online",
+  "namespace": "agentsmith",
+  "rbac": {
+    "policy": "pre_provisioned_namespace_admin",
+    "proof": "operator kubectl auth can-i apply deployments in namespace agentsmith 2026-05-23T12:00:00Z"
+  },
+  "ingress": {
+    "host": "agentsmith.ops.example.com",
+    "tls_secret_ref": "secretRef:agentsmith/agentsmith-ingress-tls"
+  },
+  "registry": {
+    "pull_secret_ref": "secretRef:agentsmith/registry-pull"
+  },
+  "storage": {
+    "storage_class": "gp3",
+    "persistent_volume_policy": "dynamic"
+  },
+  "substrate_secret_refs": [
+    "secretRef:agentsmith/mongodb-app",
+    "secretRef:agentsmith/mongodb-ca",
+    "secretRef:agentsmith/object-storage-app",
+    "secretRef:agentsmith/object-storage-ca",
+    "secretRef:agentsmith/oidc-ca",
+    "secretRef:agentsmith/oidc-client",
+    "secretRef:agentsmith/postgresql-admin",
+    "secretRef:agentsmith/postgresql-app",
+    "secretRef:agentsmith/postgresql-ca",
+    "secretRef:agentsmith/redis-app",
+    "secretRef:agentsmith/redis-ca"
+  ]
+}

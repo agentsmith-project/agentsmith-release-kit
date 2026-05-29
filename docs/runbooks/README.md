@@ -43,6 +43,11 @@ Operators should call `bash scripts/verify-release.sh --...` directly with the
 release contract, deploy template package, explicit target profile, and output
 directory for their chosen path.
 
+For a concrete real Kubernetes plus existing substrates online example, copy
+and edit `examples/online-existing-kubernetes/`. It demonstrates the
+server-dry-run command, confirmed apply command, optional route smoke, and
+optional evidence-root input without claiming deploy or release readiness.
+
 For target-preflight and the online focused chain, keep substrate connection
 truth and target prerequisites as separate files. Substrate truth stays neutral;
 target prerequisites carry namespace, RBAC policy/proof, ingress TLS, registry

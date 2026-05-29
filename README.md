@@ -598,6 +598,11 @@ Online focused chain orchestration:
 bash scripts/test-online-deployment-gate.sh
 ```
 
+A copy-pasteable `existing_kubernetes/external_declared/online` operator input
+pack is available in `examples/online-existing-kubernetes/`. It is a minimal
+use-existing-substrates example for the existing online gate and keeps every
+generated report at `readiness: false`.
+
 `--online-deployment-gate` is a KISS runner for the online focused chain on
 `existing_kubernetes/external_declared/online` only. It requires both
 `--substrate-truth <json>` and `--target-prerequisites <json>`, then invokes

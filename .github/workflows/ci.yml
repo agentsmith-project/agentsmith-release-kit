@@ -51,6 +51,8 @@ jobs:
         run: bash scripts/test-smoke.sh
       - name: Online deployment gate focused guard
         run: bash scripts/test-online-deployment-gate.sh
+      - name: Online operator example focused guard
+        run: bash scripts/test-online-operator-examples.sh
       - name: Operator signoff intake focused guard
         run: bash scripts/test-operator-signoff-intake.sh
       - name: Evidence envelope focused guard
