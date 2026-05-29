@@ -36,6 +36,7 @@ Usage:
   bash scripts/verify-release.sh --smoke --release-contract <json> --rollout-report <json> --target-profile existing_kubernetes/external_declared/<online|airgap>|existing_kubernetes/kit_installed/online --url <https-url> --output-dir <dir> [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost]
   bash scripts/verify-release.sh --online-deployment-gate --release-contract <json> --deploy-template-package <json> --archive <tgz> --target-profile existing_kubernetes/external_declared/online --render-values <json> --substrate-truth <json> --target-prerequisites <json> --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--confirm-apply existing_kubernetes/external_declared/online] [--operator-run-id <id>] [--timeout <duration>] [--smoke-url <https-url>] [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost] [--target-registry <registry-host[/namespace]>] [--registry-probe <executable>] [--evidence-root <dir> --evidence-provenance <json>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --online-deployment-gate --release-contract <json> --deploy-template-package <json> --archive <tgz> --target-profile existing_kubernetes/kit_installed/online --render-values <json> --substrate-truth <json> --target-prerequisites <json> --substrate-pack-manifest <json> --routability-probe <executable> --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--confirm-apply existing_kubernetes/kit_installed/online] [--operator-run-id <id>] [--timeout <duration>] [--smoke-url <https-url>] [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost] [--evidence-root <dir> --evidence-provenance <json>] [--forbidden-source-root <dir>]
+  bash scripts/verify-release.sh --online-adoption --release-contract <json> --use-existing-report <online-deployment-gate-report.json> --use-existing-evidence-root <dir> --install-substrates-report <online-deployment-gate-report.json> --install-substrates-evidence-root <dir> --output-dir <dir>
   bash scripts/verify-release.sh --operator-signoff-intake --release-contract <json> --online-deployment-gate-report <json> --operator-signoff-intake <json> --target-profile existing_kubernetes/external_declared/online --output-dir <dir>
   bash scripts/verify-release.sh --evidence --release-contract <json> --evidence-root <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --target-prerequisites <json> --output-dir <dir> [--expected-namespace <name>]
@@ -64,6 +65,7 @@ Bootstrap status:
   --smoke checks one route status after a bound rollout report only; it is not release readiness.
   --online-deployment-gate runs the online focused chain in order only for existing Kubernetes external-declared online and kit-installed online targets; kit-installed online requires --substrate-pack-manifest and --routability-probe. Optional evidence output is a validated focused envelope for external-declared online or kit-installed online, not release readiness.
   --online-deployment-gate evidence args are accepted only with --mode apply.
+  --online-adoption aggregates already generated confirmed-apply online/use_existing and online/install_substrates focused reports/evidence roots for repo-local adoption preparation only; it is not deploy, package, operator signoff, full release gate, or release readiness.
   --operator-signoff-intake checks an operator signoff intake JSON against a generated online deployment gate apply report only; it is not signature, identity, registry, deploy, package, or release readiness.
   --evidence checks release-kit evidence envelope intake only; it is not release readiness.
   --target-preflight checks substrate truth plus target prerequisite truth intake only; it is not release readiness.
@@ -180,6 +182,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-online-deployment-gate.mjs" "$@"
     echo "online focused chain mode is not release readiness"
+    ;;
+  --online-adoption)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-online-adoption.mjs" "$@"
+    echo "online adoption aggregation mode is not release readiness; readiness=false"
     ;;
   --operator-signoff-intake)
     shift

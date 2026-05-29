@@ -862,6 +862,34 @@ profile-specific evidence envelope capability. It must not contain raw command a
 kubeconfig content, secret payloads, product-flow fields, `verdict`,
 `release_verdict`, or deploy readiness fields.
 
+## Online Adoption Aggregation Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-online-adoption.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--online-adoption`. It aggregates only existing online focused reports and
+evidence roots for `online/use_existing`
+(`existing_kubernetes/external_declared/online`) and
+`online/install_substrates` (`existing_kubernetes/kit_installed/online`).
+Both paths are required, both must be confirmed apply with passing apply,
+rollout, and smoke steps, and both evidence roots must pass the existing
+`--evidence` diagnostic.
+
+The generated `online-adoption-report.json` uses `schema:
+agentsmith.online-adoption/v1`, `scope: online_adoption_aggregation_only`,
+`readiness: false`, and `status: pass`. It includes only release identity,
+release contract digest/subject binding, coverage counts, and
+digest/provenance summaries for the two online paths. It must not include raw
+local paths, kubeconfig content, secrets, product-flow details, operator
+verdicts, release verdicts, deploy/package fields, or release readiness
+claims. This is repo-local focused verdict preparation only, not a deploy
+capability, provider matrix, cloud provisioning flow, operator signoff, full
+release gate, or AgentSmith `release:ready` input.
+
 ## Operator Signoff Intake Focused Diagnostic
 
 Run:

@@ -642,6 +642,7 @@ assert_operator_report() {
   local expected_digest_keys="$6"
   local expect_airgap="${7:-false}"
   local expect_online_handoff="${8:-false}"
+  local expected_online_handoff_run="${9:-operator-run-1003}"
 
   "$NODE_BIN" --input-type=module - \
     "$output_dir/$REPORT_FILE" \
@@ -652,7 +653,8 @@ assert_operator_report() {
     "$expected_steps" \
     "$expected_digest_keys" \
     "$expect_airgap" \
-    "$expect_online_handoff" <<'NODE'
+    "$expect_online_handoff" \
+    "$expected_online_handoff_run" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -665,7 +667,8 @@ const [
   expectedStepsText,
   expectedDigestKeysText,
   expectAirgapText,
-  expectOnlineHandoffText
+  expectOnlineHandoffText,
+  expectedOnlineHandoffRun
 ] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
@@ -834,7 +837,9 @@ if (expectOnlineHandoff) {
   if (handoff.provenance_kind !== 'signed_operator_run') {
     throw new Error(`unexpected online handoff provenance kind: ${handoff.provenance_kind}`);
   }
-  if (!/^signed-operator-run:\/\/agentsmith-release-kit\/evidence\/operator-run-1003\//.test(handoff.artifact_uri || '')) {
+  const expectedArtifactPrefix =
+    `signed-operator-run://agentsmith-release-kit/evidence/${expectedOnlineHandoffRun}/`;
+  if (!String(handoff.artifact_uri || '').startsWith(expectedArtifactPrefix)) {
     throw new Error('online handoff must include sanitized artifact uri');
   }
 }
@@ -916,6 +921,7 @@ IMAGE_DIR="$TMP_DIR/image-archives"
 BUNDLED_TOOL="$TMP_DIR/kubectl-local"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
 VALID_PROVENANCE="$TMP_DIR/evidence-provenance.signed-operator-run.json"
+KIT_VALID_PROVENANCE="$TMP_DIR/evidence-provenance.signed-operator-run-kit.json"
 
 manifest_sha="$(create_archive "$VALID_ARCHIVE")"
 archive_sha="$(sha256_file "$VALID_ARCHIVE")"
@@ -932,6 +938,7 @@ create_payloads "$PAYLOAD_DIR" "$BUNDLED_TOOL"
 create_image_archives "$IMAGE_DIR"
 write_operator_prerequisites "$OPERATOR_PREREQUISITES" "$BUNDLED_TOOL"
 write_evidence_provenance "$VALID_PROVENANCE" operator-run-1003
+write_evidence_provenance "$KIT_VALID_PROVENANCE" operator-run-kit-1004
 : >"$KUBECTL_LOG"
 : >"$ROUTABILITY_PROBE_LOG"
 start_server
@@ -1042,6 +1049,59 @@ assert_operator_report \
   "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,render,render-check,apply" \
   "online_deployment_gate_report"
 pass "operator online/install_substrates maps to kit-installed online producer gate"
+
+kit_online_apply_output="$TMP_DIR/out-online-install-substrates-apply"
+kit_online_evidence_root="$TMP_DIR/evidence-online-install-substrates-apply"
+: >"$KUBECTL_LOG"
+: >"$ROUTABILITY_PROBE_LOG"
+before_kit_online_apply="$(hit_count)"
+FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+ROUTABILITY_PROBE_LOG="$ROUTABILITY_PROBE_LOG" \
+bash "$ROOT_DIR/scripts/operator-release.sh" online install_substrates \
+  --release-contract "$VALID_CONTRACT" \
+  --deploy-template-package "$VALID_PACKAGE" \
+  --archive "$VALID_ARCHIVE" \
+  --render-values "$VALID_VALUES" \
+  --substrate-truth "$KIT_TRUTH" \
+  --target-prerequisites "$KIT_PREREQUISITES" \
+  --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" \
+  --routability-probe "$ROUTABILITY_PROBE" \
+  --namespace agentsmith \
+  --output-dir "$kit_online_apply_output" \
+  --kubectl "$FAKE_KUBECTL" \
+  --mode apply \
+  --confirm-apply online/install_substrates \
+  --operator-run-id operator-run-kit-1004 \
+  --timeout 120s \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost \
+  --evidence-root "$kit_online_evidence_root" \
+  --evidence-provenance "$KIT_VALID_PROVENANCE" >"$TMP_DIR/online-install-substrates-apply.out"
+after_kit_online_apply="$(hit_count)"
+
+[[ "$after_kit_online_apply" -eq $((before_kit_online_apply + 1)) ]] || fail "operator kit online apply smoke should issue one request"
+[[ -s "$ROUTABILITY_PROBE_LOG" ]] || fail "operator kit online apply did not call fake routability probe"
+if grep -q -- '--dry-run=server' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "operator kit online apply must not dry-run confirmed apply"
+fi
+grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" || fail "operator kit online apply did not call rollout"
+[[ -f "$kit_online_evidence_root/evidence.json" ]] || fail "operator kit online apply evidence missing evidence.json"
+[[ -f "$kit_online_evidence_root/evidence-subject.json" ]] || fail "operator kit online apply evidence missing evidence-subject.json"
+[[ -f "$kit_online_evidence_root/online-deployment-gate-report.json" ]] || fail "operator kit online apply evidence missing gate report"
+assert_producer_profile "$kit_online_apply_output/online-deployment-gate-report.json" "$KIT_ONLINE_PROFILE"
+assert_operator_report \
+  "$kit_online_apply_output" \
+  online \
+  install_substrates \
+  "$KIT_ONLINE_PROFILE" \
+  "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,render,render-check,apply,rollout,smoke" \
+  "online_deployment_gate_report" \
+  false \
+  true \
+  operator-run-kit-1004
+pass "operator online/install_substrates confirmed apply accepts operator confirmation and writes handoff summary"
 
 airgap_output="$TMP_DIR/out-airgap-use-existing"
 airgap_bundle_root="$TMP_DIR/bundle-airgap-use-existing"

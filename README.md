@@ -733,6 +733,24 @@ online_deployment_gate_only`, `readiness: false`, and `status: pass`; it lists
 only step names, relative report paths, and a small capability map for
 the selected online target profile.
 
+Online adoption aggregation focused diagnostic:
+
+```bash
+bash scripts/test-online-adoption.sh
+```
+
+`--online-adoption` reads two already generated confirmed-apply online focused
+paths: `online/use_existing` backed by
+`existing_kubernetes/external_declared/online`, and
+`online/install_substrates` backed by
+`existing_kubernetes/kit_installed/online`. Each input must provide its
+`online-deployment-gate-report.json` plus the matching evidence root. The check
+reuses `--evidence`, requires both paths to bind the same release id, git sha,
+release contract raw digest, and release contract subject digest, and writes
+only `online-adoption-report.json` with digest/provenance/coverage summaries.
+The report keeps `readiness: false`; this is not deploy, package, operator
+signoff, AgentSmith product-flow, full release gate, or release readiness.
+
 Release-kit evidence envelope focused diagnostic:
 
 ```bash
