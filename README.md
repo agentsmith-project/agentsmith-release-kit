@@ -523,10 +523,11 @@ bash scripts/test-apply.sh
 ```
 
 `--apply` validates already-rendered manifests against a real Kubernetes API.
-It accepts only `existing_kubernetes/external_declared/online` and
-`existing_kubernetes/external_declared/airgap`; `kind_rehearsal`,
-`kit_installed`, aliases such as `offline`, non-canonical pre-GA names, and
-synonym axes fail fast. Required inputs are
+It accepts only `existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/kit_installed/online`; `kind_rehearsal`,
+`kit_installed/airgap`, aliases such as `offline`, non-canonical pre-GA names,
+and synonym axes fail fast. Required inputs are
 `--release-contract`, `--rendered-manifests`, `--target-profile`,
 `--namespace`, and `--output-dir`; optional inputs are `--kubeconfig`,
 `--context`, `--kubectl`, and `--forbidden-source-root`. If a sibling
@@ -552,10 +553,11 @@ bash scripts/test-rollout.sh
 `--rollout` validates only Kubernetes rollout status for already-rendered
 rollout-capable workloads and checks that live pod image digests match the
 render/check image inventory. It accepts only
-`existing_kubernetes/external_declared/online` and
-`existing_kubernetes/external_declared/airgap`; `kind_rehearsal`,
-`kit_installed`, aliases such as `offline`, non-canonical pre-GA names, and
-synonym axes fail fast. Required inputs are
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/kit_installed/online`; `kind_rehearsal`,
+`kit_installed/airgap`, aliases such as `offline`, non-canonical pre-GA names,
+and synonym axes fail fast. Required inputs are
 `--release-contract`, `--rendered-manifests`, `--target-profile`,
 `--namespace`, and `--output-dir`; optional inputs are `--timeout` (default
 `120s`), `--kubeconfig`, `--context`, `--kubectl`, and
@@ -592,8 +594,9 @@ bash scripts/test-smoke.sh
 
 `--smoke` validates only one already-deployed route status after a bound
 rollout report. It accepts only
-`existing_kubernetes/external_declared/online` and
-`existing_kubernetes/external_declared/airgap`. Required inputs are
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/kit_installed/online`. Required inputs are
 `--release-contract`, `--rollout-report`, `--target-profile`, `--url`, and
 `--output-dir`; optional inputs are `--expected-status` (default `200`),
 `--timeout-ms` (default `5000`), `--allow-http`, and `--allow-localhost`.
@@ -631,23 +634,29 @@ use-existing-substrates example for the existing online gate and keeps every
 generated report at `readiness: false`.
 
 `--online-deployment-gate` is a KISS runner for the online focused chain on
-`existing_kubernetes/external_declared/online` only. It requires both
-`--substrate-truth <json>` and `--target-prerequisites <json>`, then invokes
-existing focused diagnostics in order: inputs, target-preflight, template-package,
-optional image-map when `--target-registry <registry-host[/namespace]>` is
-provided, target-registry apply-only registry-presence through
+`existing_kubernetes/external_declared/online` and
+`existing_kubernetes/kit_installed/online`. External-declared online invokes
+existing focused diagnostics in order: inputs, target-preflight,
+template-package, optional image-map when
+`--target-registry <registry-host[/namespace]>` is provided,
+target-registry apply-only registry-presence through
 `--registry-probe <executable>`, render, render-check, apply, and, in
-`--mode apply` only, rollout plus optional route smoke. Default
-`server-dry-run` mode stops after apply dry-run and rejects `--smoke-url` and
+`--mode apply` only, rollout plus optional route smoke.
+Kit-installed online is source-registry only and requires
+`--substrate-pack-manifest <json>` plus `--routability-probe <executable>`;
+its order is inputs, target-preflight, substrate-pack-check, template-package,
+substrate-routability, render, render-check, apply, then apply-mode rollout
+and optional smoke. Kit-only substrate args are rejected on the external path,
+and `--target-registry` is rejected on the kit path. Default `server-dry-run`
+mode stops after apply dry-run and rejects `--smoke-url` and
 `--registry-probe`; server dry-run target-registry does not require a probe.
-Apply mode requires exact confirm text and an operator run id before
-Kubernetes calls. Apply mode with `--target-registry` also requires
-`--registry-probe <executable>` and runs registry-presence after image-map and
-before render/apply/smoke/evidence. The target registry option adopts
-image-map target refs for rendering and, in confirmed apply rollout, strict
-live ref checks for those digest-adopted target refs only; ordinary
-source-registry rollout remains digest-only. It does not log in, pull, push,
-or mirror; registry presence is a read-only operator-probe prerequisite.
+Apply mode requires exact confirm text matching the selected target profile
+and an operator run id before Kubernetes calls. The external target-registry
+option adopts image-map target refs for rendering and, in confirmed apply
+rollout, strict live ref checks for those digest-adopted target refs only;
+ordinary source-registry rollout remains digest-only. It does not log in,
+pull, push, or mirror; registry presence and routability are operator-probe
+prerequisites.
 
 Confirmed apply mode may also take `--evidence-root <dir>` and
 `--evidence-provenance <json>`. The provenance input must be explicit remote
@@ -655,9 +664,11 @@ release-kit provenance without local/file URIs, source paths, or
 secret-looking fields; the gate computes the evidence subject sha itself,
 writes `evidence.json`, `evidence-subject.json`, and
 `online-deployment-gate-report.json` under the evidence root, then reuses
-`--evidence` to validate the root. `server-dry-run` and unsupported profiles
-reject evidence output before Kubernetes or network calls and remove stale
-managed evidence files.
+`--evidence` to validate the root. `server-dry-run`, kit-installed online, and
+unsupported profiles reject evidence output before Kubernetes or network calls
+and remove stale managed evidence files. The capability map marks external
+online evidence envelope support as `optional` and kit-installed online as
+`unsupported`.
 
 This runner does not provision cloud resources, install substrates, mirror
 images, build airgap bundles, import images into kind, perform rollback, or
@@ -665,7 +676,7 @@ claim deploy/release readiness. `online-deployment-gate-report.json` keeps `sche
 agentsmith.online-deployment-gate/v1`, `scope:
 online_deployment_gate_only`, `readiness: false`, and `status: pass`; it lists
 only step names, relative report paths, and a small capability map for
-`existing_kubernetes/external_declared/online`.
+the selected online target profile.
 
 Release-kit evidence envelope focused diagnostic:
 

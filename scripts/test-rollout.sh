@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 AIRGAP_TARGET_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_ONLINE_TARGET_PROFILE="existing_kubernetes/kit_installed/online"
 KIT_AIRGAP_TARGET_PROFILE="existing_kubernetes/kit_installed/airgap"
 ALIAS_OFFLINE_TARGET_PROFILE="existing_kubernetes/external_declared/offline"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
@@ -385,7 +386,14 @@ reset_kubectl_log
 run_rollout "$valid_manifests" "$airgap_output" "$AIRGAP_TARGET_PROFILE" >/dev/null
 grep -q 'rollout status Deployment/agentsmith-web --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" || fail "fake kubectl did not receive airgap rollout status call"
 assert_rollout_report "$airgap_output/rollout-report.json" "$AIRGAP_TARGET_PROFILE"
-pass "airgap rollout accepted without enabling kind, kit, or aliases"
+pass "airgap rollout accepted without enabling kind or aliases"
+
+kit_online_output="$TMP_DIR/out-kit-online"
+reset_kubectl_log
+run_rollout "$valid_manifests" "$kit_online_output" "$KIT_ONLINE_TARGET_PROFILE" >/dev/null
+grep -q 'rollout status Deployment/agentsmith-web --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" || fail "fake kubectl did not receive kit online rollout status call"
+assert_rollout_report "$kit_online_output/rollout-report.json" "$KIT_ONLINE_TARGET_PROFILE"
+pass "kit-installed online rollout accepted without changing Kubernetes rollout behavior"
 
 rewritten_ref_output="$TMP_DIR/out-rewritten-ref"
 reset_kubectl_log

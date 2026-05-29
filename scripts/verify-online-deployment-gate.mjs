@@ -21,7 +21,13 @@ const REQUIRED_ARGS = [
   'namespace',
   'outputDir'
 ];
-const SUPPORTED_TARGET_PROFILE = 'existing_kubernetes/external_declared/online';
+const EXTERNAL_ONLINE_TARGET_PROFILE = 'existing_kubernetes/external_declared/online';
+const KIT_ONLINE_TARGET_PROFILE = 'existing_kubernetes/kit_installed/online';
+const SUPPORTED_TARGET_PROFILE_VALUES = [
+  EXTERNAL_ONLINE_TARGET_PROFILE,
+  KIT_ONLINE_TARGET_PROFILE
+];
+const SUPPORTED_TARGET_PROFILE_SET = new Set(SUPPORTED_TARGET_PROFILE_VALUES);
 const SUPPORTED_MODES = new Set(['server-dry-run', 'apply']);
 const REPORT_SCHEMA = 'agentsmith.online-deployment-gate/v1';
 const REPORT_SCOPE = 'online_deployment_gate_only';
@@ -94,7 +100,9 @@ const MANAGED_OUTPUT_ENTRIES = [
   'online-deployment-gate-report.json',
   'inputs',
   'target-preflight',
+  'substrate-pack-check',
   'template-package',
+  'substrate-routability',
   'image-map',
   'registry-presence',
   'render',
@@ -137,7 +145,7 @@ function usage() {
     --release-contract <json> \\
     --deploy-template-package <json> \\
     --archive <tgz> \\
-    --target-profile existing_kubernetes/external_declared/online \\
+    --target-profile existing_kubernetes/external_declared/online|existing_kubernetes/kit_installed/online \\
     --render-values <json> \\
     --substrate-truth <json> \\
     --target-prerequisites <json> \\
@@ -147,7 +155,7 @@ function usage() {
     [--kubeconfig <path>] \\
     [--context <name>] \\
     [--kubectl <path>] \\
-    [--confirm-apply existing_kubernetes/external_declared/online] \\
+    [--confirm-apply <matching-target-profile>] \\
     [--operator-run-id <id>] \\
     [--timeout <duration>] \\
     [--smoke-url <https-url>] \\
@@ -157,8 +165,12 @@ function usage() {
     [--allow-localhost] \\
     [--target-registry <registry-host[/namespace]>] \\
     [--registry-probe <executable>] \\
+    [--substrate-pack-manifest <json> --routability-probe <executable>] \\
     [--evidence-root <dir> --evidence-provenance <json>] \\
-    [--forbidden-source-root <dir>]`;
+    [--forbidden-source-root <dir>]
+
+Kit-installed online requires --substrate-pack-manifest and --routability-probe.
+External-declared online rejects kit-only substrate args.`;
 }
 
 function cliFail(message) {
@@ -277,6 +289,9 @@ function parseArgs(argv) {
       case '--target-prerequisites':
         parsed.targetPrerequisites = nextValue();
         break;
+      case '--substrate-pack-manifest':
+        parsed.substratePackManifest = nextValue();
+        break;
       case '--namespace':
         parsed.namespace = nextValue();
         break;
@@ -331,6 +346,9 @@ function parseArgs(argv) {
       case '--registry-probe':
         parsed.registryProbe = nextValue();
         break;
+      case '--routability-probe':
+        parsed.routabilityProbe = nextValue();
+        break;
       case '--forbidden-source-root':
         parsed.forbiddenSourceRoots.push(nextValue());
         break;
@@ -366,8 +384,8 @@ function parseTargetProfile(value) {
   }
   const [targetCluster, substrateSource, distribution] = tuple;
   const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
-  if (normalized !== SUPPORTED_TARGET_PROFILE) {
-    fail(`--online-deployment-gate only accepts ${SUPPORTED_TARGET_PROFILE}`);
+  if (!SUPPORTED_TARGET_PROFILE_SET.has(normalized)) {
+    fail(`--online-deployment-gate only accepts ${SUPPORTED_TARGET_PROFILE_VALUES.join(' or ')}`);
   }
   return {
     value: normalized,
@@ -383,11 +401,43 @@ function validateOperatorRunId(operatorRunId) {
   }
 }
 
+function isKitOnline(args) {
+  return args.targetProfile.value === KIT_ONLINE_TARGET_PROFILE;
+}
+
+function isExternalOnline(args) {
+  return args.targetProfile.value === EXTERNAL_ONLINE_TARGET_PROFILE;
+}
+
 function validateArgs(args) {
   args.targetProfile = parseTargetProfile(args.targetProfile);
 
   if (!SUPPORTED_MODES.has(args.mode)) {
     cliFail('--mode must be server-dry-run or apply');
+  }
+
+  if (isExternalOnline(args) && (args.substratePackManifest || args.routabilityProbe)) {
+    cliFail(
+      '--substrate-pack-manifest and --routability-probe are only accepted with existing_kubernetes/kit_installed/online'
+    );
+  }
+
+  if (isKitOnline(args)) {
+    if (args.targetRegistry) {
+      cliFail('--target-registry is not supported for existing_kubernetes/kit_installed/online');
+    }
+    if (args.registryProbe) {
+      cliFail('--registry-probe is not supported for existing_kubernetes/kit_installed/online');
+    }
+    if (!args.substratePackManifest) {
+      cliFail('--target-profile existing_kubernetes/kit_installed/online requires --substrate-pack-manifest <json>');
+    }
+    if (!args.routabilityProbe) {
+      cliFail('--target-profile existing_kubernetes/kit_installed/online requires --routability-probe <executable>');
+    }
+    if (args.evidenceRoot) {
+      cliFail('--evidence-root is not supported for existing_kubernetes/kit_installed/online');
+    }
   }
 
   const hasSmokeOption =
@@ -404,8 +454,8 @@ function validateArgs(args) {
   }
 
   if (args.mode === 'apply') {
-    if (args.confirmApply !== SUPPORTED_TARGET_PROFILE) {
-      cliFail(`--mode apply requires --confirm-apply ${SUPPORTED_TARGET_PROFILE}`);
+    if (args.confirmApply !== args.targetProfile.value) {
+      cliFail(`--mode apply requires --confirm-apply ${args.targetProfile.value}`);
     }
     if (!args.operatorRunId) {
       cliFail('--mode apply requires --operator-run-id <id>');
@@ -972,6 +1022,9 @@ async function writeJsonFile(file, value) {
 }
 
 function buildCapabilityMap(targetProfile) {
+  const evidenceEnvelope =
+    targetProfile.value === KIT_ONLINE_TARGET_PROFILE ? 'unsupported' : 'optional';
+
   return {
     [targetProfile.value]: {
       declared: 'supported',
@@ -981,7 +1034,7 @@ function buildCapabilityMap(targetProfile) {
       apply: 'supported',
       rollout: 'supported',
       smoke: 'optional',
-      evidence_envelope: 'optional'
+      evidence_envelope: evidenceEnvelope
     }
   };
 }
@@ -1215,6 +1268,30 @@ async function main(argv) {
     ]
   });
 
+  const substratePackCheckReportPath = path.join(
+    outputSubdir(args, 'substrate-pack-check'),
+    'substrate-pack-check-report.json'
+  );
+  if (isKitOnline(args)) {
+    runStep({
+      args,
+      steps,
+      name: 'substrate-pack-check',
+      mode: '--substrate-pack-check',
+      argv: [
+        '--target-profile',
+        targetProfile,
+        '--substrate-pack-manifest',
+        args.substratePackManifest,
+        '--substrate-truth',
+        args.substrateTruth,
+        '--output-dir',
+        outputSubdir(args, 'substrate-pack-check')
+      ],
+      reportPaths: [substratePackCheckReportPath]
+    });
+  }
+
   runStep({
     args,
     steps,
@@ -1234,6 +1311,35 @@ async function main(argv) {
       path.join(outputSubdir(args, 'template-package'), 'template-package-report.json')
     ]
   });
+
+  if (isKitOnline(args)) {
+    runStep({
+      args,
+      steps,
+      name: 'substrate-routability',
+      mode: '--substrate-routability',
+      argv: [
+        '--target-profile',
+        targetProfile,
+        '--substrate-pack-check-report',
+        substratePackCheckReportPath,
+        '--substrate-truth',
+        args.substrateTruth,
+        '--target-prerequisites',
+        args.targetPrerequisites,
+        '--namespace',
+        args.namespace,
+        ...kubeArgs(args),
+        '--routability-probe',
+        args.routabilityProbe,
+        '--output-dir',
+        outputSubdir(args, 'substrate-routability')
+      ],
+      reportPaths: [
+        path.join(outputSubdir(args, 'substrate-routability'), 'substrate-routability-report.json')
+      ]
+    });
+  }
 
   const imageMapPath = path.join(outputSubdir(args, 'image-map'), 'image-map.json');
   if (args.targetRegistry) {
@@ -1347,7 +1453,7 @@ async function main(argv) {
   if (args.mode === 'apply') {
     applyArgv.push(
       '--confirm-apply',
-      SUPPORTED_TARGET_PROFILE,
+      args.targetProfile.value,
       '--operator-run-id',
       args.operatorRunId
     );

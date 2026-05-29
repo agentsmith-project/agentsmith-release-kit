@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 AIRGAP_TARGET_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_ONLINE_TARGET_PROFILE="existing_kubernetes/kit_installed/online"
 KIT_AIRGAP_TARGET_PROFILE="existing_kubernetes/kit_installed/airgap"
 ALIAS_OFFLINE_TARGET_PROFILE="existing_kubernetes/external_declared/offline"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
@@ -316,9 +317,11 @@ NODE
 
 VALID_ROLLOUT="$TMP_DIR/rollout-report.valid.json"
 AIRGAP_ROLLOUT="$TMP_DIR/rollout-report.airgap.json"
+KIT_ONLINE_ROLLOUT="$TMP_DIR/rollout-report.kit-online.json"
 BAD_ROLLOUT="$TMP_DIR/rollout-report.bad.json"
 write_rollout_report "$VALID_ROLLOUT" valid
 write_rollout_report "$AIRGAP_ROLLOUT" valid "$AIRGAP_TARGET_PROFILE"
+write_rollout_report "$KIT_ONLINE_ROLLOUT" valid "$KIT_ONLINE_TARGET_PROFILE"
 write_rollout_report "$BAD_ROLLOUT" bad_status
 start_server
 
@@ -344,7 +347,18 @@ if [[ "$after_airgap" -ne $((before_airgap + 1)) ]]; then
   fail "airgap happy path should issue exactly one GET"
 fi
 assert_smoke_report "$airgap_output/smoke-report.json" "$BASE_URL" "127.0.0.1:$SERVER_PORT" "$AIRGAP_TARGET_PROFILE"
-pass "airgap route smoke accepted without enabling kind, kit, or aliases"
+pass "airgap route smoke accepted without enabling kind or aliases"
+
+kit_online_output="$TMP_DIR/out-kit-online"
+before_kit_online="$(hit_count)"
+run_smoke_raw "$VALID_CONTRACT" "$KIT_ONLINE_ROLLOUT" "$BASE_URL/ok" "$kit_online_output" "$KIT_ONLINE_TARGET_PROFILE" --allow-http --allow-localhost >/dev/null
+after_kit_online="$(hit_count)"
+if [[ "$after_kit_online" -ne $((before_kit_online + 1)) ]]; then
+  cat "$SERVER_LOG" >&2
+  fail "kit online happy path should issue exactly one GET"
+fi
+assert_smoke_report "$kit_online_output/smoke-report.json" "$BASE_URL" "127.0.0.1:$SERVER_PORT" "$KIT_ONLINE_TARGET_PROFILE"
+pass "kit-installed online route smoke accepted without changing smoke behavior"
 
 mismatch_output="$TMP_DIR/out-status-mismatch"
 mkdir -p "$mismatch_output"

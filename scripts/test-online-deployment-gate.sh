@@ -42,8 +42,9 @@ NODE
 
 write_truth() {
   local output="$1"
+  local profile="${2:-$TARGET_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$output" "$TARGET_PROFILE" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
 import fs from 'node:fs';
 
 const [output, profile] = process.argv.slice(2);
@@ -123,15 +124,27 @@ const truth = {
   }
 };
 
+if (substrateSource === 'kit_installed') {
+  truth.installed_by = 'agentsmith-release-kit';
+  truth.release_kit_version = '0.1.0';
+  truth.installation_id = 'kit-install-10001';
+}
+
 fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
 NODE
 }
 
 write_prerequisites() {
   local output="$1"
+  local profile="$TARGET_PROFILE"
   local mutation="${2:-valid}"
 
-  "$NODE_BIN" --input-type=module - "$output" "$TARGET_PROFILE" "$mutation" <<'NODE'
+  if [[ "${2:-}" == */*/* ]]; then
+    profile="$2"
+    mutation="${3:-valid}"
+  fi
+
+  "$NODE_BIN" --input-type=module - "$output" "$profile" "$mutation" <<'NODE'
 import fs from 'node:fs';
 
 const [output, profile, mutation] = process.argv.slice(2);
@@ -570,6 +583,93 @@ fs.chmodSync(registryProbe, 0o755);
 NODE
 }
 
+write_kit_substrate_pack_manifest() {
+  local output="$1"
+  local profile="$2"
+
+  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profile] = process.argv.slice(2);
+const digest = (char) => `sha256:${char.repeat(64)}`;
+const image = (name, tag, char) =>
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+
+const manifest = {
+  schema_version: 'agentsmith.substrate-pack-manifest/v1',
+  release_kit_version: '0.1.0',
+  installed_by: 'agentsmith-release-kit',
+  target_profile: profile,
+  images: {
+    postgresql: image('postgresql', '16.3', '1'),
+    mongodb: image('mongodb', '7.0', '2'),
+    redis: image('redis', '7.2', '3'),
+    object_storage: image('object-storage', '2026.05', '4'),
+    oidc: image('keycloak', '25.0', '5')
+  },
+  payload: {
+    install_plan: {
+      path: 'payload/install-substrates.json',
+      sha256: digest('6')
+    }
+  },
+  templates: {
+    postgresql: 'templates/postgresql.yaml',
+    mongodb: 'templates/mongodb.yaml',
+    redis: 'templates/redis.yaml',
+    object_storage: 'templates/object-storage.yaml',
+    oidc: 'templates/oidc.yaml'
+  },
+  tools: {
+    routability_probe: {
+      path: 'tools/substrate-routability-probe.txt',
+      sha256: digest('7')
+    }
+  },
+  checksums: {
+    manifest: digest('8')
+  }
+};
+
+fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+write_routability_probe() {
+  local routability_probe="$1"
+
+  "$NODE_BIN" --input-type=module - "$routability_probe" <<'NODE'
+import fs from 'node:fs';
+
+const [routabilityProbe] = process.argv.slice(2);
+fs.writeFileSync(
+  routabilityProbe,
+  `#!/usr/bin/env bash
+set -euo pipefail
+: "\${ROUTABILITY_PROBE_LOG:?}"
+printf '%s\\n' "$*" >> "$ROUTABILITY_PROBE_LOG"
+
+expected=""
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --expected-fingerprint)
+      expected="\${2:?expected fingerprint required}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$expected" ]] || exit 24
+printf '%s\\n' "$expected"
+`
+);
+fs.chmodSync(routabilityProbe, 0o755);
+NODE
+}
+
 start_server() {
   local ready_file="$TMP_DIR/server-ready"
   local log_file="$TMP_DIR/server-hits.log"
@@ -638,6 +738,9 @@ write_registry_probe "$PASS_REGISTRY_PROBE" pass
 write_registry_probe "$MISMATCH_REGISTRY_PROBE" mismatch
 write_registry_probe "$NONZERO_REGISTRY_PROBE" nonzero
 write_registry_probe "$SLEEP_REGISTRY_PROBE" sleep
+ROUTABILITY_PROBE_LOG="$TMP_DIR/routability-probe.log"
+PASS_ROUTABILITY_PROBE="$TMP_DIR/routability-probe-pass.sh"
+write_routability_probe "$PASS_ROUTABILITY_PROBE"
 
 reset_kubectl_log() {
   : >"$KUBECTL_LOG"
@@ -645,6 +748,10 @@ reset_kubectl_log() {
 
 reset_registry_probe_log() {
   : >"$REGISTRY_PROBE_LOG"
+}
+
+reset_routability_probe_log() {
+  : >"$ROUTABILITY_PROBE_LOG"
 }
 
 assert_kubectl_not_called() {
@@ -668,6 +775,23 @@ assert_registry_probe_called() {
   if [[ "$actual_count" != "$expected_count" ]]; then
     cat "$REGISTRY_PROBE_LOG" >&2
     fail "registry probe expected $expected_count calls, got $actual_count"
+  fi
+}
+
+assert_routability_probe_called() {
+  local expected_count="$1"
+  local actual_count
+  actual_count="$(wc -l <"$ROUTABILITY_PROBE_LOG" | tr -d '[:space:]')"
+  if [[ "$actual_count" != "$expected_count" ]]; then
+    cat "$ROUTABILITY_PROBE_LOG" >&2
+    fail "routability probe expected $expected_count calls, got $actual_count"
+  fi
+}
+
+assert_routability_probe_not_called() {
+  if [[ -s "$ROUTABILITY_PROBE_LOG" ]]; then
+    cat "$ROUTABILITY_PROBE_LOG" >&2
+    fail "routability probe should not have been called"
   fi
 }
 
@@ -729,6 +853,7 @@ run_gate() {
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE:-}" \
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID:-}" \
   REGISTRY_PROBE_LOG="$REGISTRY_PROBE_LOG" \
+  ROUTABILITY_PROBE_LOG="$ROUTABILITY_PROBE_LOG" \
   bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
     --release-contract "$release_contract" \
     --deploy-template-package "$deploy_template_package" \
@@ -771,8 +896,9 @@ assert_gate_report() {
   local expected_mode="$2"
   local expected_steps="$3"
   local expected_operator_run_id="${4:-}"
+  local expected_profile="${5:-$TARGET_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$expected_mode" "$expected_steps" "$TARGET_PROFILE" "$expected_operator_run_id" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$expected_mode" "$expected_steps" "$expected_profile" "$expected_operator_run_id" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -817,6 +943,8 @@ if (capabilityProfiles.length !== 1 || capabilityProfiles[0] !== expectedProfile
   throw new Error(`capability map must only declare the current target profile: ${capabilityProfiles.join(',')}`);
 }
 const capability = capabilityMap[expectedProfile];
+const expectedEvidenceEnvelope =
+  expectedProfile === 'existing_kubernetes/kit_installed/online' ? 'unsupported' : 'optional';
 const expectedCapability = {
   declared: 'supported',
   intake: 'supported',
@@ -825,7 +953,7 @@ const expectedCapability = {
   apply: 'supported',
   rollout: 'supported',
   smoke: 'optional',
-  evidence_envelope: 'optional'
+  evidence_envelope: expectedEvidenceEnvelope
 };
 const expectedCapabilityKeys = Object.keys(expectedCapability).sort();
 const actualCapabilityKeys = Object.keys(capability || {}).sort();
@@ -1080,8 +1208,11 @@ expect_registry_presence_gate_fail() {
 
 KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
 VALID_TRUTH="$TMP_DIR/substrate-truth.valid.json"
+VALID_KIT_TRUTH="$TMP_DIR/substrate-truth.kit-online.valid.json"
 VALID_PREREQUISITES="$TMP_DIR/target-prerequisites.valid.json"
+VALID_KIT_PREREQUISITES="$TMP_DIR/target-prerequisites.kit-online.valid.json"
 INVALID_PREFLIGHT_PREREQUISITES="$TMP_DIR/target-prerequisites.invalid-preflight.json"
+VALID_KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-online.valid.json"
 VALID_VALUES="$TMP_DIR/render-values.valid.json"
 VALID_ARCHIVE="$TMP_DIR/valid.tgz"
 VALID_CONTRACT_MATERIAL="$TMP_DIR/release-contract.valid-material.json"
@@ -1102,8 +1233,11 @@ SIGNED_CLI_MISMATCH_OPERATOR_PROVENANCE="$TMP_DIR/evidence-provenance.signed-cli
 SIGNED_UNBOUND_OPERATOR_PROVENANCE="$TMP_DIR/evidence-provenance.signed-unbound-operator.json"
 
 write_truth "$VALID_TRUTH"
+write_truth "$VALID_KIT_TRUTH" "$KIT_ONLINE_PROFILE"
 write_prerequisites "$VALID_PREREQUISITES" valid
+write_prerequisites "$VALID_KIT_PREREQUISITES" "$KIT_ONLINE_PROFILE" valid
 write_prerequisites "$INVALID_PREFLIGHT_PREREQUISITES" missing_namespace
+write_kit_substrate_pack_manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" "$KIT_ONLINE_PROFILE"
 write_render_values "$VALID_VALUES"
 prepare_archive_case valid valid "$VALID_ARCHIVE" "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL"
 prepare_archive_case invalid-render unknown_variable "$INVALID_ARCHIVE" "$INVALID_CONTRACT_MATERIAL" "$INVALID_PACKAGE_MATERIAL"
@@ -1641,26 +1775,144 @@ assert_no_gate_report "$signed_unbound_operator_provenance_output"
 assert_no_evidence_files "$signed_unbound_operator_provenance_root"
 pass "signed_operator_run artifact_uri without operator_run_id binding rejected before kubectl"
 
+kit_missing_pack_output="$TMP_DIR/out-kit-online-missing-pack"
+mkdir -p "$kit_missing_pack_output/render" "$kit_missing_pack_output/apply"
+printf '%s\n' '{"stale":true}' >"$kit_missing_pack_output/online-deployment-gate-report.json"
+printf '%s\n' '{"stale":true}' >"$kit_missing_pack_output/render/manifest-render-report.json"
+printf '%s\n' '{"stale":true}' >"$kit_missing_pack_output/apply/apply-report.json"
 reset_kubectl_log
-if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$TMP_DIR/out-unsupported-kit-online" "$KIT_ONLINE_PROFILE" >"$TMP_DIR/unsupported-kit-online.out" 2>"$TMP_DIR/unsupported-kit-online.err"; then
-  fail "expected kit-installed online target profile to fail"
+reset_routability_probe_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_missing_pack_output" "$KIT_ONLINE_PROFILE" >"$TMP_DIR/kit-online-missing-pack.out" 2>"$TMP_DIR/kit-online-missing-pack.err"; then
+  fail "expected kit online without substrate pack manifest to fail"
 fi
+grep -Fq -- '--substrate-pack-manifest' "$TMP_DIR/kit-online-missing-pack.err" || fail "missing kit pack failure must name --substrate-pack-manifest"
 assert_kubectl_not_called
-assert_no_gate_report "$TMP_DIR/out-unsupported-kit-online"
-pass "kit-installed online profile stays intake-only and is rejected before kubectl"
+assert_no_gate_report "$kit_missing_pack_output"
+[[ ! -e "$kit_missing_pack_output/render/manifest-render-report.json" ]] || fail "kit missing pack must clear stale render report"
+[[ ! -e "$kit_missing_pack_output/apply/apply-report.json" ]] || fail "kit missing pack must clear stale apply report"
+pass "kit online requires substrate pack manifest before render or kubectl"
 
-unsupported_evidence_root="$TMP_DIR/evidence-unsupported-kit-online"
-unsupported_evidence_output="$TMP_DIR/out-unsupported-kit-online-evidence"
-write_stale_evidence_files "$unsupported_evidence_root"
+kit_missing_probe_output="$TMP_DIR/out-kit-online-missing-routability-probe"
+mkdir -p "$kit_missing_probe_output/render" "$kit_missing_probe_output/apply"
+printf '%s\n' '{"stale":true}' >"$kit_missing_probe_output/online-deployment-gate-report.json"
+printf '%s\n' '{"stale":true}' >"$kit_missing_probe_output/render/manifest-render-report.json"
+printf '%s\n' '{"stale":true}' >"$kit_missing_probe_output/apply/apply-report.json"
 reset_kubectl_log
-if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$unsupported_evidence_output" "$KIT_ONLINE_PROFILE" \
-  --mode apply --confirm-apply "$TARGET_PROFILE" --operator-run-id operator-run-1011 --evidence-root "$unsupported_evidence_root" --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/unsupported-kit-online-evidence.out" 2>"$TMP_DIR/unsupported-kit-online-evidence.err"; then
-  fail "expected kit-installed online evidence closure to fail"
+reset_routability_probe_log
+if TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_missing_probe_output" "$KIT_ONLINE_PROFILE" \
+  --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" >"$TMP_DIR/kit-online-missing-routability-probe.out" 2>"$TMP_DIR/kit-online-missing-routability-probe.err"; then
+  fail "expected kit online without routability probe to fail"
+fi
+grep -Fq -- '--routability-probe' "$TMP_DIR/kit-online-missing-routability-probe.err" || fail "missing kit probe failure must name --routability-probe"
+assert_kubectl_not_called
+assert_no_gate_report "$kit_missing_probe_output"
+[[ ! -e "$kit_missing_probe_output/render/manifest-render-report.json" ]] || fail "kit missing probe must clear stale render report"
+[[ ! -e "$kit_missing_probe_output/apply/apply-report.json" ]] || fail "kit missing probe must clear stale apply report"
+pass "kit online requires routability probe before render or kubectl"
+
+external_kit_args_output="$TMP_DIR/out-external-kit-only-args"
+reset_kubectl_log
+reset_routability_probe_log
+if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$external_kit_args_output" "$TARGET_PROFILE" \
+  --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
+  --routability-probe "$PASS_ROUTABILITY_PROBE" >"$TMP_DIR/external-kit-only-args.out" 2>"$TMP_DIR/external-kit-only-args.err"; then
+  fail "expected external online gate with kit-only args to fail"
 fi
 assert_kubectl_not_called
-assert_no_gate_report "$unsupported_evidence_output"
-assert_no_evidence_files "$unsupported_evidence_root"
-pass "unsupported profile cannot pass online gate evidence closure"
+assert_no_gate_report "$external_kit_args_output"
+pass "external online rejects kit-only substrate args before kubectl"
+
+kit_target_registry_output="$TMP_DIR/out-kit-online-target-registry"
+reset_kubectl_log
+reset_registry_probe_log
+reset_routability_probe_log
+if TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_target_registry_output" "$KIT_ONLINE_PROFILE" \
+  --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
+  --routability-probe "$PASS_ROUTABILITY_PROBE" \
+  --target-registry "$target_registry" >"$TMP_DIR/kit-online-target-registry.out" 2>"$TMP_DIR/kit-online-target-registry.err"; then
+  fail "expected kit online with target-registry to fail"
+fi
+assert_kubectl_not_called
+assert_registry_probe_not_called
+assert_no_gate_report "$kit_target_registry_output"
+[[ ! -e "$kit_target_registry_output/image-map/image-map.json" ]] || fail "kit target-registry must fail before image-map"
+pass "kit online rejects target-registry before registry presence or kubectl"
+
+kit_registry_probe_output="$TMP_DIR/out-kit-online-registry-probe"
+reset_kubectl_log
+reset_registry_probe_log
+reset_routability_probe_log
+if TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_registry_probe_output" "$KIT_ONLINE_PROFILE" \
+  --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
+  --routability-probe "$PASS_ROUTABILITY_PROBE" \
+  --registry-probe "$PASS_REGISTRY_PROBE" >"$TMP_DIR/kit-online-registry-probe.out" 2>"$TMP_DIR/kit-online-registry-probe.err"; then
+  fail "expected kit online with registry probe to fail"
+fi
+grep -Fq -- '--registry-probe' "$TMP_DIR/kit-online-registry-probe.err" || fail "kit registry probe failure must name --registry-probe"
+assert_kubectl_not_called
+assert_registry_probe_not_called
+assert_routability_probe_not_called
+assert_no_gate_report "$kit_registry_probe_output"
+[[ ! -e "$kit_registry_probe_output/render/manifest-render-report.json" ]] || fail "kit registry probe must fail before render"
+[[ ! -e "$kit_registry_probe_output/apply/apply-report.json" ]] || fail "kit registry probe must fail before apply"
+pass "kit online rejects registry probe before probe/kubectl"
+
+kit_evidence_root="$TMP_DIR/evidence-kit-online"
+kit_evidence_output="$TMP_DIR/out-kit-online-evidence"
+write_stale_evidence_files "$kit_evidence_root"
+reset_kubectl_log
+reset_routability_probe_log
+if TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_evidence_output" "$KIT_ONLINE_PROFILE" \
+  --mode apply \
+  --confirm-apply "$KIT_ONLINE_PROFILE" \
+  --operator-run-id operator-run-kit-online-evidence \
+  --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
+  --routability-probe "$PASS_ROUTABILITY_PROBE" \
+  --evidence-root "$kit_evidence_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/kit-online-evidence.out" 2>"$TMP_DIR/kit-online-evidence.err"; then
+  fail "expected kit online evidence output to fail"
+fi
+assert_kubectl_not_called
+assert_no_gate_report "$kit_evidence_output"
+assert_no_evidence_files "$kit_evidence_root"
+pass "kit online rejects evidence output before kubectl and clears stale evidence"
+
+kit_dry_output="$TMP_DIR/out-kit-online-dry"
+reset_kubectl_log
+reset_routability_probe_log
+TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_dry_output" "$KIT_ONLINE_PROFILE" \
+  --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
+  --routability-probe "$PASS_ROUTABILITY_PROBE" >/dev/null
+assert_routability_probe_called 5
+[[ -f "$kit_dry_output/substrate-pack-check/substrate-pack-check-report.json" ]] || fail "kit dry-run gate did not write substrate pack check report"
+[[ -f "$kit_dry_output/substrate-routability/substrate-routability-report.json" ]] || fail "kit dry-run gate did not write substrate routability report"
+[[ -f "$kit_dry_output/render/manifest-render-report.json" ]] || fail "kit dry-run gate did not write render report"
+[[ -f "$kit_dry_output/apply/apply-report.json" ]] || fail "kit dry-run gate did not write apply report"
+assert_gate_report "$kit_dry_output/online-deployment-gate-report.json" server-dry-run "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,render,render-check,apply" "" "$KIT_ONLINE_PROFILE"
+pass "kit-installed online server dry-run composes pack check and routability before render and apply"
+
+kit_apply_output="$TMP_DIR/out-kit-online-apply-smoke"
+reset_kubectl_log
+reset_routability_probe_log
+before_kit_apply="$(hit_count)"
+TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_apply_output" "$KIT_ONLINE_PROFILE" \
+  --mode apply \
+  --confirm-apply "$KIT_ONLINE_PROFILE" \
+  --operator-run-id operator-run-kit-online-1001 \
+  --timeout 120s \
+  --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
+  --routability-probe "$PASS_ROUTABILITY_PROBE" \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost >/dev/null
+after_kit_apply="$(hit_count)"
+[[ "$after_kit_apply" -eq $((before_kit_apply + 1)) ]] || fail "kit apply gate smoke should issue one request"
+assert_routability_probe_called 5
+grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" || fail "kit apply gate did not call rollout"
+[[ -f "$kit_apply_output/rollout/rollout-report.json" ]] || fail "kit apply gate did not write rollout report"
+[[ -f "$kit_apply_output/smoke/smoke-report.json" ]] || fail "kit apply gate did not write smoke report"
+assert_gate_report "$kit_apply_output/online-deployment-gate-report.json" apply "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,render,render-check,apply,rollout,smoke" operator-run-kit-online-1001 "$KIT_ONLINE_PROFILE"
+pass "kit-installed online apply composes routability, rollout, and optional smoke"
 
 reset_kubectl_log
 if run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$TMP_DIR/out-unsupported" "kind_rehearsal/kit_installed/online" >"$TMP_DIR/unsupported.out" 2>"$TMP_DIR/unsupported.err"; then

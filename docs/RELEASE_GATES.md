@@ -67,11 +67,12 @@ The generated `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` must keep `readiness: false`. The
 coverage report separates `declarable_profiles`,
 `intake_supported_profiles`, `executable_profiles`, and
-`evidence_supported_profiles`; `kit_installed` remains intake-only in this
-slice. They prove contract/input digest readiness only. They are not deploy
-readiness, package readiness, release readiness, rollout evidence, or operator
-signoff. The coverage report must not contain `verdict` or
-`release_verdict`.
+`evidence_supported_profiles`. `existing_kubernetes/kit_installed/online` is
+executable for the focused online chain, while evidence-supported profiles
+remain limited to external-declared online/airgap in this slice. They prove
+contract/input digest readiness only. They are not deploy readiness, package
+readiness, release readiness, rollout evidence, or operator signoff. The
+coverage report must not contain `verdict` or `release_verdict`.
 
 ## Template Package Archive Focused Diagnostic
 
@@ -586,10 +587,11 @@ with server-side dry-run. It does not render templates, roll out workloads,
 smoke routes, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
-`--apply` accepts only `existing_kubernetes/external_declared/online` and
-`existing_kubernetes/external_declared/airgap`. `kind_rehearsal`,
-`kit_installed`, aliases such as `offline`, non-canonical pre-GA names, and
-synonym axes fail fast.
+`--apply` accepts only `existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/kit_installed/online`. `kind_rehearsal`,
+`kit_installed/airgap`, aliases such as `offline`, non-canonical pre-GA names,
+and synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--kubeconfig`, `--context`, `--kubectl`, and `--forbidden-source-root`.
@@ -624,10 +626,11 @@ already-rendered manifests. It does not render templates, apply resources,
 smoke routes, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
-`--rollout` accepts only `existing_kubernetes/external_declared/online` and
-`existing_kubernetes/external_declared/airgap`. `kind_rehearsal`,
-`kit_installed`, aliases such as `offline`, non-canonical pre-GA names, and
-synonym axes fail fast.
+`--rollout` accepts only `existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/kit_installed/online`. `kind_rehearsal`,
+`kit_installed/airgap`, aliases such as `offline`, non-canonical pre-GA names,
+and synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--timeout` (default `120s`), `--kubeconfig`, `--context`, `--kubectl`, and
@@ -677,8 +680,9 @@ does not call Kubernetes, render templates, apply resources, roll out
 workloads, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
-`--smoke` accepts only `existing_kubernetes/external_declared/online` and
-`existing_kubernetes/external_declared/airgap`.
+`--smoke` accepts only `existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/kit_installed/online`.
 Required inputs are `--release-contract`, `--rollout-report`,
 `--target-profile`, `--url`, and `--output-dir`. Optional inputs are
 `--expected-status` (default `200`), `--timeout-ms` (default `5000`),
@@ -716,31 +720,35 @@ bash scripts/test-online-deployment-gate.sh
 This focused runner exercises `bash scripts/verify-release.sh
 --online-deployment-gate`. It is a KISS sequence runner for the online focused
 chain on
-`existing_kubernetes/external_declared/online` only. It does not implement a
-release platform, cloud resource provisioning, substrate installation, image
+`existing_kubernetes/external_declared/online` and
+`existing_kubernetes/kit_installed/online`. It does not implement a release
+platform, cloud resource provisioning, substrate installation, image
 mirroring, airgap bundle creation, kind image import, rollback, product-flow
 checks, or full release readiness.
 
 The runner requires both `--substrate-truth <json>` and
-`--target-prerequisites <json>`, then calls existing focused diagnostics in
-order: inputs, target-preflight, template-package, optional image-map when
+`--target-prerequisites <json>`. The external-declared online order is inputs,
+target-preflight, template-package, optional image-map when
 `--target-registry <registry-host[/namespace]>` is provided, target-registry
 apply registry-presence through `--registry-probe <executable>`, render,
 render-check, apply, and, for confirmed `--mode apply` only, rollout plus
-optional route smoke. Target-preflight runs before render, kubectl, or route
-network checks, and invalid prerequisites remove stale managed reports. Default
+optional route smoke. The kit-installed online order is inputs,
+target-preflight, substrate-pack-check, template-package,
+substrate-routability, render, render-check, apply, and, for confirmed
+`--mode apply` only, rollout plus optional route smoke. Kit-installed online
+requires `--substrate-pack-manifest <json>` and
+`--routability-probe <executable>`, rejects `--target-registry`, and does not
+expand registry-presence. External-declared online rejects the kit-only
+substrate args. Target-preflight runs before render, kubectl, or route network
+checks, and invalid prerequisites remove stale managed reports. Default
 `server-dry-run` stops after apply dry-run and rejects `--smoke-url` and
-`--registry-probe`; server dry-run target-registry does not require a probe.
-Apply mode requires exact `--confirm-apply
-existing_kubernetes/external_declared/online` and `--operator-run-id <id>`
-before Kubernetes calls. Target-registry mode only adopts image refs through
-the generated image-map. Confirmed apply with target-registry must also provide
-`--registry-probe <executable>`; the gate runs `--registry-presence` after
-image-map and before render/apply/rollout/smoke/evidence. In confirmed apply
-rollout, strict live ref checks apply only to those digest-adopted target refs;
+`--registry-probe`; server dry-run external target-registry does not require a
+probe. Apply mode requires exact `--confirm-apply <matching-target-profile>`
+and `--operator-run-id <id>` before Kubernetes calls. In confirmed apply
+rollout, strict live ref checks apply only to digest-adopted target refs;
 ordinary source-registry rollout remains digest-only. It is not mirror
-execution or registry login; registry presence remains a focused read-only
-probe prerequisite and is not standalone release evidence.
+execution or registry login; registry presence and routability remain focused
+read-only probe prerequisites and are not standalone release evidence.
 
 Confirmed apply mode can optionally add `--evidence-root <dir>` and
 `--evidence-provenance <json>`. The provenance input must be explicit remote
@@ -749,8 +757,10 @@ fields fail before Kubernetes calls. The gate computes the fixed
 `release-kit-evidence-subject` metadata, writes `evidence.json`,
 `evidence-subject.json`, and `online-deployment-gate-report.json` under the
 evidence root, and validates that root with the existing `--evidence`
-diagnostic. `server-dry-run` evidence requests and unsupported profiles fail
-fast and remove stale managed evidence files.
+diagnostic. `server-dry-run`, kit-installed online evidence requests, and
+unsupported profiles fail fast and remove stale managed evidence files.
+The capability map marks external online evidence envelope support as
+`optional` and kit-installed online as `unsupported`.
 
 The generated `online-deployment-gate-report.json` must keep `schema:
 agentsmith.online-deployment-gate/v1`, `scope:
@@ -758,9 +768,9 @@ online_deployment_gate_only`, `readiness: false`, and `status: pass`. It
 records release identity, release contract digest, target axes, mode, and
 step names with relative report paths. Confirmed apply reports must include
 top-level `operator_run_id`; server dry-run reports must not. It also contains
-a small capability map keyed only by `existing_kubernetes/external_declared/online` with
-declared/intake/preflight/render/apply/rollout/smoke/evidence envelope
-capabilities. It must not contain raw command args, response bodies,
+a small capability map keyed only by the selected online target profile with
+declared/intake/preflight/render/apply/rollout/smoke capabilities plus the
+profile-specific evidence envelope capability. It must not contain raw command args, response bodies,
 kubeconfig content, secret payloads, product-flow fields, `verdict`,
 `release_verdict`, or deploy readiness fields.
 
