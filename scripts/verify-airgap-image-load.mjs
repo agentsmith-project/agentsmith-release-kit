@@ -19,7 +19,13 @@ const REQUIRED_ARGS = [
   'imageLoader',
   'outputDir'
 ];
-const AIRGAP_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const EXTERNAL_AIRGAP_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const KIT_AIRGAP_TARGET_PROFILE = 'existing_kubernetes/kit_installed/airgap';
+const AIRGAP_TARGET_PROFILE_VALUES = [
+  EXTERNAL_AIRGAP_TARGET_PROFILE,
+  KIT_AIRGAP_TARGET_PROFILE
+];
+const AIRGAP_TARGET_PROFILE_SET = new Set(AIRGAP_TARGET_PROFILE_VALUES);
 const IMAGE_MAP_SCHEMA = 'agentsmith.image-map/v1';
 const ARCHIVE_CHECK_REPORT_SCHEMA = 'agentsmith.airgap-image-archive-check-report/v1';
 const ARCHIVE_CHECK_REPORT_SCOPE = 'airgap_image_archive_content_check_only';
@@ -60,7 +66,7 @@ function usage() {
     --deploy-template-package <json> \\
     --archive <tgz> \\
     --image-map <json> \\
-    --target-profile existing_kubernetes/external_declared/airgap \\
+    --target-profile existing_kubernetes/<external_declared|kit_installed>/airgap \\
     --bundle-root <dir> \\
     --bundle-manifest <json> \\
     --archive-probe <executable> \\
@@ -261,33 +267,32 @@ function assertAllowedKeys(object, allowedKeys, label) {
 }
 
 function parseTargetProfile(value) {
-  if (value !== AIRGAP_TARGET_PROFILE) {
-    fail(`--airgap-image-load only accepts ${AIRGAP_TARGET_PROFILE}`);
+  const text = requireString(value, 'target_profile');
+  const tuple = text.split('/');
+  if (tuple.length !== 3 || tuple.some((part) => part.trim() === '')) {
+    fail('target_profile must be <target_cluster>/<substrate_source>/<distribution>');
+  }
+  const [targetCluster, substrateSource, distribution] = tuple;
+  const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
+  if (!AIRGAP_TARGET_PROFILE_SET.has(normalized)) {
+    fail(`--airgap-image-load only accepts ${AIRGAP_TARGET_PROFILE_VALUES.join(' or ')}`);
   }
 
   return {
-    value,
-    target_cluster: 'existing_kubernetes',
-    substrate_source: 'external_declared',
-    distribution: 'airgap'
+    value: normalized,
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution
   };
 }
 
-function assertTargetProfileObject(value, label) {
+function assertTargetProfileObject(value, label, targetProfile) {
   const profile = requireObject(value, label);
   assertAllowedKeys(profile, TARGET_PROFILE_KEYS, label);
-  assertStringEquals(profile.value, AIRGAP_TARGET_PROFILE, `${label}.value`);
-  assertStringEquals(
-    profile.target_cluster,
-    'existing_kubernetes',
-    `${label}.target_cluster`
-  );
-  assertStringEquals(
-    profile.substrate_source,
-    'external_declared',
-    `${label}.substrate_source`
-  );
-  assertStringEquals(profile.distribution, 'airgap', `${label}.distribution`);
+  assertStringEquals(profile.value, targetProfile.value, `${label}.value`);
+  assertStringEquals(profile.target_cluster, targetProfile.target_cluster, `${label}.target_cluster`);
+  assertStringEquals(profile.substrate_source, targetProfile.substrate_source, `${label}.substrate_source`);
+  assertStringEquals(profile.distribution, targetProfile.distribution, `${label}.distribution`);
 }
 
 function rejectUriOrWindowsPath(value, label) {
@@ -481,7 +486,8 @@ function assertArchiveCheckReport(report, targetProfile) {
   requireString(report.git_sha, 'airgap_image_archive_check_report.git_sha');
   assertTargetProfileObject(
     report.target_profile,
-    'airgap_image_archive_check_report.target_profile'
+    'airgap_image_archive_check_report.target_profile',
+    targetProfile
   );
   if (report.target_profile.value !== targetProfile.value) {
     fail('airgap_image_archive_check_report.target_profile must match target_profile');
@@ -562,12 +568,12 @@ function readDigestSummary(archiveCheckSummary, archiveCheckReportInputDigest) {
   return summary;
 }
 
-function assertImageMap(imageMap) {
+function assertImageMap(imageMap, targetProfile) {
   assertStringEquals(imageMap.schema, IMAGE_MAP_SCHEMA, 'image_map.schema');
   assertStringEquals(imageMap.scope, 'image_map_only', 'image_map.scope');
   requireBooleanFalse(imageMap.readiness, 'image_map.readiness');
   assertStringEquals(imageMap.status, 'pass', 'image_map.status');
-  assertTargetProfileObject(imageMap.target_profile, 'image_map.target_profile');
+  assertTargetProfileObject(imageMap.target_profile, 'image_map.target_profile', targetProfile);
   requireBooleanTrue(imageMap.mirror_required, 'image_map.mirror_required');
   requireString(imageMap.target_registry, 'image_map.target_registry');
 
@@ -614,10 +620,11 @@ async function readImageLoadInputs({
   bundleManifest,
   bundleRoot,
   archiveCheckSummary,
-  imageMapSummary
+  imageMapSummary,
+  targetProfile
 }) {
   const manifest = requireObject(bundleManifest, 'bundle_manifest');
-  assertTargetProfileObject(manifest.target_profile, 'bundle_manifest.target_profile');
+  assertTargetProfileObject(manifest.target_profile, 'bundle_manifest.target_profile', targetProfile);
   const declarations = requireArray(
     manifest.image_artifact_declarations,
     'bundle_manifest.image_artifact_declarations'
@@ -860,13 +867,15 @@ async function main() {
       targetProfile
     );
     const imageMapSummary = assertImageMap(
-      requireObject(imageMapInput.value, 'image_map')
+      requireObject(imageMapInput.value, 'image_map'),
+      targetProfile
     );
     const imageLoadInputs = await readImageLoadInputs({
       bundleManifest: bundleManifestInput.value,
       bundleRoot,
       archiveCheckSummary,
-      imageMapSummary
+      imageMapSummary,
+      targetProfile
     });
     const loadSummary = runImageLoads({
       imageLoader,

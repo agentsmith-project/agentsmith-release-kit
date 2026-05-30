@@ -22,7 +22,13 @@ const REQUIRED_ARGS = [
   'namespace',
   'outputDir'
 ];
-const SUPPORTED_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const EXTERNAL_AIRGAP_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const KIT_AIRGAP_TARGET_PROFILE = 'existing_kubernetes/kit_installed/airgap';
+const SUPPORTED_TARGET_PROFILES = [
+  EXTERNAL_AIRGAP_TARGET_PROFILE,
+  KIT_AIRGAP_TARGET_PROFILE
+];
+const SUPPORTED_TARGET_PROFILE_SET = new Set(SUPPORTED_TARGET_PROFILES);
 const SUPPORTED_MODES = new Set(['server-dry-run', 'apply']);
 const REPORT_SCHEMA = 'agentsmith.airgap-deployment-gate/v1';
 const REPORT_SCOPE = 'airgap_deployment_gate_only';
@@ -43,12 +49,15 @@ const SECRET_VALUE_RE = [
 const MANAGED_OUTPUT_ENTRIES = [
   REPORT_FILE,
   'target-preflight',
+  'substrate-pack-check',
   'airgap-image-load',
   'airgap-bundle-render-check',
   'apply',
   'rollout',
   'smoke'
 ];
+const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
+const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
 class CliError extends Error {
   constructor(message) {
@@ -78,7 +87,7 @@ function usage() {
     --deploy-template-package <bundle-local-json> \\
     --archive <bundle-local-tgz> \\
     --image-map <bundle-local-json> \\
-    --target-profile existing_kubernetes/external_declared/airgap \\
+    --target-profile existing_kubernetes/<external_declared|kit_installed>/airgap \\
     --bundle-root <dir> \\
     --bundle-manifest <bundle-local-json> \\
     --render-values <bundle-local-json> \\
@@ -92,7 +101,7 @@ function usage() {
     [--kubectl <path>] \\
     [--archive-probe <executable>] \\
     [--image-loader <executable>] \\
-    [--confirm-apply existing_kubernetes/external_declared/airgap] \\
+    [--confirm-apply <matching-target-profile>] \\
     [--operator-run-id <id>] \\
     [--timeout <duration>] \\
     [--smoke-url <https-url>] \\
@@ -298,8 +307,8 @@ function parseTargetProfile(value) {
   }
   const [targetCluster, substrateSource, distribution] = tuple;
   const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
-  if (normalized !== SUPPORTED_TARGET_PROFILE) {
-    fail(`--airgap-deployment-gate only accepts ${SUPPORTED_TARGET_PROFILE}`);
+  if (!SUPPORTED_TARGET_PROFILE_SET.has(normalized)) {
+    fail(`--airgap-deployment-gate only accepts ${SUPPORTED_TARGET_PROFILES.join(' or ')}`);
   }
   return {
     value: normalized,
@@ -318,6 +327,20 @@ function validateOperatorRunId(operatorRunId) {
 function requireString(value, label) {
   if (typeof value !== 'string' || value.trim() === '') {
     fail(`${label} is required`);
+  }
+  return value;
+}
+
+function requireObject(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail(`${label} must be an object`);
+  }
+  return value;
+}
+
+function requireArray(value, label) {
+  if (!Array.isArray(value)) {
+    fail(`${label} must be an array`);
   }
   return value;
 }
@@ -507,6 +530,130 @@ async function removeManagedOutputs(outputDir) {
 function isInsidePath(rootDir, candidate) {
   const relative = path.relative(rootDir, candidate);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function rejectUriOrWindowsPath(value, label) {
+  const text = requireString(value, label);
+  if (text.trim() !== text) {
+    fail(`${label} must not have leading or trailing whitespace`);
+  }
+  if (text.startsWith('//') || WINDOWS_DRIVE_RE.test(text) || text.includes('\\')) {
+    fail(`${label} must be a local POSIX path`);
+  }
+  if (URI_SCHEME_RE.test(text)) {
+    fail(`${label} must be a local POSIX path, not a URI`);
+  }
+  return text;
+}
+
+function validateBundleRelativePath(value, label) {
+  const relativePath = requireString(value, label);
+  if (
+    relativePath.trim() !== relativePath ||
+    path.posix.isAbsolute(relativePath) ||
+    path.isAbsolute(relativePath) ||
+    WINDOWS_DRIVE_RE.test(relativePath) ||
+    relativePath.includes('\\') ||
+    URI_SCHEME_RE.test(relativePath)
+  ) {
+    fail(`${label} must be a relative bundle path`);
+  }
+  if (relativePath.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')) {
+    fail(`${label} must not contain empty, dot, or parent segments`);
+  }
+  return relativePath;
+}
+
+async function canonicalBundleRoot(input) {
+  rejectUriOrWindowsPath(input, 'bundle_root');
+  const requested = path.resolve(input);
+  let stat;
+  try {
+    stat = await fs.lstat(requested);
+  } catch (error) {
+    fail(`cannot read bundle root: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail('bundle root must not be a symlink');
+  }
+  if (!stat.isDirectory()) {
+    fail('bundle root must be a directory');
+  }
+  try {
+    return await fs.realpath(requested);
+  } catch (error) {
+    fail(`cannot resolve bundle root: ${error.message}`);
+  }
+}
+
+async function bundleLocalFile(input, label, bundleRoot) {
+  rejectUriOrWindowsPath(input, label);
+  const requested = path.resolve(input);
+  if (!isInsidePath(bundleRoot, requested)) {
+    fail(`${label} must be inside bundle root`);
+  }
+  let stat;
+  try {
+    stat = await fs.lstat(requested);
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`${label} must not be a symlink`);
+  }
+  if (!stat.isFile()) {
+    fail(`${label} must point to a file`);
+  }
+  try {
+    const realPath = await fs.realpath(requested);
+    if (!isInsidePath(bundleRoot, realPath)) {
+      fail(`${label} must resolve inside bundle root`);
+    }
+    return realPath;
+  } catch (error) {
+    fail(`cannot resolve ${label}: ${error.message}`);
+  }
+}
+
+async function discoverSubstratePackManifest(args) {
+  if (args.targetProfile.value !== KIT_AIRGAP_TARGET_PROFILE) {
+    return undefined;
+  }
+
+  const bundleRoot = await canonicalBundleRoot(args.bundleRoot);
+  const bundleManifestPath = await bundleLocalFile(
+    args.bundleManifest,
+    'bundle manifest',
+    bundleRoot
+  );
+  const bundleManifestInput = await readJsonFile(bundleManifestPath, 'bundle manifest');
+  const manifest = requireObject(bundleManifestInput.value, 'bundle_manifest');
+  const manifestTargetProfile = requireObject(
+    manifest.target_profile,
+    'bundle_manifest.target_profile'
+  );
+  if (requireString(manifestTargetProfile.value, 'bundle_manifest.target_profile.value') !== args.targetProfile.value) {
+    fail('bundle_manifest.target_profile.value must match --target-profile');
+  }
+  const components = requireArray(manifest.components, 'bundle_manifest.components');
+  const substratePackComponents = components
+    .map((value, index) => ({ value: requireObject(value, `bundle_manifest.components[${index}]`), index }))
+    .filter(({ value }) => value.kind === 'substrate_pack_manifest');
+
+  if (substratePackComponents.length !== 1) {
+    fail('kit airgap bundle manifest must include exactly one substrate_pack_manifest component');
+  }
+
+  const { value, index } = substratePackComponents[0];
+  const relativePath = validateBundleRelativePath(
+    value.path,
+    `bundle_manifest.components[${index}].path`
+  );
+  return bundleLocalFile(
+    path.join(bundleRoot, relativePath),
+    `bundle_manifest.components[${index}].path`,
+    bundleRoot
+  );
 }
 
 async function canonicalForbiddenSourceRoots(inputRoots) {
@@ -772,6 +919,7 @@ async function main(argv) {
 
   const steps = [];
   const targetProfile = args.targetProfile.value;
+  const substratePackManifest = await discoverSubstratePackManifest(args);
 
   runStep({
     args,
@@ -794,6 +942,28 @@ async function main(argv) {
       path.join(outputSubdir(args, 'target-preflight'), 'target-preflight-report.json')
     ]
   });
+
+  if (substratePackManifest) {
+    runStep({
+      args,
+      steps,
+      name: 'substrate-pack-check',
+      mode: '--substrate-pack-check',
+      argv: [
+        '--target-profile',
+        targetProfile,
+        '--substrate-pack-manifest',
+        substratePackManifest,
+        '--substrate-truth',
+        args.substrateTruth,
+        '--output-dir',
+        outputSubdir(args, 'substrate-pack-check')
+      ],
+      reportPaths: [
+        path.join(outputSubdir(args, 'substrate-pack-check'), 'substrate-pack-check-report.json')
+      ]
+    });
+  }
 
   if (args.mode === 'apply') {
     runStep({

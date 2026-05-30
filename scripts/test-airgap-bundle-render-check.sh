@@ -29,6 +29,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 PAYLOAD_DIR="$TMP_DIR/payload"
 IMAGE_DIR="$TMP_DIR/image-archives"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
+KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -52,8 +53,9 @@ NODE
 
 write_truth() {
   local output="$1"
+  local profile="${2:-$AIRGAP_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$output" "$AIRGAP_PROFILE" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
 import fs from 'node:fs';
 
 const [output, profile] = process.argv.slice(2);
@@ -133,7 +135,63 @@ const truth = {
   }
 };
 
+if (substrateSource === 'kit_installed') {
+  truth.installed_by = 'agentsmith-release-kit';
+  truth.release_kit_version = '0.1.0';
+  truth.installation_id = 'kit-install-10001';
+}
+
 fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
+NODE
+}
+
+write_kit_substrate_pack_manifest() {
+  local output="$1"
+
+  "$NODE_BIN" --input-type=module - "$output" "$KIT_AIRGAP_PROFILE" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profile] = process.argv.slice(2);
+const digest = (char) => `sha256:${char.repeat(64)}`;
+const image = (name, tag, char) =>
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+const manifest = {
+  schema_version: 'agentsmith.substrate-pack-manifest/v1',
+  release_kit_version: '0.1.0',
+  installed_by: 'agentsmith-release-kit',
+  target_profile: profile,
+  images: {
+    postgresql: image('postgresql', '16.3', '1'),
+    mongodb: image('mongodb', '7.0', '2'),
+    redis: image('redis', '7.2', '3'),
+    object_storage: image('object-storage', '2026.05', '4'),
+    oidc: image('keycloak', '25.0', '5')
+  },
+  payload: {
+    install_plan: {
+      path: 'payload/install-substrates.json',
+      sha256: digest('6')
+    }
+  },
+  templates: {
+    postgresql: 'templates/postgresql.yaml',
+    mongodb: 'templates/mongodb.yaml',
+    redis: 'templates/redis.yaml',
+    object_storage: 'templates/object-storage.yaml',
+    oidc: 'templates/oidc.yaml'
+  },
+  tools: {
+    checks: {
+      path: 'tools/substrate-checks.txt',
+      sha256: digest('7')
+    }
+  },
+  checksums: {
+    manifest: digest('8')
+  }
+};
+
+fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
@@ -382,21 +440,28 @@ run_bundle_create() {
   local archive="$3"
   local bundle_root="$4"
   local output_dir="$5"
+  local target_profile="${6:-$AIRGAP_PROFILE}"
+  local substrate_pack_manifest="${7:-}"
   local image_archive_args=()
+  local substrate_pack_args=()
 
   for id in "${RELEASE_IMAGE_IDS[@]}"; do
     image_archive_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
   done
+  if [[ -n "$substrate_pack_manifest" ]]; then
+    substrate_pack_args+=(--substrate-pack-manifest "$substrate_pack_manifest")
+  fi
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
     --release-contract "$release_contract" \
     --deploy-template-package "$deploy_template_package" \
     --archive "$archive" \
-    --target-profile "$AIRGAP_PROFILE" \
+    --target-profile "$target_profile" \
     --target-registry "$AIRGAP_REGISTRY" \
     --bundle-root "$bundle_root" \
     --output-dir "$output_dir" \
     "${image_archive_args[@]}" \
+    "${substrate_pack_args[@]}" \
     --runbook "$PAYLOAD_DIR/runbook.md" \
     --script "$PAYLOAD_DIR/install.sh" \
     --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
@@ -406,10 +471,11 @@ run_bundle_create() {
 
 write_bundle_render_inputs() {
   local bundle_root="$1"
+  local target_profile="${2:-$AIRGAP_PROFILE}"
 
   mkdir -p "$bundle_root/operator-inputs"
   write_render_values "$bundle_root/operator-inputs/render-values.json"
-  write_truth "$bundle_root/operator-inputs/substrate-truth.json"
+  write_truth "$bundle_root/operator-inputs/substrate-truth.json" "$target_profile"
 }
 
 run_airgap_bundle_render_check() {
@@ -481,11 +547,12 @@ NODE
 
 assert_report() {
   local report_file="$1"
+  local expected_profile="${2:-$AIRGAP_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$AIRGAP_REGISTRY" "$VALID_CONTRACT" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$AIRGAP_REGISTRY" "$VALID_CONTRACT" "$expected_profile" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile, expectedRegistry, validContract] = process.argv.slice(2);
+const [reportFile, expectedRegistry, validContract, expectedProfile] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
 const expectedImageMapCount = JSON.parse(
@@ -526,7 +593,7 @@ if (report.readiness !== false) {
 if (report.status !== 'pass') {
   throw new Error(`unexpected status: ${report.status}`);
 }
-if (report.target_profile?.value !== 'existing_kubernetes/external_declared/airgap') {
+if (report.target_profile?.value !== expectedProfile) {
   throw new Error(`unexpected target profile: ${report.target_profile?.value}`);
 }
 if (Object.prototype.hasOwnProperty.call(report, 'target_registry')) {
@@ -549,8 +616,9 @@ for (const [label, digest] of Object.entries(report.digest_summary || {})) {
     throw new Error(`digest summary missing sha256 for ${label}`);
   }
 }
-if (!Array.isArray(report.bundle_components) || report.bundle_components.length !== 4) {
-  throw new Error('report must summarize the four bundle component paths');
+const expectedComponentCount = expectedProfile.includes('/kit_installed/') ? 5 : 4;
+if (!Array.isArray(report.bundle_components) || report.bundle_components.length !== expectedComponentCount) {
+  throw new Error(`report must summarize ${expectedComponentCount} bundle component paths`);
 }
 assertNoLeakKeys(report);
 if (
@@ -608,6 +676,7 @@ expect_render_check_fail_with_stderr() {
 create_payloads
 create_image_archives
 write_operator_prerequisites "$OPERATOR_PREREQUISITES"
+write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK_MANIFEST"
 
 VALID_ARCHIVE="$TMP_DIR/valid.tgz"
 VALID_MANIFEST_SHA="$(create_render_archive valid "$VALID_ARCHIVE" valid)"
@@ -625,6 +694,18 @@ run_bundle_create \
   "$VALID_BUNDLE_ROOT" \
   "$VALID_CREATE_OUTPUT" >"$TMP_DIR/create-valid.out"
 write_bundle_render_inputs "$VALID_BUNDLE_ROOT"
+
+KIT_BUNDLE_ROOT="$TMP_DIR/bundle-kit-valid"
+KIT_CREATE_OUTPUT="$TMP_DIR/out-create-kit-valid"
+run_bundle_create \
+  "$VALID_CONTRACT" \
+  "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+  "$VALID_ARCHIVE" \
+  "$KIT_BUNDLE_ROOT" \
+  "$KIT_CREATE_OUTPUT" \
+  "$KIT_AIRGAP_PROFILE" \
+  "$KIT_SUBSTRATE_PACK_MANIFEST" >"$TMP_DIR/create-kit-valid.out"
+write_bundle_render_inputs "$KIT_BUNDLE_ROOT" "$KIT_AIRGAP_PROFILE"
 
 shim_dir="$TMP_DIR/shims"
 mkdir -p "$shim_dir"
@@ -646,10 +727,17 @@ if ! tail -n 1 "$TMP_DIR/render-check-valid.out" | grep -q 'airgap bundle render
 fi
 pass "valid airgap bundle rendered offline and passed target image inventory check"
 
+kit_output_dir="$TMP_DIR/out-render-check-kit"
+PATH="$shim_dir:$PATH" run_airgap_bundle_render_check \
+  "$KIT_BUNDLE_ROOT" \
+  "$kit_output_dir" \
+  "$KIT_AIRGAP_PROFILE" >"$TMP_DIR/render-check-kit.out"
+assert_report "$kit_output_dir/$REPORT_FILE" "$KIT_AIRGAP_PROFILE"
+pass "valid kit airgap bundle rendered offline and passed target image inventory check"
+
 for profile_case in \
   "online:$ONLINE_PROFILE" \
-  "kind:$KIND_PROFILE" \
-  "kit-airgap:$KIT_AIRGAP_PROFILE"; do
+  "kind:$KIND_PROFILE"; do
   label="${profile_case%%:*}"
   profile="${profile_case#*:}"
   expect_render_check_fail "unsupported-profile-$label" "$TMP_DIR/out-profile-$label" \

@@ -698,11 +698,12 @@ NODE
 
 write_bundle_operator_inputs() {
   local bundle_root="$1"
+  local target_profile="${2:-$AIRGAP_PROFILE}"
 
   mkdir -p "$bundle_root/operator-inputs"
   write_render_values "$bundle_root/operator-inputs/render-values.json"
-  write_truth "$bundle_root/operator-inputs/substrate-truth.json" "$AIRGAP_PROFILE"
-  write_prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" "$AIRGAP_PROFILE"
+  write_truth "$bundle_root/operator-inputs/substrate-truth.json" "$target_profile"
+  write_prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" "$target_profile"
 }
 
 target_image_for_id() {
@@ -980,6 +981,7 @@ assert_airgap_consume_chain() {
   local expected_rehearsal_label="$3"
   local expected_consume_steps="$4"
   local expected_deployment_steps="$5"
+  local expected_profile="${6:-$AIRGAP_PROFILE}"
 
   "$NODE_BIN" --input-type=module - \
     "$output_dir/airgap-consume-rehearsal-report.json" \
@@ -988,7 +990,7 @@ assert_airgap_consume_chain() {
     "$expected_rehearsal_label" \
     "$expected_consume_steps" \
     "$expected_deployment_steps" \
-    "$AIRGAP_PROFILE" <<'NODE'
+    "$expected_profile" <<'NODE'
 import fs from 'node:fs';
 
 const [
@@ -1023,7 +1025,7 @@ if (consumeReport.target_profile?.value !== expectedProfile) {
 }
 if (
   consumeReport.target_profile?.target_cluster !== 'existing_kubernetes' ||
-  consumeReport.target_profile?.substrate_source !== 'external_declared' ||
+  consumeReport.target_profile?.substrate_source !== expectedProfile.split('/')[1] ||
   consumeReport.target_profile?.distribution !== 'airgap'
 ) {
   throw new Error('consume report target profile tuple drifted');
@@ -1452,6 +1454,70 @@ assert_operator_report \
   true
 pass "operator airgap/use_existing maps to consume rehearsal and writes handoff summary"
 
+write_bundle_operator_inputs "$kit_airgap_bundle_root" "$KIT_AIRGAP_PROFILE"
+kit_airgap_target_app_image="$(target_image_for_id "$kit_airgap_bundle_root/components/image-map.json" agentsmith_app)"
+kit_airgap_consume_output="$TMP_DIR/out-airgap-consume-install-substrates"
+: >"$KUBECTL_LOG"
+: >"$LOAD_LOG"
+before_kit_airgap_apply="$(hit_count)"
+AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+FAKE_KUBECTL_LIVE_IMAGE="$kit_airgap_target_app_image" \
+FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$kit_airgap_target_app_image" \
+bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+  --bundle-root "$kit_airgap_bundle_root" \
+  --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
+  --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
+  --target-prerequisites "$kit_airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+  --namespace agentsmith \
+  --output-dir "$kit_airgap_consume_output" \
+  --kubectl "$FAKE_KUBECTL" \
+  --mode apply \
+  --archive-probe "$GOOD_PROBE" \
+  --image-loader "$GOOD_LOADER" \
+  --confirm-apply airgap/install_substrates \
+  --operator-run-id operator-airgap-kit-1006 \
+  --timeout 120s \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost >"$TMP_DIR/airgap-consume-install-substrates.out"
+after_kit_airgap_apply="$(hit_count)"
+
+[[ "$after_kit_airgap_apply" -eq $((before_kit_airgap_apply + 1)) ]] ||
+  fail "operator kit airgap apply smoke should issue one request"
+if grep -q -- '--dry-run=server' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "operator kit airgap apply must not dry-run confirmed apply"
+fi
+grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" ||
+  fail "operator kit airgap apply did not call rollout"
+grep -q 'get pods' "$KUBECTL_LOG" || fail "operator kit airgap apply did not check live pods"
+[[ "$(grep -c '^sha256:' "$LOAD_LOG" 2>/dev/null || true)" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] ||
+  fail "operator kit airgap apply must load every image exactly once"
+[[ -f "$kit_airgap_consume_output/$REPORT_FILE" ]] ||
+  fail "operator airgap/install_substrates summary missing"
+[[ -f "$kit_airgap_consume_output/airgap-deployment-gate/substrate-pack-check/substrate-pack-check-report.json" ]] ||
+  fail "operator kit airgap consume must run nested substrate-pack-check"
+assert_producer_profile \
+  "$kit_airgap_consume_output/airgap-deployment-gate/airgap-deployment-gate-report.json" \
+  "$KIT_AIRGAP_PROFILE"
+assert_airgap_consume_chain \
+  "$kit_airgap_consume_output" \
+  apply \
+  existing_kubernetes \
+  "airgap-bundle-check,airgap-deployment-gate" \
+  "target-preflight,substrate-pack-check,airgap-image-load,airgap-bundle-render-check,apply,rollout,smoke" \
+  "$KIT_AIRGAP_PROFILE"
+assert_operator_report \
+  "$kit_airgap_consume_output" \
+  airgap \
+  install_substrates \
+  "$KIT_AIRGAP_PROFILE" \
+  "airgap-bundle-check,airgap-deployment-gate" \
+  "airgap_bundle_check_report,airgap_consume_rehearsal_report,airgap_deployment_gate_report" \
+  true
+pass "operator airgap/install_substrates maps to kit consume rehearsal and writes handoff summary"
+
 custom_manifest_bundle_root="$TMP_DIR/bundle-airgap-custom-manifest"
 custom_manifest_output="$TMP_DIR/out-airgap-custom-manifest"
 cp -R "$airgap_bundle_root" "$custom_manifest_bundle_root"
@@ -1530,13 +1596,6 @@ expect_operator_fail_preserves_summary airgap-bundle-install-substrates-missing-
     --output-dir "$missing_pack_output"
 [[ ! -e "$missing_pack_output/bundle-create-report.json" ]] ||
   fail "missing substrate pack path called bundle-create"
-
-unsupported_airgap_output="$TMP_DIR/out-airgap-consume-install-substrates"
-expect_operator_fail_preserves_summary airgap-consume-install-substrates "$unsupported_airgap_output" \
-  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
-    --output-dir "$unsupported_airgap_output"
-[[ ! -e "$unsupported_airgap_output/airgap-consume-rehearsal-report.json" ]] ||
-  fail "unsupported airgap install path called consume rehearsal"
 
 target_profile_output="$TMP_DIR/out-target-profile"
 expect_operator_fail_preserves_summary rejected-target-profile "$target_profile_output" \
@@ -1617,6 +1676,26 @@ expect_operator_fail_preserves_summary raw-airgap-confirm-apply-equals "$raw_air
     --image-loader "$GOOD_LOADER" \
     --confirm-apply="$AIRGAP_PROFILE" \
     --operator-run-id operator-airgap-raw-equals
+
+raw_kit_airgap_confirm_output="$TMP_DIR/out-raw-kit-airgap-confirm-apply"
+expect_operator_fail_preserves_summary raw-kit-airgap-confirm-apply "$raw_kit_airgap_confirm_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+    FAKE_KUBECTL_LIVE_IMAGE="$kit_airgap_target_app_image" \
+    FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$kit_airgap_target_app_image" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+    --bundle-root "$kit_airgap_bundle_root" \
+    --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$kit_airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$raw_kit_airgap_confirm_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --archive-probe "$GOOD_PROBE" \
+    --image-loader "$GOOD_LOADER" \
+    --confirm-apply "$KIT_AIRGAP_PROFILE" \
+    --operator-run-id operator-airgap-kit-raw
 
 missing_release_contract_output="$TMP_DIR/out-missing-release-contract"
 expect_operator_fail_preserves_summary missing-release-contract "$missing_release_contract_output" \

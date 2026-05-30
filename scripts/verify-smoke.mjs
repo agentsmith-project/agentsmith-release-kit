@@ -18,7 +18,8 @@ const ROLLOUT_SCOPE = 'kubernetes_rollout_imageid_only';
 const SUPPORTED_TARGET_PROFILES = new Set([
   'existing_kubernetes/external_declared/online',
   'existing_kubernetes/external_declared/airgap',
-  'existing_kubernetes/kit_installed/online'
+  'existing_kubernetes/kit_installed/online',
+  'existing_kubernetes/kit_installed/airgap'
 ]);
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
@@ -53,7 +54,7 @@ function usage() {
   node scripts/verify-smoke.mjs \\
     --release-contract <json> \\
     --rollout-report <json> \\
-    --target-profile existing_kubernetes/external_declared/<online|airgap>|existing_kubernetes/kit_installed/online \\
+    --target-profile existing_kubernetes/<external_declared|kit_installed>/<online|airgap> \\
     --url <https-url> \\
     --output-dir <dir> \\
     [--expected-status <code>] \\

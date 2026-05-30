@@ -19,13 +19,13 @@ Operator surface:
   online/use_existing maps internally to existing_kubernetes/external_declared/online.
   online/install_substrates maps internally to existing_kubernetes/kit_installed/online.
   airgap/use_existing maps internally to existing_kubernetes/external_declared/airgap.
-  airgap/install_substrates is intentionally unsupported in v0 and fails fast.
+  airgap/install_substrates maps internally to existing_kubernetes/kit_installed/airgap.
   airgap-bundle/use_existing maps internally to existing_kubernetes/external_declared/airgap.
   airgap-bundle/install_substrates maps internally to existing_kubernetes/kit_installed/airgap.
 
 This facade forwards to existing producer diagnostics only:
   online/* -> scripts/verify-release.sh --online-deployment-gate
-  airgap/use_existing -> scripts/verify-release.sh --airgap-consume-rehearsal
+  airgap/* -> scripts/verify-release.sh --airgap-consume-rehearsal
   airgap-bundle/* -> scripts/verify-release.sh --bundle-create
 USAGE
 }
@@ -180,7 +180,9 @@ case "$surface/$substrate_strategy" in
     machine_profile="existing_kubernetes/external_declared/airgap"
     ;;
   airgap/install_substrates)
-    fail "airgap/install_substrates is not implemented in operator release surface v0"
+    producer_mode="--airgap-consume-rehearsal"
+    producer_name="airgap-consume-rehearsal"
+    machine_profile="existing_kubernetes/kit_installed/airgap"
     ;;
   airgap-bundle/use_existing)
     producer_mode="--bundle-create"

@@ -75,6 +75,13 @@ const MAPPINGS = new Map([
       producerMode: 'airgap-consume-rehearsal',
       machineProfile: 'existing_kubernetes/external_declared/airgap'
     }
+  ],
+  [
+    'airgap/install_substrates',
+    {
+      producerMode: 'airgap-consume-rehearsal',
+      machineProfile: 'existing_kubernetes/kit_installed/airgap'
+    }
   ]
 ]);
 const FORBIDDEN_OUTPUT_KEYS = new Set([

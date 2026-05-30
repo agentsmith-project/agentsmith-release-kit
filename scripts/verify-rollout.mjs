@@ -19,7 +19,8 @@ const ROLLOUT_SCOPE = 'kubernetes_rollout_imageid_only';
 const SUPPORTED_TARGET_PROFILES = new Set([
   'existing_kubernetes/external_declared/online',
   'existing_kubernetes/external_declared/airgap',
-  'existing_kubernetes/kit_installed/online'
+  'existing_kubernetes/kit_installed/online',
+  'existing_kubernetes/kit_installed/airgap'
 ]);
 const ROLLOUT_WORKLOAD_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet']);
 const NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
@@ -48,7 +49,7 @@ function usage() {
   node scripts/verify-rollout.mjs \\
     --release-contract <json> \\
     --rendered-manifests <dir> \\
-    --target-profile existing_kubernetes/external_declared/<online|airgap>|existing_kubernetes/kit_installed/online \\
+    --target-profile existing_kubernetes/<external_declared|kit_installed>/<online|airgap> \\
     --namespace <name> \\
     --output-dir <dir> \\
     [--timeout <duration>] \\

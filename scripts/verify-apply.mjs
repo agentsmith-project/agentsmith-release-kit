@@ -20,7 +20,8 @@ const APPLY_SCOPE = 'kubernetes_apply_only';
 const SUPPORTED_TARGET_PROFILES = new Set([
   'existing_kubernetes/external_declared/online',
   'existing_kubernetes/external_declared/airgap',
-  'existing_kubernetes/kit_installed/online'
+  'existing_kubernetes/kit_installed/online',
+  'existing_kubernetes/kit_installed/airgap'
 ]);
 const SUPPORTED_MODES = new Set(['server-dry-run', 'apply']);
 const NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
@@ -45,7 +46,7 @@ function usage() {
   node scripts/verify-apply.mjs \\
     --release-contract <json> \\
     --rendered-manifests <dir> \\
-    --target-profile existing_kubernetes/external_declared/<online|airgap>|existing_kubernetes/kit_installed/online \\
+    --target-profile existing_kubernetes/<external_declared|kit_installed>/<online|airgap> \\
     --namespace <name> \\
     --output-dir <dir> \\
     [--mode server-dry-run|apply] \\

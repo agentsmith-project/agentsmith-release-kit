@@ -395,6 +395,13 @@ grep -q 'rollout status Deployment/agentsmith-web --namespace agentsmith --timeo
 assert_rollout_report "$kit_online_output/rollout-report.json" "$KIT_ONLINE_TARGET_PROFILE"
 pass "kit-installed online rollout accepted without changing Kubernetes rollout behavior"
 
+kit_airgap_output="$TMP_DIR/out-kit-airgap"
+reset_kubectl_log
+run_rollout "$valid_manifests" "$kit_airgap_output" "$KIT_AIRGAP_TARGET_PROFILE" >/dev/null
+grep -q 'rollout status Deployment/agentsmith-web --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" || fail "fake kubectl did not receive kit airgap rollout status call"
+assert_rollout_report "$kit_airgap_output/rollout-report.json" "$KIT_AIRGAP_TARGET_PROFILE"
+pass "kit-installed airgap rollout accepted without changing Kubernetes rollout behavior"
+
 rewritten_ref_output="$TMP_DIR/out-rewritten-ref"
 reset_kubectl_log
 FAKE_KUBECTL_PODS_MODE=rewritten_ref_same_digest run_rollout "$valid_manifests" "$rewritten_ref_output" "$TARGET_PROFILE" >/dev/null
@@ -462,7 +469,6 @@ expect_profile_fail() {
 }
 
 expect_profile_fail kind-rehearsal "kind_rehearsal/kit_installed/online"
-expect_profile_fail kit-airgap "$KIT_AIRGAP_TARGET_PROFILE"
 expect_profile_fail alias-offline "$ALIAS_OFFLINE_TARGET_PROFILE"
 expect_profile_fail noncanonical-local-kind "local-kind/external_declared/online"
 expect_profile_fail synonym-cluster "existing_kubernetes/cluster/online"

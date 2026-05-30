@@ -36,6 +36,7 @@ VALID_ARCHIVE="$TMP_DIR/agentsmith-deploy-template-package.tgz"
 PAYLOAD_DIR="$TMP_DIR/payload"
 IMAGE_DIR="$TMP_DIR/image-archives"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
+KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
 GOOD_PROBE="$TMP_DIR/tools/archive-digest-probe"
 GOOD_LOADER="$TMP_DIR/tools/image-loader"
 NONZERO_LOADER="$TMP_DIR/tools/nonzero-image-loader"
@@ -239,6 +240,56 @@ fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
 NODE
 }
 
+write_kit_substrate_pack_manifest() {
+  local output="$1"
+
+  "$NODE_BIN" --input-type=module - "$output" "$KIT_AIRGAP_PROFILE" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profile] = process.argv.slice(2);
+const digest = (char) => `sha256:${char.repeat(64)}`;
+const image = (name, tag, char) =>
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+const manifest = {
+  schema_version: 'agentsmith.substrate-pack-manifest/v1',
+  release_kit_version: '0.1.0',
+  installed_by: 'agentsmith-release-kit',
+  target_profile: profile,
+  images: {
+    postgresql: image('postgresql', '16.3', '1'),
+    mongodb: image('mongodb', '7.0', '2'),
+    redis: image('redis', '7.2', '3'),
+    object_storage: image('object-storage', '2026.05', '4'),
+    oidc: image('keycloak', '25.0', '5')
+  },
+  payload: {
+    install_plan: {
+      path: 'payload/install-substrates.json',
+      sha256: digest('6')
+    }
+  },
+  templates: {
+    postgresql: 'templates/postgresql.yaml',
+    mongodb: 'templates/mongodb.yaml',
+    redis: 'templates/redis.yaml',
+    object_storage: 'templates/object-storage.yaml',
+    oidc: 'templates/oidc.yaml'
+  },
+  tools: {
+    checks: {
+      path: 'tools/substrate-checks.txt',
+      sha256: digest('7')
+    }
+  },
+  checksums: {
+    manifest: digest('8')
+  }
+};
+
+fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
 write_tools() {
   mkdir -p "$(dirname "$GOOD_PROBE")"
   cat >"$GOOD_PROBE" <<'NODE'
@@ -313,21 +364,28 @@ NODE
 run_bundle_create() {
   local bundle_root="$1"
   local output_dir="$2"
+  local target_profile="${3:-$AIRGAP_PROFILE}"
+  local substrate_pack_manifest="${4:-}"
   local image_archive_args=()
+  local substrate_pack_args=()
 
   for id in "${RELEASE_IMAGE_IDS[@]}"; do
     image_archive_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
   done
+  if [[ -n "$substrate_pack_manifest" ]]; then
+    substrate_pack_args+=(--substrate-pack-manifest "$substrate_pack_manifest")
+  fi
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
     --release-contract "$VALID_CONTRACT" \
     --deploy-template-package "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
     --archive "$VALID_ARCHIVE" \
-    --target-profile "$AIRGAP_PROFILE" \
+    --target-profile "$target_profile" \
     --target-registry "$AIRGAP_REGISTRY" \
     --bundle-root "$bundle_root" \
     --output-dir "$output_dir" \
     "${image_archive_args[@]}" \
+    "${substrate_pack_args[@]}" \
     --runbook "$PAYLOAD_DIR/runbook.md" \
     --script "$PAYLOAD_DIR/install.sh" \
     --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
@@ -421,11 +479,12 @@ NODE
 assert_report() {
   local report_file="$1"
   local archive_check_report_file="$2"
+  local expected_profile="${3:-$AIRGAP_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$archive_check_report_file" "$VALID_CONTRACT" "$GOOD_LOADER" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$archive_check_report_file" "$VALID_CONTRACT" "$GOOD_LOADER" "$expected_profile" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile, archiveCheckReportFile, validContract, loaderPath] = process.argv.slice(2);
+const [reportFile, archiveCheckReportFile, validContract, loaderPath, expectedProfile] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const archiveCheckReport = JSON.parse(fs.readFileSync(archiveCheckReportFile, 'utf8'));
 const serialized = JSON.stringify(report);
@@ -479,7 +538,7 @@ if (report.readiness !== false) {
 if (report.status !== 'pass') {
   throw new Error(`unexpected status: ${report.status}`);
 }
-if (report.target_profile?.value !== 'existing_kubernetes/external_declared/airgap') {
+if (report.target_profile?.value !== expectedProfile) {
   throw new Error(`unexpected target profile: ${report.target_profile?.value}`);
 }
 if (report.load_count !== expectedImageCount) {
@@ -567,11 +626,20 @@ write_materials "$manifest_sha" "$archive_sha"
 create_payloads
 create_image_archives
 write_operator_prerequisites "$OPERATOR_PREREQUISITES"
+write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK_MANIFEST"
 write_tools
 
 VALID_BUNDLE_ROOT="$TMP_DIR/bundle-valid"
 VALID_CREATE_OUTPUT="$TMP_DIR/out-create-valid"
 run_bundle_create "$VALID_BUNDLE_ROOT" "$VALID_CREATE_OUTPUT" >"$TMP_DIR/create-valid.out"
+
+KIT_BUNDLE_ROOT="$TMP_DIR/bundle-kit-valid"
+KIT_CREATE_OUTPUT="$TMP_DIR/out-create-kit-valid"
+run_bundle_create \
+  "$KIT_BUNDLE_ROOT" \
+  "$KIT_CREATE_OUTPUT" \
+  "$KIT_AIRGAP_PROFILE" \
+  "$KIT_SUBSTRATE_PACK_MANIFEST" >"$TMP_DIR/create-kit-valid.out"
 
 shim_dir="$TMP_DIR/shims"
 mkdir -p "$shim_dir"
@@ -595,10 +663,24 @@ if ! tail -n 1 "$TMP_DIR/image-load-valid.out" | grep -q 'airgap image load mode
 fi
 pass "valid airgap image archives loaded through operator loader without release readiness"
 
+: >"$LOAD_LOG"
+kit_output_dir="$TMP_DIR/out-image-load-kit"
+PATH="$shim_dir:$PATH" AGENTSMITH_LOAD_LOG="$LOAD_LOG" run_image_load \
+  "$KIT_BUNDLE_ROOT" \
+  "$kit_output_dir" \
+  "$GOOD_LOADER" \
+  "$KIT_AIRGAP_PROFILE" >"$TMP_DIR/image-load-kit.out"
+assert_report \
+  "$kit_output_dir/$REPORT_FILE" \
+  "$kit_output_dir/$ARCHIVE_CHECK_DIR/$ARCHIVE_CHECK_REPORT_FILE" \
+  "$KIT_AIRGAP_PROFILE"
+kit_load_count="$(grep -c '^sha256:' "$LOAD_LOG")"
+[[ "$kit_load_count" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] || fail "kit image loader must run exactly once per image"
+pass "valid kit airgap image archives loaded through operator loader without release readiness"
+
 for profile_case in \
   "online:$ONLINE_PROFILE" \
   "kind:$KIND_PROFILE" \
-  "kit-airgap:$KIT_AIRGAP_PROFILE" \
   "noncanonical:$NONCANONICAL_PROFILE" \
   "alias-offline:$ALIAS_OFFLINE_PROFILE"; do
   label="${profile_case%%:*}"

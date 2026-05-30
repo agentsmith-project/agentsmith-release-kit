@@ -303,6 +303,13 @@ grep -Eq 'apply .*--dry-run=server' "$KUBECTL_LOG" || fail "kit online apply dry
 assert_apply_report "$kit_online_dry_run_output/apply-report.json" server-dry-run "" "$KIT_ONLINE_TARGET_PROFILE"
 pass "kit-installed online server dry-run accepted without changing Kubernetes apply behavior"
 
+kit_airgap_dry_run_output="$TMP_DIR/out-kit-airgap-dry-run"
+reset_kubectl_log
+run_apply "$valid_manifests" "$kit_airgap_dry_run_output" "$KIT_AIRGAP_TARGET_PROFILE" >/dev/null
+grep -Eq 'apply .*--dry-run=server' "$KUBECTL_LOG" || fail "kit airgap apply dry-run did not pass --dry-run=server"
+assert_apply_report "$kit_airgap_dry_run_output/apply-report.json" server-dry-run "" "$KIT_AIRGAP_TARGET_PROFILE"
+pass "kit-installed airgap server dry-run accepted without changing Kubernetes apply behavior"
+
 unparsed_version_output="$TMP_DIR/out-unparsed-version"
 reset_kubectl_log
 FAKE_KUBECTL_VERSION_MODE=nonjson run_apply "$valid_manifests" "$unparsed_version_output" "$TARGET_PROFILE" >/dev/null
@@ -348,6 +355,19 @@ fi
 assert_apply_report "$kit_online_apply_output/apply-report.json" apply operator-run-kit-online-1001 "$KIT_ONLINE_TARGET_PROFILE"
 pass "confirmed kit-installed online apply requires matching confirm target profile"
 
+kit_airgap_apply_output="$TMP_DIR/out-kit-airgap-apply"
+reset_kubectl_log
+run_apply "$valid_manifests" "$kit_airgap_apply_output" "$KIT_AIRGAP_TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$KIT_AIRGAP_TARGET_PROFILE" \
+  --operator-run-id operator-run-kit-airgap-1001 >/dev/null
+if grep -q -- '--dry-run=server' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "confirmed kit airgap apply must not pass --dry-run=server"
+fi
+assert_apply_report "$kit_airgap_apply_output/apply-report.json" apply operator-run-kit-airgap-1001 "$KIT_AIRGAP_TARGET_PROFILE"
+pass "confirmed kit-installed airgap apply requires matching confirm target profile"
+
 reset_kubectl_log
 if run_apply "$valid_manifests" "$TMP_DIR/out-airgap-confirm-mismatch" "$AIRGAP_TARGET_PROFILE" \
   --mode apply \
@@ -390,7 +410,6 @@ expect_profile_fail() {
 }
 
 expect_profile_fail kind-rehearsal "kind_rehearsal/kit_installed/online"
-expect_profile_fail kit-airgap "$KIT_AIRGAP_TARGET_PROFILE"
 expect_profile_fail alias-offline "$ALIAS_OFFLINE_TARGET_PROFILE"
 expect_profile_fail noncanonical-local-kind "local-kind/external_declared/online"
 expect_profile_fail synonym-cluster "existing_kubernetes/cluster/online"

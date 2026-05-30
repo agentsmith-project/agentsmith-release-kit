@@ -8,7 +8,13 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERIFY_RELEASE = path.join(ROOT_DIR, 'scripts', 'verify-release.sh');
-const AIRGAP_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const EXTERNAL_AIRGAP_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const KIT_AIRGAP_TARGET_PROFILE = 'existing_kubernetes/kit_installed/airgap';
+const SUPPORTED_TARGET_PROFILES = [
+  EXTERNAL_AIRGAP_TARGET_PROFILE,
+  KIT_AIRGAP_TARGET_PROFILE
+];
+const SUPPORTED_TARGET_PROFILE_SET = new Set(SUPPORTED_TARGET_PROFILES);
 const REPORT_FILE = 'airgap-consume-rehearsal-report.json';
 const BUNDLE_MANIFEST_FILE = 'airgap-bundle-manifest.json';
 const REQUIRED_ARGS = [
@@ -25,6 +31,7 @@ const COMPONENT_KINDS = [
   'deploy_template_archive',
   'image_map'
 ];
+const SUBSTRATE_PACK_COMPONENT_KIND = 'substrate_pack_manifest';
 const SUPPORTED_MODES = new Set(['server-dry-run', 'apply']);
 const SUPPORTED_REHEARSAL_LABELS = new Set(['existing_kubernetes', 'kind_rehearsal']);
 const MANAGED_OUTPUT_ENTRIES = [
@@ -74,7 +81,7 @@ function usage() {
     [--forbidden-source-root <dir>] \\
     [--archive-probe <executable>] \\
     [--image-loader <executable>] \\
-    [--confirm-apply existing_kubernetes/external_declared/airgap] \\
+    [--confirm-apply <matching-bundle-target-profile>] \\
     [--operator-run-id <id>] \\
     [--timeout <duration>] \\
     [--smoke-url <https-url>] \\
@@ -84,7 +91,7 @@ function usage() {
     [--allow-localhost]
 
 Rehearsal label is operator-provided label-only metadata. It does not change
-the existing_kubernetes/external_declared/airgap target profile or prove kind.`;
+the bundle target profile or prove kind.`;
 }
 
 function cliFail(message) {
@@ -392,7 +399,42 @@ async function resolveManifestComponent(bundleRoot, component, label) {
   return bundleLocalFile(path.join(bundleRoot, relativePath), `${label}.path`, bundleRoot);
 }
 
-async function discoverComponents(bundleRoot, manifest) {
+function parseTargetProfileValue(value, label) {
+  const text = requireString(value, label);
+  const tuple = text.split('/');
+  if (tuple.length !== 3 || tuple.some((part) => part.trim() === '')) {
+    fail(`${label} must be <target_cluster>/<substrate_source>/<distribution>`);
+  }
+  const [targetCluster, substrateSource, distribution] = tuple;
+  const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
+  if (!SUPPORTED_TARGET_PROFILE_SET.has(normalized)) {
+    fail(`bundle_manifest.target_profile must be ${SUPPORTED_TARGET_PROFILES.join(' or ')}`);
+  }
+  return {
+    value: normalized,
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution
+  };
+}
+
+function discoverTargetProfile(manifest) {
+  const profile = requireObject(manifest.target_profile, 'bundle_manifest.target_profile');
+  const parsed = parseTargetProfileValue(profile.value, 'bundle_manifest.target_profile.value');
+  if (
+    requireString(profile.target_cluster, 'bundle_manifest.target_profile.target_cluster') !==
+      parsed.target_cluster ||
+    requireString(profile.substrate_source, 'bundle_manifest.target_profile.substrate_source') !==
+      parsed.substrate_source ||
+    requireString(profile.distribution, 'bundle_manifest.target_profile.distribution') !==
+      parsed.distribution
+  ) {
+    fail('bundle_manifest.target_profile fields must match bundle_manifest.target_profile.value');
+  }
+  return parsed;
+}
+
+async function discoverComponents(bundleRoot, manifest, targetProfile) {
   const components = requireArray(manifest.components, 'bundle_manifest.components');
   const byKind = new Map();
   for (const [index, value] of components.entries()) {
@@ -415,6 +457,17 @@ async function discoverComponents(bundleRoot, manifest) {
       bundleRoot,
       component,
       `bundle_manifest.components.${kind}`
+    );
+  }
+  if (targetProfile.value === KIT_AIRGAP_TARGET_PROFILE) {
+    const component = byKind.get(SUBSTRATE_PACK_COMPONENT_KIND);
+    if (!component) {
+      fail('kit airgap bundle manifest must include substrate_pack_manifest');
+    }
+    paths[SUBSTRATE_PACK_COMPONENT_KIND] = await resolveManifestComponent(
+      bundleRoot,
+      component,
+      `bundle_manifest.components.${SUBSTRATE_PACK_COMPONENT_KIND}`
     );
   }
   return paths;
@@ -509,15 +562,6 @@ async function readProducerReport(file, step, expectedMode) {
   return input.input_sha256;
 }
 
-function targetProfile() {
-  return {
-    value: AIRGAP_TARGET_PROFILE,
-    target_cluster: 'existing_kubernetes',
-    substrate_source: 'external_declared',
-    distribution: 'airgap'
-  };
-}
-
 function rehearsalLabel(value) {
   return {
     value,
@@ -554,9 +598,12 @@ async function main(argv) {
 
   const bundleManifestPath = await resolveBundleManifest(args, bundleRoot);
   const bundleManifestInput = await readJson(bundleManifestPath, 'bundle manifest');
+  const bundleManifest = requireObject(bundleManifestInput.value, 'bundle_manifest');
+  const targetProfile = discoverTargetProfile(bundleManifest);
   const componentPaths = await discoverComponents(
     bundleRoot,
-    requireObject(bundleManifestInput.value, 'bundle_manifest')
+    bundleManifest,
+    targetProfile
   );
   const releaseIdentity = await readReleaseIdentity(componentPaths.release_contract);
 
@@ -572,7 +619,7 @@ async function main(argv) {
     '--image-map',
     componentPaths.image_map,
     '--target-profile',
-    AIRGAP_TARGET_PROFILE,
+    targetProfile.value,
     '--bundle-root',
     bundleRoot,
     '--bundle-manifest',
@@ -600,7 +647,7 @@ async function main(argv) {
     '--image-map',
     componentPaths.image_map,
     '--target-profile',
-    AIRGAP_TARGET_PROFILE,
+    targetProfile.value,
     '--bundle-root',
     bundleRoot,
     '--bundle-manifest',
@@ -634,7 +681,7 @@ async function main(argv) {
     mode: args.mode,
     release_id: releaseIdentity.release_id,
     git_sha: releaseIdentity.git_sha,
-    target_profile: targetProfile(),
+    target_profile: targetProfile,
     rehearsal_label: rehearsalLabel(args.rehearsalLabel),
     input_digests: {
       release_contract: releaseIdentity.input_sha256,
@@ -647,7 +694,15 @@ async function main(argv) {
         'deploy template archive'
       ),
       image_map: await digestFile(componentPaths.image_map, 'image map'),
-      bundle_manifest: bundleManifestInput.input_sha256
+      bundle_manifest: bundleManifestInput.input_sha256,
+      ...(componentPaths.substrate_pack_manifest
+        ? {
+            substrate_pack_manifest: await digestFile(
+              componentPaths.substrate_pack_manifest,
+              'substrate pack manifest'
+            )
+          }
+        : {})
     },
     producer_report_digests: {
       airgap_bundle_check_report: bundleCheckReportDigest,

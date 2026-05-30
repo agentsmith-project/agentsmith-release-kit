@@ -19,7 +19,13 @@ const REQUIRED_ARGS = [
   'substrateTruth',
   'outputDir'
 ];
-const AIRGAP_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const EXTERNAL_AIRGAP_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const KIT_AIRGAP_TARGET_PROFILE = 'existing_kubernetes/kit_installed/airgap';
+const AIRGAP_TARGET_PROFILE_VALUES = [
+  EXTERNAL_AIRGAP_TARGET_PROFILE,
+  KIT_AIRGAP_TARGET_PROFILE
+];
+const AIRGAP_TARGET_PROFILE_SET = new Set(AIRGAP_TARGET_PROFILE_VALUES);
 const REPORT_SCHEMA = 'agentsmith.airgap-bundle-render-check-report/v1';
 const REPORT_SCOPE = 'airgap_bundle_render_check_only';
 const REPORT_FILE = 'airgap-bundle-render-check-report.json';
@@ -41,11 +47,15 @@ const TARGET_PROFILE_KEYS = new Set([
   'substrate_source',
   'distribution'
 ]);
-const COMPONENT_KINDS = new Set([
+const REQUIRED_COMPONENT_KINDS = new Set([
   'release_contract',
   'deploy_template_package',
   'deploy_template_archive',
   'image_map'
+]);
+const SUMMARY_COMPONENT_KINDS = new Set([
+  ...REQUIRED_COMPONENT_KINDS,
+  'substrate_pack_manifest'
 ]);
 const COMPONENT_ARG_BY_KIND = {
   release_contract: 'releaseContract',
@@ -75,7 +85,7 @@ function usage() {
     --deploy-template-package <bundle-local-json> \\
     --archive <bundle-local-tgz> \\
     --image-map <bundle-local-json> \\
-    --target-profile existing_kubernetes/external_declared/airgap \\
+    --target-profile existing_kubernetes/<external_declared|kit_installed>/airgap \\
     --bundle-root <dir> \\
     --bundle-manifest <bundle-local-json> \\
     --render-values <bundle-local-json> \\
@@ -316,33 +326,32 @@ function isInsidePath(rootDir, candidate) {
 }
 
 function parseTargetProfile(value) {
-  if (value !== AIRGAP_TARGET_PROFILE) {
-    fail(`--airgap-bundle-render-check only accepts ${AIRGAP_TARGET_PROFILE}`);
+  const text = requireString(value, 'target_profile');
+  const tuple = text.split('/');
+  if (tuple.length !== 3 || tuple.some((part) => part.trim() === '')) {
+    fail('target_profile must be <target_cluster>/<substrate_source>/<distribution>');
+  }
+  const [targetCluster, substrateSource, distribution] = tuple;
+  const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
+  if (!AIRGAP_TARGET_PROFILE_SET.has(normalized)) {
+    fail(`--airgap-bundle-render-check only accepts ${AIRGAP_TARGET_PROFILE_VALUES.join(' or ')}`);
   }
 
   return {
-    value,
-    target_cluster: 'existing_kubernetes',
-    substrate_source: 'external_declared',
-    distribution: 'airgap'
+    value: normalized,
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution
   };
 }
 
-function assertTargetProfileObject(value, label) {
+function assertTargetProfileObject(value, label, targetProfile) {
   const profile = requireObject(value, label);
   assertAllowedKeys(profile, TARGET_PROFILE_KEYS, label);
-  assertStringEquals(profile.value, AIRGAP_TARGET_PROFILE, `${label}.value`);
-  assertStringEquals(
-    profile.target_cluster,
-    'existing_kubernetes',
-    `${label}.target_cluster`
-  );
-  assertStringEquals(
-    profile.substrate_source,
-    'external_declared',
-    `${label}.substrate_source`
-  );
-  assertStringEquals(profile.distribution, 'airgap', `${label}.distribution`);
+  assertStringEquals(profile.value, targetProfile.value, `${label}.value`);
+  assertStringEquals(profile.target_cluster, targetProfile.target_cluster, `${label}.target_cluster`);
+  assertStringEquals(profile.substrate_source, targetProfile.substrate_source, `${label}.substrate_source`);
+  assertStringEquals(profile.distribution, targetProfile.distribution, `${label}.distribution`);
 }
 
 function assertNonSensitiveTargetRegistry(value, label) {
@@ -503,7 +512,7 @@ async function assertBundleInputsMatchManifest({
     const label = `bundle_manifest.components[${index}]`;
     const component = requireObject(value, label);
     const kind = requireString(component.kind, `${label}.kind`);
-    if (!COMPONENT_KINDS.has(kind)) {
+    if (!SUMMARY_COMPONENT_KINDS.has(kind)) {
       continue;
     }
     if (seen.has(kind)) {
@@ -513,7 +522,7 @@ async function assertBundleInputsMatchManifest({
 
     const componentRealPath = await bundleManifestComponentPath(bundleRoot, component);
     const argKey = COMPONENT_ARG_BY_KIND[kind];
-    if (componentRealPath !== bundleLocalPaths[argKey]) {
+    if (argKey && componentRealPath !== bundleLocalPaths[argKey]) {
       fail(`${toKebab(argKey)} must point at bundle_manifest.components ${kind} path`);
     }
     summary.push({
@@ -523,7 +532,7 @@ async function assertBundleInputsMatchManifest({
     });
   }
 
-  for (const kind of COMPONENT_KINDS) {
+  for (const kind of REQUIRED_COMPONENT_KINDS) {
     if (!seen.has(kind)) {
       fail(`bundle_manifest.components is missing ${kind}`);
     }
@@ -552,10 +561,10 @@ function assertReportEnvelope(report, expected, label) {
   assertStringEquals(report.status, 'pass', `${label}.status`);
   assertStringEquals(report.release_id, expected.releaseId, `${label}.release_id`);
   assertStringEquals(report.git_sha, expected.gitSha, `${label}.git_sha`);
-  assertTargetProfileObject(report.target_profile, `${label}.target_profile`);
+  assertTargetProfileObject(report.target_profile, `${label}.target_profile`, expected.targetProfile);
 }
 
-function assertImageMap(imageMap, expectedReleaseId, expectedGitSha) {
+function assertImageMap(imageMap, expectedReleaseId, expectedGitSha, targetProfile) {
   const report = requireObject(imageMap, 'image_map');
   assertStringEquals(report.schema, 'agentsmith.image-map/v1', 'image_map.schema');
   assertStringEquals(report.scope, 'image_map_only', 'image_map.scope');
@@ -563,7 +572,7 @@ function assertImageMap(imageMap, expectedReleaseId, expectedGitSha) {
   assertStringEquals(report.status, 'pass', 'image_map.status');
   assertStringEquals(report.release_id, expectedReleaseId, 'image_map.release_id');
   assertStringEquals(report.git_sha, expectedGitSha, 'image_map.git_sha');
-  assertTargetProfileObject(report.target_profile, 'image_map.target_profile');
+  assertTargetProfileObject(report.target_profile, 'image_map.target_profile', targetProfile);
   requireBooleanTrue(report.mirror_required, 'image_map.mirror_required');
   const targetRegistry = requireString(report.target_registry, 'image_map.target_registry');
   assertNonSensitiveTargetRegistry(targetRegistry, 'image_map.target_registry');
@@ -882,7 +891,8 @@ async function main() {
         schema: 'agentsmith.airgap-bundle-check-report/v1',
         scope: 'airgap_bundle_manifest_check_only',
         releaseId: checkReport.release_id,
-        gitSha: checkReport.git_sha
+        gitSha: checkReport.git_sha,
+        targetProfile
       },
       'airgap_bundle_check_report'
     );
@@ -897,7 +907,8 @@ async function main() {
       {
         schema: 'agentsmith.manifest-render-report/v1',
         scope: 'manifest_render_only',
-        ...expected
+        ...expected,
+        targetProfile
       },
       'manifest_render_report'
     );
@@ -910,7 +921,8 @@ async function main() {
       {
         schema: 'agentsmith.render-check-report/v1',
         scope: 'render_check_image_inventory_only',
-        ...expected
+        ...expected,
+        targetProfile
       },
       'render_check_report'
     );
@@ -918,7 +930,8 @@ async function main() {
     const imageMapSummary = assertImageMap(
       imageMapInput.value,
       expected.releaseId,
-      expected.gitSha
+      expected.gitSha,
+      targetProfile
     );
     const imageInventorySummary = assertRenderedImagesUseTargets({
       renderReport,

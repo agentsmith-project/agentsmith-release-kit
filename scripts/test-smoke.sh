@@ -318,10 +318,12 @@ NODE
 VALID_ROLLOUT="$TMP_DIR/rollout-report.valid.json"
 AIRGAP_ROLLOUT="$TMP_DIR/rollout-report.airgap.json"
 KIT_ONLINE_ROLLOUT="$TMP_DIR/rollout-report.kit-online.json"
+KIT_AIRGAP_ROLLOUT="$TMP_DIR/rollout-report.kit-airgap.json"
 BAD_ROLLOUT="$TMP_DIR/rollout-report.bad.json"
 write_rollout_report "$VALID_ROLLOUT" valid
 write_rollout_report "$AIRGAP_ROLLOUT" valid "$AIRGAP_TARGET_PROFILE"
 write_rollout_report "$KIT_ONLINE_ROLLOUT" valid "$KIT_ONLINE_TARGET_PROFILE"
+write_rollout_report "$KIT_AIRGAP_ROLLOUT" valid "$KIT_AIRGAP_TARGET_PROFILE"
 write_rollout_report "$BAD_ROLLOUT" bad_status
 start_server
 
@@ -360,6 +362,17 @@ fi
 assert_smoke_report "$kit_online_output/smoke-report.json" "$BASE_URL" "127.0.0.1:$SERVER_PORT" "$KIT_ONLINE_TARGET_PROFILE"
 pass "kit-installed online route smoke accepted without changing smoke behavior"
 
+kit_airgap_output="$TMP_DIR/out-kit-airgap"
+before_kit_airgap="$(hit_count)"
+run_smoke_raw "$VALID_CONTRACT" "$KIT_AIRGAP_ROLLOUT" "$BASE_URL/ok" "$kit_airgap_output" "$KIT_AIRGAP_TARGET_PROFILE" --allow-http --allow-localhost >/dev/null
+after_kit_airgap="$(hit_count)"
+if [[ "$after_kit_airgap" -ne $((before_kit_airgap + 1)) ]]; then
+  cat "$SERVER_LOG" >&2
+  fail "kit airgap happy path should issue exactly one GET"
+fi
+assert_smoke_report "$kit_airgap_output/smoke-report.json" "$BASE_URL" "127.0.0.1:$SERVER_PORT" "$KIT_AIRGAP_TARGET_PROFILE"
+pass "kit-installed airgap route smoke accepted without changing smoke behavior"
+
 mismatch_output="$TMP_DIR/out-status-mismatch"
 mkdir -p "$mismatch_output"
 printf '%s\n' '{"stale":true}' >"$mismatch_output/smoke-report.json"
@@ -380,7 +393,6 @@ expect_no_network_fail dotted-localhost "https://localhost./ok" "$TMP_DIR/out-do
 expect_no_network_fail mapped-loopback-decimal "http://[::ffff:127.0.0.1]:$SERVER_PORT/ok" "$TMP_DIR/out-mapped-loopback-decimal" "$TARGET_PROFILE" --allow-http
 expect_no_network_fail mapped-loopback-hex "http://[::ffff:7f00:1]:$SERVER_PORT/ok" "$TMP_DIR/out-mapped-loopback-hex" "$TARGET_PROFILE" --allow-http
 expect_no_network_fail unsupported-target "$BASE_URL/ok" "$TMP_DIR/out-unsupported-target" "kind_rehearsal/kit_installed/online" --allow-http --allow-localhost
-expect_no_network_fail kit-airgap-target "$BASE_URL/ok" "$TMP_DIR/out-kit-airgap-target" "$KIT_AIRGAP_TARGET_PROFILE" --allow-http --allow-localhost
 expect_no_network_fail alias-offline-target "$BASE_URL/ok" "$TMP_DIR/out-alias-offline-target" "$ALIAS_OFFLINE_TARGET_PROFILE" --allow-http --allow-localhost
 
 before_bad_rollout="$(hit_count)"
