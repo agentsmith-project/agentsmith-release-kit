@@ -26,7 +26,8 @@ export const INTAKE_SUPPORTED_TARGET_PROFILE_SET = new Set(
 export const EXECUTABLE_TARGET_PROFILE_VALUES = [
   'existing_kubernetes/external_declared/online',
   'existing_kubernetes/external_declared/airgap',
-  'existing_kubernetes/kit_installed/online'
+  'existing_kubernetes/kit_installed/online',
+  'existing_kubernetes/kit_installed/airgap'
 ];
 
 export const EXECUTABLE_TARGET_PROFILE_SET = new Set(EXECUTABLE_TARGET_PROFILE_VALUES);

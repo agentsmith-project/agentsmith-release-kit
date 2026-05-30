@@ -1615,6 +1615,78 @@ assert_operator_report \
 assert_operator_airgap_manifest_digest "$custom_manifest_output" "$custom_bundle_manifest_digest"
 pass "operator airgap/use_existing summary honors non-default in-bundle bundle manifest"
 
+equals_output_dir_output="$TMP_DIR/out-equals-output-dir"
+expect_operator_fail_preserves_summary operator-equals-output-dir "$equals_output_dir_output" \
+  env FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+    --release-contract "$VALID_CONTRACT" \
+    --deploy-template-package "$VALID_PACKAGE" \
+    --archive "$VALID_ARCHIVE" \
+    --render-values "$VALID_VALUES" \
+    --substrate-truth "$EXTERNAL_TRUTH" \
+    --target-prerequisites "$EXTERNAL_PREREQUISITES" \
+    --namespace agentsmith \
+    --output-dir="$equals_output_dir_output" \
+    --kubectl "$FAKE_KUBECTL"
+
+equals_bundle_root_output="$TMP_DIR/out-airgap-equals-bundle-root"
+expect_operator_fail_before_airgap_consume_outputs \
+  airgap-equals-bundle-root \
+  "$equals_bundle_root_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root="$airgap_bundle_root" \
+    --render-values "$airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$equals_bundle_root_output" \
+    --kubectl "$FAKE_KUBECTL"
+
+equals_bundle_manifest_output="$TMP_DIR/out-airgap-equals-bundle-manifest"
+expect_operator_fail_before_airgap_consume_outputs \
+  airgap-equals-bundle-manifest \
+  "$equals_bundle_manifest_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$custom_manifest_bundle_root" \
+    --bundle-manifest="$custom_bundle_manifest" \
+    --render-values "$custom_manifest_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$custom_manifest_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$custom_manifest_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$equals_bundle_manifest_output" \
+    --kubectl "$FAKE_KUBECTL"
+
+equals_confirm_apply_output="$TMP_DIR/out-equals-confirm-apply"
+expect_operator_fail_preserves_summary operator-equals-confirm-apply "$equals_confirm_apply_output" \
+  env FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+    --release-contract "$VALID_CONTRACT" \
+    --deploy-template-package "$VALID_PACKAGE" \
+    --archive "$VALID_ARCHIVE" \
+    --render-values "$VALID_VALUES" \
+    --substrate-truth "$EXTERNAL_TRUTH" \
+    --target-prerequisites "$EXTERNAL_PREREQUISITES" \
+    --namespace agentsmith \
+    --output-dir "$equals_confirm_apply_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --confirm-apply=online/use_existing \
+    --operator-run-id operator-run-equals-confirm \
+    --timeout 120s \
+    --smoke-url "$BASE_URL/ok" \
+    --allow-http \
+    --allow-localhost
+
+duplicate_output_dir_output="$TMP_DIR/out-duplicate-output-dir"
+expect_operator_fail_preserves_summary duplicate-output-dir "$duplicate_output_dir_output" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+    --output-dir "$duplicate_output_dir_output" \
+    --output-dir "$TMP_DIR/out-duplicate-output-dir-second"
+
 duplicate_bundle_root_output="$TMP_DIR/out-airgap-duplicate-bundle-root"
 expect_operator_fail_before_airgap_consume_outputs \
   airgap-duplicate-bundle-root \

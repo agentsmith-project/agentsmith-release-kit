@@ -1249,6 +1249,52 @@ expect_kit_bundle_fail() {
   pass "invalid kit airgap bundle rejected: $label"
 }
 
+expect_outside_bundle_manifest_fail() {
+  local label="outside-bundle-manifest"
+  local image_map_dir="$TMP_DIR/image-map-$label"
+  local bundle_root="$TMP_DIR/bundle-$label"
+  local bundle_manifest="$bundle_root/airgap-bundle-manifest.json"
+  local outside_manifest="$TMP_DIR/$label.airgap-bundle-manifest.json"
+  local output_dir="$TMP_DIR/out-$label"
+
+  run_image_map "$image_map_dir"
+  create_bundle "$image_map_dir/image-map.json" "$bundle_root" "$bundle_manifest"
+  cp "$bundle_manifest" "$outside_manifest"
+  write_stale_report "$output_dir"
+
+  if run_airgap_bundle_check "$image_map_dir/image-map.json" "$AIRGAP_PROFILE" "$bundle_root" "$outside_manifest" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected outside bundle manifest argument to fail"
+  fi
+
+  assert_no_report "$output_dir/$REPORT_FILE"
+  pass "outside airgap bundle manifest argument rejected"
+}
+
+expect_bundle_root_symlink_fail() {
+  local label="bundle-root-symlink"
+  local image_map_dir="$TMP_DIR/image-map-$label"
+  local bundle_root="$TMP_DIR/bundle-$label"
+  local bundle_root_link="$TMP_DIR/bundle-$label-link"
+  local bundle_manifest="$bundle_root/airgap-bundle-manifest.json"
+  local output_dir="$TMP_DIR/out-$label"
+
+  run_image_map "$image_map_dir"
+  create_bundle "$image_map_dir/image-map.json" "$bundle_root" "$bundle_manifest"
+  ln -s "$bundle_root" "$bundle_root_link"
+  write_stale_report "$output_dir"
+
+  if run_airgap_bundle_check "$image_map_dir/image-map.json" "$AIRGAP_PROFILE" "$bundle_root_link" "$bundle_root_link/airgap-bundle-manifest.json" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected bundle root symlink argument to fail"
+  fi
+
+  assert_no_report "$output_dir/$REPORT_FILE"
+  pass "airgap bundle root symlink argument rejected"
+}
+
 valid_image_map_dir="$TMP_DIR/image-map-valid"
 valid_bundle_root="$TMP_DIR/bundle-valid"
 valid_bundle_manifest="$valid_bundle_root/airgap-bundle-manifest.json"
@@ -1278,6 +1324,9 @@ add_kit_substrate_pack_to_bundle "$valid_kit_bundle_root" "$valid_kit_bundle_man
 run_airgap_bundle_check "$valid_kit_image_map_dir/image-map.json" "$KIT_AIRGAP_PROFILE" "$valid_kit_bundle_root" "$valid_kit_bundle_manifest" "$valid_kit_output_dir" >"$TMP_DIR/valid-kit-airgap.out"
 assert_report "$valid_kit_output_dir/$REPORT_FILE" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE" 5 kit_installed true
 pass "valid kit-installed airgap bundle manifest binds substrate pack component digest"
+
+expect_outside_bundle_manifest_fail
+expect_bundle_root_symlink_fail
 
 expect_kit_bundle_fail substrate-pack-binding-sha-mismatch substrate_pack_binding_sha_mismatch
 expect_kit_bundle_fail substrate-pack-component-sha-mismatch substrate_pack_component_sha_mismatch

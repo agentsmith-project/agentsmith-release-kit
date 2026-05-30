@@ -6,6 +6,7 @@ NODE_BIN="${NODE:-node}"
 FIXTURE_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 FIXTURE_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-package.valid.json"
 AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 SURFACE_REPORT_FILE="operator-release-surface-report.json"
 ADOPTION_REPORT_FILE="airgap-adoption-report.json"
@@ -191,8 +192,9 @@ JSON
 
 write_truth() {
   local output="$1"
+  local profile="${2:-$AIRGAP_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$output" "$AIRGAP_PROFILE" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
 import fs from 'node:fs';
 
 const [output, profile] = process.argv.slice(2);
@@ -272,14 +274,21 @@ const truth = {
   }
 };
 
+if (substrateSource === 'kit_installed') {
+  truth.installed_by = 'agentsmith-release-kit';
+  truth.release_kit_version = '0.1.0';
+  truth.installation_id = 'kit-install-airgap-adoption-10001';
+}
+
 fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
 NODE
 }
 
 write_prerequisites() {
   local output="$1"
+  local profile="${2:-$AIRGAP_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$output" "$AIRGAP_PROFILE" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
 import fs from 'node:fs';
 
 const [output, profile] = process.argv.slice(2);
@@ -392,6 +401,58 @@ const prerequisites = {
 };
 
 fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+write_kit_substrate_pack_manifest() {
+  local output="$1"
+  local profile="$2"
+
+  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profile] = process.argv.slice(2);
+const digest = (char) => `sha256:${char.repeat(64)}`;
+const image = (name, tag, char) =>
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+
+const manifest = {
+  schema_version: 'agentsmith.substrate-pack-manifest/v1',
+  release_kit_version: '0.1.0',
+  installed_by: 'agentsmith-release-kit',
+  target_profile: profile,
+  images: {
+    postgresql: image('postgresql', '16.3', '1'),
+    mongodb: image('mongodb', '7.0', '2'),
+    redis: image('redis', '7.2', '3'),
+    object_storage: image('object-storage', '2026.05', '4'),
+    oidc: image('keycloak', '25.0', '5')
+  },
+  payload: {
+    install_plan: {
+      path: 'payload/install-substrates.json',
+      sha256: digest('6')
+    }
+  },
+  templates: {
+    postgresql: 'templates/postgresql.yaml',
+    mongodb: 'templates/mongodb.yaml',
+    redis: 'templates/redis.yaml',
+    object_storage: 'templates/object-storage.yaml',
+    oidc: 'templates/oidc.yaml'
+  },
+  tools: {
+    routability_probe: {
+      path: 'tools/substrate-routability-probe.txt',
+      sha256: digest('7')
+    }
+  },
+  checksums: {
+    manifest: digest('8')
+  }
+};
+
+fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
@@ -511,11 +572,12 @@ NODE
 
 write_bundle_operator_inputs() {
   local bundle_root="$1"
+  local profile="${2:-$AIRGAP_PROFILE}"
 
   mkdir -p "$bundle_root/operator-inputs"
   write_render_values "$bundle_root/operator-inputs/render-values.json"
-  write_truth "$bundle_root/operator-inputs/substrate-truth.json"
-  write_prerequisites "$bundle_root/operator-inputs/target-prerequisites.json"
+  write_truth "$bundle_root/operator-inputs/substrate-truth.json" "$profile"
+  write_prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" "$profile"
 }
 
 target_image_for_id() {
@@ -603,6 +665,28 @@ run_bundle_surface() {
     "$@"
 }
 
+run_kit_bundle_surface() {
+  local bundle_root="$1"
+  local output_dir="$2"
+  shift 2
+
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
+    --release-contract "$VALID_CONTRACT" \
+    --deploy-template-package "$VALID_PACKAGE" \
+    --archive "$VALID_ARCHIVE" \
+    --target-registry "$AIRGAP_REGISTRY" \
+    "${image_args[@]}" \
+    --runbook "$PAYLOAD_DIR/runbook.md" \
+    --script "$PAYLOAD_DIR/install.sh" \
+    --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
+    --profile-values-example "$PAYLOAD_DIR/profile-values.example.yaml" \
+    --operator-prerequisites "$OPERATOR_PREREQUISITES" \
+    --substrate-pack-manifest "$KIT_AIRGAP_SUBSTRATE_PACK" \
+    --bundle-root "$bundle_root" \
+    --output-dir "$output_dir" \
+    "$@"
+}
+
 run_consume_surface() {
   local bundle_root="$1"
   local output_dir="$2"
@@ -633,6 +717,42 @@ run_consume_surface() {
     --archive-probe "$GOOD_PROBE" \
     --image-loader "$GOOD_LOADER" \
     --confirm-apply airgap/use_existing \
+    --operator-run-id "$operator_run_id" \
+    --timeout 120s \
+    "${smoke_args[@]}" \
+    "$@"
+}
+
+run_kit_consume_surface() {
+  local bundle_root="$1"
+  local output_dir="$2"
+  local operator_run_id="$3"
+  local smoke_url="$4"
+  shift 4
+  local target_app_image
+  local smoke_args=()
+
+  target_app_image="$(target_image_for_id "$bundle_root/components/image-map.json" agentsmith_app)"
+  if [[ -n "$smoke_url" ]]; then
+    smoke_args+=(--smoke-url "$smoke_url" --allow-http --allow-localhost)
+  fi
+
+  AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+  FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  FAKE_KUBECTL_LIVE_IMAGE="$target_app_image" \
+  FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$target_app_image" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+    --bundle-root "$bundle_root" \
+    --render-values "$bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$output_dir" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --archive-probe "$GOOD_PROBE" \
+    --image-loader "$GOOD_LOADER" \
+    --confirm-apply airgap/install_substrates \
     --operator-run-id "$operator_run_id" \
     --timeout 120s \
     "${smoke_args[@]}" \
@@ -672,11 +792,13 @@ run_adoption() {
 
 assert_adoption_report() {
   local report_file="$1"
+  local expected_profile="${2:-$AIRGAP_PROFILE}"
+  local expected_strategy="${3:-use_existing}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$expected_profile" "$expected_strategy" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile] = process.argv.slice(2);
+const [reportFile, expectedProfile, expectedStrategy] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
 const digestRe = /^sha256:[0-9a-f]{64}$/;
@@ -756,10 +878,18 @@ for (const group of Object.values(report.producer_report_digests || {})) {
 }
 const bundlePath = report.operator_paths?.find((item) => item.surface === 'airgap-bundle');
 const consumePath = report.operator_paths?.find((item) => item.surface === 'airgap');
-if (!bundlePath || bundlePath.substrate_strategy !== 'use_existing') {
+if (
+  !bundlePath ||
+  bundlePath.substrate_strategy !== expectedStrategy ||
+  bundlePath.machine_profile !== expectedProfile
+) {
   throw new Error('bundle operator path summary missing');
 }
-if (!consumePath || consumePath.substrate_strategy !== 'use_existing') {
+if (
+  !consumePath ||
+  consumePath.substrate_strategy !== expectedStrategy ||
+  consumePath.machine_profile !== expectedProfile
+) {
   throw new Error('consume operator path summary missing');
 }
 if (consumePath.mode !== 'apply' || consumePath.operator_run_id_present !== true) {
@@ -865,6 +995,25 @@ fs.writeFileSync(surfaceReport, `${JSON.stringify(report, null, 2)}\n`);
 NODE
 }
 
+update_bundle_surface_bundle_create_digest() {
+  local surface_report="$1"
+  local bundle_create_digest="$2"
+
+  "$NODE_BIN" --input-type=module - \
+    "$surface_report" \
+    "$bundle_create_digest" <<'NODE'
+import fs from 'node:fs';
+
+const [surfaceReport, bundleCreateDigest] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(surfaceReport, 'utf8'));
+if (!report.producer_report_digests) {
+  throw new Error('bundle surface missing producer digests');
+}
+report.producer_report_digests.bundle_create_report = bundleCreateDigest;
+fs.writeFileSync(surfaceReport, `${JSON.stringify(report, null, 2)}\n`);
+NODE
+}
+
 update_consume_report_bundle_check_digest() {
   local consume_report="$1"
   local bundle_check_digest="$2"
@@ -904,6 +1053,38 @@ report.producer_report_digests.airgap_bundle_check_report = bundleCheckDigest;
 report.producer_report_digests.airgap_consume_rehearsal_report = consumeReportDigest;
 report.airgap_handoff.airgap_bundle_check_report_digest = bundleCheckDigest;
 fs.writeFileSync(surfaceReport, `${JSON.stringify(report, null, 2)}\n`);
+NODE
+}
+
+remove_bundle_create_substrate_pack_artifact() {
+  local report_file="$1"
+
+  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+if (!report.artifacts?.substrate_pack_manifest) {
+  throw new Error('bundle create report missing substrate_pack_manifest fixture');
+}
+delete report.artifacts.substrate_pack_manifest;
+fs.writeFileSync(reportFile, `${JSON.stringify(report, null, 2)}\n`);
+NODE
+}
+
+remove_consume_substrate_pack_digest() {
+  local report_file="$1"
+
+  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+if (!report.input_digests?.substrate_pack_manifest) {
+  throw new Error('consume report missing substrate_pack_manifest fixture');
+}
+delete report.input_digests.substrate_pack_manifest;
+fs.writeFileSync(reportFile, `${JSON.stringify(report, null, 2)}\n`);
 NODE
 }
 
@@ -948,6 +1129,7 @@ VALID_PACKAGE="$TMP_DIR/deploy-template-package.valid-material.json"
 VALID_VALUES="$TMP_DIR/render-values.valid.json"
 VALID_TRUTH="$TMP_DIR/substrate-truth.airgap.json"
 VALID_PREREQUISITES="$TMP_DIR/target-prerequisites.airgap.json"
+KIT_AIRGAP_SUBSTRATE_PACK="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
 
 manifest_sha="$(create_archive "$VALID_ARCHIVE")"
 archive_sha="$(sha256_file "$VALID_ARCHIVE")"
@@ -958,6 +1140,7 @@ write_prerequisites "$VALID_PREREQUISITES"
 create_payloads
 create_image_archives
 write_operator_prerequisites
+write_kit_substrate_pack_manifest "$KIT_AIRGAP_SUBSTRATE_PACK" "$KIT_AIRGAP_PROFILE"
 write_airgap_apply_tools
 write_fake_kubectl
 start_server
@@ -988,6 +1171,67 @@ run_adoption \
   "$adoption_output" >"$TMP_DIR/airgap-adoption.out"
 assert_adoption_report "$adoption_output/$ADOPTION_REPORT_FILE"
 pass "airgap adoption aggregates bundle and consume operator surfaces"
+
+kit_bundle_output="$TMP_DIR/out-airgap-bundle-install-substrates"
+kit_bundle_root="$TMP_DIR/bundle-airgap-install-substrates"
+run_kit_bundle_surface "$kit_bundle_root" "$kit_bundle_output" >"$TMP_DIR/kit-airgap-bundle.out"
+[[ -f "$kit_bundle_output/$SURFACE_REPORT_FILE" ]] || fail "kit bundle operator surface report missing"
+[[ -f "$kit_bundle_root/airgap-bundle-manifest.json" ]] || fail "kit bundle manifest missing"
+
+write_bundle_operator_inputs "$kit_bundle_root" "$KIT_AIRGAP_PROFILE"
+kit_consume_output="$TMP_DIR/out-airgap-consume-install-substrates"
+: >"$LOAD_LOG"
+: >"$KUBECTL_LOG"
+run_kit_consume_surface "$kit_bundle_root" "$kit_consume_output" operator-airgap-adoption-kit-1002 "http://127.0.0.1:$SERVER_PORT/ok" >"$TMP_DIR/kit-airgap-consume.out"
+[[ -f "$kit_consume_output/$SURFACE_REPORT_FILE" ]] || fail "kit consume operator surface report missing"
+
+kit_adoption_output="$TMP_DIR/out-airgap-adoption-kit"
+run_adoption \
+  "$kit_bundle_output/$SURFACE_REPORT_FILE" \
+  "$kit_consume_output/$SURFACE_REPORT_FILE" \
+  "$kit_bundle_root/airgap-bundle-manifest.json" \
+  "$kit_adoption_output" >"$TMP_DIR/kit-airgap-adoption.out"
+assert_adoption_report "$kit_adoption_output/$ADOPTION_REPORT_FILE" "$KIT_AIRGAP_PROFILE" install_substrates
+pass "kit airgap adoption aggregates bundle packaging and consume/deploy chain"
+
+expect_adoption_fail kit-profile-mismatch \
+  run_adoption \
+    "$kit_bundle_output/$SURFACE_REPORT_FILE" \
+    "$consume_output/$SURFACE_REPORT_FILE" \
+    "$kit_bundle_root/airgap-bundle-manifest.json" \
+    "$TMP_DIR/out-adoption-kit-profile-mismatch"
+
+kit_missing_bundle_pack_output="$TMP_DIR/out-airgap-bundle-kit-missing-pack"
+cp -R "$kit_bundle_output" "$kit_missing_bundle_pack_output"
+remove_bundle_create_substrate_pack_artifact \
+  "$kit_missing_bundle_pack_output/bundle-create-report.json"
+kit_missing_bundle_create_digest="$(sha256_file "$kit_missing_bundle_pack_output/bundle-create-report.json")"
+update_bundle_surface_bundle_create_digest \
+  "$kit_missing_bundle_pack_output/$SURFACE_REPORT_FILE" \
+  "$kit_missing_bundle_create_digest"
+expect_adoption_fail kit-bundle-create-missing-substrate-pack \
+  run_adoption \
+    "$kit_missing_bundle_pack_output/$SURFACE_REPORT_FILE" \
+    "$kit_consume_output/$SURFACE_REPORT_FILE" \
+    "$kit_bundle_root/airgap-bundle-manifest.json" \
+    "$TMP_DIR/out-adoption-kit-bundle-create-missing-pack"
+
+kit_missing_consume_pack_output="$TMP_DIR/out-airgap-consume-kit-missing-pack"
+cp -R "$kit_consume_output" "$kit_missing_consume_pack_output"
+remove_consume_substrate_pack_digest \
+  "$kit_missing_consume_pack_output/airgap-consume-rehearsal-report.json"
+kit_consume_bundle_check_digest="$(sha256_file "$kit_missing_consume_pack_output/airgap-bundle-check/airgap-bundle-check-report.json")"
+kit_missing_consume_report_digest="$(sha256_file "$kit_missing_consume_pack_output/airgap-consume-rehearsal-report.json")"
+update_consume_surface_digests \
+  "$kit_missing_consume_pack_output/$SURFACE_REPORT_FILE" \
+  "$kit_consume_bundle_check_digest" \
+  "$kit_missing_consume_report_digest"
+expect_adoption_fail kit-consume-missing-substrate-pack \
+  run_adoption \
+    "$kit_bundle_output/$SURFACE_REPORT_FILE" \
+    "$kit_missing_consume_pack_output/$SURFACE_REPORT_FILE" \
+    "$kit_bundle_root/airgap-bundle-manifest.json" \
+    "$TMP_DIR/out-adoption-kit-consume-missing-pack"
 
 explicit_manifest_digest="$(sha256_file "$bundle_root/airgap-bundle-manifest.json")"
 mismatched_manifest_digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

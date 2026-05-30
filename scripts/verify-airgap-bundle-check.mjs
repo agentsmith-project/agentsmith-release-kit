@@ -819,12 +819,15 @@ function assertImageMap({
 }
 
 async function canonicalBundleRoot(input) {
-  const requested = path.resolve(input);
+  const requested = path.resolve(requireString(input, 'bundle root'));
   let stat;
   try {
-    stat = await fs.stat(requested);
+    stat = await fs.lstat(requested);
   } catch (error) {
     fail(`cannot read bundle root: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail('bundle root must not be a symlink');
   }
   if (!stat.isDirectory()) {
     fail('bundle root must be a directory');
@@ -835,6 +838,38 @@ async function canonicalBundleRoot(input) {
   } catch (error) {
     fail(`cannot resolve bundle root: ${error.message}`);
   }
+}
+
+async function bundleLocalFile(input, label, bundleRoot) {
+  const requested = path.resolve(requireString(input, label));
+  if (!isInsidePath(bundleRoot, requested)) {
+    fail(`${label} must be inside bundle root`);
+  }
+
+  let stat;
+  try {
+    stat = await fs.lstat(requested);
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`${label} must not be a symlink`);
+  }
+  if (!stat.isFile()) {
+    fail(`${label} must point to a file`);
+  }
+
+  let realPath;
+  try {
+    realPath = await fs.realpath(requested);
+  } catch (error) {
+    fail(`cannot resolve ${label}: ${error.message}`);
+  }
+  if (!isInsidePath(bundleRoot, realPath)) {
+    fail(`${label} must resolve inside bundle root`);
+  }
+
+  return realPath;
 }
 
 function isInsidePath(rootDir, candidate) {
@@ -1292,12 +1327,17 @@ async function main() {
     'deploy template package'
   );
   const imageMapInput = await readJson(args.imageMap, 'image map');
-  const bundleManifestInput = await readJson(args.bundleManifest, 'bundle manifest');
   const deployTemplateArchiveInputDigest = await digestFile(
     args.archive,
     'deploy template archive'
   );
   const bundleRoot = await canonicalBundleRoot(args.bundleRoot);
+  const bundleManifestPath = await bundleLocalFile(
+    args.bundleManifest,
+    'bundle manifest',
+    bundleRoot
+  );
+  const bundleManifestInput = await readJson(bundleManifestPath, 'bundle manifest');
 
   const deployTemplatePackage = requireObject(
     deployTemplatePackageInput.value,

@@ -21,10 +21,14 @@ const AIRGAP_BUNDLE_CHECK_SCHEMA = 'agentsmith.airgap-bundle-check-report/v1';
 const AIRGAP_BUNDLE_CHECK_SCOPE = 'airgap_bundle_manifest_check_only';
 const BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
 const AIRGAP_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const KIT_AIRGAP_PROFILE = 'existing_kubernetes/kit_installed/airgap';
+const AIRGAP_PROFILES = new Set([AIRGAP_PROFILE, KIT_AIRGAP_PROFILE]);
 const AIRGAP_CONSUME_SCHEMA = 'agentsmith.airgap-consume-rehearsal/v1';
 const AIRGAP_CONSUME_SCOPE = 'airgap_consume_rehearsal_only';
 const AIRGAP_DEPLOYMENT_GATE_SCHEMA = 'agentsmith.airgap-deployment-gate/v1';
 const AIRGAP_DEPLOYMENT_GATE_SCOPE = 'airgap_deployment_gate_only';
+const SUBSTRATE_PACK_CHECK_SCHEMA = 'agentsmith.substrate-pack-check-report/v1';
+const SUBSTRATE_PACK_CHECK_SCOPE = 'substrate_pack_check_only';
 const BUNDLE_CREATE_REPORT_FILE = 'bundle-create-report.json';
 const AIRGAP_BUNDLE_CHECK_REPORT_FILE = 'airgap-bundle-check-report.json';
 const AIRGAP_CONSUME_REPORT_FILE = 'airgap-consume-rehearsal-report.json';
@@ -237,7 +241,7 @@ function assertStringEquals(value, expected, label) {
   return text;
 }
 
-function assertProfile(report, label) {
+function assertProfile(report, label, expectedProfile) {
   const profile = requireObject(report.target_profile, `${label}.target_profile`);
   const targetCluster = requireString(
     profile.target_cluster,
@@ -253,9 +257,17 @@ function assertProfile(report, label) {
   );
   const computed = `${targetCluster}/${substrateSource}/${distribution}`;
   assertStringEquals(profile.value, computed, `${label}.target_profile.value`);
-  if (computed !== AIRGAP_PROFILE) {
-    fail(`${label}.target_profile must be ${AIRGAP_PROFILE}`);
+  if (!AIRGAP_PROFILES.has(computed)) {
+    fail(`${label}.target_profile must be an existing Kubernetes airgap profile`);
   }
+  if (expectedProfile !== undefined && computed !== expectedProfile) {
+    fail(`${label}.target_profile must be ${expectedProfile}`);
+  }
+  return computed;
+}
+
+function strategyForProfile(profile) {
+  return profile === KIT_AIRGAP_PROFILE ? 'install_substrates' : 'use_existing';
 }
 
 function releaseIdentityFromContract(releaseContractInput) {
@@ -275,7 +287,7 @@ function assertReleaseIdentity(report, label, releaseIdentity) {
   }
 }
 
-function assertSurfaceBase(report, label, releaseIdentity) {
+function assertSurfaceBase(report, label, releaseIdentity, expectedProfile) {
   assertStringEquals(report.schema, SURFACE_SCHEMA, `${label}.schema`);
   assertStringEquals(report.scope, SURFACE_SCOPE, `${label}.scope`);
   requireBooleanFalse(report.readiness, `${label}.readiness`);
@@ -290,7 +302,8 @@ function assertSurfaceBase(report, label, releaseIdentity) {
         distribution: report.machine_profile?.split('/')?.[2]
       }
     },
-    label
+    label,
+    expectedProfile
   );
   const releaseContractDigest = requireDigest(
     report.release_contract_digest,
@@ -301,13 +314,13 @@ function assertSurfaceBase(report, label, releaseIdentity) {
   }
 }
 
-function assertProducerBase(report, label, { schema, scope, releaseIdentity }) {
+function assertProducerBase(report, label, { schema, scope, releaseIdentity, expectedProfile }) {
   assertStringEquals(report.schema, schema, `${label}.schema`);
   assertStringEquals(report.scope, scope, `${label}.scope`);
   requireBooleanFalse(report.readiness, `${label}.readiness`);
   assertStringEquals(report.status, 'pass', `${label}.status`);
   assertReleaseIdentity(report, label, releaseIdentity);
-  assertProfile(report, label);
+  assertProfile(report, label, expectedProfile);
 }
 
 function assertReleaseContractDigestObject(report, label, releaseIdentity) {
@@ -528,7 +541,7 @@ function assertBundleManifest(manifest, releaseIdentity, manifestDigest) {
   if (gitSha !== releaseIdentity.gitSha) {
     fail('airgap_bundle_manifest.git_sha must match release contract');
   }
-  assertProfile(manifest, 'airgap_bundle_manifest');
+  const profile = assertProfile(manifest, 'airgap_bundle_manifest');
   const bindings = requireObject(manifest.bindings, 'airgap_bundle_manifest.bindings');
   const releaseContractDigest = requireDigest(
     bindings.release_contract_sha256,
@@ -538,6 +551,54 @@ function assertBundleManifest(manifest, releaseIdentity, manifestDigest) {
     fail('airgap_bundle_manifest release contract binding must match release contract input');
   }
   requireDigest(manifestDigest, 'airgap_bundle_manifest input digest');
+  return profile;
+}
+
+function substratePackDigestFromManifest(manifest, expectedProfile) {
+  const substrate = requireObject(manifest.substrate, 'airgap_bundle_manifest.substrate');
+  const mode = requireString(substrate.mode, 'airgap_bundle_manifest.substrate.mode');
+  const bundled = substrate.bundled;
+  const bindings = requireObject(manifest.bindings, 'airgap_bundle_manifest.bindings');
+  const components = requireArray(manifest.components, 'airgap_bundle_manifest.components');
+  const substratePackComponents = components
+    .map((componentValue, index) => ({
+      value: requireObject(componentValue, `airgap_bundle_manifest.components[${index}]`),
+      index
+    }))
+    .filter(({ value }) => value.kind === 'substrate_pack_manifest');
+
+  if (expectedProfile === KIT_AIRGAP_PROFILE) {
+    if (mode !== 'kit_installed' || bundled !== true) {
+      fail('kit airgap bundle manifest must declare bundled kit_installed substrate');
+    }
+    if (substratePackComponents.length !== 1) {
+      fail('kit airgap bundle manifest must include exactly one substrate_pack_manifest component');
+    }
+    const { value, index } = substratePackComponents[0];
+    const componentDigest = requireDigest(
+      value.sha256,
+      `airgap_bundle_manifest.components[${index}].sha256`
+    );
+    const bindingDigest = requireDigest(
+      bindings.substrate_pack_manifest_sha256,
+      'airgap_bundle_manifest.bindings.substrate_pack_manifest_sha256'
+    );
+    if (componentDigest !== bindingDigest) {
+      fail('airgap bundle substrate pack component digest must match binding digest');
+    }
+    return componentDigest;
+  }
+
+  if (mode !== 'external_declared' || bundled !== false) {
+    fail('external-declared airgap bundle manifest must not declare bundled substrate');
+  }
+  if (Object.prototype.hasOwnProperty.call(bindings, 'substrate_pack_manifest_sha256')) {
+    fail('external-declared airgap bundle manifest must not include substrate pack binding');
+  }
+  if (substratePackComponents.length !== 0) {
+    fail('external-declared airgap bundle manifest must not include substrate_pack_manifest component');
+  }
+  return undefined;
 }
 
 function assertSurfaceHandoff(surface, label, manifestDigest) {
@@ -555,14 +616,16 @@ function assertSurfaceHandoff(surface, label, manifestDigest) {
 async function validateBundleSurface({
   surfaceInput,
   releaseIdentity,
-  manifestDigest
+  manifestDigest,
+  expectedProfile,
+  substratePackDigest
 }) {
   const surface = requireObject(surfaceInput.value, 'bundle_surface_report');
-  assertSurfaceBase(surface, 'bundle_surface_report', releaseIdentity);
+  assertSurfaceBase(surface, 'bundle_surface_report', releaseIdentity, expectedProfile);
   assertStringEquals(surface.surface, 'airgap-bundle', 'bundle_surface_report.surface');
   assertStringEquals(
     surface.substrate_strategy,
-    'use_existing',
+    strategyForProfile(expectedProfile),
     'bundle_surface_report.substrate_strategy'
   );
   const handoff = assertSurfaceHandoff(surface, 'bundle_surface_report', manifestDigest);
@@ -612,12 +675,14 @@ async function validateBundleSurface({
   assertProducerBase(bundleCreateReport, 'bundle_create_report', {
     schema: BUNDLE_CREATE_SCHEMA,
     scope: BUNDLE_CREATE_SCOPE,
-    releaseIdentity
+    releaseIdentity,
+    expectedProfile
   });
   assertProducerBase(bundleCheckReport, 'bundle_airgap_bundle_check_report', {
     schema: AIRGAP_BUNDLE_CHECK_SCHEMA,
     scope: AIRGAP_BUNDLE_CHECK_SCOPE,
-    releaseIdentity
+    releaseIdentity,
+    expectedProfile
   });
   assertArtifactReleaseContractDigest(
     bundleCreateReport,
@@ -634,6 +699,52 @@ async function validateBundleSurface({
     'bundle_airgap_bundle_check_report',
     manifestDigest
   );
+  const bundleCreateSubstrate = requireObject(
+    bundleCreateReport.substrate,
+    'bundle_create_report.substrate'
+  );
+  const bundleCheckSubstrate = requireObject(
+    bundleCheckReport.substrate,
+    'bundle_airgap_bundle_check_report.substrate'
+  );
+  assertStringEquals(
+    bundleCreateSubstrate.mode,
+    expectedProfile.split('/')[1],
+    'bundle_create_report.substrate.mode'
+  );
+  assertStringEquals(
+    bundleCheckSubstrate.mode,
+    expectedProfile.split('/')[1],
+    'bundle_airgap_bundle_check_report.substrate.mode'
+  );
+  if (expectedProfile === KIT_AIRGAP_PROFILE) {
+    const bundleCreateArtifacts = requireObject(
+      bundleCreateReport.artifacts,
+      'bundle_create_report.artifacts'
+    );
+    const substratePackArtifact = requireObject(
+      bundleCreateArtifacts.substrate_pack_manifest,
+      'bundle_create_report.artifacts.substrate_pack_manifest'
+    );
+    const bundleCreatePackDigest = requireDigest(
+      substratePackArtifact.input_sha256,
+      'bundle_create_report.artifacts.substrate_pack_manifest.input_sha256'
+    );
+    if (bundleCreatePackDigest !== substratePackDigest) {
+      fail('bundle_create_report substrate pack digest must match bundle manifest binding');
+    }
+    if (bundleCreateSubstrate.bundled !== true) {
+      fail('bundle_create_report.substrate.bundled must be true for kit airgap');
+    }
+    if (bundleCheckSubstrate.bundled !== true) {
+      fail('bundle_airgap_bundle_check_report.substrate.bundled must be true for kit airgap');
+    }
+  } else if (
+    bundleCreateSubstrate.bundled !== false ||
+    bundleCheckSubstrate.bundled !== false
+  ) {
+    fail('external-declared bundle reports must not claim bundled substrate');
+  }
 
   return {
     surface,
@@ -649,14 +760,16 @@ async function validateBundleSurface({
 async function validateConsumeSurface({
   surfaceInput,
   releaseIdentity,
-  manifestDigest
+  manifestDigest,
+  expectedProfile,
+  substratePackDigest
 }) {
   const surface = requireObject(surfaceInput.value, 'consume_surface_report');
-  assertSurfaceBase(surface, 'consume_surface_report', releaseIdentity);
+  assertSurfaceBase(surface, 'consume_surface_report', releaseIdentity, expectedProfile);
   assertStringEquals(surface.surface, 'airgap', 'consume_surface_report.surface');
   assertStringEquals(
     surface.substrate_strategy,
-    'use_existing',
+    strategyForProfile(expectedProfile),
     'consume_surface_report.substrate_strategy'
   );
   const handoff = assertSurfaceHandoff(surface, 'consume_surface_report', manifestDigest);
@@ -722,12 +835,14 @@ async function validateConsumeSurface({
   assertProducerBase(consumeReport, 'airgap_consume_rehearsal_report', {
     schema: AIRGAP_CONSUME_SCHEMA,
     scope: AIRGAP_CONSUME_SCOPE,
-    releaseIdentity
+    releaseIdentity,
+    expectedProfile
   });
   assertProducerBase(bundleCheckReport, 'consume_airgap_bundle_check_report', {
     schema: AIRGAP_BUNDLE_CHECK_SCHEMA,
     scope: AIRGAP_BUNDLE_CHECK_SCOPE,
-    releaseIdentity
+    releaseIdentity,
+    expectedProfile
   });
   assertArtifactReleaseContractDigest(
     bundleCheckReport,
@@ -792,7 +907,8 @@ async function validateConsumeSurface({
   assertProducerBase(deploymentGateReport, 'airgap_deployment_gate_report', {
     schema: AIRGAP_DEPLOYMENT_GATE_SCHEMA,
     scope: AIRGAP_DEPLOYMENT_GATE_SCOPE,
-    releaseIdentity
+    releaseIdentity,
+    expectedProfile
   });
   assertStringEquals(deploymentGateReport.mode, 'apply', 'airgap_deployment_gate_report.mode');
   assertReleaseContractDigestObject(
@@ -812,6 +928,73 @@ async function validateConsumeSurface({
     if (!deploymentSteps.includes(requiredStep)) {
       fail(`airgap_deployment_gate_report.steps must include ${requiredStep}`);
     }
+  }
+
+  if (expectedProfile === KIT_AIRGAP_PROFILE) {
+    const consumePackDigest = requireDigest(
+      inputDigests.substrate_pack_manifest,
+      'airgap_consume_rehearsal_report.input_digests.substrate_pack_manifest'
+    );
+    if (consumePackDigest !== substratePackDigest) {
+      fail('airgap consume substrate pack digest must match bundle manifest binding');
+    }
+    if (!deploymentSteps.includes('substrate-pack-check')) {
+      fail('kit airgap deployment gate must include substrate-pack-check');
+    }
+    const deploymentOutputDir = path.dirname(
+      path.join(outputDir, deploymentGatePath)
+    );
+    const substratePackCheckPath = requireStep(
+      deploymentGateReport,
+      'substrate-pack-check',
+      'airgap_deployment_gate_report'
+    );
+    const substratePackCheckInput = await readOutputRelativeJson(
+      deploymentOutputDir,
+      substratePackCheckPath,
+      'substrate_pack_check_report'
+    );
+    const substratePackCheckReport = requireObject(
+      substratePackCheckInput.value,
+      'substrate_pack_check_report'
+    );
+    assertStringEquals(
+      substratePackCheckReport.schema,
+      SUBSTRATE_PACK_CHECK_SCHEMA,
+      'substrate_pack_check_report.schema'
+    );
+    assertStringEquals(
+      substratePackCheckReport.scope,
+      SUBSTRATE_PACK_CHECK_SCOPE,
+      'substrate_pack_check_report.scope'
+    );
+    requireBooleanFalse(
+      substratePackCheckReport.readiness,
+      'substrate_pack_check_report.readiness'
+    );
+    assertStringEquals(
+      substratePackCheckReport.status,
+      'pass',
+      'substrate_pack_check_report.status'
+    );
+    assertProfile(substratePackCheckReport, 'substrate_pack_check_report', expectedProfile);
+    const substratePackInputs = requireObject(
+      substratePackCheckReport.inputs,
+      'substrate_pack_check_report.inputs'
+    );
+    const substratePackManifestInput = requireObject(
+      substratePackInputs.substrate_pack_manifest,
+      'substrate_pack_check_report.inputs.substrate_pack_manifest'
+    );
+    const substratePackCheckDigest = requireDigest(
+      substratePackManifestInput.input_sha256,
+      'substrate_pack_check_report.inputs.substrate_pack_manifest.input_sha256'
+    );
+    if (substratePackCheckDigest !== substratePackDigest) {
+      fail('substrate_pack_check_report substrate pack digest must match bundle manifest binding');
+    }
+  } else if (Object.prototype.hasOwnProperty.call(inputDigests, 'substrate_pack_manifest')) {
+    fail('external-declared airgap consume report must not include substrate pack digest');
   }
 
   const consumeBundleCheckPath = requireConsumeStep(
@@ -896,7 +1079,16 @@ async function main(argv) {
   const releaseIdentity = releaseIdentityFromContract(releaseContractInput);
   const bundleManifestInput = await readJson(args.bundleManifest, 'airgap bundle manifest');
   const bundleManifest = requireObject(bundleManifestInput.value, 'airgap_bundle_manifest');
-  assertBundleManifest(bundleManifest, releaseIdentity, bundleManifestInput.digest);
+  const expectedProfile = assertBundleManifest(
+    bundleManifest,
+    releaseIdentity,
+    bundleManifestInput.digest
+  );
+  const expectedStrategy = strategyForProfile(expectedProfile);
+  const substratePackDigest = substratePackDigestFromManifest(
+    bundleManifest,
+    expectedProfile
+  );
 
   const bundleSurfaceInput = {
     ...(await readJson(args.bundleSurfaceReport, 'airgap bundle operator surface report')),
@@ -910,12 +1102,16 @@ async function main(argv) {
   const bundleSummary = await validateBundleSurface({
     surfaceInput: bundleSurfaceInput,
     releaseIdentity,
-    manifestDigest: bundleManifestInput.digest
+    manifestDigest: bundleManifestInput.digest,
+    expectedProfile,
+    substratePackDigest
   });
   const consumeSummary = await validateConsumeSurface({
     surfaceInput: consumeSurfaceInput,
     releaseIdentity,
-    manifestDigest: bundleManifestInput.digest
+    manifestDigest: bundleManifestInput.digest,
+    expectedProfile,
+    substratePackDigest
   });
 
   assertDigestEquals(
@@ -961,14 +1157,14 @@ async function main(argv) {
     operator_paths: [
       {
         surface: 'airgap-bundle',
-        substrate_strategy: 'use_existing',
-        machine_profile: AIRGAP_PROFILE,
+        substrate_strategy: expectedStrategy,
+        machine_profile: expectedProfile,
         steps: bundleSummary.steps
       },
       {
         surface: 'airgap',
-        substrate_strategy: 'use_existing',
-        machine_profile: AIRGAP_PROFILE,
+        substrate_strategy: expectedStrategy,
+        machine_profile: expectedProfile,
         mode: consumeSummary.mode,
         operator_run_id_present: consumeSummary.operatorRunIdPresent,
         steps: consumeSummary.steps,

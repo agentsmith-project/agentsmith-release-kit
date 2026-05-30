@@ -60,48 +60,64 @@ find_arg_value() {
   return 1
 }
 
+OPERATOR_SINGLETON_FLAGS=(
+  --bundle-root
+  --bundle-manifest
+  --output-dir
+  --confirm-apply
+  --release-contract
+  --deploy-template-package
+  --archive
+  --target-registry
+  --registry-probe
+  --mode
+  --rehearsal-label
+  --operator-run-id
+  --render-values
+  --substrate-truth
+  --target-prerequisites
+  --namespace
+  --kubeconfig
+  --context
+  --kubectl
+  --archive-probe
+  --image-loader
+  --timeout
+  --smoke-url
+  --expected-status
+  --timeout-ms
+  --evidence-root
+  --evidence-provenance
+  --substrate-pack-manifest
+  --routability-probe
+  --runbook
+  --script
+  --profile-values-schema
+  --profile-values-example
+  --operator-prerequisites
+)
+
+assert_no_equals_singleton_args() {
+  local flag
+  local arg
+
+  for arg in "$@"; do
+    for flag in "${OPERATOR_SINGLETON_FLAGS[@]}"; do
+      case "$arg" in
+        "$flag"=*)
+          fail "operator facade does not accept equals form for singleton/control argument: $flag"
+          ;;
+      esac
+    done
+  done
+}
+
 assert_no_duplicate_singleton_args() {
-  local singleton_flags=(
-    --bundle-root
-    --bundle-manifest
-    --output-dir
-    --confirm-apply
-    --release-contract
-    --deploy-template-package
-    --archive
-    --target-registry
-    --registry-probe
-    --mode
-    --rehearsal-label
-    --operator-run-id
-    --render-values
-    --substrate-truth
-    --target-prerequisites
-    --namespace
-    --kubeconfig
-    --context
-    --kubectl
-    --archive-probe
-    --image-loader
-    --timeout
-    --smoke-url
-    --expected-status
-    --timeout-ms
-    --evidence-root
-    --evidence-provenance
-    --substrate-pack-manifest
-    --routability-probe
-    --runbook
-    --script
-    --profile-values-schema
-    --profile-values-example
-    --operator-prerequisites
-  )
   local flag
   local arg
   local count
 
-  for flag in "${singleton_flags[@]}"; do
+  for flag in "${OPERATOR_SINGLETON_FLAGS[@]}"; do
     count=0
     for arg in "$@"; do
       case "$arg" in
@@ -409,6 +425,7 @@ case "$surface/$substrate_strategy" in
     ;;
 esac
 
+assert_no_equals_singleton_args "$@"
 assert_no_duplicate_singleton_args "$@"
 reject_producer_vocabulary "$@"
 operator_confirm="$surface/$substrate_strategy"

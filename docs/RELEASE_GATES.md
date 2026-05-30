@@ -47,7 +47,8 @@ diagnostic:
   `existing_kubernetes/kit_installed/online`.
 - `airgap/use_existing` -> `--airgap-consume-rehearsal` with
   `existing_kubernetes/external_declared/airgap`.
-- `airgap/install_substrates` fails fast in v0.
+- `airgap/install_substrates` -> `--airgap-consume-rehearsal` with
+  `existing_kubernetes/kit_installed/airgap`.
 - `airgap-bundle/use_existing` -> `--bundle-create` with
   `existing_kubernetes/external_declared/airgap`.
 - `airgap-bundle/install_substrates` -> `--bundle-create` with
@@ -57,7 +58,19 @@ diagnostic:
 For confirmed apply, the operator passes the same operator choice to
 `--confirm-apply`, for example `--confirm-apply online/use_existing`; the facade
 maps that value to the producer target profile internally. Raw producer machine
-profiles are rejected before producer reports or summaries are written.
+profiles, profile mismatches, duplicate singleton/control arguments, and
+singleton/control `--flag=value` forms are rejected before producer reports or
+summaries are written. Repeatable producer arguments such as `--image-archive`
+and `--forbidden-source-root` remain repeatable inputs to the focused
+producers.
+
+The repo-local focused surface supports kit airgap bundle packaging, substrate
+pack manifest validation, and the kit airgap consume/deployment chain. The
+bundle side binds the substrate pack into `airgap-bundle-manifest.json`; the
+consume side runs the focused deployment chain with substrate-pack-check,
+image load, bundle render-check, apply, rollout, and smoke when confirmed
+apply is requested. These reports are still focused diagnostics, not an
+operator verdict or release readiness.
 
 The generated `operator-release-surface-report.json` must keep `schema:
 agentsmith.operator-release-surface-report/v1`, `scope:
@@ -78,10 +91,10 @@ bash scripts/test-airgap-adoption.sh
 ```
 
 This focused guard exercises `bash scripts/verify-release.sh
---airgap-adoption`. It consumes the generated
-`airgap-bundle/use_existing` and confirmed-apply `airgap/use_existing`
-`operator-release-surface-report.json` files, plus an explicit release contract
-and `airgap-bundle-manifest.json`.
+--airgap-adoption`. It consumes matching generated airgap-bundle and
+confirmed-apply airgap `operator-release-surface-report.json` files for either
+`use_existing` or `install_substrates`, plus an explicit release contract and
+`airgap-bundle-manifest.json`.
 
 The generated `airgap-adoption-report.json` keeps `schema:
 agentsmith.airgap-adoption/v1`, `scope: airgap_adoption_only`, `readiness:
@@ -90,9 +103,12 @@ contract digest, bundle manifest digest, surface/producer report digests,
 sanitized operator path summaries, and target registry summary. It validates
 that the consume chain is confirmed apply, includes image load, bundle render
 check, apply, rollout, and smoke, and has an `operator_run_id` in the nested
-deployment report. Server dry-run, missing smoke, bundle manifest digest
-drift, and release digest mismatch fail fast. It is not deploy, package,
-operator signoff, full release gate, or release readiness.
+deployment report. For kit-installed airgap it additionally binds the bundle
+report, consume report, deployment report, substrate pack manifest digest, and
+substrate-pack-check report truth. Profile mismatches, missing substrate pack
+truth, server dry-run, missing smoke, bundle manifest digest drift, and release
+digest mismatch fail fast. It is not deploy, package, operator signoff, full
+release gate, operator verdict, or release readiness.
 
 ## Contract Intake Focused Diagnostic
 
@@ -137,13 +153,14 @@ coverage report separates `declarable_profiles`,
 executable focused deployment profiles:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`, and
-`existing_kubernetes/kit_installed/online`; it does not include
-`existing_kubernetes/kit_installed/airgap`, kind rehearsal, or aliases.
-Evidence-supported profiles include external-declared online/airgap plus
-kit-installed online confirmed-apply envelopes in this slice. They prove
-contract/input digest readiness only. They are not
-deploy readiness, package readiness, release readiness, rollout evidence, or
-operator signoff. The coverage report must not contain `verdict` or
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`; it does not include kind rehearsal
+or aliases. Evidence-supported profiles include external-declared
+online/airgap plus kit-installed online confirmed-apply envelopes in this
+slice. Kit airgap adoption remains a repo-local focused aggregate, not an
+evidence envelope. They prove contract/input digest readiness only. They are
+not deploy readiness, package readiness, release readiness, rollout evidence,
+or operator signoff. The coverage report must not contain `verdict` or
 `release_verdict`.
 
 ## Template Package Archive Focused Diagnostic

@@ -101,17 +101,23 @@ bash scripts/verify-release.sh --airgap-adoption \
   --output-dir <dir>
 ```
 
-The online, airgap/use_existing, and airgap-bundle commands map operator
-choices to the existing producer diagnostics and write
-`operator-release-surface-report.json` with `readiness: false`.
-`airgap-bundle/install_substrates` is packaging-side only: it maps to
-`existing_kubernetes/kit_installed/airgap`, requires
-`--substrate-pack-manifest`, and writes a bundle manifest binding for that
-substrate pack. `airgap/install_substrates` still fails fast in v0.
-`--airgap-adoption` aggregates the generated `airgap-bundle/use_existing`
-surface plus confirmed-apply `airgap/use_existing` surface for repo-local
-adoption preparation only and writes `airgap-adoption-report.json` with
-`readiness: false`.
+The online, airgap, and airgap-bundle commands map operator choices to the
+existing producer diagnostics and write `operator-release-surface-report.json`
+with `readiness: false`. The repo-local focused surface supports
+airgap-bundle and airgap `use_existing` plus `install_substrates`: kit airgap
+bundle packaging requires `--substrate-pack-manifest`, validates the substrate
+pack manifest, binds it into `airgap-bundle-manifest.json`, and the kit airgap
+consume/deployment chain runs the focused substrate-pack-check, image load,
+bundle render-check, apply, rollout, and smoke steps. Profile mismatches fail
+before producer output, and duplicate singleton/control facade arguments fail
+fast before producer side effects.
+`--airgap-adoption` aggregates matching generated airgap-bundle and
+confirmed-apply airgap surfaces for `use_existing` or `install_substrates`
+repo-local adoption preparation only. For kit airgap it binds the bundle
+report, consume report, deployment report, substrate pack manifest digest, and
+substrate-pack-check report truth. It writes `airgap-adoption-report.json`
+with `readiness: false`; this is not a formal release gate, operator verdict,
+deploy/package readiness, or release readiness.
 `verify-release.sh` remains the producer catalog and maintainer/focused
 diagnostic entry.
 
@@ -154,11 +160,13 @@ release readiness. In that coverage report, `executable_profiles` means the
 currently executable focused deployment profiles:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`, and
-`existing_kubernetes/kit_installed/online`; it does not include
-`existing_kubernetes/kit_installed/airgap`, kind rehearsal, or aliases.
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`; it does not include kind
+rehearsal or aliases.
 Evidence-supported profiles include external-declared online/airgap plus
-kit-installed online confirmed-apply envelopes, but still do not claim
-deploy/package/release readiness.
+kit-installed online confirmed-apply envelopes. Kit airgap adoption remains a
+repo-local focused aggregate, not an evidence envelope, operator verdict,
+deploy/package readiness, or release readiness.
 
 Deploy template package archive focused diagnostic:
 
