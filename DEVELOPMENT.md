@@ -24,6 +24,7 @@ bash scripts/test-bundle-load-plan.sh
 bash scripts/test-airgap-bundle-render-check.sh
 bash scripts/test-airgap-deployment-gate.sh
 bash scripts/test-airgap-consume-rehearsal.sh
+bash scripts/test-airgap-adoption.sh
 bash scripts/test-substrate-pack-check.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
@@ -43,6 +44,10 @@ for focused diagnostics and maintainer work.
 `airgap/use_existing` is the operator-facing entry for consuming an already
 assembled airgap bundle; it maps to `--airgap-consume-rehearsal` and keeps
 `readiness: false`.
+`--airgap-adoption` consumes the repo-local airgap-bundle/use_existing and
+confirmed-apply airgap/use_existing operator surface summaries plus an explicit
+release contract and bundle manifest. It writes a digest-only
+`airgap-adoption-report.json` with `readiness: false`.
 
 ## Development Principles
 

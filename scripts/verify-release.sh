@@ -29,6 +29,7 @@ Usage:
   bash scripts/verify-release.sh --airgap-deployment-gate --release-contract <bundle-local-json> --deploy-template-package <bundle-local-json> --archive <bundle-local-tgz> --image-map <bundle-local-json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <bundle-local-json> --render-values <bundle-local-json> --substrate-truth <bundle-local-json> --target-prerequisites <json> --namespace <name> --output-dir <dir> --mode server-dry-run [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --airgap-deployment-gate --release-contract <bundle-local-json> --deploy-template-package <bundle-local-json> --archive <bundle-local-tgz> --image-map <bundle-local-json> --target-profile existing_kubernetes/external_declared/airgap --bundle-root <dir> --bundle-manifest <bundle-local-json> --render-values <bundle-local-json> --substrate-truth <bundle-local-json> --target-prerequisites <json> --namespace <name> --output-dir <dir> --mode apply --archive-probe <executable> --image-loader <executable> --confirm-apply existing_kubernetes/external_declared/airgap --operator-run-id <id> [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--timeout <duration>] [--smoke-url <https-url>] [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --airgap-consume-rehearsal --bundle-root <dir> [--bundle-manifest <bundle-local-json>] --render-values <bundle-local-json> --substrate-truth <bundle-local-json> --target-prerequisites <json> --namespace <name> --output-dir <dir> [--rehearsal-label existing_kubernetes|kind_rehearsal] [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--archive-probe <executable>] [--image-loader <executable>] [--confirm-apply existing_kubernetes/external_declared/airgap] [--operator-run-id <id>] [--timeout <duration>] [--smoke-url <https-url>] [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost] [--forbidden-source-root <dir>]
+  bash scripts/verify-release.sh --airgap-adoption --release-contract <json> --bundle-surface-report <airgap-bundle/operator-release-surface-report.json> --consume-surface-report <airgap/operator-release-surface-report.json> --bundle-manifest <airgap-bundle-manifest.json> --output-dir <dir>
   bash scripts/verify-release.sh --substrate-pack-check --target-profile existing_kubernetes/kit_installed/<online|airgap> --substrate-pack-manifest <json> --substrate-truth <json> --output-dir <dir>
   bash scripts/verify-release.sh --substrate-routability --target-profile existing_kubernetes/kit_installed/online --substrate-pack-check-report <json> --substrate-truth <json> --target-prerequisites <json> --namespace <name> --kubectl <path-or-command> --routability-probe <executable> --output-dir <dir> [--context <name>] [--kubeconfig <path>] [--timeout-ms <ms>]
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/external_declared/<online|airgap>|existing_kubernetes/kit_installed/online --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
@@ -59,6 +60,7 @@ Bootstrap status:
   --airgap-bundle-render-check renders an already assembled airgap bundle offline and runs rendered manifest image inventory check only; it is not package, offline install, deploy, registry, apply, smoke, or release readiness.
   --airgap-deployment-gate runs the airgap focused chain for existing Kubernetes / external declared targets only; it is not package, offline install, registry mirror, operator signoff, or release readiness.
   --airgap-consume-rehearsal discovers bundle components from an already assembled bundle, then runs bundle-check plus the airgap focused chain; --rehearsal-label is operator-provided label-only metadata and does not change the target profile or prove kind; it is not package, offline install, registry mirror, operator signoff, deploy, or release readiness.
+  --airgap-adoption aggregates already generated airgap-bundle/use_existing and confirmed-apply airgap/use_existing operator summaries for repo-local adoption preparation only; it is not deploy, package, operator signoff, full release gate, or release readiness.
   --substrate-pack-check checks only a kit-installed substrate pack manifest and matching substrate truth for existing Kubernetes online/airgap targets; it is not substrate installation, deploy, package, or release readiness.
   --substrate-routability checks only existing Kubernetes / kit-installed / online substrate endpoint routability through an operator pod-network probe; it is not substrate installation, deploy, package, or release readiness.
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
@@ -153,6 +155,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-airgap-consume-rehearsal.mjs" "$@"
     echo "airgap consume rehearsal mode is not release readiness; readiness=false"
+    ;;
+  --airgap-adoption)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-airgap-adoption.mjs" "$@"
+    echo "airgap adoption aggregation mode is not release readiness; readiness=false"
     ;;
   --substrate-pack-check)
     shift

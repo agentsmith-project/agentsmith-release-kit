@@ -67,6 +67,31 @@ for bundle creation or airgap bundle consumption. Online confirmed apply with
 summary. It is not accepted by
 `--evidence` and is not deploy, package, or release readiness.
 
+## Airgap Adoption Aggregation Focused Guard
+
+Run:
+
+```bash
+bash scripts/test-airgap-adoption.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--airgap-adoption`. It consumes the generated
+`airgap-bundle/use_existing` and confirmed-apply `airgap/use_existing`
+`operator-release-surface-report.json` files, plus an explicit release contract
+and `airgap-bundle-manifest.json`.
+
+The generated `airgap-adoption-report.json` keeps `schema:
+agentsmith.airgap-adoption/v1`, `scope: airgap_adoption_only`, `readiness:
+false`, and `status: pass`. It contains only release identity, release
+contract digest, bundle manifest digest, surface/producer report digests,
+sanitized operator path summaries, and target registry summary. It validates
+that the consume chain is confirmed apply, includes image load, bundle render
+check, apply, rollout, and smoke, and has an `operator_run_id` in the nested
+deployment report. Server dry-run, missing smoke, bundle manifest digest
+drift, and release digest mismatch fail fast. It is not deploy, package,
+operator signoff, full release gate, or release readiness.
+
 ## Contract Intake Focused Diagnostic
 
 Run:

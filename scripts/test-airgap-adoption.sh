@@ -1,0 +1,891 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+NODE_BIN="${NODE:-node}"
+FIXTURE_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
+FIXTURE_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-package.valid.json"
+AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+AIRGAP_REGISTRY="registry.example.internal/releases"
+SURFACE_REPORT_FILE="operator-release-surface-report.json"
+ADOPTION_REPORT_FILE="airgap-adoption-report.json"
+
+mapfile -t RELEASE_IMAGE_IDS < <(
+  "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
+import fs from 'node:fs';
+
+const [fixtureContract] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(fixtureContract, 'utf8'));
+for (const item of contract.deploy_image_inventory) {
+  console.log(item.id);
+}
+NODE
+)
+
+TMP_DIR="$(mktemp -d)"
+SERVER_PID=""
+trap 'if [[ -n "$SERVER_PID" ]]; then kill "$SERVER_PID" 2>/dev/null || true; fi; rm -rf "$TMP_DIR"' EXIT
+
+PAYLOAD_DIR="$TMP_DIR/payload"
+IMAGE_DIR="$TMP_DIR/image-archives"
+OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
+BUNDLED_TOOL="$TMP_DIR/kubectl-local"
+GOOD_PROBE="$TMP_DIR/tools/archive-digest-probe"
+GOOD_LOADER="$TMP_DIR/tools/image-loader"
+LOAD_LOG="$TMP_DIR/image-load.log"
+KUBECTL_LOG="$TMP_DIR/kubectl.log"
+FAKE_KUBECTL="$TMP_DIR/kubectl"
+SERVER_PORT=""
+SERVER_LOG=""
+
+fail() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+pass() {
+  echo "PASS: $*"
+}
+
+sha256_file() {
+  "$NODE_BIN" --input-type=module - "$1" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [file] = process.argv.slice(2);
+const body = fs.readFileSync(file);
+console.log(`sha256:${crypto.createHash('sha256').update(body).digest('hex')}`);
+NODE
+}
+
+create_archive() {
+  local archive="$1"
+  local package_dir="$TMP_DIR/package"
+
+  mkdir -p "$package_dir/templates"
+  cat >"$package_dir/manifest.json" <<'JSON'
+{
+  "schema_version": "agentsmith.deploy-template-manifest/v1",
+  "templates": [
+    {
+      "path": "templates/workloads.yaml",
+      "kind": "kubernetes"
+    }
+  ]
+}
+JSON
+  cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
+  namespace: ${{ values.namespace }}
+spec:
+  replicas: ${{ values.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentsmith-web
+      app.kubernetes.io/part: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: agentsmith-web
+        app.kubernetes.io/part: web
+    spec:
+      initContainers:
+        - name: schema
+          image: ${{ images.agentsmith_app.image }}
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+YAML
+
+  tar -czf "$archive" -C "$package_dir" manifest.json templates/workloads.yaml
+  sha256_file "$package_dir/manifest.json"
+}
+
+write_materials() {
+  local manifest_sha="$1"
+  local archive_sha="$2"
+  local contract_output="$3"
+  local deploy_template_package_output="$4"
+
+  "$NODE_BIN" --input-type=module - \
+    "$FIXTURE_CONTRACT" \
+    "$FIXTURE_DEPLOY_TEMPLATE_PACKAGE" \
+    "$manifest_sha" \
+    "$archive_sha" \
+    "$contract_output" \
+    "$deploy_template_package_output" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [
+  contractInput,
+  packageInput,
+  manifestSha,
+  archiveSha,
+  contractOutput,
+  packageOutput
+] = process.argv.slice(2);
+
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+const deployTemplatePackage = JSON.parse(fs.readFileSync(packageInput, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digest(value) {
+  return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+}
+
+function subjectDigest(value) {
+  const { artifact_provenance: _artifactProvenance, ...subject } = value;
+  return digest(JSON.stringify(stableJson(subject)));
+}
+
+function artifactProjectionDigest(value) {
+  const { artifact_sha256: _artifactSha256, ...artifactProvenance } =
+    value.artifact_provenance;
+  const projection = { ...value, artifact_provenance: artifactProvenance };
+  return digest(JSON.stringify(stableJson(projection)));
+}
+
+deployTemplatePackage.package_sha256 = archiveSha;
+deployTemplatePackage.manifest_sha256 = manifestSha;
+deployTemplatePackage.artifact_provenance.artifact_sha256 = archiveSha;
+deployTemplatePackage.artifact_provenance.subject_sha256 =
+  subjectDigest(deployTemplatePackage);
+
+contract.deploy_template_digest = manifestSha;
+contract.deploy_template_package = deployTemplatePackage;
+contract.artifact_provenance.subject_sha256 = subjectDigest(contract);
+contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
+
+fs.writeFileSync(packageOutput, `${JSON.stringify(deployTemplatePackage, null, 2)}\n`);
+fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
+write_render_values() {
+  local output="$1"
+
+  cat >"$output" <<'JSON'
+{
+  "namespace": "agentsmith",
+  "replicas": 2
+}
+JSON
+}
+
+write_truth() {
+  local output="$1"
+
+  "$NODE_BIN" --input-type=module - "$output" "$AIRGAP_PROFILE" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profile] = process.argv.slice(2);
+const [targetCluster, substrateSource, distribution] = profile.split('/');
+
+function service(name, host) {
+  return {
+    host,
+    credential_secret_ref: `secretRef:release/${name}-credential`,
+    tls: {
+      mode: 'verify-full',
+      ca_secret_ref: `secretRef:release/${name}-ca`
+    },
+    reachability: {
+      status: 'declared_reachable',
+      proof: `operator ${name} check 2026-05-23T12:00:00Z`
+    }
+  };
+}
+
+const truth = {
+  schema_version: 'agentsmith.substrate-connection.truth/v1',
+  target_cluster: targetCluster,
+  substrate_source: substrateSource,
+  distribution,
+  declared_at: '2026-05-23T12:00:00.000Z',
+  declared_by: 'release-operator@example.com',
+  services: {
+    postgresql: {
+      ...service('postgresql', 'postgresql.release.example.internal'),
+      port: 5432,
+      database: 'appdb',
+      admin_secret_ref: 'secretRef:release/postgresql-admin',
+      sslmode: 'verify-full',
+      extensions: {
+        pgvector: {
+          status: 'installed',
+          version: '0.7.4'
+        }
+      }
+    },
+    mongodb: {
+      ...service('mongodb', 'mongodb.release.example.internal'),
+      port: 27017
+    },
+    redis: {
+      ...service('redis', 'redis.release.example.internal'),
+      port: 6379
+    },
+    object_storage: {
+      url: 'https://objects.release.example.internal',
+      bucket: 'release-artifacts',
+      region: 'us-west-2',
+      credential_secret_ref: 'secretRef:release/object-storage-credential',
+      tls: {
+        mode: 'https',
+        ca_secret_ref: 'secretRef:release/object-storage-ca'
+      },
+      reachability: {
+        status: 'declared_reachable',
+        proof: 'operator bucket check 2026-05-23T12:00:00Z'
+      }
+    },
+    oidc: {
+      issuer_url: 'https://keycloak.release.example.com/realms/app',
+      client_id: 'app-web',
+      client_secret_ref: 'secretRef:release/oidc-client',
+      tls: {
+        mode: 'https',
+        ca_secret_ref: 'secretRef:release/oidc-ca'
+      },
+      reachability: {
+        status: 'declared_reachable',
+        proof: 'operator oidc check 2026-05-23T12:00:00Z'
+      }
+    }
+  }
+};
+
+fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
+NODE
+}
+
+write_prerequisites() {
+  local output="$1"
+
+  "$NODE_BIN" --input-type=module - "$output" "$AIRGAP_PROFILE" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profile] = process.argv.slice(2);
+const prerequisites = {
+  schema_version: 'agentsmith.target-prerequisites.truth/v1',
+  target_profile: profile,
+  namespace: 'agentsmith',
+  rbac: {
+    policy: 'pre_provisioned',
+    proof: 'operator kubectl auth can-i apply deployments in namespace agentsmith 2026-05-23T12:00:00Z'
+  },
+  ingress: {
+    host: 'agentsmith.release.example.com',
+    tls_secret_ref: 'secretRef:release/agentsmith-ingress-tls'
+  },
+  registry: {
+    pull_secret_ref: 'secretRef:release/registry-pull'
+  },
+  storage: {
+    storage_class: 'gp3',
+    persistent_volume_policy: 'dynamic'
+  },
+  substrate_secret_refs: [
+    'secretRef:release/postgresql-credential',
+    'secretRef:release/postgresql-admin',
+    'secretRef:release/postgresql-ca',
+    'secretRef:release/mongodb-credential',
+    'secretRef:release/mongodb-ca',
+    'secretRef:release/redis-credential',
+    'secretRef:release/redis-ca',
+    'secretRef:release/object-storage-credential',
+    'secretRef:release/object-storage-ca',
+    'secretRef:release/oidc-client',
+    'secretRef:release/oidc-ca'
+  ]
+};
+
+fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+create_payloads() {
+  mkdir -p "$PAYLOAD_DIR" "$(dirname "$BUNDLED_TOOL")"
+  cat >"$PAYLOAD_DIR/runbook.md" <<'EOF_RUNBOOK'
+# AgentSmith airgap runbook
+
+Use the approved operator-held substrate and registry records.
+EOF_RUNBOOK
+  cat >"$PAYLOAD_DIR/install.sh" <<'EOF_SCRIPT'
+#!/usr/bin/env sh
+set -eu
+printf '%s\n' "operator-reviewed local install placeholder"
+EOF_SCRIPT
+  chmod +x "$PAYLOAD_DIR/install.sh"
+  cat >"$PAYLOAD_DIR/profile-values.schema.json" <<'JSON'
+{
+  "type": "object",
+  "additionalProperties": false
+}
+JSON
+  printf '%s\n' 'namespace: agentsmith' >"$PAYLOAD_DIR/profile-values.example.yaml"
+  printf '%s\n' 'bundled kubectl placeholder' >"$BUNDLED_TOOL"
+}
+
+create_image_archives() {
+  mkdir -p "$IMAGE_DIR"
+  "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" "$IMAGE_DIR" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [fixtureContract, imageDir] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(fixtureContract, 'utf8'));
+for (const image of contract.deploy_image_inventory) {
+  fs.writeFileSync(
+    path.join(imageDir, `${image.id}.oci-layout.tar`),
+    [
+      'local oci layout tar fixture',
+      `id=${image.id}`,
+      `target_digest=${image.digest}`,
+      ''
+    ].join('\n')
+  );
+}
+NODE
+}
+
+write_operator_prerequisites() {
+  "$NODE_BIN" --input-type=module - "$OPERATOR_PREREQUISITES" "$BUNDLED_TOOL" <<'NODE'
+import fs from 'node:fs';
+
+const [output, toolFile] = process.argv.slice(2);
+const prerequisites = {
+  substrate_connection_truth_ref: 'operator held substrate truth record AS-123',
+  target_registry_proof_ref: 'operator held target registry proof AS-123',
+  tools: [
+    {
+      name: 'kubectl',
+      version: '1.30.0',
+      source: 'bundled',
+      path: toolFile
+    },
+    {
+      name: 'skopeo',
+      version: '1.16.0',
+      source: 'operator_prerequisite',
+      location: 'operator workstation inventory skopeo',
+      proof: 'signed operator prerequisite proof skopeo'
+    }
+  ]
+};
+
+fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+write_airgap_apply_tools() {
+  mkdir -p "$(dirname "$GOOD_PROBE")"
+
+  cat >"$GOOD_PROBE" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const archivePath = process.argv[2] || process.env.AGENTSMITH_IMAGE_ARCHIVE_PATH;
+if (!archivePath) {
+  process.exit(2);
+}
+const body = fs.readFileSync(archivePath, 'utf8');
+const matches = [...body.matchAll(/^target_digest=(sha256:[0-9a-f]{64})$/gm)];
+if (matches.length !== 1) {
+  process.exit(3);
+}
+console.log(matches[0][1]);
+NODE
+  chmod +x "$GOOD_PROBE"
+
+  cat >"$GOOD_LOADER" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const [archivePath, targetImage, targetDigest] = process.argv.slice(2);
+if (!archivePath || !targetImage || !targetDigest) {
+  process.exit(2);
+}
+const body = fs.readFileSync(archivePath, 'utf8');
+const matches = [...body.matchAll(/^target_digest=(sha256:[0-9a-f]{64})$/gm)];
+if (matches.length !== 1 || matches[0][1] !== targetDigest) {
+  process.exit(3);
+}
+if (!targetImage.endsWith(`@${targetDigest}`)) {
+  process.exit(4);
+}
+if (process.env.AGENTSMITH_LOAD_LOG) {
+  fs.appendFileSync(process.env.AGENTSMITH_LOAD_LOG, `${targetDigest}\n`);
+}
+console.log(targetDigest);
+NODE
+  chmod +x "$GOOD_LOADER"
+}
+
+write_fake_kubectl() {
+  "$NODE_BIN" --input-type=module - "$FAKE_KUBECTL" <<'NODE'
+import fs from 'node:fs';
+
+const [fakeKubectl] = process.argv.slice(2);
+fs.writeFileSync(
+  fakeKubectl,
+  `#!/usr/bin/env bash
+set -euo pipefail
+: "\${FAKE_KUBECTL_LOG:?}"
+printf '%s\\n' "$*" >> "$FAKE_KUBECTL_LOG"
+
+command_name=""
+for arg in "$@"; do
+  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
+    command_name="$arg"
+    break
+  fi
+done
+
+if [[ "$command_name" == "version" ]]; then
+  printf '%s\\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
+  exit 0
+fi
+
+if [[ "$command_name" == "apply" ]]; then
+  printf '%s\\n' "deployment.apps/agentsmith-web"
+  exit 0
+fi
+
+if [[ "$command_name" == "rollout" ]]; then
+  printf '%s\\n' "deployment.apps/agentsmith-web rolled out"
+  exit 0
+fi
+
+if [[ "$command_name" == "get" ]]; then
+  get_target=""
+  previous=""
+  for arg in "$@"; do
+    if [[ "$previous" == "get" ]]; then
+      get_target="$arg"
+    fi
+    previous="$arg"
+  done
+
+  if [[ "$get_target" == "Deployment/agentsmith-web" ]]; then
+    cat <<'JSON'
+{"spec":{"selector":{"matchLabels":{"app.kubernetes.io/name":"agentsmith-web","app.kubernetes.io/part":"web"}}}}
+JSON
+    exit 0
+  fi
+
+  if [[ "$get_target" == "pods" ]]; then
+    live_image="\${FAKE_KUBECTL_LIVE_IMAGE:-ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
+    live_image_id="\${FAKE_KUBECTL_LIVE_IMAGE_ID:-docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
+    cat <<JSON
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"$live_image","imageID":"$live_image_id"}],"containerStatuses":[{"name":"web","image":"$live_image","imageID":"$live_image_id"}]}}]}
+JSON
+    exit 0
+  fi
+fi
+
+echo "unexpected fake kubectl args: $*" >&2
+exit 2
+`
+);
+fs.chmodSync(fakeKubectl, 0o755);
+NODE
+}
+
+write_bundle_operator_inputs() {
+  local bundle_root="$1"
+
+  mkdir -p "$bundle_root/operator-inputs"
+  write_render_values "$bundle_root/operator-inputs/render-values.json"
+  write_truth "$bundle_root/operator-inputs/substrate-truth.json"
+  write_prerequisites "$bundle_root/operator-inputs/target-prerequisites.json"
+}
+
+target_image_for_id() {
+  local image_map="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" --input-type=module - "$image_map" "$image_id" <<'NODE'
+import fs from 'node:fs';
+
+const [imageMapInput, imageId] = process.argv.slice(2);
+const imageMap = JSON.parse(fs.readFileSync(imageMapInput, 'utf8'));
+const mapping = imageMap.mappings.find((item) => item.id === imageId);
+if (!mapping) {
+  throw new Error(`missing image-map mapping: ${imageId}`);
+}
+console.log(mapping.target_image);
+NODE
+}
+
+start_server() {
+  local ready_file="$TMP_DIR/server-ready"
+  local stdout_file="$TMP_DIR/server.out"
+  local stderr_file="$TMP_DIR/server.err"
+  SERVER_LOG="$TMP_DIR/server-hits.log"
+
+  "$NODE_BIN" --input-type=module - "$ready_file" "$SERVER_LOG" >"$stdout_file" 2>"$stderr_file" <<'NODE' &
+import fs from 'node:fs';
+import http from 'node:http';
+
+const [readyFile, logFile] = process.argv.slice(2);
+
+const server = http.createServer((request, response) => {
+  const url = new URL(request.url, `http://${request.headers.host || '127.0.0.1'}`);
+  fs.appendFileSync(logFile, `${request.method} ${url.pathname}\n`);
+  response.statusCode = url.pathname === '/ok' ? 200 : 404;
+  response.end(url.pathname === '/ok' ? 'route ok' : 'not found');
+});
+
+server.listen(0, '127.0.0.1', () => {
+  fs.writeFileSync(readyFile, String(server.address().port));
+});
+
+process.on('SIGTERM', () => {
+  server.close(() => process.exit(0));
+});
+NODE
+  SERVER_PID=$!
+
+  for _ in {1..50}; do
+    if [[ -s "$ready_file" ]]; then
+      SERVER_PORT="$(<"$ready_file")"
+      return
+    fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      cat "$stdout_file" >&2 || true
+      cat "$stderr_file" >&2 || true
+      fail "smoke server exited before ready"
+    fi
+    sleep 0.1
+  done
+
+  cat "$stdout_file" >&2 || true
+  cat "$stderr_file" >&2 || true
+  fail "smoke server did not become ready"
+}
+
+run_bundle_surface() {
+  local bundle_root="$1"
+  local output_dir="$2"
+  shift 2
+
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle use_existing \
+    --release-contract "$VALID_CONTRACT" \
+    --deploy-template-package "$VALID_PACKAGE" \
+    --archive "$VALID_ARCHIVE" \
+    --target-registry "$AIRGAP_REGISTRY" \
+    "${image_args[@]}" \
+    --runbook "$PAYLOAD_DIR/runbook.md" \
+    --script "$PAYLOAD_DIR/install.sh" \
+    --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
+    --profile-values-example "$PAYLOAD_DIR/profile-values.example.yaml" \
+    --operator-prerequisites "$OPERATOR_PREREQUISITES" \
+    --bundle-root "$bundle_root" \
+    --output-dir "$output_dir" \
+    "$@"
+}
+
+run_consume_surface() {
+  local bundle_root="$1"
+  local output_dir="$2"
+  local operator_run_id="$3"
+  local smoke_url="$4"
+  shift 4
+  local target_app_image
+  local smoke_args=()
+
+  target_app_image="$(target_image_for_id "$bundle_root/components/image-map.json" agentsmith_app)"
+  if [[ -n "$smoke_url" ]]; then
+    smoke_args+=(--smoke-url "$smoke_url" --allow-http --allow-localhost)
+  fi
+
+  AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+  FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  FAKE_KUBECTL_LIVE_IMAGE="$target_app_image" \
+  FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$target_app_image" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$bundle_root" \
+    --render-values "$bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$output_dir" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --archive-probe "$GOOD_PROBE" \
+    --image-loader "$GOOD_LOADER" \
+    --confirm-apply airgap/use_existing \
+    --operator-run-id "$operator_run_id" \
+    --timeout 120s \
+    "${smoke_args[@]}" \
+    "$@"
+}
+
+run_consume_surface_dry_run() {
+  local bundle_root="$1"
+  local output_dir="$2"
+
+  FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$bundle_root" \
+    --render-values "$bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$output_dir" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode server-dry-run
+}
+
+run_adoption() {
+  local bundle_surface_report="$1"
+  local consume_surface_report="$2"
+  local bundle_manifest="$3"
+  local output_dir="$4"
+  local release_contract="${5:-$VALID_CONTRACT}"
+
+  bash "$ROOT_DIR/scripts/verify-release.sh" --airgap-adoption \
+    --release-contract "$release_contract" \
+    --bundle-surface-report "$bundle_surface_report" \
+    --consume-surface-report "$consume_surface_report" \
+    --bundle-manifest "$bundle_manifest" \
+    --output-dir "$output_dir"
+}
+
+assert_adoption_report() {
+  local report_file="$1"
+
+  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const serialized = JSON.stringify(report);
+const digestRe = /^sha256:[0-9a-f]{64}$/;
+const allowedTopLevelKeys = new Set([
+  'schema',
+  'scope',
+  'readiness',
+  'status',
+  'release',
+  'release_contract_digest',
+  'bundle_manifest_digest',
+  'surface_report_digests',
+  'producer_report_digests',
+  'operator_paths',
+  'target_registry_summary'
+]);
+const forbiddenKeys = new Set([
+  'verdict',
+  'release_verdict',
+  'release_readiness',
+  'package_readiness',
+  'operator_verdict',
+  'ready'
+]);
+
+function assertNoForbiddenKeys(value, label = 'report') {
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoForbiddenKeys(item, `${label}[${index}]`));
+    return;
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    if (forbiddenKeys.has(key)) {
+      throw new Error(`airgap adoption report included forbidden key: ${label}.${key}`);
+    }
+    assertNoForbiddenKeys(nested, `${label}.${key}`);
+  }
+}
+
+if (report.schema !== 'agentsmith.airgap-adoption/v1') {
+  throw new Error(`unexpected schema: ${report.schema}`);
+}
+if (report.scope !== 'airgap_adoption_only') {
+  throw new Error(`unexpected scope: ${report.scope}`);
+}
+if (report.readiness !== false || report.status !== 'pass') {
+  throw new Error('adoption report must pass with readiness=false');
+}
+for (const key of Object.keys(report)) {
+  if (!allowedTopLevelKeys.has(key)) {
+    throw new Error(`unexpected adoption report key: ${key}`);
+  }
+}
+assertNoForbiddenKeys(report);
+if (!report.release || !report.release.release_id || !/^[0-9a-f]{40}$/.test(report.release.git_sha || '')) {
+  throw new Error('adoption report must include release identity');
+}
+if (!digestRe.test(report.release_contract_digest || '')) {
+  throw new Error('adoption report must include release contract digest');
+}
+if (!digestRe.test(report.bundle_manifest_digest || '')) {
+  throw new Error('adoption report must include bundle manifest digest');
+}
+for (const digest of Object.values(report.surface_report_digests || {})) {
+  if (!digestRe.test(digest)) {
+    throw new Error('surface report digest is invalid');
+  }
+}
+for (const group of Object.values(report.producer_report_digests || {})) {
+  for (const digest of Object.values(group || {})) {
+    if (!digestRe.test(digest)) {
+      throw new Error('producer report digest is invalid');
+    }
+  }
+}
+const bundlePath = report.operator_paths?.find((item) => item.surface === 'airgap-bundle');
+const consumePath = report.operator_paths?.find((item) => item.surface === 'airgap');
+if (!bundlePath || bundlePath.substrate_strategy !== 'use_existing') {
+  throw new Error('bundle operator path summary missing');
+}
+if (!consumePath || consumePath.substrate_strategy !== 'use_existing') {
+  throw new Error('consume operator path summary missing');
+}
+if (consumePath.mode !== 'apply' || consumePath.operator_run_id_present !== true) {
+  throw new Error('consume path must prove confirmed apply with operator_run_id');
+}
+for (const requiredStep of ['airgap-image-load', 'airgap-bundle-render-check', 'apply', 'rollout', 'smoke']) {
+  if (!consumePath.deployment_steps?.includes(requiredStep)) {
+    throw new Error(`consume path missing deployment step: ${requiredStep}`);
+  }
+}
+if (report.target_registry_summary?.host !== 'registry.example.internal') {
+  throw new Error('target registry summary must use sanitized registry host');
+}
+if (/\/tmp\/|\/home\/|secretRef:|kubeconfig|Bearer|token\s*[:=]|password\s*[:=]|operator_identity|signature_uri/i.test(serialized)) {
+  throw new Error('adoption report leaked paths, kubeconfig, signatures, identity, or secret-ish payloads');
+}
+NODE
+}
+
+expect_adoption_fail() {
+  local label="$1"
+  shift
+
+  if "$@" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected airgap adoption failure: $label"
+  fi
+
+  pass "airgap adoption rejected invalid case: $label"
+}
+
+VALID_ARCHIVE="$TMP_DIR/agentsmith-deploy-template-package.tgz"
+VALID_CONTRACT="$TMP_DIR/release-contract.valid-material.json"
+VALID_PACKAGE="$TMP_DIR/deploy-template-package.valid-material.json"
+VALID_VALUES="$TMP_DIR/render-values.valid.json"
+VALID_TRUTH="$TMP_DIR/substrate-truth.airgap.json"
+VALID_PREREQUISITES="$TMP_DIR/target-prerequisites.airgap.json"
+
+manifest_sha="$(create_archive "$VALID_ARCHIVE")"
+archive_sha="$(sha256_file "$VALID_ARCHIVE")"
+write_materials "$manifest_sha" "$archive_sha" "$VALID_CONTRACT" "$VALID_PACKAGE"
+write_render_values "$VALID_VALUES"
+write_truth "$VALID_TRUTH"
+write_prerequisites "$VALID_PREREQUISITES"
+create_payloads
+create_image_archives
+write_operator_prerequisites
+write_airgap_apply_tools
+write_fake_kubectl
+start_server
+
+image_args=()
+for id in "${RELEASE_IMAGE_IDS[@]}"; do
+  image_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
+done
+
+bundle_output="$TMP_DIR/out-airgap-bundle"
+bundle_root="$TMP_DIR/bundle-airgap-use-existing"
+run_bundle_surface "$bundle_root" "$bundle_output" >"$TMP_DIR/airgap-bundle.out"
+[[ -f "$bundle_output/$SURFACE_REPORT_FILE" ]] || fail "bundle operator surface report missing"
+[[ -f "$bundle_root/airgap-bundle-manifest.json" ]] || fail "bundle manifest missing"
+
+write_bundle_operator_inputs "$bundle_root"
+consume_output="$TMP_DIR/out-airgap-consume"
+: >"$LOAD_LOG"
+: >"$KUBECTL_LOG"
+run_consume_surface "$bundle_root" "$consume_output" operator-airgap-adoption-1001 "http://127.0.0.1:$SERVER_PORT/ok" >"$TMP_DIR/airgap-consume.out"
+[[ -f "$consume_output/$SURFACE_REPORT_FILE" ]] || fail "consume operator surface report missing"
+
+adoption_output="$TMP_DIR/out-airgap-adoption"
+run_adoption \
+  "$bundle_output/$SURFACE_REPORT_FILE" \
+  "$consume_output/$SURFACE_REPORT_FILE" \
+  "$bundle_root/airgap-bundle-manifest.json" \
+  "$adoption_output" >"$TMP_DIR/airgap-adoption.out"
+assert_adoption_report "$adoption_output/$ADOPTION_REPORT_FILE"
+pass "airgap adoption aggregates bundle and consume operator surfaces"
+
+dry_run_consume_output="$TMP_DIR/out-airgap-consume-dry-run"
+: >"$KUBECTL_LOG"
+run_consume_surface_dry_run "$bundle_root" "$dry_run_consume_output" >"$TMP_DIR/airgap-consume-dry-run.out"
+expect_adoption_fail server-dry-run \
+  run_adoption \
+    "$bundle_output/$SURFACE_REPORT_FILE" \
+    "$dry_run_consume_output/$SURFACE_REPORT_FILE" \
+    "$bundle_root/airgap-bundle-manifest.json" \
+    "$TMP_DIR/out-adoption-dry-run"
+
+missing_smoke_consume_output="$TMP_DIR/out-airgap-consume-missing-smoke"
+: >"$LOAD_LOG"
+: >"$KUBECTL_LOG"
+run_consume_surface "$bundle_root" "$missing_smoke_consume_output" operator-airgap-adoption-no-smoke "" >"$TMP_DIR/airgap-consume-missing-smoke.out"
+expect_adoption_fail missing-smoke \
+  run_adoption \
+    "$bundle_output/$SURFACE_REPORT_FILE" \
+    "$missing_smoke_consume_output/$SURFACE_REPORT_FILE" \
+    "$bundle_root/airgap-bundle-manifest.json" \
+    "$TMP_DIR/out-adoption-missing-smoke"
+
+drifted_manifest="$TMP_DIR/airgap-bundle-manifest.drifted.json"
+cp "$bundle_root/airgap-bundle-manifest.json" "$drifted_manifest"
+"$NODE_BIN" --input-type=module - "$drifted_manifest" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestFile] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+manifest.release_id = '2026.05.23-p0-drifted';
+fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+expect_adoption_fail bundle-manifest-digest-drift \
+  run_adoption \
+    "$bundle_output/$SURFACE_REPORT_FILE" \
+    "$consume_output/$SURFACE_REPORT_FILE" \
+    "$drifted_manifest" \
+    "$TMP_DIR/out-adoption-manifest-drift"
+
+drifted_contract="$TMP_DIR/release-contract.digest-drift.json"
+cp "$VALID_CONTRACT" "$drifted_contract"
+printf '\n' >>"$drifted_contract"
+expect_adoption_fail release-digest-mismatch \
+  run_adoption \
+    "$bundle_output/$SURFACE_REPORT_FILE" \
+    "$consume_output/$SURFACE_REPORT_FILE" \
+    "$bundle_root/airgap-bundle-manifest.json" \
+    "$TMP_DIR/out-adoption-release-drift" \
+    "$drifted_contract"
+
+pass "airgap adoption focused tests completed"

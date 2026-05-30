@@ -45,6 +45,8 @@ jobs:
         run: bash scripts/test-airgap-deployment-gate.sh
       - name: Airgap consume rehearsal focused guard
         run: bash scripts/test-airgap-consume-rehearsal.sh
+      - name: Airgap adoption aggregation focused guard
+        run: bash scripts/test-airgap-adoption.sh
       - name: Substrate pack focused guard
         run: bash scripts/test-substrate-pack-check.sh
       - name: Substrate routability focused guard

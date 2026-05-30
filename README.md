@@ -8,10 +8,10 @@ identity, boundary documents, handoff guidance, and focused diagnostics. It
 contains image-map, airgap bundle create, airgap bundle manifest/digest,
 airgap image archive materiality, airgap image load, registry presence,
 airgap bundle load-plan, airgap bundle render-check, airgap deployment focused
-chain orchestration, airgap consume rehearsal, substrate pack check, apply-only,
-rollout/live digest, route smoke, and online focused chain orchestration
-diagnostics, plus operator signoff intake binding, but does not contain full
-deploy tooling yet.
+chain orchestration, airgap consume rehearsal, airgap adoption aggregation,
+substrate pack check, apply-only, rollout/live digest, route smoke, and online
+focused chain orchestration diagnostics, plus operator signoff intake binding,
+but does not contain full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -93,6 +93,12 @@ bash scripts/operator-release.sh airgap use_existing ...
 bash scripts/operator-release.sh airgap install_substrates ...
 bash scripts/operator-release.sh airgap-bundle use_existing ...
 bash scripts/operator-release.sh airgap-bundle install_substrates ...
+bash scripts/verify-release.sh --airgap-adoption \
+  --release-contract <json> \
+  --bundle-surface-report <airgap-bundle/operator-release-surface-report.json> \
+  --consume-surface-report <airgap/operator-release-surface-report.json> \
+  --bundle-manifest <airgap-bundle-manifest.json> \
+  --output-dir <dir>
 ```
 
 The use-existing online, airgap, and airgap-bundle commands map operator
@@ -100,6 +106,10 @@ choices to the existing producer
 diagnostics and write `operator-release-surface-report.json` with
 `readiness: false`. `airgap/install_substrates` and
 `airgap-bundle/install_substrates` fail fast in v0.
+`--airgap-adoption` aggregates the generated `airgap-bundle/use_existing`
+surface plus confirmed-apply `airgap/use_existing` surface for repo-local
+adoption preparation only and writes `airgap-adoption-report.json` with
+`readiness: false`.
 `verify-release.sh` remains the producer catalog and maintainer/focused
 diagnostic entry.
 
