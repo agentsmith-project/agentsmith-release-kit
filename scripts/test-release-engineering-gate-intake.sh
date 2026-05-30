@@ -20,8 +20,9 @@ pass() {
 
 write_candidate_inputs() {
   local output_dir="$1"
+  local release_contract="${2:-$VALID_CONTRACT}"
 
-  "$NODE_BIN" --input-type=module - "$VALID_CONTRACT" "$output_dir" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$release_contract" "$output_dir" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -308,6 +309,9 @@ switch (mutation) {
       data.release_contract_digest = `sha256:${'b'.repeat(64)}`;
     }
     break;
+  case 'unsafe_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri = '/home/percy/.kube/config';
+    break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);
 }
@@ -503,6 +507,20 @@ expect_fail package-readiness \
     "$AIRGAP_INSTALL_SUBSTRATES_REPORT" \
     "$BAD_CONTRACT_PACKAGE_READINESS"
 
+BAD_CONTRACT_UNSAFE_ARTIFACT_URI="$TMP_DIR/bad/release-contract-unsafe-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_UNSAFE_ARTIFACT_URI" unsafe_release_contract_artifact_uri
+UNSAFE_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/unsafe-artifact-uri-inputs"
+write_candidate_inputs "$UNSAFE_ARTIFACT_URI_INPUT_DIR" "$BAD_CONTRACT_UNSAFE_ARTIFACT_URI"
+UNSAFE_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-unsafe-artifact-uri"
+expect_fail unsafe-release-contract-artifact-uri \
+  run_intake \
+    "$UNSAFE_ARTIFACT_URI_OUTPUT" \
+    "$UNSAFE_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
+    "$UNSAFE_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+    "$UNSAFE_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$BAD_CONTRACT_UNSAFE_ARTIFACT_URI"
+assert_no_stale_report "$UNSAFE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
 expect_fail focused-online-producer-as-adoption \
   run_intake \
     "$TMP_DIR/out-focused-online" \
@@ -579,6 +597,20 @@ expect_fail stale-report-clear \
     "$AIRGAP_USE_EXISTING_REPORT" \
     "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
 assert_no_stale_report "$STALE_OUTPUT/$REPORT_FILE"
+
+STALE_CLI_OUTPUT="$TMP_DIR/out-stale-cli-clear"
+run_intake \
+  "$STALE_CLI_OUTPUT" \
+  "$ONLINE_REPORT" \
+  "$AIRGAP_USE_EXISTING_REPORT" \
+  "$AIRGAP_INSTALL_SUBSTRATES_REPORT" >"$TMP_DIR/stale-cli-pass.out"
+[[ -f "$STALE_CLI_OUTPUT/$REPORT_FILE" ]] || fail "stale CLI setup report missing"
+expect_fail stale-cli-report-clear \
+  bash "$ROOT_DIR/scripts/verify-release.sh" --release-engineering-gate-intake \
+    --release-contract "$VALID_CONTRACT" \
+    --online-adoption-report "$ONLINE_REPORT" \
+    --output-dir "$STALE_CLI_OUTPUT"
+assert_no_stale_report "$STALE_CLI_OUTPUT/$REPORT_FILE"
 
 expect_fail default-verify-release-fail-closed \
   bash "$ROOT_DIR/scripts/verify-release.sh"

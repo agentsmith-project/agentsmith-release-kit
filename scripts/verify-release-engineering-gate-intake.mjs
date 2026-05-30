@@ -73,6 +73,8 @@ const KNOWN_FOCUSED_PRODUCER_SCOPES = new Map([
 ]);
 const LOCAL_OR_SECRET_TEXT_RE =
   /(?:^|["'\s])(?:\/home\/|\/tmp\/|\/var\/|\/private\/|[A-Za-z]:[\\/]|file:\/\/)|secretRef:|kubeconfig|Bearer\s+[A-Za-z0-9._~+/=-]+|token\s*[:=]|password\s*[:=]/i;
+const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+const SAFE_ARTIFACT_URI_SCHEMES = new Set(['gh-artifact', 'https']);
 
 class CliError extends Error {
   constructor(message) {
@@ -361,6 +363,85 @@ function assertNoUnsafeText(value, label) {
   }
 }
 
+function pathSegments(parsed) {
+  return parsed.pathname
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch {
+        return segment;
+      }
+    });
+}
+
+function isGithubActionsArtifactUri(parsed) {
+  const segments = pathSegments(parsed);
+  if (parsed.protocol !== 'https:') {
+    return false;
+  }
+  if (parsed.hostname === 'api.github.com') {
+    return (
+      segments[0] === 'repos' &&
+      Boolean(segments[1]) &&
+      Boolean(segments[2]) &&
+      segments[3] === 'actions' &&
+      ((segments[4] === 'runs' && Boolean(segments[5]) && segments[6] === 'artifacts') ||
+        (segments[4] === 'artifacts' && Boolean(segments[5])))
+    );
+  }
+  if (parsed.hostname === 'github.com') {
+    return (
+      Boolean(segments[0]) &&
+      Boolean(segments[1]) &&
+      segments[2] === 'actions' &&
+      segments[3] === 'runs' &&
+      Boolean(segments[4])
+    );
+  }
+  return false;
+}
+
+function isSafeGhArtifactUri(parsed) {
+  const segments = pathSegments(parsed);
+  return (
+    parsed.protocol === 'gh-artifact:' &&
+    Boolean(parsed.hostname) &&
+    segments.length >= 3 &&
+    !segments.includes('.') &&
+    !segments.includes('..')
+  );
+}
+
+function requireAllowedArtifactUri(value, label) {
+  const uri = requireString(value, label);
+  if (
+    uri !== uri.trim() ||
+    /[\r\n]/.test(uri) ||
+    LOCAL_OR_SECRET_TEXT_RE.test(uri) ||
+    !URI_SCHEME_RE.test(uri)
+  ) {
+    fail(`${label} must be an allowed remote artifact URI`);
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    fail(`${label} must be an allowed remote artifact URI`);
+  }
+
+  const scheme = parsed.protocol.slice(0, -1).toLowerCase();
+  if (!SAFE_ARTIFACT_URI_SCHEMES.has(scheme)) {
+    fail(`${label} must be an allowed remote artifact URI`);
+  }
+  if (isSafeGhArtifactUri(parsed) || isGithubActionsArtifactUri(parsed)) {
+    return uri;
+  }
+  fail(`${label} must be an allowed remote artifact URI`);
+}
+
 function releaseContractSubjectDigest(contract) {
   const provenance = requireObject(
     contract.artifact_provenance,
@@ -388,6 +469,34 @@ function releaseContractSubjectDigest(contract) {
   return declaredSubject;
 }
 
+function validateReleaseContractProvenance(provenance, releaseContractSubjectSha256) {
+  const sanitized = {
+    provenance_kind: requireString(
+      provenance.provenance_kind,
+      'release_contract.artifact_provenance.provenance_kind'
+    ),
+    producer_repo: requireString(
+      provenance.producer_repo,
+      'release_contract.artifact_provenance.producer_repo'
+    ),
+    normalized_remote: requireString(
+      provenance.normalized_remote,
+      'release_contract.artifact_provenance.normalized_remote'
+    ),
+    commit_sha: requireGitSha(
+      provenance.commit_sha,
+      'release_contract.artifact_provenance.commit_sha'
+    ),
+    artifact_uri: requireAllowedArtifactUri(
+      provenance.artifact_uri,
+      'release_contract.artifact_provenance.artifact_uri'
+    ),
+    subject_sha256: releaseContractSubjectSha256
+  };
+  assertNoUnsafeText(sanitized, 'release_contract.artifact_provenance');
+  return sanitized;
+}
+
 function releaseIdentityFromContract(releaseContractInput) {
   const contract = requireObject(releaseContractInput.value, 'release_contract');
   assertNoFormalInputFields(contract, 'release_contract');
@@ -412,26 +521,7 @@ function releaseIdentityFromContract(releaseContractInput) {
     gitSha,
     releaseContractDigest: releaseContractInput.digest,
     releaseContractSubjectSha256,
-    provenance: {
-      provenance_kind: requireString(
-        provenance.provenance_kind,
-        'release_contract.artifact_provenance.provenance_kind'
-      ),
-      producer_repo: requireString(
-        provenance.producer_repo,
-        'release_contract.artifact_provenance.producer_repo'
-      ),
-      normalized_remote: requireString(
-        provenance.normalized_remote,
-        'release_contract.artifact_provenance.normalized_remote'
-      ),
-      commit_sha: provenanceCommitSha,
-      artifact_uri: requireString(
-        provenance.artifact_uri,
-        'release_contract.artifact_provenance.artifact_uri'
-      ),
-      subject_sha256: releaseContractSubjectSha256
-    }
+    provenance: validateReleaseContractProvenance(provenance, releaseContractSubjectSha256)
   };
 }
 
@@ -717,11 +807,34 @@ async function removeManagedReport(outputDir) {
   await fs.rm(path.join(path.resolve(outputDir), REPORT_FILE), { force: true });
 }
 
+function extractExplicitOutputDir(argv) {
+  let outputDir;
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== '--output-dir') {
+      continue;
+    }
+    const value = argv[index + 1];
+    if (value && value.trim() !== '' && !value.startsWith('--')) {
+      outputDir = value;
+    }
+  }
+  return outputDir;
+}
+
 async function main(argv) {
-  const args = parseArgs(argv);
-  if (args.help) {
-    console.log(usage());
-    return;
+  const explicitOutputDir = extractExplicitOutputDir(argv);
+  let args;
+  try {
+    args = parseArgs(argv);
+    if (args.help) {
+      console.log(usage());
+      return;
+    }
+  } catch (error) {
+    if ((error.exitCode || 1) === 2) {
+      await removeManagedReport(explicitOutputDir);
+    }
+    throw error;
   }
 
   await removeManagedReport(args.outputDir);
