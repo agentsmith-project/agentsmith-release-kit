@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { validateSubstratePackManifest } from './lib/substrate-pack-manifest-validation.mjs';
 import {
   CANONICAL_DECLARABLE_TARGET_PROFILE_SET,
   CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES,
@@ -1353,6 +1354,19 @@ async function main() {
     );
     expectedComponentSha256.substrate_pack_manifest =
       expectedBindings.substrate_pack_manifest_sha256;
+
+    const substratePackPath = await resolveBundleFile(
+      bundleRoot,
+      component.path,
+      'bundle_manifest.components[substrate_pack_manifest].path'
+    );
+    const substratePackInput = await readJson(substratePackPath, 'substrate pack manifest');
+    if (substratePackInput.inputDigest !== expectedBindings.substrate_pack_manifest_sha256) {
+      fail(
+        'bundle_manifest.components[substrate_pack_manifest].sha256 must match component file sha256'
+      );
+    }
+    validateSubstratePackManifest(substratePackInput.value, targetProfile, { fail });
   }
   const bundleSummary = await assertBundleManifest({
     manifest: bundleManifest,

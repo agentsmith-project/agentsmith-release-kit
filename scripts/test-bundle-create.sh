@@ -242,11 +242,12 @@ NODE
 write_kit_substrate_pack_manifest() {
   local output="$1"
   local profile="$2"
+  local mutation="${3:-valid}"
 
-  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$output" "$profile" "$mutation" <<'NODE'
 import fs from 'node:fs';
 
-const [output, profile] = process.argv.slice(2);
+const [output, profile, mutation] = process.argv.slice(2);
 const digest = (char) => `sha256:${char.repeat(64)}`;
 const image = (name, tag, char) =>
   `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
@@ -286,6 +287,25 @@ const manifest = {
     manifest: digest('8')
   }
 };
+
+switch (mutation) {
+  case 'valid':
+    break;
+  case 'secret_payload':
+    manifest.payload.access_token = 'Bearer notrealcredential12345';
+    break;
+  case 'non_digest_image':
+    manifest.images.redis = 'ghcr.io/agentsmith-project/substrates/redis:7.2';
+    break;
+  case 'localhost_image':
+    manifest.images.postgresql = 'localhost:5000/substrates/postgresql:16.3@' + digest('1');
+    break;
+  case 'missing_required_section':
+    delete manifest.tools;
+    break;
+  default:
+    throw new Error(`unknown substrate pack mutation: ${mutation}`);
+}
 
 fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
@@ -653,6 +673,22 @@ expect_create_fail missing-substrate-pack-manifest "$TMP_DIR/bundle-missing-subs
   run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-missing-substrate-pack" "$TMP_DIR/out-missing-substrate-pack" \
     "${default_image_args[@]}" \
     "${common_payload_args[@]}"
+
+expect_create_fail external-declared-rejects-substrate-pack-manifest "$TMP_DIR/bundle-external-substrate-pack" "$TMP_DIR/out-external-substrate-pack" \
+  run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-external-substrate-pack" "$TMP_DIR/out-external-substrate-pack" \
+    "${default_image_args[@]}" \
+    "${common_payload_args[@]}" \
+    --substrate-pack-manifest "$KIT_SUBSTRATE_PACK"
+
+for substrate_pack_case in secret_payload non_digest_image localhost_image missing_required_section; do
+  bad_substrate_pack="$TMP_DIR/substrate-pack-$substrate_pack_case.json"
+  write_kit_substrate_pack_manifest "$bad_substrate_pack" "$KIT_AIRGAP_PROFILE" "$substrate_pack_case"
+  expect_create_fail "kit-substrate-pack-$substrate_pack_case" "$TMP_DIR/bundle-kit-substrate-pack-$substrate_pack_case" "$TMP_DIR/out-kit-substrate-pack-$substrate_pack_case" \
+    run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-kit-substrate-pack-$substrate_pack_case" "$TMP_DIR/out-kit-substrate-pack-$substrate_pack_case" \
+      "${default_image_args[@]}" \
+      "${common_payload_args[@]}" \
+      --substrate-pack-manifest "$bad_substrate_pack"
+done
 
 expect_create_fail invalid-target-registry "$TMP_DIR/bundle-bad-registry" "$TMP_DIR/out-bad-registry" \
   run_bundle_create_full "$AIRGAP_PROFILE" "https://registry.example.internal/releases" "$TMP_DIR/bundle-bad-registry" "$TMP_DIR/out-bad-registry" \

@@ -800,11 +800,12 @@ NODE
 write_kit_substrate_pack_manifest() {
   local output="$1"
   local profile="$2"
+  local mutation="${3:-valid}"
 
-  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$output" "$profile" "$mutation" <<'NODE'
 import fs from 'node:fs';
 
-const [output, profile] = process.argv.slice(2);
+const [output, profile, mutation] = process.argv.slice(2);
 const digest = (char) => `sha256:${char.repeat(64)}`;
 const image = (name, tag, char) =>
   `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
@@ -844,6 +845,29 @@ const manifest = {
     manifest: digest('8')
   }
 };
+
+switch (mutation) {
+  case 'valid':
+    break;
+  case 'secret_payload':
+    manifest.payload.access_token = 'Bearer notrealcredential12345';
+    break;
+  case 'source_path':
+    manifest.templates.postgresql =
+      '/home/percy/works/mbos-v1/' + 'agent' + 'smith/' + 'src/' + 'app/page.tsx';
+    break;
+  case 'non_digest_image':
+    manifest.images.redis = 'ghcr.io/agentsmith-project/substrates/redis:7.2';
+    break;
+  case 'localhost_image':
+    manifest.images.postgresql = 'localhost:5000/substrates/postgresql:16.3@' + digest('1');
+    break;
+  case 'missing_required_section':
+    delete manifest.tools;
+    break;
+  default:
+    throw new Error(`unknown substrate pack mutation: ${mutation}`);
+}
 
 fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
@@ -1202,13 +1226,14 @@ expect_contract_fail() {
 expect_kit_bundle_fail() {
   local label="$1"
   local mutation="$2"
+  local substrate_pack_mutation="${3:-valid}"
   local image_map_dir="$TMP_DIR/image-map-kit-$label"
   local bundle_root="$TMP_DIR/bundle-kit-$label"
   local bundle_manifest="$bundle_root/airgap-bundle-manifest.json"
   local output_dir="$TMP_DIR/out-kit-$label"
   local substrate_pack_manifest="$TMP_DIR/substrate-pack-$label.json"
 
-  write_kit_substrate_pack_manifest "$substrate_pack_manifest" "$KIT_AIRGAP_PROFILE"
+  write_kit_substrate_pack_manifest "$substrate_pack_manifest" "$KIT_AIRGAP_PROFILE" "$substrate_pack_mutation"
   run_image_map "$image_map_dir" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE"
   create_bundle "$image_map_dir/image-map.json" "$bundle_root" "$bundle_manifest"
   add_kit_substrate_pack_to_bundle "$bundle_root" "$bundle_manifest" "$substrate_pack_manifest" "$mutation"
@@ -1257,6 +1282,11 @@ pass "valid kit-installed airgap bundle manifest binds substrate pack component 
 expect_kit_bundle_fail substrate-pack-binding-sha-mismatch substrate_pack_binding_sha_mismatch
 expect_kit_bundle_fail substrate-pack-component-sha-mismatch substrate_pack_component_sha_mismatch
 expect_kit_bundle_fail missing-substrate-pack-component missing_substrate_pack_component
+expect_kit_bundle_fail substrate-pack-secret-payload valid secret_payload
+expect_kit_bundle_fail substrate-pack-source-path valid source_path
+expect_kit_bundle_fail substrate-pack-non-digest-image valid non_digest_image
+expect_kit_bundle_fail substrate-pack-localhost-image valid localhost_image
+expect_kit_bundle_fail substrate-pack-missing-required-section valid missing_required_section
 
 expect_image_map_fail missing-target-registry missing_target_registry
 expect_image_map_fail image-map-not-airgap online_target_profile

@@ -5,6 +5,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { validateSubstratePackManifest } from './lib/substrate-pack-manifest-validation.mjs';
+
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SCRIPT_DIR, '..');
 const REQUIRED_ARGS = [
@@ -27,7 +29,6 @@ const AIRGAP_BUNDLE_TARGET_PROFILE_VALUES = [
   KIT_AIRGAP_TARGET_PROFILE
 ];
 const AIRGAP_BUNDLE_TARGET_PROFILE_SET = new Set(AIRGAP_BUNDLE_TARGET_PROFILE_VALUES);
-const SUBSTRATE_PACK_MANIFEST_SCHEMA = 'agentsmith.substrate-pack-manifest/v1';
 const REPORT_SCHEMA = 'agentsmith.airgap-bundle-create-report/v1';
 const REPORT_SCOPE = 'airgap_bundle_create_only';
 const REPORT_FILE = 'bundle-create-report.json';
@@ -543,22 +544,7 @@ async function normalizeSubstratePackManifest(args, targetProfile) {
     'substrate pack manifest'
   );
   const input = await readJson(sourcePath, 'substrate pack manifest');
-  const manifest = requireObject(input.value, 'substrate_pack_manifest');
-  assertStringEquals(
-    manifest.schema_version,
-    SUBSTRATE_PACK_MANIFEST_SCHEMA,
-    'substrate_pack_manifest.schema_version'
-  );
-  assertStringEquals(
-    manifest.installed_by,
-    'agentsmith-release-kit',
-    'substrate_pack_manifest.installed_by'
-  );
-  assertStringEquals(
-    manifest.target_profile,
-    targetProfile.value,
-    'substrate_pack_manifest.target_profile'
-  );
+  validateSubstratePackManifest(input.value, targetProfile, { fail });
 
   return {
     sourcePath,

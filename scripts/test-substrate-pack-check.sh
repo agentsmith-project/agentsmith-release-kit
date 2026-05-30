@@ -147,6 +147,9 @@ switch (mutation) {
   case 'empty_tools':
     manifest.tools = {};
     break;
+  case 'missing_required_section':
+    delete manifest.tools;
+    break;
   default:
     throw new Error(`unknown manifest mutation: ${mutation}`);
 }
@@ -439,6 +442,7 @@ expect_fail secret-payload secret_payload
 expect_fail public-download public_download
 expect_fail public-download-key public_download_key
 expect_fail empty-tools empty_tools
+expect_fail missing-required-section missing_required_section
 expect_fail truth-profile-mismatch valid valid "$KIT_ONLINE_PROFILE" "$KIT_ONLINE_PROFILE" "$KIT_AIRGAP_PROFILE"
 expect_fail truth-wrong-installed-by valid wrong_installed_by
 expect_fail truth-raw-kubeconfig valid raw_kubeconfig
