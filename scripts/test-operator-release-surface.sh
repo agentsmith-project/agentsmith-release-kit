@@ -937,6 +937,27 @@ if (/\/tmp\/|\/home\/|secretRef:|operator held|operator workstation|signed opera
 NODE
 }
 
+assert_operator_airgap_manifest_digest() {
+  local output_dir="$1"
+  local expected_digest="$2"
+
+  "$NODE_BIN" --input-type=module - \
+    "$output_dir/$REPORT_FILE" \
+    "$expected_digest" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile, expectedDigest] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const actualDigest = report.airgap_handoff?.bundle_manifest_digest;
+
+if (actualDigest !== expectedDigest) {
+  throw new Error(
+    `operator summary used the wrong bundle manifest digest: ${actualDigest} !== ${expectedDigest}`
+  );
+}
+NODE
+}
+
 assert_producer_profile() {
   local report_file="$1"
   local expected_profile="$2"
@@ -1373,6 +1394,67 @@ assert_operator_report \
   "airgap_bundle_check_report,airgap_consume_rehearsal_report,airgap_deployment_gate_report" \
   true
 pass "operator airgap/use_existing maps to consume rehearsal and writes handoff summary"
+
+custom_manifest_bundle_root="$TMP_DIR/bundle-airgap-custom-manifest"
+custom_manifest_output="$TMP_DIR/out-airgap-custom-manifest"
+cp -R "$airgap_bundle_root" "$custom_manifest_bundle_root"
+write_bundle_operator_inputs "$custom_manifest_bundle_root"
+mkdir -p "$custom_manifest_bundle_root/manifests"
+custom_bundle_manifest="$custom_manifest_bundle_root/manifests/operator-selected-manifest.json"
+cp "$custom_manifest_bundle_root/airgap-bundle-manifest.json" "$custom_bundle_manifest"
+custom_bundle_manifest_digest="$(sha256_file "$custom_bundle_manifest")"
+"$NODE_BIN" --input-type=module - "$custom_manifest_bundle_root/airgap-bundle-manifest.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+manifest.release_id = 'wrong-default-manifest-identity';
+manifest.git_sha = '0000000000000000000000000000000000000000';
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+custom_manifest_target_app_image="$(target_image_for_id "$custom_manifest_bundle_root/components/image-map.json" agentsmith_app)"
+: >"$KUBECTL_LOG"
+: >"$LOAD_LOG"
+before_custom_manifest_apply="$(hit_count)"
+AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+FAKE_KUBECTL_LIVE_IMAGE="$custom_manifest_target_app_image" \
+FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$custom_manifest_target_app_image" \
+bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+  --bundle-root "$custom_manifest_bundle_root" \
+  --bundle-manifest "$custom_bundle_manifest" \
+  --render-values "$custom_manifest_bundle_root/operator-inputs/render-values.json" \
+  --substrate-truth "$custom_manifest_bundle_root/operator-inputs/substrate-truth.json" \
+  --target-prerequisites "$custom_manifest_bundle_root/operator-inputs/target-prerequisites.json" \
+  --namespace agentsmith \
+  --output-dir "$custom_manifest_output" \
+  --kubectl "$FAKE_KUBECTL" \
+  --mode apply \
+  --archive-probe "$GOOD_PROBE" \
+  --image-loader "$GOOD_LOADER" \
+  --confirm-apply airgap/use_existing \
+  --operator-run-id operator-airgap-custom-manifest \
+  --timeout 120s \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost >"$TMP_DIR/airgap-custom-manifest.out"
+after_custom_manifest_apply="$(hit_count)"
+
+[[ "$after_custom_manifest_apply" -eq $((before_custom_manifest_apply + 1)) ]] ||
+  fail "operator airgap custom manifest apply smoke should issue one request"
+[[ "$(grep -c '^sha256:' "$LOAD_LOG" 2>/dev/null || true)" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] ||
+  fail "operator airgap custom manifest apply must load every image exactly once"
+[[ -f "$custom_manifest_output/$REPORT_FILE" ]] || fail "operator airgap custom manifest summary missing"
+assert_operator_report \
+  "$custom_manifest_output" \
+  airgap \
+  use_existing \
+  "$AIRGAP_PROFILE" \
+  "airgap-bundle-check,airgap-deployment-gate" \
+  "airgap_bundle_check_report,airgap_consume_rehearsal_report,airgap_deployment_gate_report" \
+  true
+assert_operator_airgap_manifest_digest "$custom_manifest_output" "$custom_bundle_manifest_digest"
+pass "operator airgap/use_existing summary honors non-default in-bundle bundle manifest"
 
 unsupported_output="$TMP_DIR/out-airgap-install-substrates"
 expect_operator_fail_preserves_summary airgap-install-substrates "$unsupported_output" \

@@ -37,6 +37,8 @@ const AIRGAP_DEPLOYMENT_GATE_SCOPE = 'airgap_deployment_gate_only';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const SAFE_RELATIVE_PATH_RE = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+const URI_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:/;
+const WINDOWS_DRIVE_RE = /^[A-Za-z]:[\\/]/;
 const ONLINE_HANDOFF_PROVENANCE_KINDS = new Set(['ci_artifact', 'signed_operator_run']);
 const MAPPINGS = new Map([
   [
@@ -106,6 +108,7 @@ function usage() {
     [--release-contract <json>] \\
     [--evidence-root <dir>] \\
     [--bundle-root <dir>] \\
+    [--bundle-manifest <bundle-local-json>] \\
     [--target-registry <registry-host[/namespace]>]`;
 }
 
@@ -164,6 +167,9 @@ function parseArgs(argv) {
         break;
       case '--bundle-root':
         parsed.bundleRoot = nextValue();
+        break;
+      case '--bundle-manifest':
+        parsed.bundleManifest = nextValue();
         break;
       case '--target-registry':
         parsed.targetRegistry = nextValue();
@@ -327,11 +333,17 @@ function assertMapping(args) {
   if (args.producerMode === 'airgap-consume-rehearsal' && args.targetRegistry) {
     cliFail('airgap consume summaries do not accept --target-registry');
   }
-  if (args.producerMode === 'online-deployment-gate' && (args.bundleRoot || args.targetRegistry)) {
-    cliFail('online summaries do not accept --bundle-root or --target-registry');
+  if (
+    args.producerMode === 'online-deployment-gate' &&
+    (args.bundleRoot || args.bundleManifest || args.targetRegistry)
+  ) {
+    cliFail('online summaries do not accept --bundle-root, --bundle-manifest, or --target-registry');
   }
   if (args.producerMode !== 'bundle-create' && args.targetRegistry) {
     cliFail('--target-registry is only accepted for bundle-create summaries');
+  }
+  if (args.bundleManifest && args.producerMode !== 'airgap-consume-rehearsal') {
+    cliFail('--bundle-manifest is only accepted for airgap consume summaries');
   }
   if (args.evidenceRoot && args.producerMode !== 'online-deployment-gate') {
     cliFail('--evidence-root is only accepted for online summaries');
@@ -422,6 +434,79 @@ async function assertOutputFile(outputDir, relativePath, label) {
   if (!stat.isFile()) {
     fail(`${label} must point to a file`);
   }
+}
+
+function rejectUriOrWindowsPath(value, label) {
+  if (value.startsWith('//') || WINDOWS_DRIVE_RE.test(value) || value.includes('\\')) {
+    fail(`${label} must be a local POSIX path`);
+  }
+  if (URI_SCHEME_RE.test(value)) {
+    fail(`${label} must be a local POSIX path, not a URI`);
+  }
+}
+
+function isInsidePath(rootDir, candidate) {
+  const relative = path.relative(rootDir, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function canonicalBundleRoot(input) {
+  rejectUriOrWindowsPath(requireString(input, 'bundle_root'), 'bundle_root');
+  const requested = path.resolve(input);
+  let stat;
+  try {
+    stat = await fs.lstat(requested);
+  } catch (error) {
+    fail(`cannot read bundle root: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail('bundle root must not be a symlink');
+  }
+  if (!stat.isDirectory()) {
+    fail('bundle root must be a directory');
+  }
+  try {
+    return await fs.realpath(requested);
+  } catch (error) {
+    fail(`cannot resolve bundle root: ${error.message}`);
+  }
+}
+
+async function bundleLocalFile(input, label, bundleRoot) {
+  rejectUriOrWindowsPath(requireString(input, label), label);
+  const requested = path.resolve(input);
+  if (!isInsidePath(bundleRoot, requested)) {
+    fail(`${label} must be inside bundle root`);
+  }
+  let stat;
+  try {
+    stat = await fs.lstat(requested);
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`${label} must not be a symlink`);
+  }
+  if (!stat.isFile()) {
+    fail(`${label} must point to a file`);
+  }
+  try {
+    const realPath = await fs.realpath(requested);
+    if (!isInsidePath(bundleRoot, realPath)) {
+      fail(`${label} must resolve inside bundle root`);
+    }
+    return realPath;
+  } catch (error) {
+    fail(`cannot resolve ${label}: ${error.message}`);
+  }
+}
+
+async function resolveAirgapConsumeBundleManifest(args, bundleRoot) {
+  return bundleLocalFile(
+    args.bundleManifest || path.join(bundleRoot, AIRGAP_BUNDLE_MANIFEST_FILE),
+    'bundle manifest',
+    bundleRoot
+  );
 }
 
 async function sanitizeProducerSteps(outputDir, producerSteps) {
@@ -875,7 +960,7 @@ function assertConsumeDigestBindings({
 
 async function buildAirgapConsumeSummary(args) {
   const outputDir = path.resolve(args.outputDir);
-  const bundleRoot = path.resolve(args.bundleRoot);
+  const bundleRoot = await canonicalBundleRoot(args.bundleRoot);
   const consumeReportPath = path.join(outputDir, AIRGAP_CONSUME_REPORT_FILE);
   const bundleCheckReportPath = path.join(
     outputDir,
@@ -887,7 +972,7 @@ async function buildAirgapConsumeSummary(args) {
     'airgap-deployment-gate',
     AIRGAP_DEPLOYMENT_GATE_REPORT_FILE
   );
-  const manifestPath = path.join(bundleRoot, AIRGAP_BUNDLE_MANIFEST_FILE);
+  const manifestPath = await resolveAirgapConsumeBundleManifest(args, bundleRoot);
   const consumeInput = await readJson(consumeReportPath, 'airgap consume rehearsal report');
   const bundleCheckInput = await readJson(bundleCheckReportPath, 'airgap bundle check report');
   const deploymentGateInput = await readJson(

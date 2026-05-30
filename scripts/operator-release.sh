@@ -212,6 +212,7 @@ translate_operator_confirm_apply "$operator_confirm" "$machine_profile" "$@"
 release_contract=""
 output_dir="$(require_arg_value --output-dir "$@")"
 bundle_root=""
+bundle_manifest=""
 target_registry=""
 evidence_root=""
 
@@ -230,6 +231,11 @@ if [[ "$producer_name" == "bundle-create" ]]; then
   target_registry="$(require_arg_value --target-registry "$@")"
 elif [[ "$producer_name" == "airgap-consume-rehearsal" ]]; then
   bundle_root="$(require_arg_value --bundle-root "$@")"
+  if bundle_manifest="$(find_arg_value --bundle-manifest "$@")"; then
+    :
+  else
+    bundle_manifest=""
+  fi
 fi
 
 remove_operator_summary_if_requested "$output_dir"
@@ -273,6 +279,11 @@ elif [[ "$producer_name" == "airgap-consume-rehearsal" ]]; then
   summary_args+=(
     --bundle-root "$bundle_root"
   )
+  if [[ -n "$bundle_manifest" ]]; then
+    summary_args+=(
+      --bundle-manifest "$bundle_manifest"
+    )
+  fi
 fi
 
 if [[ "$producer_name" == "online-deployment-gate" && -n "$evidence_root" ]]; then
