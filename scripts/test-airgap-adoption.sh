@@ -1145,6 +1145,17 @@ write_airgap_apply_tools
 write_fake_kubectl
 start_server
 
+"$NODE_BIN" "$ROOT_DIR/scripts/verify-airgap-adoption.mjs" --help >"$TMP_DIR/airgap-adoption-help.out"
+grep -q 'airgap/use_existing and' "$TMP_DIR/airgap-adoption-help.out" ||
+  fail "airgap adoption help must mention airgap/use_existing"
+grep -q 'airgap/install_substrates' "$TMP_DIR/airgap-adoption-help.out" ||
+  fail "airgap adoption help must mention airgap/install_substrates"
+grep -q 'readiness=false' "$TMP_DIR/airgap-adoption-help.out" ||
+  fail "airgap adoption help must keep readiness=false boundary"
+grep -q 'formal release readiness' "$TMP_DIR/airgap-adoption-help.out" ||
+  fail "airgap adoption help must reject formal release readiness"
+pass "airgap adoption help states both operator paths and readiness boundary"
+
 image_args=()
 for id in "${RELEASE_IMAGE_IDS[@]}"; do
   image_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")

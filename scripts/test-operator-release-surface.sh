@@ -1681,6 +1681,36 @@ expect_operator_fail_preserves_summary operator-equals-confirm-apply "$equals_co
     --allow-http \
     --allow-localhost
 
+equals_allow_http_output="$TMP_DIR/out-equals-allow-http"
+expect_operator_fail_preserves_summary operator-equals-allow-http "$equals_allow_http_output" \
+  env FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+    --release-contract "$VALID_CONTRACT" \
+    --deploy-template-package "$VALID_PACKAGE" \
+    --archive "$VALID_ARCHIVE" \
+    --render-values "$VALID_VALUES" \
+    --substrate-truth "$EXTERNAL_TRUTH" \
+    --target-prerequisites "$EXTERNAL_PREREQUISITES" \
+    --namespace agentsmith \
+    --output-dir "$equals_allow_http_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --allow-http=true
+
+equals_allow_localhost_output="$TMP_DIR/out-equals-allow-localhost"
+expect_operator_fail_preserves_summary operator-equals-allow-localhost "$equals_allow_localhost_output" \
+  env FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+    --release-contract "$VALID_CONTRACT" \
+    --deploy-template-package "$VALID_PACKAGE" \
+    --archive "$VALID_ARCHIVE" \
+    --render-values "$VALID_VALUES" \
+    --substrate-truth "$EXTERNAL_TRUTH" \
+    --target-prerequisites "$EXTERNAL_PREREQUISITES" \
+    --namespace agentsmith \
+    --output-dir "$equals_allow_localhost_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --allow-localhost=true
+
 duplicate_output_dir_output="$TMP_DIR/out-duplicate-output-dir"
 expect_operator_fail_preserves_summary duplicate-output-dir "$duplicate_output_dir_output" \
   bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \

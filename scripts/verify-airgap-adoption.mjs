@@ -91,10 +91,11 @@ function usage() {
     --bundle-manifest <airgap-bundle-manifest.json> \\
     --output-dir <dir>
 
-This is repo-local airgap/use_existing adoption aggregation only. It validates
-already generated operator-facing airgap-bundle/use_existing and
-airgap/use_existing confirmed-apply summaries and writes ${REPORT_FILE}; it is
-not deploy, package, operator signoff, full release gate, or release readiness.`;
+This is repo-local focused adoption aggregation for airgap/use_existing and
+airgap/install_substrates only. It validates already generated matching
+operator-facing airgap-bundle/* packaging summaries and confirmed-apply
+airgap/* consume summaries and writes ${REPORT_FILE} with readiness=false; it is
+not deploy, package, operator signoff, full release gate, or formal release readiness.`;
 }
 
 function cliFail(message) {

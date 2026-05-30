@@ -85,6 +85,8 @@ OPERATOR_SINGLETON_FLAGS=(
   --timeout
   --smoke-url
   --expected-status
+  --allow-http
+  --allow-localhost
   --timeout-ms
   --evidence-root
   --evidence-provenance
