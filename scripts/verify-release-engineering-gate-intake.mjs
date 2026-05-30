@@ -80,6 +80,8 @@ const SAFE_ARTIFACT_URI_SCHEMES = new Set(['gh-artifact', 'https']);
 const SAFE_INTAKE_REPORT_URI_SCHEMES = new Set(['gh-artifact', 'https', 'signed-operator-run']);
 const INTAKE_REPORT_URI_KEYS = new Set(['artifact_uri', 'report_uri', 'summary_uri']);
 const URI_MATERIAL_SPLIT_RE = /[#?&=:/\\]+/;
+const PERCENT_ENCODED_OCTET_RE = /%[0-9A-Fa-f]{2}/;
+const MAX_PERCENT_DECODE_DEPTH = 8;
 
 class CliError extends Error {
   constructor(message) {
@@ -368,29 +370,60 @@ function assertNoUnsafeText(value, label) {
   }
 }
 
-function percentDecodedCandidates(value) {
+function decodePercentToFixedPoint(value, label) {
   const candidates = [];
   let current = value;
-  for (let depth = 0; depth < 3; depth += 1) {
+
+  for (let depth = 0; depth < MAX_PERCENT_DECODE_DEPTH; depth += 1) {
+    if (!current.includes('%')) {
+      return { value: current, candidates };
+    }
+
     let decoded;
     try {
       decoded = decodeURIComponent(current);
     } catch {
-      break;
+      fail(`${label} contains malformed percent encoding`);
     }
+
     if (decoded === current) {
-      break;
+      if (PERCENT_ENCODED_OCTET_RE.test(current)) {
+        fail(`${label} contains unresolved percent-encoded octets`);
+      }
+      return { value: current, candidates };
     }
+
     candidates.push(decoded);
     current = decoded;
   }
-  return candidates;
+
+  if (PERCENT_ENCODED_OCTET_RE.test(current)) {
+    fail(`${label} exceeds maximum percent decoding depth`);
+  }
+  try {
+    const decoded = decodeURIComponent(current);
+    if (decoded !== current) {
+      fail(`${label} exceeds maximum percent decoding depth`);
+    }
+  } catch {
+    fail(`${label} contains malformed percent encoding`);
+  }
+
+  return { value: current, candidates };
+}
+
+function percentDecodedCandidates(value, label) {
+  return decodePercentToFixedPoint(value, label).candidates;
+}
+
+function percentDecodedValue(value, label) {
+  return decodePercentToFixedPoint(value, label).value;
 }
 
 function assertNoUnsafeDecodedText(value, label) {
   if (typeof value === 'string') {
     assertNoUnsafeText(value, label);
-    for (const decoded of percentDecodedCandidates(value)) {
+    for (const decoded of percentDecodedCandidates(value, label)) {
       assertNoUnsafeText(decoded, `${label} decoded`);
     }
     return;
@@ -408,8 +441,9 @@ function assertNoUnsafeDecodedText(value, label) {
   }
 }
 
-function uriMaterialCandidates(value) {
-  const candidates = new Set([value, ...percentDecodedCandidates(value)]);
+function uriMaterialCandidates(value, label) {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  const candidates = new Set([text, ...percentDecodedCandidates(text, label)]);
   for (const candidate of [...candidates]) {
     for (const part of candidate.split(URI_MATERIAL_SPLIT_RE)) {
       if (part) {
@@ -417,7 +451,7 @@ function uriMaterialCandidates(value) {
       }
     }
   }
-  return [...candidates];
+  return candidates;
 }
 
 function assertNoUnsafeUriComponentText(value, label) {
@@ -428,7 +462,7 @@ function assertNoUnsafeUriComponentText(value, label) {
 }
 
 function assertNoUnsafeUriMaterial(value, label) {
-  for (const candidate of uriMaterialCandidates(value)) {
+  for (const candidate of uriMaterialCandidates(value, label)) {
     assertNoUnsafeUriComponentText(candidate, label);
   }
 }
@@ -451,17 +485,11 @@ function assertNoUnsafeUriDecodedText(value, label) {
   }
 }
 
-function pathSegments(parsed) {
+function pathSegments(parsed, label) {
   return parsed.pathname
     .split('/')
     .filter(Boolean)
-    .map((segment) => {
-      try {
-        return decodeURIComponent(segment);
-      } catch {
-        return segment;
-      }
-    });
+    .map((segment, index) => percentDecodedValue(segment, `${label}.pathname segment ${index}`));
 }
 
 function assertNoUnsafeUriDecodedParts(parsed, label) {
@@ -474,23 +502,28 @@ function assertNoUnsafeUriDecodedParts(parsed, label) {
     parsed.pathname,
     parsed.search,
     parsed.hash,
-    ...percentDecodedCandidates(parsed.pathname),
-    ...percentDecodedCandidates(parsed.search),
-    ...percentDecodedCandidates(parsed.hash)
+    ...percentDecodedCandidates(parsed.pathname, `${label}.pathname`),
+    ...percentDecodedCandidates(parsed.search, `${label}.search`),
+    ...percentDecodedCandidates(parsed.hash, `${label}.hash`)
   ];
   for (const segment of parsed.pathname.split('/').filter(Boolean)) {
-    candidates.push(segment, ...percentDecodedCandidates(segment));
+    candidates.push(segment, ...percentDecodedCandidates(segment, `${label}.pathname segment`));
   }
   for (const [key, value] of parsed.searchParams.entries()) {
-    candidates.push(key, value, ...percentDecodedCandidates(key), ...percentDecodedCandidates(value));
+    candidates.push(
+      key,
+      value,
+      ...percentDecodedCandidates(key, `${label}.search key`),
+      ...percentDecodedCandidates(value, `${label}.search value`)
+    );
   }
   for (const candidate of candidates) {
     assertNoUnsafeUriMaterial(candidate, `${label} decoded uri`);
   }
 }
 
-function isGithubActionsArtifactUri(parsed) {
-  const segments = pathSegments(parsed);
+function isGithubActionsArtifactUri(parsed, label) {
+  const segments = pathSegments(parsed, label);
   if (parsed.protocol !== 'https:') {
     return false;
   }
@@ -516,8 +549,8 @@ function isGithubActionsArtifactUri(parsed) {
   return false;
 }
 
-function isSafeGhArtifactUri(parsed) {
-  const segments = pathSegments(parsed);
+function isSafeGhArtifactUri(parsed, label) {
+  const segments = pathSegments(parsed, label);
   return (
     parsed.protocol === 'gh-artifact:' &&
     Boolean(parsed.hostname) &&
@@ -570,7 +603,7 @@ function requireAllowedArtifactUri(value, label) {
     SAFE_ARTIFACT_URI_SCHEMES,
     `${label} must be an allowed remote artifact URI`
   );
-  if (isSafeGhArtifactUri(parsed) || isGithubActionsArtifactUri(parsed)) {
+  if (isSafeGhArtifactUri(parsed, label) || isGithubActionsArtifactUri(parsed, label)) {
     return uri;
   }
   fail(`${label} must be an allowed remote artifact URI`);

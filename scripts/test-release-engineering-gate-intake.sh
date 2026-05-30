@@ -269,6 +269,14 @@ import path from 'node:path';
 const [source, target, mutation] = process.argv.slice(2);
 const data = JSON.parse(fs.readFileSync(source, 'utf8'));
 
+function encodePercentLayers(text, layers) {
+  let encoded = text;
+  for (let index = 0; index < layers; index += 1) {
+    encoded = encodeURIComponent(encoded);
+  }
+  return encoded;
+}
+
 switch (mutation) {
   case 'readiness_true':
     data.readiness = true;
@@ -324,6 +332,18 @@ switch (mutation) {
     data.artifact_provenance.artifact_uri =
       'gh-artifact://agentsmith/release-contract/10001/%252Fhome%252Fpercy%252F.kube%252Fconfig';
     break;
+  case 'deep_fragment_home_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri =
+      `gh-artifact://agentsmith/release-contract/10001/release-contract.json#${encodePercentLayers('/home/percy/.kube/config', 7)}`;
+    break;
+  case 'malformed_percent_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri =
+      'gh-artifact://agentsmith/release-contract/10001/release-contract.json#%ZZ';
+    break;
+  case 'overdeep_percent_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri =
+      `gh-artifact://agentsmith/release-contract/10001/release-contract.json#${encodePercentLayers('release contract', 20)}`;
+    break;
   case 'fragment_secret_release_contract_artifact_uri':
     data.artifact_provenance.artifact_uri =
       'gh-artifact://agentsmith/release-contract/10001/release-contract.json#secret%3Dplain';
@@ -344,6 +364,10 @@ switch (mutation) {
     data.online_paths.use_existing.provenance.artifact_uri =
       'signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/%2Fhome%2Fpercy%2F.kube%2Fconfig';
     break;
+  case 'deep_home_online_provenance_artifact_uri':
+    data.online_paths.use_existing.provenance.artifact_uri =
+      `signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/${encodePercentLayers('/home/percy/.kube/config', 7)}`;
+    break;
   case 'encoded_token_online_provenance_artifact_uri':
     data.online_paths.use_existing.provenance.artifact_uri =
       'signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/token%3Dabc123';
@@ -351,6 +375,10 @@ switch (mutation) {
   case 'fragment_home_airgap_summary_uri':
     data.summary_uri =
       'gh-artifact://agentsmith/airgap-adoption/10001/summary.json#%2Fhome%2Fpercy%2F.kube%2Fconfig';
+    break;
+  case 'deep_fragment_home_airgap_summary_uri':
+    data.summary_uri =
+      `gh-artifact://agentsmith/airgap-adoption/10001/summary.json#${encodePercentLayers('/home/percy/.kube/config', 7)}`;
     break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);
@@ -618,6 +646,48 @@ expect_fail double-encoded-home-release-contract-artifact-uri \
     "$BAD_CONTRACT_DOUBLE_ENCODED_HOME_ARTIFACT_URI"
 assert_no_stale_report "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
+BAD_CONTRACT_DEEP_FRAGMENT_HOME_ARTIFACT_URI="$TMP_DIR/bad/release-contract-deep-fragment-home-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_DEEP_FRAGMENT_HOME_ARTIFACT_URI" deep_fragment_home_release_contract_artifact_uri
+DEEP_FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/deep-fragment-home-artifact-uri-inputs"
+write_candidate_inputs "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR" "$BAD_CONTRACT_DEEP_FRAGMENT_HOME_ARTIFACT_URI"
+DEEP_FRAGMENT_HOME_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-deep-fragment-home-artifact-uri"
+expect_fail deep-fragment-home-release-contract-artifact-uri \
+  run_intake \
+    "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_OUTPUT" \
+    "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
+    "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+    "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$BAD_CONTRACT_DEEP_FRAGMENT_HOME_ARTIFACT_URI"
+assert_no_stale_report "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
+BAD_CONTRACT_MALFORMED_PERCENT_ARTIFACT_URI="$TMP_DIR/bad/release-contract-malformed-percent-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_MALFORMED_PERCENT_ARTIFACT_URI" malformed_percent_release_contract_artifact_uri
+MALFORMED_PERCENT_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/malformed-percent-artifact-uri-inputs"
+write_candidate_inputs "$MALFORMED_PERCENT_ARTIFACT_URI_INPUT_DIR" "$BAD_CONTRACT_MALFORMED_PERCENT_ARTIFACT_URI"
+MALFORMED_PERCENT_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-malformed-percent-artifact-uri"
+expect_fail malformed-percent-release-contract-artifact-uri \
+  run_intake \
+    "$MALFORMED_PERCENT_ARTIFACT_URI_OUTPUT" \
+    "$MALFORMED_PERCENT_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
+    "$MALFORMED_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+    "$MALFORMED_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$BAD_CONTRACT_MALFORMED_PERCENT_ARTIFACT_URI"
+assert_no_stale_report "$MALFORMED_PERCENT_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
+BAD_CONTRACT_OVERDEEP_PERCENT_ARTIFACT_URI="$TMP_DIR/bad/release-contract-overdeep-percent-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_OVERDEEP_PERCENT_ARTIFACT_URI" overdeep_percent_release_contract_artifact_uri
+OVERDEEP_PERCENT_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/overdeep-percent-artifact-uri-inputs"
+write_candidate_inputs "$OVERDEEP_PERCENT_ARTIFACT_URI_INPUT_DIR" "$BAD_CONTRACT_OVERDEEP_PERCENT_ARTIFACT_URI"
+OVERDEEP_PERCENT_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-overdeep-percent-artifact-uri"
+expect_fail overdeep-percent-release-contract-artifact-uri \
+  run_intake \
+    "$OVERDEEP_PERCENT_ARTIFACT_URI_OUTPUT" \
+    "$OVERDEEP_PERCENT_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
+    "$OVERDEEP_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+    "$OVERDEEP_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$BAD_CONTRACT_OVERDEEP_PERCENT_ARTIFACT_URI"
+assert_no_stale_report "$OVERDEEP_PERCENT_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
 BAD_CONTRACT_FRAGMENT_SECRET_ARTIFACT_URI="$TMP_DIR/bad/release-contract-fragment-secret-artifact-uri.json"
 copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_FRAGMENT_SECRET_ARTIFACT_URI" fragment_secret_release_contract_artifact_uri
 FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/fragment-secret-artifact-uri-inputs"
@@ -668,6 +738,17 @@ expect_fail encoded-home-online-provenance-artifact-uri \
     "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
 assert_no_stale_report "$ENCODED_HOME_ONLINE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
+BAD_ONLINE_DEEP_HOME_ARTIFACT_URI="$TMP_DIR/bad/online-deep-home-artifact-uri.json"
+copy_and_mutate_json "$ONLINE_REPORT" "$BAD_ONLINE_DEEP_HOME_ARTIFACT_URI" deep_home_online_provenance_artifact_uri
+DEEP_HOME_ONLINE_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-online-deep-home-artifact-uri"
+expect_fail deep-home-online-provenance-artifact-uri \
+  run_intake \
+    "$DEEP_HOME_ONLINE_ARTIFACT_URI_OUTPUT" \
+    "$BAD_ONLINE_DEEP_HOME_ARTIFACT_URI" \
+    "$AIRGAP_USE_EXISTING_REPORT" \
+    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+assert_no_stale_report "$DEEP_HOME_ONLINE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
 BAD_ONLINE_ENCODED_TOKEN_ARTIFACT_URI="$TMP_DIR/bad/online-encoded-token-artifact-uri.json"
 copy_and_mutate_json "$ONLINE_REPORT" "$BAD_ONLINE_ENCODED_TOKEN_ARTIFACT_URI" encoded_token_online_provenance_artifact_uri
 ENCODED_TOKEN_ONLINE_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-online-encoded-token-artifact-uri"
@@ -689,6 +770,17 @@ expect_fail fragment-home-airgap-summary-uri \
     "$BAD_AIRGAP_FRAGMENT_HOME_SUMMARY_URI" \
     "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
 assert_no_stale_report "$FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT/$REPORT_FILE"
+
+BAD_AIRGAP_DEEP_FRAGMENT_HOME_SUMMARY_URI="$TMP_DIR/bad/airgap-deep-fragment-home-summary-uri.json"
+copy_and_mutate_json "$AIRGAP_USE_EXISTING_REPORT" "$BAD_AIRGAP_DEEP_FRAGMENT_HOME_SUMMARY_URI" deep_fragment_home_airgap_summary_uri
+DEEP_FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT="$TMP_DIR/out-airgap-deep-fragment-home-summary-uri"
+expect_fail deep-fragment-home-airgap-summary-uri \
+  run_intake \
+    "$DEEP_FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT" \
+    "$ONLINE_REPORT" \
+    "$BAD_AIRGAP_DEEP_FRAGMENT_HOME_SUMMARY_URI" \
+    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+assert_no_stale_report "$DEEP_FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT/$REPORT_FILE"
 
 expect_fail focused-online-producer-as-adoption \
   run_intake \
