@@ -1615,6 +1615,84 @@ assert_operator_report \
 assert_operator_airgap_manifest_digest "$custom_manifest_output" "$custom_bundle_manifest_digest"
 pass "operator airgap/use_existing summary honors non-default in-bundle bundle manifest"
 
+duplicate_bundle_root_output="$TMP_DIR/out-airgap-duplicate-bundle-root"
+expect_operator_fail_before_airgap_consume_outputs \
+  airgap-duplicate-bundle-root \
+  "$duplicate_bundle_root_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$airgap_bundle_root" \
+    --bundle-root="$kit_airgap_bundle_root" \
+    --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$kit_airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$duplicate_bundle_root_output" \
+    --kubectl "$FAKE_KUBECTL"
+
+duplicate_bundle_manifest_mismatch="$custom_manifest_bundle_root/manifests/operator-selected-kit-mismatch.json"
+cp "$custom_bundle_manifest" "$duplicate_bundle_manifest_mismatch"
+"$NODE_BIN" --input-type=module - "$duplicate_bundle_manifest_mismatch" "$KIT_AIRGAP_PROFILE" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath, profile] = process.argv.slice(2);
+const [targetCluster, substrateSource, distribution] = profile.split('/');
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+manifest.target_profile = {
+  value: profile,
+  target_cluster: targetCluster,
+  substrate_source: substrateSource,
+  distribution
+};
+
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+duplicate_bundle_manifest_output="$TMP_DIR/out-airgap-duplicate-bundle-manifest"
+expect_operator_fail_before_airgap_consume_outputs \
+  airgap-duplicate-bundle-manifest \
+  "$duplicate_bundle_manifest_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$custom_manifest_bundle_root" \
+    --bundle-manifest "$custom_bundle_manifest" \
+    --bundle-manifest="$duplicate_bundle_manifest_mismatch" \
+    --render-values "$custom_manifest_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$custom_manifest_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$custom_manifest_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$duplicate_bundle_manifest_output" \
+    --kubectl "$FAKE_KUBECTL"
+
+duplicate_confirm_apply_output="$TMP_DIR/out-airgap-duplicate-confirm-apply"
+expect_operator_fail_before_airgap_consume_outputs \
+  airgap-duplicate-confirm-apply \
+  "$duplicate_confirm_apply_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+    FAKE_KUBECTL_LIVE_IMAGE="$kit_airgap_target_app_image" \
+    FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$kit_airgap_target_app_image" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+    --bundle-root "$kit_airgap_bundle_root" \
+    --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$kit_airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$duplicate_confirm_apply_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --archive-probe "$GOOD_PROBE" \
+    --image-loader "$GOOD_LOADER" \
+    --confirm-apply airgap/install_substrates \
+    --confirm-apply=airgap/install_substrates \
+    --operator-run-id operator-airgap-kit-duplicate-confirm \
+    --timeout 120s \
+    --smoke-url "$BASE_URL/ok" \
+    --allow-http \
+    --allow-localhost
+
 airgap_install_external_bundle_output="$TMP_DIR/out-airgap-install-substrates-external-bundle"
 expect_operator_fail_before_airgap_consume_outputs \
   airgap-install-substrates-external-bundle \

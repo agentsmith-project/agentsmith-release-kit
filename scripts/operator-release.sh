@@ -60,6 +60,62 @@ find_arg_value() {
   return 1
 }
 
+assert_no_duplicate_singleton_args() {
+  local singleton_flags=(
+    --bundle-root
+    --bundle-manifest
+    --output-dir
+    --confirm-apply
+    --release-contract
+    --deploy-template-package
+    --archive
+    --target-registry
+    --registry-probe
+    --mode
+    --rehearsal-label
+    --operator-run-id
+    --render-values
+    --substrate-truth
+    --target-prerequisites
+    --namespace
+    --kubeconfig
+    --context
+    --kubectl
+    --archive-probe
+    --image-loader
+    --timeout
+    --smoke-url
+    --expected-status
+    --timeout-ms
+    --evidence-root
+    --evidence-provenance
+    --substrate-pack-manifest
+    --routability-probe
+    --runbook
+    --script
+    --profile-values-schema
+    --profile-values-example
+    --operator-prerequisites
+  )
+  local flag
+  local arg
+  local count
+
+  for flag in "${singleton_flags[@]}"; do
+    count=0
+    for arg in "$@"; do
+      case "$arg" in
+        "$flag"|"$flag"=*)
+          count=$((count + 1))
+          ;;
+      esac
+    done
+    if [[ "$count" -gt 1 ]]; then
+      fail "duplicate singleton/control argument for operator facade: $flag"
+    fi
+  done
+}
+
 remove_operator_summary_if_requested() {
   local output_dir="${1:-}"
   if [[ -n "$output_dir" ]]; then
@@ -353,6 +409,7 @@ case "$surface/$substrate_strategy" in
     ;;
 esac
 
+assert_no_duplicate_singleton_args "$@"
 reject_producer_vocabulary "$@"
 operator_confirm="$surface/$substrate_strategy"
 translated_args=()
