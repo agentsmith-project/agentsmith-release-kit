@@ -72,11 +72,14 @@ const KNOWN_FOCUSED_PRODUCER_SCOPES = new Map([
   ['airgap_bundle_manifest_check_only', 'airgap bundle check producer']
 ]);
 const LOCAL_OR_SECRET_TEXT_RE =
-  /(?:^|["'\s])(?:\/(?:home|tmp|var|private)(?:\/|$)|[A-Za-z]:[\\/]|file:\/\/)|secretRef:|kubeconfig|Bearer\s+[A-Za-z0-9._~+/=-]+|token\s*[:=]|password\s*[:=]/i;
+  /(?:^|["'\s])(?:\/(?:home|tmp|var|private)(?:\/|$)|[A-Za-z]:[\\/]|file:\/\/)|secretRef:|kubeconfig|Bearer\s+[A-Za-z0-9._~+/=-]+|token\s*[:=]|secret\s*[:=]|password\s*[:=]/i;
+const UNSAFE_URI_COMPONENT_TEXT_RE =
+  /(?:^|[#?&=:/\\])(?:\/(?:home|tmp|var|private)(?:[\/\\#?&=:]|$)|[A-Za-z]:[\\/]|file:\/\/)|(?:^|[#?&=:/\\])\.kube(?:[\/\\#?&=:.]|$)|secretRef:|kubeconfig|Bearer\s+[A-Za-z0-9._~+/=-]+|token\s*[:=]|secret\s*[:=]|password\s*[:=]/i;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const SAFE_ARTIFACT_URI_SCHEMES = new Set(['gh-artifact', 'https']);
 const SAFE_INTAKE_REPORT_URI_SCHEMES = new Set(['gh-artifact', 'https', 'signed-operator-run']);
 const INTAKE_REPORT_URI_KEYS = new Set(['artifact_uri', 'report_uri', 'summary_uri']);
+const URI_MATERIAL_SPLIT_RE = /[#?&=:/\\]+/;
 
 class CliError extends Error {
   constructor(message) {
@@ -405,6 +408,49 @@ function assertNoUnsafeDecodedText(value, label) {
   }
 }
 
+function uriMaterialCandidates(value) {
+  const candidates = new Set([value, ...percentDecodedCandidates(value)]);
+  for (const candidate of [...candidates]) {
+    for (const part of candidate.split(URI_MATERIAL_SPLIT_RE)) {
+      if (part) {
+        candidates.add(part);
+      }
+    }
+  }
+  return [...candidates];
+}
+
+function assertNoUnsafeUriComponentText(value, label) {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  if (LOCAL_OR_SECRET_TEXT_RE.test(text) || UNSAFE_URI_COMPONENT_TEXT_RE.test(text)) {
+    fail(`${label} must not include raw local paths, kubeconfig, or secret-looking payloads`);
+  }
+}
+
+function assertNoUnsafeUriMaterial(value, label) {
+  for (const candidate of uriMaterialCandidates(value)) {
+    assertNoUnsafeUriComponentText(candidate, label);
+  }
+}
+
+function assertNoUnsafeUriDecodedText(value, label) {
+  if (typeof value === 'string') {
+    assertNoUnsafeUriMaterial(value, label);
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoUnsafeUriDecodedText(item, `${label}[${index}]`));
+    return;
+  }
+
+  if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value)) {
+      assertNoUnsafeUriDecodedText(nested, `${label}.${key}`);
+    }
+  }
+}
+
 function pathSegments(parsed) {
   return parsed.pathname
     .split('/')
@@ -439,7 +485,7 @@ function assertNoUnsafeUriDecodedParts(parsed, label) {
     candidates.push(key, value, ...percentDecodedCandidates(key), ...percentDecodedCandidates(value));
   }
   for (const candidate of candidates) {
-    assertNoUnsafeText(candidate, `${label} decoded uri`);
+    assertNoUnsafeUriMaterial(candidate, `${label} decoded uri`);
   }
 }
 
@@ -490,7 +536,7 @@ function parseSafeIntakeReportUri(value, label, allowedSchemes, message) {
   ) {
     fail(message);
   }
-  assertNoUnsafeDecodedText(uri, label);
+  assertNoUnsafeUriDecodedText(uri, label);
 
   let parsed;
   try {

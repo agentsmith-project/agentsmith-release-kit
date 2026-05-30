@@ -316,13 +316,29 @@ switch (mutation) {
     data.artifact_provenance.artifact_uri =
       'gh-artifact://agentsmith/release-contract/10001/%2Fhome%2Fpercy%2F.kube%2Fconfig';
     break;
+  case 'fragment_home_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri =
+      'gh-artifact://agentsmith/release-contract/10001/release-contract.json#%2Fhome%2Fpercy%2F.kube%2Fconfig';
+    break;
   case 'double_encoded_home_release_contract_artifact_uri':
     data.artifact_provenance.artifact_uri =
       'gh-artifact://agentsmith/release-contract/10001/%252Fhome%252Fpercy%252F.kube%252Fconfig';
     break;
+  case 'fragment_secret_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri =
+      'gh-artifact://agentsmith/release-contract/10001/release-contract.json#secret%3Dplain';
+    break;
+  case 'github_actions_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri =
+      'https://github.com/agentsmith-project/agentsmith-release-kit/actions/runs/10001/artifacts?name=release-contract-provenance';
+    break;
   case 'encoded_token_release_contract_artifact_uri':
     data.artifact_provenance.artifact_uri =
       'gh-artifact://agentsmith/release-contract/10001/token%3Dabc123';
+    break;
+  case 'fragment_home_online_report_uri':
+    data.report_uri =
+      'gh-artifact://agentsmith/online-adoption/10001/report.json#%2Fhome%2Fpercy%2F.kube%2Fconfig';
     break;
   case 'encoded_home_online_provenance_artifact_uri':
     data.online_paths.use_existing.provenance.artifact_uri =
@@ -331,6 +347,10 @@ switch (mutation) {
   case 'encoded_token_online_provenance_artifact_uri':
     data.online_paths.use_existing.provenance.artifact_uri =
       'signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/token%3Dabc123';
+    break;
+  case 'fragment_home_airgap_summary_uri':
+    data.summary_uri =
+      'gh-artifact://agentsmith/airgap-adoption/10001/summary.json#%2Fhome%2Fpercy%2F.kube%2Fconfig';
     break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);
@@ -481,6 +501,21 @@ grep -q 'not release readiness' "$TMP_DIR/pass.out" ||
   fail "release engineering gate intake command must state readiness boundary"
 pass "release engineering gate intake accepts valid four-quadrant candidate inputs"
 
+GITHUB_ACTIONS_CONTRACT_ARTIFACT_URI="$TMP_DIR/pass/release-contract-github-actions-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$GITHUB_ACTIONS_CONTRACT_ARTIFACT_URI" github_actions_release_contract_artifact_uri
+GITHUB_ACTIONS_INPUT_DIR="$TMP_DIR/github-actions-artifact-uri-inputs"
+write_candidate_inputs "$GITHUB_ACTIONS_INPUT_DIR" "$GITHUB_ACTIONS_CONTRACT_ARTIFACT_URI"
+GITHUB_ACTIONS_OUTPUT="$TMP_DIR/out-github-actions-artifact-uri"
+run_intake \
+  "$GITHUB_ACTIONS_OUTPUT" \
+  "$GITHUB_ACTIONS_INPUT_DIR/online-adoption-report.json" \
+  "$GITHUB_ACTIONS_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+  "$GITHUB_ACTIONS_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+  "$GITHUB_ACTIONS_CONTRACT_ARTIFACT_URI" >"$TMP_DIR/github-actions-artifact-uri.out"
+[[ -f "$GITHUB_ACTIONS_OUTPUT/$REPORT_FILE" ]] || fail "GitHub Actions artifact URI intake report missing"
+assert_intake_report "$GITHUB_ACTIONS_OUTPUT/$REPORT_FILE"
+pass "release engineering gate intake accepts safe GitHub Actions artifact URI"
+
 BAD_ONLINE="$TMP_DIR/bad/online-readiness-true.json"
 copy_and_mutate_json "$ONLINE_REPORT" "$BAD_ONLINE" readiness_true
 expect_fail readiness-true \
@@ -555,6 +590,20 @@ expect_fail encoded-home-release-contract-artifact-uri \
     "$BAD_CONTRACT_ENCODED_HOME_ARTIFACT_URI"
 assert_no_stale_report "$ENCODED_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
+BAD_CONTRACT_FRAGMENT_HOME_ARTIFACT_URI="$TMP_DIR/bad/release-contract-fragment-home-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_FRAGMENT_HOME_ARTIFACT_URI" fragment_home_release_contract_artifact_uri
+FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/fragment-home-artifact-uri-inputs"
+write_candidate_inputs "$FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR" "$BAD_CONTRACT_FRAGMENT_HOME_ARTIFACT_URI"
+FRAGMENT_HOME_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-fragment-home-artifact-uri"
+expect_fail fragment-home-release-contract-artifact-uri \
+  run_intake \
+    "$FRAGMENT_HOME_ARTIFACT_URI_OUTPUT" \
+    "$FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
+    "$FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+    "$FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$BAD_CONTRACT_FRAGMENT_HOME_ARTIFACT_URI"
+assert_no_stale_report "$FRAGMENT_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
 BAD_CONTRACT_DOUBLE_ENCODED_HOME_ARTIFACT_URI="$TMP_DIR/bad/release-contract-double-encoded-home-artifact-uri.json"
 copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_DOUBLE_ENCODED_HOME_ARTIFACT_URI" double_encoded_home_release_contract_artifact_uri
 DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/double-encoded-home-artifact-uri-inputs"
@@ -569,6 +618,20 @@ expect_fail double-encoded-home-release-contract-artifact-uri \
     "$BAD_CONTRACT_DOUBLE_ENCODED_HOME_ARTIFACT_URI"
 assert_no_stale_report "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
+BAD_CONTRACT_FRAGMENT_SECRET_ARTIFACT_URI="$TMP_DIR/bad/release-contract-fragment-secret-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_FRAGMENT_SECRET_ARTIFACT_URI" fragment_secret_release_contract_artifact_uri
+FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/fragment-secret-artifact-uri-inputs"
+write_candidate_inputs "$FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR" "$BAD_CONTRACT_FRAGMENT_SECRET_ARTIFACT_URI"
+FRAGMENT_SECRET_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-fragment-secret-artifact-uri"
+expect_fail fragment-secret-release-contract-artifact-uri \
+  run_intake \
+    "$FRAGMENT_SECRET_ARTIFACT_URI_OUTPUT" \
+    "$FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
+    "$FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+    "$FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$BAD_CONTRACT_FRAGMENT_SECRET_ARTIFACT_URI"
+assert_no_stale_report "$FRAGMENT_SECRET_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
 BAD_CONTRACT_ENCODED_TOKEN_ARTIFACT_URI="$TMP_DIR/bad/release-contract-encoded-token-artifact-uri.json"
 copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_ENCODED_TOKEN_ARTIFACT_URI" encoded_token_release_contract_artifact_uri
 ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/encoded-token-artifact-uri-inputs"
@@ -582,6 +645,17 @@ expect_fail encoded-token-release-contract-artifact-uri \
     "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
     "$BAD_CONTRACT_ENCODED_TOKEN_ARTIFACT_URI"
 assert_no_stale_report "$ENCODED_TOKEN_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
+BAD_ONLINE_FRAGMENT_HOME_REPORT_URI="$TMP_DIR/bad/online-fragment-home-report-uri.json"
+copy_and_mutate_json "$ONLINE_REPORT" "$BAD_ONLINE_FRAGMENT_HOME_REPORT_URI" fragment_home_online_report_uri
+FRAGMENT_HOME_ONLINE_REPORT_URI_OUTPUT="$TMP_DIR/out-online-fragment-home-report-uri"
+expect_fail fragment-home-online-report-uri \
+  run_intake \
+    "$FRAGMENT_HOME_ONLINE_REPORT_URI_OUTPUT" \
+    "$BAD_ONLINE_FRAGMENT_HOME_REPORT_URI" \
+    "$AIRGAP_USE_EXISTING_REPORT" \
+    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+assert_no_stale_report "$FRAGMENT_HOME_ONLINE_REPORT_URI_OUTPUT/$REPORT_FILE"
 
 BAD_ONLINE_ENCODED_HOME_ARTIFACT_URI="$TMP_DIR/bad/online-encoded-home-artifact-uri.json"
 copy_and_mutate_json "$ONLINE_REPORT" "$BAD_ONLINE_ENCODED_HOME_ARTIFACT_URI" encoded_home_online_provenance_artifact_uri
@@ -604,6 +678,17 @@ expect_fail encoded-token-online-provenance-artifact-uri \
     "$AIRGAP_USE_EXISTING_REPORT" \
     "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
 assert_no_stale_report "$ENCODED_TOKEN_ONLINE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
+BAD_AIRGAP_FRAGMENT_HOME_SUMMARY_URI="$TMP_DIR/bad/airgap-fragment-home-summary-uri.json"
+copy_and_mutate_json "$AIRGAP_USE_EXISTING_REPORT" "$BAD_AIRGAP_FRAGMENT_HOME_SUMMARY_URI" fragment_home_airgap_summary_uri
+FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT="$TMP_DIR/out-airgap-fragment-home-summary-uri"
+expect_fail fragment-home-airgap-summary-uri \
+  run_intake \
+    "$FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT" \
+    "$ONLINE_REPORT" \
+    "$BAD_AIRGAP_FRAGMENT_HOME_SUMMARY_URI" \
+    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+assert_no_stale_report "$FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT/$REPORT_FILE"
 
 expect_fail focused-online-producer-as-adoption \
   run_intake \
