@@ -72,7 +72,7 @@ const KNOWN_FOCUSED_PRODUCER_SCOPES = new Map([
   ['airgap_bundle_manifest_check_only', 'airgap bundle check producer']
 ]);
 const LOCAL_OR_SECRET_TEXT_RE =
-  /(?:^|["'\s])(?:\/home\/|\/tmp\/|\/var\/|\/private\/|[A-Za-z]:[\\/]|file:\/\/)|secretRef:|kubeconfig|Bearer\s+[A-Za-z0-9._~+/=-]+|token\s*[:=]|password\s*[:=]/i;
+  /(?:^|["'\s])(?:\/(?:home|tmp|var|private)(?:\/|$)|[A-Za-z]:[\\/]|file:\/\/)|secretRef:|kubeconfig|Bearer\s+[A-Za-z0-9._~+/=-]+|token\s*[:=]|password\s*[:=]/i;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const SAFE_ARTIFACT_URI_SCHEMES = new Set(['gh-artifact', 'https']);
 
@@ -357,10 +357,29 @@ function validateDigestLeaves(value, label) {
 }
 
 function assertNoUnsafeText(value, label) {
-  const serialized = JSON.stringify(value);
+  const serialized = typeof value === 'string' ? value : JSON.stringify(value);
   if (LOCAL_OR_SECRET_TEXT_RE.test(serialized)) {
     fail(`${label} must not include raw local paths, kubeconfig, or secret-looking payloads`);
   }
+}
+
+function percentDecodedCandidates(value) {
+  const candidates = [];
+  let current = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    let decoded;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      break;
+    }
+    if (decoded === current) {
+      break;
+    }
+    candidates.push(decoded);
+    current = decoded;
+  }
+  return candidates;
 }
 
 function pathSegments(parsed) {
@@ -374,6 +393,16 @@ function pathSegments(parsed) {
         return segment;
       }
     });
+}
+
+function assertNoUnsafeArtifactDecodedPath(parsed, label) {
+  const candidates = [parsed.pathname, ...percentDecodedCandidates(parsed.pathname)];
+  for (const segment of parsed.pathname.split('/').filter(Boolean)) {
+    candidates.push(segment, ...percentDecodedCandidates(segment));
+  }
+  for (const candidate of candidates) {
+    assertNoUnsafeText(candidate, `${label} decoded path`);
+  }
 }
 
 function isGithubActionsArtifactUri(parsed) {
@@ -436,6 +465,7 @@ function requireAllowedArtifactUri(value, label) {
   if (!SAFE_ARTIFACT_URI_SCHEMES.has(scheme)) {
     fail(`${label} must be an allowed remote artifact URI`);
   }
+  assertNoUnsafeArtifactDecodedPath(parsed, label);
   if (isSafeGhArtifactUri(parsed) || isGithubActionsArtifactUri(parsed)) {
     return uri;
   }

@@ -312,6 +312,18 @@ switch (mutation) {
   case 'unsafe_release_contract_artifact_uri':
     data.artifact_provenance.artifact_uri = '/home/percy/.kube/config';
     break;
+  case 'encoded_home_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri =
+      'gh-artifact://agentsmith/release-contract/10001/%2Fhome%2Fpercy%2F.kube%2Fconfig';
+    break;
+  case 'double_encoded_home_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri =
+      'gh-artifact://agentsmith/release-contract/10001/%252Fhome%252Fpercy%252F.kube%252Fconfig';
+    break;
+  case 'encoded_token_release_contract_artifact_uri':
+    data.artifact_provenance.artifact_uri =
+      'gh-artifact://agentsmith/release-contract/10001/token%3Dabc123';
+    break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);
 }
@@ -520,6 +532,48 @@ expect_fail unsafe-release-contract-artifact-uri \
     "$UNSAFE_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
     "$BAD_CONTRACT_UNSAFE_ARTIFACT_URI"
 assert_no_stale_report "$UNSAFE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
+BAD_CONTRACT_ENCODED_HOME_ARTIFACT_URI="$TMP_DIR/bad/release-contract-encoded-home-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_ENCODED_HOME_ARTIFACT_URI" encoded_home_release_contract_artifact_uri
+ENCODED_HOME_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/encoded-home-artifact-uri-inputs"
+write_candidate_inputs "$ENCODED_HOME_ARTIFACT_URI_INPUT_DIR" "$BAD_CONTRACT_ENCODED_HOME_ARTIFACT_URI"
+ENCODED_HOME_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-encoded-home-artifact-uri"
+expect_fail encoded-home-release-contract-artifact-uri \
+  run_intake \
+    "$ENCODED_HOME_ARTIFACT_URI_OUTPUT" \
+    "$ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
+    "$ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+    "$ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$BAD_CONTRACT_ENCODED_HOME_ARTIFACT_URI"
+assert_no_stale_report "$ENCODED_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
+BAD_CONTRACT_DOUBLE_ENCODED_HOME_ARTIFACT_URI="$TMP_DIR/bad/release-contract-double-encoded-home-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_DOUBLE_ENCODED_HOME_ARTIFACT_URI" double_encoded_home_release_contract_artifact_uri
+DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/double-encoded-home-artifact-uri-inputs"
+write_candidate_inputs "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR" "$BAD_CONTRACT_DOUBLE_ENCODED_HOME_ARTIFACT_URI"
+DOUBLE_ENCODED_HOME_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-double-encoded-home-artifact-uri"
+expect_fail double-encoded-home-release-contract-artifact-uri \
+  run_intake \
+    "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_OUTPUT" \
+    "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
+    "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+    "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$BAD_CONTRACT_DOUBLE_ENCODED_HOME_ARTIFACT_URI"
+assert_no_stale_report "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
+BAD_CONTRACT_ENCODED_TOKEN_ARTIFACT_URI="$TMP_DIR/bad/release-contract-encoded-token-artifact-uri.json"
+copy_and_mutate_json "$VALID_CONTRACT" "$BAD_CONTRACT_ENCODED_TOKEN_ARTIFACT_URI" encoded_token_release_contract_artifact_uri
+ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR="$TMP_DIR/encoded-token-artifact-uri-inputs"
+write_candidate_inputs "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR" "$BAD_CONTRACT_ENCODED_TOKEN_ARTIFACT_URI"
+ENCODED_TOKEN_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-encoded-token-artifact-uri"
+expect_fail encoded-token-release-contract-artifact-uri \
+  run_intake \
+    "$ENCODED_TOKEN_ARTIFACT_URI_OUTPUT" \
+    "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
+    "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
+    "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$BAD_CONTRACT_ENCODED_TOKEN_ARTIFACT_URI"
+assert_no_stale_report "$ENCODED_TOKEN_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
 expect_fail focused-online-producer-as-adoption \
   run_intake \
