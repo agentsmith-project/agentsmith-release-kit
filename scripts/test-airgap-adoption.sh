@@ -989,27 +989,33 @@ run_adoption \
 assert_adoption_report "$adoption_output/$ADOPTION_REPORT_FILE"
 pass "airgap adoption aggregates bundle and consume operator surfaces"
 
-nested_mismatch_bundle_output="$TMP_DIR/out-airgap-bundle-nested-mismatch"
-nested_mismatch_consume_output="$TMP_DIR/out-airgap-consume-nested-mismatch"
-cp -R "$bundle_output" "$nested_mismatch_bundle_output"
-cp -R "$consume_output" "$nested_mismatch_consume_output"
 explicit_manifest_digest="$(sha256_file "$bundle_root/airgap-bundle-manifest.json")"
 mismatched_manifest_digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+nested_mismatch_bundle_output="$TMP_DIR/out-airgap-bundle-nested-mismatch"
+cp -R "$bundle_output" "$nested_mismatch_bundle_output"
 mutate_bundle_check_manifest_digest \
   "$nested_mismatch_bundle_output/airgap-bundle-check-report.json" \
   "$mismatched_manifest_digest" \
   "$explicit_manifest_digest"
+nested_bundle_check_digest="$(sha256_file "$nested_mismatch_bundle_output/airgap-bundle-check-report.json")"
+update_surface_bundle_check_digest \
+  "$nested_mismatch_bundle_output/$SURFACE_REPORT_FILE" \
+  "$nested_bundle_check_digest"
+expect_adoption_fail nested-bundle-check-manifest-digest-mismatch-bundle-surface \
+  run_adoption \
+    "$nested_mismatch_bundle_output/$SURFACE_REPORT_FILE" \
+    "$consume_output/$SURFACE_REPORT_FILE" \
+    "$bundle_root/airgap-bundle-manifest.json" \
+    "$TMP_DIR/out-adoption-nested-bundle-surface-mismatch"
+
+nested_mismatch_consume_output="$TMP_DIR/out-airgap-consume-nested-mismatch"
+cp -R "$consume_output" "$nested_mismatch_consume_output"
 mutate_bundle_check_manifest_digest \
   "$nested_mismatch_consume_output/airgap-bundle-check/airgap-bundle-check-report.json" \
   "$mismatched_manifest_digest" \
   "$explicit_manifest_digest"
-nested_bundle_check_digest="$(sha256_file "$nested_mismatch_bundle_output/airgap-bundle-check-report.json")"
 nested_consume_check_digest="$(sha256_file "$nested_mismatch_consume_output/airgap-bundle-check/airgap-bundle-check-report.json")"
-[[ "$nested_bundle_check_digest" == "$nested_consume_check_digest" ]] ||
-  fail "nested bundle-check mutation must keep bundle and consume report digests aligned"
-update_surface_bundle_check_digest \
-  "$nested_mismatch_bundle_output/$SURFACE_REPORT_FILE" \
-  "$nested_bundle_check_digest"
 update_consume_report_bundle_check_digest \
   "$nested_mismatch_consume_output/airgap-consume-rehearsal-report.json" \
   "$nested_consume_check_digest"
@@ -1018,12 +1024,12 @@ update_consume_surface_digests \
   "$nested_mismatch_consume_output/$SURFACE_REPORT_FILE" \
   "$nested_consume_check_digest" \
   "$nested_consume_report_digest"
-expect_adoption_fail_or_record nested-bundle-check-manifest-digest-mismatch \
+expect_adoption_fail nested-bundle-check-manifest-digest-mismatch-consume-surface \
   run_adoption \
-    "$nested_mismatch_bundle_output/$SURFACE_REPORT_FILE" \
+    "$bundle_output/$SURFACE_REPORT_FILE" \
     "$nested_mismatch_consume_output/$SURFACE_REPORT_FILE" \
     "$bundle_root/airgap-bundle-manifest.json" \
-    "$TMP_DIR/out-adoption-nested-mismatch"
+    "$TMP_DIR/out-adoption-nested-consume-surface-mismatch"
 
 dry_run_consume_output="$TMP_DIR/out-airgap-consume-dry-run"
 : >"$KUBECTL_LOG"
