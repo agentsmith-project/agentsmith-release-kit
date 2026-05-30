@@ -8,6 +8,7 @@ FIXTURE_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-packag
 EXTERNAL_ONLINE_PROFILE="existing_kubernetes/external_declared/online"
 KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
 AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 REPORT_FILE="operator-release-surface-report.json"
 AIRGAP_REGISTRY="registry.release.example/agentsmith"
 
@@ -1116,6 +1117,7 @@ KIT_TRUTH="$TMP_DIR/substrate-truth.kit-online.json"
 EXTERNAL_PREREQUISITES="$TMP_DIR/target-prerequisites.external-online.json"
 KIT_PREREQUISITES="$TMP_DIR/target-prerequisites.kit-online.json"
 KIT_SUBSTRATE_PACK="$TMP_DIR/substrate-pack-manifest.kit-online.json"
+KIT_AIRGAP_SUBSTRATE_PACK="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
 FAKE_KUBECTL="$TMP_DIR/kubectl"
 KUBECTL_LOG="$TMP_DIR/kubectl.log"
 ROUTABILITY_PROBE="$TMP_DIR/routability-probe.sh"
@@ -1136,6 +1138,7 @@ write_truth "$KIT_TRUTH" "$KIT_ONLINE_PROFILE"
 write_prerequisites "$EXTERNAL_PREREQUISITES" "$EXTERNAL_ONLINE_PROFILE"
 write_prerequisites "$KIT_PREREQUISITES" "$KIT_ONLINE_PROFILE"
 write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK" "$KIT_ONLINE_PROFILE"
+write_kit_substrate_pack_manifest "$KIT_AIRGAP_SUBSTRATE_PACK" "$KIT_AIRGAP_PROFILE"
 write_fake_kubectl "$FAKE_KUBECTL"
 write_routability_probe "$ROUTABILITY_PROBE"
 create_payloads "$PAYLOAD_DIR" "$BUNDLED_TOOL"
@@ -1337,6 +1340,60 @@ assert_operator_report \
   true
 pass "operator airgap-bundle/use_existing maps to bundle-create and writes handoff summary"
 
+kit_airgap_output="$TMP_DIR/out-airgap-bundle-install-substrates"
+kit_airgap_bundle_root="$TMP_DIR/bundle-airgap-install-substrates"
+bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
+  --release-contract "$VALID_CONTRACT" \
+  --deploy-template-package "$VALID_PACKAGE" \
+  --archive "$VALID_ARCHIVE" \
+  --target-registry "$AIRGAP_REGISTRY" \
+  "${image_args[@]}" \
+  --runbook "$PAYLOAD_DIR/runbook.md" \
+  --script "$PAYLOAD_DIR/install.sh" \
+  --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
+  --profile-values-example "$PAYLOAD_DIR/profile-values.example.yaml" \
+  --operator-prerequisites "$OPERATOR_PREREQUISITES" \
+  --substrate-pack-manifest "$KIT_AIRGAP_SUBSTRATE_PACK" \
+  --bundle-root "$kit_airgap_bundle_root" \
+  --output-dir "$kit_airgap_output" >"$TMP_DIR/airgap-bundle-install-substrates.out"
+
+[[ -f "$kit_airgap_output/$REPORT_FILE" ]] ||
+  fail "operator airgap-bundle/install_substrates summary missing"
+assert_producer_profile "$kit_airgap_output/bundle-create-report.json" "$KIT_AIRGAP_PROFILE"
+assert_operator_report \
+  "$kit_airgap_output" \
+  airgap-bundle \
+  install_substrates \
+  "$KIT_AIRGAP_PROFILE" \
+  "bundle-create,airgap-bundle-check" \
+  "airgap_bundle_check_report,bundle_create_report" \
+  true
+"$NODE_BIN" --input-type=module - \
+  "$kit_airgap_bundle_root/airgap-bundle-manifest.json" \
+  "$KIT_AIRGAP_SUBSTRATE_PACK" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [manifestPath, substratePackManifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const packDigest =
+  `sha256:${crypto.createHash('sha256').update(fs.readFileSync(substratePackManifestPath)).digest('hex')}`;
+const packComponent = manifest.components.find((component) => (
+  component.kind === 'substrate_pack_manifest'
+));
+
+if (manifest.substrate?.mode !== 'kit_installed' || manifest.substrate?.bundled !== true) {
+  throw new Error('operator kit airgap bundle substrate summary drifted');
+}
+if (!packComponent || packComponent.sha256 !== packDigest) {
+  throw new Error('operator kit airgap bundle missing bound substrate pack component');
+}
+if (manifest.bindings?.substrate_pack_manifest_sha256 !== packDigest) {
+  throw new Error('operator kit airgap bundle missing substrate pack binding digest');
+}
+NODE
+pass "operator airgap-bundle/install_substrates maps to kit-installed bundle-create"
+
 write_bundle_operator_inputs "$airgap_bundle_root"
 airgap_target_app_image="$(target_image_for_id "$airgap_bundle_root/components/image-map.json" agentsmith_app)"
 airgap_consume_output="$TMP_DIR/out-airgap-consume-use-existing"
@@ -1456,11 +1513,23 @@ assert_operator_report \
 assert_operator_airgap_manifest_digest "$custom_manifest_output" "$custom_bundle_manifest_digest"
 pass "operator airgap/use_existing summary honors non-default in-bundle bundle manifest"
 
-unsupported_output="$TMP_DIR/out-airgap-install-substrates"
-expect_operator_fail_preserves_summary airgap-install-substrates "$unsupported_output" \
+missing_pack_output="$TMP_DIR/out-airgap-bundle-install-substrates-missing-pack"
+expect_operator_fail_preserves_summary airgap-bundle-install-substrates-missing-pack "$missing_pack_output" \
   bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
-    --output-dir "$unsupported_output"
-[[ ! -e "$unsupported_output/bundle-create-report.json" ]] || fail "unsupported airgap install path called bundle-create"
+    --release-contract "$VALID_CONTRACT" \
+    --deploy-template-package "$VALID_PACKAGE" \
+    --archive "$VALID_ARCHIVE" \
+    --target-registry "$AIRGAP_REGISTRY" \
+    "${image_args[@]}" \
+    --runbook "$PAYLOAD_DIR/runbook.md" \
+    --script "$PAYLOAD_DIR/install.sh" \
+    --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
+    --profile-values-example "$PAYLOAD_DIR/profile-values.example.yaml" \
+    --operator-prerequisites "$OPERATOR_PREREQUISITES" \
+    --bundle-root "$TMP_DIR/bundle-missing-kit-pack" \
+    --output-dir "$missing_pack_output"
+[[ ! -e "$missing_pack_output/bundle-create-report.json" ]] ||
+  fail "missing substrate pack path called bundle-create"
 
 unsupported_airgap_output="$TMP_DIR/out-airgap-consume-install-substrates"
 expect_operator_fail_preserves_summary airgap-consume-install-substrates "$unsupported_airgap_output" \

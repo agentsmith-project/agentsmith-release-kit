@@ -63,6 +63,13 @@ const MAPPINGS = new Map([
     }
   ],
   [
+    'airgap-bundle/install_substrates',
+    {
+      producerMode: 'bundle-create',
+      machineProfile: 'existing_kubernetes/kit_installed/airgap'
+    }
+  ],
+  [
     'airgap/use_existing',
     {
       producerMode: 'airgap-consume-rehearsal',

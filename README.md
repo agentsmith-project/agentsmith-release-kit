@@ -101,11 +101,13 @@ bash scripts/verify-release.sh --airgap-adoption \
   --output-dir <dir>
 ```
 
-The use-existing online, airgap, and airgap-bundle commands map operator
-choices to the existing producer
-diagnostics and write `operator-release-surface-report.json` with
-`readiness: false`. `airgap/install_substrates` and
-`airgap-bundle/install_substrates` fail fast in v0.
+The online, airgap/use_existing, and airgap-bundle commands map operator
+choices to the existing producer diagnostics and write
+`operator-release-surface-report.json` with `readiness: false`.
+`airgap-bundle/install_substrates` is packaging-side only: it maps to
+`existing_kubernetes/kit_installed/airgap`, requires
+`--substrate-pack-manifest`, and writes a bundle manifest binding for that
+substrate pack. `airgap/install_substrates` still fails fast in v0.
 `--airgap-adoption` aggregates the generated `airgap-bundle/use_existing`
 surface plus confirmed-apply `airgap/use_existing` surface for repo-local
 adoption preparation only and writes `airgap-adoption-report.json` with
@@ -302,7 +304,9 @@ bash scripts/test-bundle-create.sh
 ```
 
 `--bundle-create` is a local airgap bundle assembler plus immediate
-self-check. It accepts only `existing_kubernetes/external_declared/airgap`.
+self-check. It accepts `existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`. The kit-installed airgap target
+requires `--substrate-pack-manifest <json>`.
 Inputs are the release contract, deploy template package descriptor, matching
 `.tgz` archive, target registry, one local `--image-archive
 <image_id=file>` per generated image-map mapping, runbook, install script,
@@ -313,10 +317,15 @@ The assembler first reuses `--inputs`, `--template-package`, and `--image-map
 --target-registry`; then it copies only local files into a fixed bundle shape:
 `components/`, `images/`, `payload/`, optional `tools/`, and root
 `airgap-bundle-manifest.json`. Image archive ids must match the generated
-image-map one-to-one. Input image archives and bundled tools must be local
-regular files, not URIs, directories, or symlinks. Payload files are lightly
-scanned for obvious secret-looking content. Bundled tool inputs are copied
-under `tools/<name>` and the manifest records the copied file sha.
+image-map one-to-one. For kit-installed airgap bundles, the substrate pack
+manifest is copied to `components/substrate-pack-manifest.json`; the bundle
+manifest records a `substrate_pack_manifest` component and
+`bindings.substrate_pack_manifest_sha256`, with `substrate.mode:
+kit_installed` and `substrate.bundled: true`. Input image archives and
+bundled tools must be local regular files, not URIs, directories, or symlinks.
+Payload files are lightly scanned for obvious secret-looking content. Bundled
+tool inputs are copied under `tools/<name>` and the manifest records the copied
+file sha.
 
 After assembly, `--bundle-create` immediately runs `--airgap-bundle-check`
 against the generated bundle. Only after that passes it writes
@@ -338,15 +347,14 @@ bash scripts/test-airgap-bundle-check.sh
 `--airgap-bundle-check` validates only a local bundle manifest with
 `schema_version: agentsmith.airgap-bundle-manifest/v1` against an explicit
 bundle root, release contract, deploy template package descriptor, deploy
-template archive `.tgz`, and airgap `image-map`. It accepts only
-`existing_kubernetes/external_declared/airgap`; online, kind, and
-non-canonical pre-GA target names fail fast. `kit_installed` airgap profiles
-may be declared in the release contract but are not airgap bundle-check CLI
-targets in this slice. The release contract
-`target_profiles` value must be an array, must include
-`existing_kubernetes/external_declared/airgap`, and every entry must use a
-canonical profile tuple with `required: boolean`; `support_level` is rejected.
-The airgap profile may remain `required: false`. The image-map must be a
+template archive `.tgz`, and airgap `image-map`. It accepts
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`; online, kind, and non-canonical
+pre-GA target names fail fast. The release contract `target_profiles` value
+must be an array, must include the selected airgap target profile, and every
+entry must use a canonical profile tuple with `required: boolean`;
+`support_level` is rejected. The airgap profile may remain `required: false`.
+The image-map must be a
 passing `agentsmith.image-map/v1` report with `scope: image_map_only`,
 `readiness: false`, `mirror_required: true`, a target registry, the exact
 airgap target profile, and `action: mirror_required` for every mapping. Each
@@ -367,7 +375,9 @@ accepts only the documented top-level, `bindings`, `components`,
 `operator_prerequisites`, and `substrate` fields. `components` must contain
 exactly one component of each `kind`:
 `release_contract`, `deploy_template_package`, `deploy_template_archive`, and
-`image_map`. `payload_artifacts[]` allows only `id`, `kind`, `path`, and
+`image_map`; kit-installed airgap bundles must also include
+`substrate_pack_manifest`, with a matching binding digest. `payload_artifacts[]`
+allows only `id`, `kind`, `path`, and
 `sha256`; allowed kinds are `runbook`, `script`, `profile_values_schema`,
 `profile_values_example`, and `checksums`, with `runbook`, `script`,
 `profile_values_schema`, and `checksums` required. Duplicate payload ids,

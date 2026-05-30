@@ -21,6 +21,13 @@ const REQUIRED_ARGS = [
   'outputDir'
 ];
 const AIRGAP_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
+const KIT_AIRGAP_TARGET_PROFILE = 'existing_kubernetes/kit_installed/airgap';
+const AIRGAP_BUNDLE_TARGET_PROFILE_VALUES = [
+  AIRGAP_TARGET_PROFILE,
+  KIT_AIRGAP_TARGET_PROFILE
+];
+const AIRGAP_BUNDLE_TARGET_PROFILE_SET = new Set(AIRGAP_BUNDLE_TARGET_PROFILE_VALUES);
+const SUBSTRATE_PACK_MANIFEST_SCHEMA = 'agentsmith.substrate-pack-manifest/v1';
 const REPORT_SCHEMA = 'agentsmith.airgap-bundle-create-report/v1';
 const REPORT_SCOPE = 'airgap_bundle_create_only';
 const REPORT_FILE = 'bundle-create-report.json';
@@ -75,13 +82,14 @@ function usage() {
     --release-contract <json> \\
     --deploy-template-package <json> \\
     --archive <tgz> \\
-    --target-profile existing_kubernetes/external_declared/airgap \\
+    --target-profile existing_kubernetes/<external_declared|kit_installed>/airgap \\
     --target-registry <registry-host[/namespace]> \\
     --image-archive <image_id=local-file> [repeat] \\
     --runbook <file> \\
     --script <file> \\
     --profile-values-schema <file> \\
     [--profile-values-example <file>] \\
+    [--substrate-pack-manifest <json> for existing_kubernetes/kit_installed/airgap] \\
     --operator-prerequisites <json> \\
     --bundle-root <dir> \\
     --output-dir <dir>`;
@@ -150,6 +158,9 @@ function parseArgs(argv) {
         break;
       case '--profile-values-example':
         parsed.profileValuesExample = nextValue();
+        break;
+      case '--substrate-pack-manifest':
+        parsed.substratePackManifest = nextValue();
         break;
       case '--operator-prerequisites':
         parsed.operatorPrerequisites = nextValue();
@@ -257,6 +268,14 @@ function requireString(value, label) {
   return value;
 }
 
+function assertStringEquals(value, expected, label) {
+  const actual = requireString(value, label);
+  if (actual !== expected) {
+    fail(`${label} must be ${expected}`);
+  }
+  return actual;
+}
+
 function requireDigest(value, label) {
   const digest = requireString(value, label);
   if (!DIGEST_RE.test(digest)) {
@@ -274,14 +293,16 @@ function assertAllowedKeys(object, allowedKeys, label) {
 }
 
 function parseTargetProfile(value) {
-  if (value !== AIRGAP_TARGET_PROFILE) {
-    fail(`--bundle-create only accepts ${AIRGAP_TARGET_PROFILE}`);
+  const text = requireString(value, 'target_profile');
+  if (!AIRGAP_BUNDLE_TARGET_PROFILE_SET.has(text)) {
+    fail(`--bundle-create only accepts ${AIRGAP_BUNDLE_TARGET_PROFILE_VALUES.join(' or ')}`);
   }
+  const [targetCluster, substrateSource, distribution] = text.split('/');
   return {
-    value,
-    target_cluster: 'existing_kubernetes',
-    substrate_source: 'external_declared',
-    distribution: 'airgap'
+    value: text,
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution
   };
 }
 
@@ -505,6 +526,47 @@ async function normalizePayloadInputs(args) {
   return normalized;
 }
 
+async function normalizeSubstratePackManifest(args, targetProfile) {
+  const requiresSubstratePack = targetProfile.value === KIT_AIRGAP_TARGET_PROFILE;
+  if (!requiresSubstratePack) {
+    if (args.substratePackManifest) {
+      fail(`--substrate-pack-manifest is only accepted for ${KIT_AIRGAP_TARGET_PROFILE}`);
+    }
+    return undefined;
+  }
+  if (!args.substratePackManifest) {
+    cliFail('missing required argument: --substrate-pack-manifest');
+  }
+
+  const sourcePath = await canonicalLocalFile(
+    args.substratePackManifest,
+    'substrate pack manifest'
+  );
+  const input = await readJson(sourcePath, 'substrate pack manifest');
+  const manifest = requireObject(input.value, 'substrate_pack_manifest');
+  assertStringEquals(
+    manifest.schema_version,
+    SUBSTRATE_PACK_MANIFEST_SCHEMA,
+    'substrate_pack_manifest.schema_version'
+  );
+  assertStringEquals(
+    manifest.installed_by,
+    'agentsmith-release-kit',
+    'substrate_pack_manifest.installed_by'
+  );
+  assertStringEquals(
+    manifest.target_profile,
+    targetProfile.value,
+    'substrate_pack_manifest.target_profile'
+  );
+
+  return {
+    sourcePath,
+    bundlePath: 'components/substrate-pack-manifest.json',
+    inputDigest: input.inputDigest
+  };
+}
+
 async function normalizeImageArchives(values) {
   const seen = new Set();
   const normalized = [];
@@ -631,7 +693,8 @@ async function assembleBundle({
   imageMapPath,
   imageArchives,
   payloadInputs,
-  operatorPrerequisites
+  operatorPrerequisites,
+  substratePackManifest
 }) {
   await fs.mkdir(bundleRoot, { recursive: true });
 
@@ -681,6 +744,16 @@ async function assembleBundle({
       ...(await copyInputFile(imageMapPath, bundleRoot, componentPaths.image_map))
     }
   ];
+  if (substratePackManifest) {
+    components.push({
+      kind: 'substrate_pack_manifest',
+      ...(await copyInputFile(
+        substratePackManifest.sourcePath,
+        bundleRoot,
+        substratePackManifest.bundlePath
+      ))
+    });
+  }
 
   const imageArchiveById = new Map(imageArchives.map((archive) => [archive.id, archive]));
   const imageArtifactDeclarations = [];
@@ -746,25 +819,30 @@ async function assembleBundle({
   const componentDigestByKind = Object.fromEntries(
     components.map((component) => [component.kind, component.sha256])
   );
+  const bindings = {
+    release_contract_sha256: componentDigestByKind.release_contract,
+    deploy_template_package_sha256: componentDigestByKind.deploy_template_package,
+    deploy_template_archive_sha256: deployTemplateArchiveInputDigest,
+    deploy_template_manifest_sha256: deployTemplateManifestSha256,
+    image_map_sha256: componentDigestByKind.image_map
+  };
+  if (substratePackManifest) {
+    bindings.substrate_pack_manifest_sha256 =
+      componentDigestByKind.substrate_pack_manifest;
+  }
   const manifest = {
     schema_version: 'agentsmith.airgap-bundle-manifest/v1',
     release_id: releaseId,
     git_sha: gitSha,
     target_profile: targetProfile,
-    bindings: {
-      release_contract_sha256: componentDigestByKind.release_contract,
-      deploy_template_package_sha256: componentDigestByKind.deploy_template_package,
-      deploy_template_archive_sha256: deployTemplateArchiveInputDigest,
-      deploy_template_manifest_sha256: deployTemplateManifestSha256,
-      image_map_sha256: componentDigestByKind.image_map
-    },
+    bindings,
     components,
     image_artifact_declarations: imageArtifactDeclarations,
     payload_artifacts: payloadArtifacts,
     operator_prerequisites: operatorPrerequisitesForManifest(operatorPrerequisites),
     substrate: {
-      mode: 'external_declared',
-      bundled: false
+      mode: targetProfile.substrate_source,
+      bundled: targetProfile.substrate_source === 'kit_installed'
     }
   };
 
@@ -780,6 +858,7 @@ async function assembleBundle({
     deployTemplateArchiveInputDigest,
     imageMapInputDigest: imageMapInput.inputDigest,
     imageMapImageCount: mappings.length,
+    substratePackManifestInputDigest: substratePackManifest?.inputDigest,
     manifestPath
   };
 }
@@ -821,14 +900,25 @@ function buildReport({
       },
       airgap_bundle_check_report: {
         input_sha256: checkReportInputDigest
-      }
+      },
+      ...(assembly.substratePackManifestInputDigest
+        ? {
+            substrate_pack_manifest: {
+              input_sha256: assembly.substratePackManifestInputDigest
+            }
+          }
+        : {})
     },
     components_count: checkReport.components_count,
     image_artifact_count: checkReport.image_artifact_declaration_count,
     payload_artifact_count: checkReport.payload_artifact_count,
     tool_count: checkReport.tool_count,
     bundled_tool_count: checkReport.bundled_tool_count,
-    operator_prerequisite_tool_count: checkReport.operator_prerequisite_tool_count
+    operator_prerequisite_tool_count: checkReport.operator_prerequisite_tool_count,
+    substrate: {
+      mode: targetProfile.substrate_source,
+      bundled: targetProfile.substrate_source === 'kit_installed'
+    }
   };
 }
 
@@ -864,6 +954,7 @@ async function main() {
     const imageArchives = await normalizeImageArchives(args.imageArchives);
     const payloadInputs = await normalizePayloadInputs(args);
     const operatorPrerequisites = await normalizeOperatorPrerequisites(args.operatorPrerequisites);
+    const substratePackManifest = await normalizeSubstratePackManifest(args, targetProfile);
 
     await fs.mkdir(args.outputDir, { recursive: true });
     workDir = await fs.mkdtemp(path.join(path.resolve(args.outputDir), '.bundle-create-work-'));
@@ -925,7 +1016,8 @@ async function main() {
       imageMapPath,
       imageArchives,
       payloadInputs,
-      operatorPrerequisites
+      operatorPrerequisites,
+      substratePackManifest
     });
 
     runNodeScript(

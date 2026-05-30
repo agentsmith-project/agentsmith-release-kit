@@ -30,10 +30,11 @@ pass() {
 run_image_map() {
   local output_dir="$1"
   local release_contract="${2:-$VALID_CONTRACT}"
+  local target_profile="${3:-$AIRGAP_PROFILE}"
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --image-map \
     --release-contract "$release_contract" \
-    --target-profile "$AIRGAP_PROFILE" \
+    --target-profile "$target_profile" \
     --target-registry "$AIRGAP_REGISTRY" \
     --output-dir "$output_dir" >/dev/null
 }
@@ -796,18 +797,154 @@ writeText(bundleManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
-assert_report() {
-  local report_file="$1"
+write_kit_substrate_pack_manifest() {
+  local output="$1"
+  local profile="$2"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$VALID_CONTRACT" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile, validContract] = process.argv.slice(2);
+const [output, profile] = process.argv.slice(2);
+const digest = (char) => `sha256:${char.repeat(64)}`;
+const image = (name, tag, char) =>
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+
+const manifest = {
+  schema_version: 'agentsmith.substrate-pack-manifest/v1',
+  release_kit_version: '0.1.0',
+  installed_by: 'agentsmith-release-kit',
+  target_profile: profile,
+  images: {
+    postgresql: image('postgresql', '16.3', '1'),
+    mongodb: image('mongodb', '7.0', '2'),
+    redis: image('redis', '7.2', '3'),
+    object_storage: image('object-storage', '2026.05', '4'),
+    oidc: image('keycloak', '25.0', '5')
+  },
+  payload: {
+    install_plan: {
+      path: 'payload/install-substrates.json',
+      sha256: digest('6')
+    }
+  },
+  templates: {
+    postgresql: 'templates/postgresql.yaml',
+    mongodb: 'templates/mongodb.yaml',
+    redis: 'templates/redis.yaml',
+    object_storage: 'templates/object-storage.yaml',
+    oidc: 'templates/oidc.yaml'
+  },
+  tools: {
+    routability_probe: {
+      path: 'tools/substrate-routability-probe.txt',
+      sha256: digest('7')
+    }
+  },
+  checksums: {
+    manifest: digest('8')
+  }
+};
+
+fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+add_kit_substrate_pack_to_bundle() {
+  local bundle_root="$1"
+  local bundle_manifest="$2"
+  local substrate_pack_manifest="$3"
+  local mutation="${4:-valid}"
+
+  "$NODE_BIN" --input-type=module - \
+    "$bundle_root" \
+    "$bundle_manifest" \
+    "$substrate_pack_manifest" \
+    "$mutation" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [bundleRoot, bundleManifestPath, substratePackManifest, mutation] =
+  process.argv.slice(2);
+
+function digestFile(file) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+}
+
+const componentPath = 'components/substrate-pack-manifest.json';
+const destination = path.join(bundleRoot, componentPath);
+const manifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
+
+fs.copyFileSync(substratePackManifest, destination);
+const componentSha256 = digestFile(destination);
+
+manifest.substrate = {
+  mode: 'kit_installed',
+  bundled: true
+};
+manifest.bindings.substrate_pack_manifest_sha256 = componentSha256;
+manifest.components.push({
+  kind: 'substrate_pack_manifest',
+  path: componentPath,
+  sha256: componentSha256
+});
+
+switch (mutation) {
+  case 'valid':
+    break;
+  case 'substrate_pack_binding_sha_mismatch':
+    manifest.bindings.substrate_pack_manifest_sha256 = `sha256:${'1'.repeat(64)}`;
+    break;
+  case 'substrate_pack_component_sha_mismatch':
+    manifest.components.find((component) => (
+      component.kind === 'substrate_pack_manifest'
+    )).sha256 = `sha256:${'2'.repeat(64)}`;
+    break;
+  case 'missing_substrate_pack_component':
+    manifest.components = manifest.components.filter((component) => (
+      component.kind !== 'substrate_pack_manifest'
+    ));
+    break;
+  default:
+    throw new Error(`unknown kit substrate mutation: ${mutation}`);
+}
+
+fs.writeFileSync(bundleManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+assert_report() {
+  local report_file="$1"
+  local valid_contract="${2:-$VALID_CONTRACT}"
+  local expected_profile="${3:-$AIRGAP_PROFILE}"
+  local expected_components_count="${4:-4}"
+  local expected_substrate_mode="${5:-external_declared}"
+  local expected_substrate_bundled="${6:-false}"
+
+  "$NODE_BIN" --input-type=module - \
+    "$report_file" \
+    "$valid_contract" \
+    "$expected_profile" \
+    "$expected_components_count" \
+    "$expected_substrate_mode" \
+    "$expected_substrate_bundled" <<'NODE'
+import fs from 'node:fs';
+
+const [
+  reportFile,
+  validContract,
+  expectedProfile,
+  expectedComponentsCountText,
+  expectedSubstrateMode,
+  expectedSubstrateBundledText
+] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
 const expectedImageCount = JSON.parse(
   fs.readFileSync(validContract, 'utf8')
 ).deploy_image_inventory.length;
+const expectedComponentsCount = Number(expectedComponentsCountText);
+const expectedSubstrateBundled = expectedSubstrateBundledText === 'true';
 
 function assertNoLeakKeys(value, path = 'report') {
   if (!value || typeof value !== 'object') {
@@ -840,11 +977,17 @@ if (report.readiness !== false) {
 if (report.status !== 'pass') {
   throw new Error(`unexpected status: ${report.status}`);
 }
-if (report.target_profile?.value !== 'existing_kubernetes/external_declared/airgap') {
+if (report.target_profile?.value !== expectedProfile) {
   throw new Error(`unexpected target profile: ${report.target_profile?.value}`);
 }
-if (report.components_count !== 4) {
+if (report.components_count !== expectedComponentsCount) {
   throw new Error(`unexpected components count: ${report.components_count}`);
+}
+if (report.substrate?.mode !== expectedSubstrateMode) {
+  throw new Error(`unexpected substrate mode: ${report.substrate?.mode}`);
+}
+if (report.substrate?.bundled !== expectedSubstrateBundled) {
+  throw new Error(`unexpected substrate bundled flag: ${report.substrate?.bundled}`);
 }
 const imageMapCount = report.artifacts?.image_map?.image_count;
 if (imageMapCount !== expectedImageCount) {
@@ -1056,6 +1199,31 @@ expect_contract_fail() {
   pass "invalid release contract rejected: $label"
 }
 
+expect_kit_bundle_fail() {
+  local label="$1"
+  local mutation="$2"
+  local image_map_dir="$TMP_DIR/image-map-kit-$label"
+  local bundle_root="$TMP_DIR/bundle-kit-$label"
+  local bundle_manifest="$bundle_root/airgap-bundle-manifest.json"
+  local output_dir="$TMP_DIR/out-kit-$label"
+  local substrate_pack_manifest="$TMP_DIR/substrate-pack-$label.json"
+
+  write_kit_substrate_pack_manifest "$substrate_pack_manifest" "$KIT_AIRGAP_PROFILE"
+  run_image_map "$image_map_dir" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE"
+  create_bundle "$image_map_dir/image-map.json" "$bundle_root" "$bundle_manifest"
+  add_kit_substrate_pack_to_bundle "$bundle_root" "$bundle_manifest" "$substrate_pack_manifest" "$mutation"
+  write_stale_report "$output_dir"
+
+  if run_airgap_bundle_check "$image_map_dir/image-map.json" "$KIT_AIRGAP_PROFILE" "$bundle_root" "$bundle_manifest" "$output_dir" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected invalid kit airgap bundle case to fail: $label"
+  fi
+
+  assert_no_report "$output_dir/$REPORT_FILE"
+  pass "invalid kit airgap bundle rejected: $label"
+}
+
 valid_image_map_dir="$TMP_DIR/image-map-valid"
 valid_bundle_root="$TMP_DIR/bundle-valid"
 valid_bundle_manifest="$valid_bundle_root/airgap-bundle-manifest.json"
@@ -1071,6 +1239,24 @@ if ! tail -n 1 "$TMP_DIR/valid-airgap.out" | grep -q 'readiness=false'; then
   fail "airgap bundle check stdout must end with readiness=false"
 fi
 pass "valid airgap bundle manifest accepted with focused non-readiness report"
+
+valid_kit_image_map_dir="$TMP_DIR/image-map-valid-kit"
+valid_kit_bundle_root="$TMP_DIR/bundle-valid-kit"
+valid_kit_bundle_manifest="$valid_kit_bundle_root/airgap-bundle-manifest.json"
+valid_kit_output_dir="$TMP_DIR/out-valid-kit"
+valid_kit_substrate_pack="$TMP_DIR/substrate-pack-valid-kit.json"
+
+write_kit_substrate_pack_manifest "$valid_kit_substrate_pack" "$KIT_AIRGAP_PROFILE"
+run_image_map "$valid_kit_image_map_dir" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE"
+create_bundle "$valid_kit_image_map_dir/image-map.json" "$valid_kit_bundle_root" "$valid_kit_bundle_manifest"
+add_kit_substrate_pack_to_bundle "$valid_kit_bundle_root" "$valid_kit_bundle_manifest" "$valid_kit_substrate_pack"
+run_airgap_bundle_check "$valid_kit_image_map_dir/image-map.json" "$KIT_AIRGAP_PROFILE" "$valid_kit_bundle_root" "$valid_kit_bundle_manifest" "$valid_kit_output_dir" >"$TMP_DIR/valid-kit-airgap.out"
+assert_report "$valid_kit_output_dir/$REPORT_FILE" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE" 5 kit_installed true
+pass "valid kit-installed airgap bundle manifest binds substrate pack component digest"
+
+expect_kit_bundle_fail substrate-pack-binding-sha-mismatch substrate_pack_binding_sha_mismatch
+expect_kit_bundle_fail substrate-pack-component-sha-mismatch substrate_pack_component_sha_mismatch
+expect_kit_bundle_fail missing-substrate-pack-component missing_substrate_pack_component
 
 expect_image_map_fail missing-target-registry missing_target_registry
 expect_image_map_fail image-map-not-airgap online_target_profile
@@ -1177,7 +1363,6 @@ expect_contract_fail \
 
 expect_profile_fail online "$ONLINE_PROFILE"
 expect_profile_fail kind-rehearsal "$KIND_PROFILE"
-expect_profile_fail kit-installed-airgap "$KIT_AIRGAP_PROFILE"
 expect_profile_fail alias-offline "existing_kubernetes/external_declared/offline"
 expect_profile_fail alias-air-gapped "existing_kubernetes/external_declared/air-gapped"
 

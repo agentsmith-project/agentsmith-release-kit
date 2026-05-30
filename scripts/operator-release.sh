@@ -21,12 +21,12 @@ Operator surface:
   airgap/use_existing maps internally to existing_kubernetes/external_declared/airgap.
   airgap/install_substrates is intentionally unsupported in v0 and fails fast.
   airgap-bundle/use_existing maps internally to existing_kubernetes/external_declared/airgap.
-  airgap-bundle/install_substrates is intentionally unsupported in v0 and fails fast.
+  airgap-bundle/install_substrates maps internally to existing_kubernetes/kit_installed/airgap.
 
 This facade forwards to existing producer diagnostics only:
   online/* -> scripts/verify-release.sh --online-deployment-gate
   airgap/use_existing -> scripts/verify-release.sh --airgap-consume-rehearsal
-  airgap-bundle/use_existing -> scripts/verify-release.sh --bundle-create
+  airgap-bundle/* -> scripts/verify-release.sh --bundle-create
 USAGE
 }
 
@@ -188,7 +188,9 @@ case "$surface/$substrate_strategy" in
     machine_profile="existing_kubernetes/external_declared/airgap"
     ;;
   airgap-bundle/install_substrates)
-    fail "airgap-bundle/install_substrates is not implemented in operator release surface v0"
+    producer_mode="--bundle-create"
+    producer_name="bundle-create"
+    machine_profile="existing_kubernetes/kit_installed/airgap"
     ;;
   online/*)
     fail "unknown online substrate strategy: $substrate_strategy"
@@ -224,6 +226,10 @@ if evidence_root="$(find_arg_value --evidence-root "$@")"; then
   :
 else
   evidence_root=""
+fi
+
+if [[ "$surface/$substrate_strategy" == "airgap-bundle/install_substrates" ]]; then
+  require_arg_value --substrate-pack-manifest "$@" >/dev/null
 fi
 
 if [[ "$producer_name" == "bundle-create" ]]; then

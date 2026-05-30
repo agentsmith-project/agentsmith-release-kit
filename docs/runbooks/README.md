@@ -13,7 +13,7 @@ sign off deploy, package, offline install, or release readiness.
 | `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/operator-release.sh online use_existing ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]` | Runs the existing online focused chain for declared substrate endpoints and explicit target prerequisites. Confirmed apply uses `--confirm-apply online/use_existing`; the facade maps it internally. Target-registry confirmed apply still binds registry presence through the operator probe before render/apply. |
 | `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the existing local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
 | `online/install_substrates` | `existing_kubernetes/kit_installed/online` | `bash scripts/operator-release.sh online install_substrates ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the existing online focused chain for kit-installed substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope. It is source-registry only, rejects `--target-registry` and `--registry-probe`, and is not a substrate installer or release readiness. |
-| `airgap-bundle/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle install_substrates ...` | Fails fast in v0. There is no kit-installed airgap facade success path yet. |
+| `airgap-bundle/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle install_substrates ... --substrate-pack-manifest ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the packaging-side local bundle assembler and immediate self-check, binds the substrate pack manifest as a bundle component, then writes the operator surface summary. It does not consume/deploy the bundle or install substrates. |
 
 ## Optional Rehearsal
 
@@ -34,7 +34,7 @@ endpoint is kind.
 | `online/use_existing` | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, optional registry presence through an operator probe, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
 | `airgap-bundle/use_existing` | Image-map mirror plan through the bundle-create producer, local bundle assembler plus self-check, and operator surface summary. Other airgap checks remain focused producer diagnostics. | Registry mirroring, offline install, deploy readiness, package readiness. |
 | `online/install_substrates` | Contract declaration, target-preflight substrate/prerequisites intake, standalone image-map planning, substrate pack focused materiality, Pod-network substrate routability, template-package, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope through the online focused chain. | Substrate installer, target-registry/registry-probe support, deploy readiness, package readiness, release readiness. |
-| `airgap-bundle/install_substrates` | No facade success path in v0; the command fails fast. | Substrate installer, kit-installed airgap deploy, deploy readiness, package readiness, release readiness. |
+| `airgap-bundle/install_substrates` | Packaging-side bundle assembly, substrate pack manifest component/digest binding, bundle self-check, and operator surface summary. | Substrate installer, kit-installed airgap deploy, deploy readiness, package readiness, release readiness. |
 
 ## Command Roles
 
@@ -152,6 +152,11 @@ payload and operator prerequisite inputs. The bundle root must be absent or
 empty. The command writes `bundle-create-report.json` with `readiness=false`
 after the generated bundle passes `--airgap-bundle-check`; that report is not
 accepted by the evidence envelope validator.
+For `airgap-bundle/install_substrates`, also provide
+`--substrate-pack-manifest <json>`; the generated bundle records it as
+`components/substrate-pack-manifest.json`,
+`components[].kind: substrate_pack_manifest`, and
+`bindings.substrate_pack_manifest_sha256`.
 
 For airgap bundle checks, the bundle manifest must use
 `schema_version: agentsmith.airgap-bundle-manifest/v1`. The check validates

@@ -34,6 +34,7 @@ VALID_ARCHIVE="$TMP_DIR/agentsmith-deploy-template-package.tgz"
 PAYLOAD_DIR="$TMP_DIR/payload"
 IMAGE_DIR="$TMP_DIR/image-archives"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
+KIT_SUBSTRATE_PACK="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -235,6 +236,58 @@ switch (mutation) {
 }
 
 fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+write_kit_substrate_pack_manifest() {
+  local output="$1"
+  local profile="$2"
+
+  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profile] = process.argv.slice(2);
+const digest = (char) => `sha256:${char.repeat(64)}`;
+const image = (name, tag, char) =>
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+
+const manifest = {
+  schema_version: 'agentsmith.substrate-pack-manifest/v1',
+  release_kit_version: '0.1.0',
+  installed_by: 'agentsmith-release-kit',
+  target_profile: profile,
+  images: {
+    postgresql: image('postgresql', '16.3', '1'),
+    mongodb: image('mongodb', '7.0', '2'),
+    redis: image('redis', '7.2', '3'),
+    object_storage: image('object-storage', '2026.05', '4'),
+    oidc: image('keycloak', '25.0', '5')
+  },
+  payload: {
+    install_plan: {
+      path: 'payload/install-substrates.json',
+      sha256: digest('6')
+    }
+  },
+  templates: {
+    postgresql: 'templates/postgresql.yaml',
+    mongodb: 'templates/mongodb.yaml',
+    redis: 'templates/redis.yaml',
+    object_storage: 'templates/object-storage.yaml',
+    oidc: 'templates/oidc.yaml'
+  },
+  tools: {
+    routability_probe: {
+      path: 'tools/substrate-routability-probe.txt',
+      sha256: digest('7')
+    }
+  },
+  checksums: {
+    manifest: digest('8')
+  }
+};
+
+fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
@@ -454,6 +507,65 @@ if (/payload\/|tools\/|operator held|operator workstation|signed operator prereq
 NODE
 }
 
+assert_kit_bundle_and_report() {
+  local bundle_root="$1"
+  local output_dir="$2"
+  local substrate_pack_manifest="$3"
+
+  "$NODE_BIN" --input-type=module - \
+    "$bundle_root" \
+    "$output_dir/$REPORT_FILE" \
+    "$output_dir/$CHECK_REPORT_FILE" \
+    "$substrate_pack_manifest" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [bundleRoot, reportFile, checkReportFile, substratePackManifest] =
+  process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const checkReport = JSON.parse(fs.readFileSync(checkReportFile, 'utf8'));
+const manifest = JSON.parse(
+  fs.readFileSync(path.join(bundleRoot, 'airgap-bundle-manifest.json'), 'utf8')
+);
+const packDigest =
+  `sha256:${crypto.createHash('sha256').update(fs.readFileSync(substratePackManifest)).digest('hex')}`;
+const bundledPackDigest =
+  `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(bundleRoot, 'components/substrate-pack-manifest.json'))).digest('hex')}`;
+const packComponent = manifest.components.find((component) => (
+  component.kind === 'substrate_pack_manifest'
+));
+
+if (report.target_profile?.value !== 'existing_kubernetes/kit_installed/airgap') {
+  throw new Error(`unexpected kit create target profile: ${report.target_profile?.value}`);
+}
+if (checkReport.target_profile?.value !== 'existing_kubernetes/kit_installed/airgap') {
+  throw new Error(`unexpected kit bundle-check target profile: ${checkReport.target_profile?.value}`);
+}
+if (manifest.target_profile?.value !== 'existing_kubernetes/kit_installed/airgap') {
+  throw new Error(`unexpected kit manifest target profile: ${manifest.target_profile?.value}`);
+}
+if (manifest.substrate?.mode !== 'kit_installed' || manifest.substrate?.bundled !== true) {
+  throw new Error('kit airgap manifest substrate summary must be kit_installed and bundled');
+}
+if (!packComponent) {
+  throw new Error('kit airgap manifest must include substrate_pack_manifest component');
+}
+if (packComponent.path !== 'components/substrate-pack-manifest.json') {
+  throw new Error(`unexpected substrate pack component path: ${packComponent.path}`);
+}
+if (packComponent.sha256 !== packDigest || bundledPackDigest !== packDigest) {
+  throw new Error('substrate pack component sha must bind to input and bundled file');
+}
+if (manifest.bindings?.substrate_pack_manifest_sha256 !== packDigest) {
+  throw new Error('substrate pack binding digest must match input manifest digest');
+}
+if (report.components_count !== 5 || checkReport.components_count !== 5) {
+  throw new Error('kit airgap reports must count the substrate pack component');
+}
+NODE
+}
+
 expect_create_fail() {
   local label="$1"
   local bundle_root="$2"
@@ -478,6 +590,7 @@ write_materials "$manifest_sha" "$archive_sha"
 create_payloads
 create_image_archives
 write_operator_prerequisites "$OPERATOR_PREREQUISITES"
+write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK" "$KIT_AIRGAP_PROFILE"
 refresh_args
 
 valid_bundle_root="$TMP_DIR/bundle-valid"
@@ -489,6 +602,15 @@ if ! tail -n 1 "$TMP_DIR/valid-create.out" | grep -q 'bundle create mode is not 
   fail "bundle create stdout must end with non-readiness wording"
 fi
 pass "valid bundle create assembled bundle and wrote focused non-readiness report"
+
+valid_kit_bundle_root="$TMP_DIR/bundle-valid-kit"
+valid_kit_output_dir="$TMP_DIR/out-valid-kit"
+run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$valid_kit_bundle_root" "$valid_kit_output_dir" \
+  "${default_image_args[@]}" \
+  "${common_payload_args[@]}" \
+  --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" >"$TMP_DIR/valid-create-kit.out"
+assert_kit_bundle_and_report "$valid_kit_bundle_root" "$valid_kit_output_dir" "$KIT_SUBSTRATE_PACK"
+pass "valid kit-installed airgap bundle create binds substrate pack manifest"
 
 rerun_output_dir="$TMP_DIR/out-rerun-check"
 run_airgap_bundle_check "$valid_bundle_root" "$rerun_output_dir" >"$TMP_DIR/rerun-check.out"
@@ -518,7 +640,6 @@ expect_create_fail unknown-image-id "$TMP_DIR/bundle-unknown-image" "$TMP_DIR/ou
 for profile_case in \
   "online:$ONLINE_PROFILE" \
   "kind:$KIND_PROFILE" \
-  "kit-airgap:$KIT_AIRGAP_PROFILE" \
   "alias-offline:$ALIAS_OFFLINE_PROFILE"; do
   label="${profile_case%%:*}"
   profile="${profile_case#*:}"
@@ -527,6 +648,11 @@ for profile_case in \
       "${default_image_args[@]}" \
       "${common_payload_args[@]}"
 done
+
+expect_create_fail missing-substrate-pack-manifest "$TMP_DIR/bundle-missing-substrate-pack" "$TMP_DIR/out-missing-substrate-pack" \
+  run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-missing-substrate-pack" "$TMP_DIR/out-missing-substrate-pack" \
+    "${default_image_args[@]}" \
+    "${common_payload_args[@]}"
 
 expect_create_fail invalid-target-registry "$TMP_DIR/bundle-bad-registry" "$TMP_DIR/out-bad-registry" \
   run_bundle_create_full "$AIRGAP_PROFILE" "https://registry.example.internal/releases" "$TMP_DIR/bundle-bad-registry" "$TMP_DIR/out-bad-registry" \

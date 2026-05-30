@@ -193,8 +193,11 @@ tooling itself, call Kubernetes, or claim deploy/package/release readiness,
 and it is not accepted by the evidence envelope validator.
 
 The current `--bundle-create` path is a focused diagnostic for local airgap
-bundle assembly plus immediate self-check only. It supports only
-`existing_kubernetes/external_declared/airgap`. It consumes the release
+bundle assembly plus immediate self-check only. It supports
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`. The kit-installed airgap target
+requires `--substrate-pack-manifest`, copies it into the bundle components,
+and binds its sha256 in `airgap-bundle-manifest.json`. It consumes the release
 contract, deploy template package descriptor, matching `.tgz` archive, target
 registry, one local image archive per generated image-map mapping, required
 payload files, operator prerequisites, an absent-or-empty bundle root, and an
@@ -213,21 +216,23 @@ The current `--airgap-bundle-check` path is a focused diagnostic for local
 airgap bundle manifest/digest checking only. It consumes a release contract,
 deploy template package descriptor, deploy template archive `.tgz`, airgap
 `image-map`, explicit target profile
-`existing_kubernetes/external_declared/airgap`, explicit bundle root, bundle
+`existing_kubernetes/<external_declared|kit_installed>/airgap`, explicit bundle root, bundle
 manifest, and output directory. The deploy template archive sha256 must match
 `deploy_template_package.package_sha256`,
 `deploy_template_package.artifact_provenance.artifact_sha256`, and
 `bundle_manifest.bindings.deploy_template_archive_sha256`. The release
 contract `target_profiles` value must be an array and must include
-`existing_kubernetes/external_declared/airgap`; every declared profile must use
-a canonical profile tuple with `required: boolean`, and `support_level` is
-rejected. The airgap profile may remain `required: false`. The bundle manifest
+the selected airgap target profile; every declared profile must use a canonical
+profile tuple with `required: boolean`, and `support_level` is rejected. The
+airgap profile may remain `required: false`. The bundle manifest
 must use `schema_version: agentsmith.airgap-bundle-manifest/v1` and accepts
 only the documented top-level, `bindings`, `components`,
 `image_artifact_declarations`, `payload_artifacts`,
 `operator_prerequisites`, and `substrate` fields. Its `components` list must
 contain exactly one component for each `kind`: `release_contract`,
-`deploy_template_package`, `deploy_template_archive`, and `image_map`. The
+`deploy_template_package`, `deploy_template_archive`, and `image_map`. For
+`kit_installed`, it must also contain `substrate_pack_manifest` and matching
+`bindings.substrate_pack_manifest_sha256`. The
 image-map must be airgap, have `mirror_required: true`, and every mapping must
 use `action: mirror_required`. Its mappings are rebound to
 `release_contract.deploy_image_inventory`: ids must exist, source image and
