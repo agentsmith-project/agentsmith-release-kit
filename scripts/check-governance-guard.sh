@@ -141,14 +141,29 @@ require_text README.md "backend-real"
 require_text README.md "product flow"
 require_text README.md "Cloud resource provisioning"
 require_text README.md "release management UI"
-require_text README.md '`target_cluster`: `existing_kubernetes` or `kind_rehearsal`'
-require_text README.md '`substrate_source`: `external_declared` or `kit_installed`'
-require_text README.md '`distribution`: `online` or `airgap`'
-require_text README.md '`kind_rehearsal` is only a local or CI rehearsal target'
-require_text README.md "not a user deployment prerequisite"
-require_text README.md "does not replace real Kubernetes evidence"
+require_text README.md "The formal operator release quadrants are"
+require_text README.md '`online/use_existing`'
+require_text README.md '`online/install_substrates`'
+require_text README.md '`airgap/use_existing`'
+require_text README.md '`airgap/install_substrates`'
+require_text README.md '`kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input'
+require_text README.md "is not a release profile, user deployment prerequisite, operator release"
+require_text README.md "target, or replacement for real Kubernetes evidence"
+require_text docs/runbooks/README.md "## Formal Operator Quadrants"
+require_text docs/runbooks/README.md "Airgap bundle packaging commands are packaging-side helpers"
+require_text docs/runbooks/README.md "not formal release quadrants"
+require_text docs/runbooks/README.md 'use `airgap/install_substrates` for the consume/deployment-focused path'
+require_text docs/RELEASE_GATES.md "Only the four existing-Kubernetes"
+require_text docs/RELEASE_GATES.md "tuples are formal operator release profiles"
+require_text docs/RELEASE_GATES.md "rehearsal-only accepted input"
+require_text docs/contracts/README.md "Only accepted pre-GA profile tuples are accepted"
+require_text docs/contracts/README.md "not a formal operator"
 require_text DEVELOPMENT.md "There is intentionally no"
 require_text DEVELOPMENT.md "package.json"
+require_text DEVELOPMENT.md "four existing-Kubernetes operator release profiles"
+require_text DEVELOPMENT.md '`kind_rehearsal/kit_installed/online` remains'
+require_text DEVELOPMENT.md "rehearsal-only accepted input"
+require_text DEVELOPMENT.md "profile, release target, or user deployment prerequisite"
 require_text AGENTS.md "Quick gate success is never release readiness"
 pass "scope and non-goals"
 
@@ -162,6 +177,13 @@ fi
 pass "release gate bootstrap boundary"
 
 mapfile -d '' scan_paths < <(find . -path ./.git -prune -o -type f -print0)
+doc_policy_paths=(
+  README.md
+  DEVELOPMENT.md
+  docs/RELEASE_GATES.md
+  docs/contracts/README.md
+  docs/runbooks/README.md
+)
 
 afscp_mount_plan_contract="afscp-mount-plan"
 afscp_mount_plan_contract+="-contract"
@@ -230,6 +252,16 @@ reject_scan \
   "kind rehearsal prerequisite claim found" \
   '(^|[^[:alnum:]_])kind(_rehearsal)?[[:space:]]+(is|as)[[:space:]]+(a[[:space:]]+)?(required|mandatory|prerequisite)|(^|[^[:alnum:]_])kind(_rehearsal)?[[:space:]]+(must|shall)[[:space:]]+|(^|[^[:alnum:]_])(required|mandatory)[[:space:]]+kind(_rehearsal)?([[:space:]]+cluster|[[:space:]]+target)?' \
   "${scan_paths[@]}"
+
+reject_scan \
+  "kind rehearsal documented as canonical release profile" \
+  'The canonical declarable target profiles are|canonical declarable (target |release )?profiles|canonical profile tuple(s)?|Only canonical profile tuples are accepted|five canonical target profiles|`kind_rehearsal/kit_installed/online` is a canonical|kind_rehearsal/kit_installed/online.*canonical.*(declarable|release|profile)' \
+  "${doc_policy_paths[@]}"
+
+reject_scan \
+  "airgap-bundle/install_substrates documented as deploy execution" \
+  'kit-installed airgap deploy' \
+  "${doc_policy_paths[@]}"
 
 require_text docs/RELEASE_GATES.md "No mutable image or non-digest release claim is present"
 pass "boundary scans"

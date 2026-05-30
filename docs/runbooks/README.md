@@ -6,13 +6,21 @@ Use this page to choose the target path before running repo-local checks. The
 scripts here produce focused evidence with `readiness: false`; they do not
 sign off deploy, package, offline install, or release readiness.
 
-## Operator Quadrants
+## Formal Operator Quadrants
 
 | Operator choice | Machine profile mapping | Operator command entry | Current result |
 | --- | --- | --- | --- |
 | `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/operator-release.sh online use_existing ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]` | Runs the existing online focused chain for declared substrate endpoints and explicit target prerequisites. Confirmed apply uses `--confirm-apply online/use_existing`; the facade maps it internally. Target-registry confirmed apply still binds registry presence through the operator probe before render/apply. |
-| `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the existing local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
 | `online/install_substrates` | `existing_kubernetes/kit_installed/online` | `bash scripts/operator-release.sh online install_substrates ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the existing online focused chain for kit-installed substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope. It is source-registry only, rejects `--target-registry` and `--registry-probe`, and is not a substrate installer or release readiness. |
+| `airgap/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap use_existing ... --bundle-root ... --render-values ... --substrate-truth ... --target-prerequisites ...` | Consumes an already assembled bundle through the existing airgap consume/deployment-focused chain: bundle check, preflight, render-check, apply, rollout, and optional smoke when confirmed apply is requested. It is not full readiness or an operator verdict. |
+| `airgap/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap install_substrates ... --bundle-root ... --render-values ... --substrate-truth ... --target-prerequisites ...` | Consumes an already assembled kit-installed bundle through the focused chain: substrate-pack-check, image load, bundle render-check, apply, rollout, and optional smoke when confirmed apply is requested. It does not install substrates and is not full readiness or an operator verdict. |
+
+Airgap bundle packaging commands are packaging-side helpers for the airgap
+quadrants, not formal release quadrants.
+
+| Packaging surface | Machine profile mapping | Operator command entry | Current result |
+| --- | --- | --- | --- |
+| `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the existing local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
 | `airgap-bundle/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle install_substrates ... --substrate-pack-manifest ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the packaging-side local bundle assembler and immediate self-check, binds the substrate pack manifest as a bundle component, then writes the operator surface summary. It does not consume/deploy the bundle or install substrates. |
 
 ## Optional Rehearsal
@@ -29,12 +37,14 @@ endpoint is kind.
 
 ## Implemented Now / Not Yet
 
-| Operator choice | Implemented now | Not yet |
+| Path | Implemented now | Not yet |
 | --- | --- | --- |
 | `online/use_existing` | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, optional registry presence through an operator probe, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
-| `airgap-bundle/use_existing` | Image-map mirror plan through the bundle-create producer, local bundle assembler plus self-check, and operator surface summary. Other airgap checks remain focused producer diagnostics. | Registry mirroring, offline install, deploy readiness, package readiness. |
 | `online/install_substrates` | Contract declaration, target-preflight substrate/prerequisites intake, standalone image-map planning, substrate pack focused materiality, Pod-network substrate routability, template-package, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope through the online focused chain. | Substrate installer, target-registry/registry-probe support, deploy readiness, package readiness, release readiness. |
-| `airgap-bundle/install_substrates` | Packaging-side bundle assembly, substrate pack manifest component/digest binding, bundle self-check, and operator surface summary. | Substrate installer, kit-installed airgap deploy, deploy readiness, package readiness, release readiness. |
+| `airgap/use_existing` | Bundle consume/deployment-focused diagnostics for an already assembled existing-substrate airgap bundle: bundle check, image load, bundle render-check, apply, rollout, optional smoke, and operator surface summary. | Registry mirroring, offline install, full readiness, operator verdict, deploy readiness, package readiness, release readiness. |
+| `airgap/install_substrates` | Bundle consume/deployment-focused diagnostics for an already assembled kit-installed airgap bundle: bundle check, substrate-pack-check, image load, bundle render-check, apply, rollout, optional smoke, and operator surface summary. | Substrate installer, full readiness, operator verdict, deploy readiness, package readiness, release readiness. |
+| `airgap-bundle/use_existing` | Image-map mirror plan through the bundle-create producer, local bundle assembler plus self-check, and operator surface summary. Other airgap checks remain focused producer diagnostics. | Registry mirroring, offline install, deploy readiness, package readiness. |
+| `airgap-bundle/install_substrates` | Packaging-side bundle assembly, substrate pack manifest component/digest binding, bundle self-check, and operator surface summary. | Bundle consume/deploy execution by this command; use `airgap/install_substrates` for the consume/deployment-focused path. Still no substrate installer, full readiness, operator verdict, deploy readiness, package readiness, or release readiness. |
 
 ## Command Roles
 
@@ -126,10 +136,11 @@ accepted by evidence intake and is not deploy/package/release readiness.
 
 ## Current Notes
 
-Pre-GA release contracts may declare the five canonical target profiles, but
-none may be marked required. Keep every `target_profiles[].required` value
-`false`; `required: true` fails fast because release-kit does not yet have full
-deploy/package evidence for every path.
+Pre-GA release contracts may declare the four existing-Kubernetes operator
+release profiles plus `kind_rehearsal/kit_installed/online` only as
+rehearsal-only input, but none may be marked required. Keep every
+`target_profiles[].required` value `false`; `required: true` fails fast because
+release-kit does not yet have full deploy/package evidence for every path.
 
 For image-map, online targets may omit `--target-registry` to use source
 digest refs directly. Airgap targets require

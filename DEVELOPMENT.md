@@ -159,11 +159,13 @@ an output directory, and an optional
 `--target-registry <registry-host[/namespace]>`. It reads only
 `release_contract.deploy_image_inventory`, requires every inventory image to
 be digest-pinned with a matching `digest` field, rejects duplicate ids, images,
-and digests, and accepts only the four existing Kubernetes canonical profiles
-as CLI targets. `kind_rehearsal/kit_installed/online` is a canonical profile
-tuple but out of scope for image-map CLI. Only canonical profile tuples are
-accepted in `release_contract.target_profiles`; non-canonical pre-GA names and
-synonym axes fail fast.
+and digests, and accepts only the four existing-Kubernetes operator release
+profiles as CLI targets. `kind_rehearsal/kit_installed/online` remains
+rehearsal-only accepted input for focused intake/coverage. It is not a release
+profile, release target, or user deployment prerequisite, and it is out of
+scope for image-map CLI. `release_contract.target_profiles` is limited to the
+four existing-Kubernetes operator release profiles plus this rehearsal-only
+accepted input; non-canonical pre-GA names and synonym axes fail fast.
 Standalone image-map enforces the release contract's dynamic
 `required_image_ids` exact-set closure against `deploy_image_inventory` ids.
 If that closure includes `managed_runner`, it flows through image-map, render

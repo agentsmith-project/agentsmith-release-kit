@@ -37,9 +37,9 @@ bash scripts/test-operator-release-surface.sh
 ```
 
 This focused guard exercises `bash scripts/operator-release.sh`. The facade
-accepts operator choices only, rejects producer vocabulary such as
-`--target-profile`, maps the choice internally, and calls the existing producer
-diagnostic:
+accepts the four formal operator choices plus packaging-side airgap-bundle
+commands, rejects producer vocabulary such as `--target-profile`, maps the
+choice internally, and calls the existing producer diagnostic:
 
 - `online/use_existing` -> `--online-deployment-gate` with
   `existing_kubernetes/external_declared/online`.
@@ -136,14 +136,15 @@ supplied by the release contract. This is still a focused diagnostic with
 Every `release_contract.target_profiles` entry must declare
 `required: boolean`; `support_level` is not accepted as a replacement. Duplicate
 `target_cluster/substrate_source/distribution` tuples are rejected. Every entry
-must use one of the canonical declarable profiles:
+must use an accepted pre-GA profile tuple:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`,
 `existing_kubernetes/kit_installed/airgap`, or
-`kind_rehearsal/kit_installed/online`. During pre-GA every canonical profile
-is declarable/intake-supported only for contract purposes, and every entry must
-use `required: false`; any `required: true` target fails fast.
+`kind_rehearsal/kit_installed/online`. Only the four existing-Kubernetes
+tuples are formal operator release profiles; the kind tuple is
+rehearsal-only accepted input. During pre-GA every entry must use
+`required: false`; any `required: true` target fails fast.
 
 The generated `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` must keep `readiness: false`. The
@@ -292,8 +293,8 @@ call Kubernetes, or claim deploy, package, or release readiness.
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`, and
 `existing_kubernetes/kit_installed/airgap`.
-`kind_rehearsal/kit_installed/online` is a canonical profile tuple but out of
-scope for image-map CLI. Only canonical profile tuples are accepted in
+`kind_rehearsal/kit_installed/online` is rehearsal-only accepted input and out
+of scope for image-map CLI. Only accepted pre-GA profile tuples are accepted in
 `release_contract.target_profiles`; non-canonical pre-GA names and synonym
 axes fail fast. The selected target profile must exist in the release
 contract. Every inventory item must have unique `id`, `image`, and `digest`
@@ -445,8 +446,8 @@ inputs/template-package and `deploy_image_inventory` ids; this does not make the
 bundle check release readiness.
 
 The release contract `target_profiles` value must be an array and must declare
-the selected airgap target profile. Every target profile tuple must be
-canonical, every entry must carry `required: false` during pre-GA, and
+the selected airgap target profile. Every target profile tuple must be accepted
+for pre-GA intake, every entry must carry `required: false` during pre-GA, and
 `support_level` is rejected. The kit-installed airgap check validates only
 bundle manifest/component/digest binding; it does not deploy substrates.
 
@@ -1257,13 +1258,14 @@ The accepted truth schemas are
 `agentsmith.target-prerequisites.truth/v1`. Docker substrate truth,
 non-canonical pre-GA target names such as `local-kind`, `existing-cluster`,
 `real-k8s`, and synonym axes such as `kind` or `cluster` are rejected. The
-supported focused profiles for this diagnostic are the canonical
+supported focused profiles for this diagnostic are the accepted
 target-preflight intake profiles:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`,
 `existing_kubernetes/kit_installed/airgap`, and
-`kind_rehearsal/kit_installed/online`.
+`kind_rehearsal/kit_installed/online`; the kind tuple is local/CI
+rehearsal-only and not a formal operator release target.
 
 For `external_declared`, the operator provides the connection truth and target
 prerequisites; the release kit only validates the documents. Raw evidence

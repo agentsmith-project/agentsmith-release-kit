@@ -60,23 +60,28 @@ AgentSmith Release Kit does not own:
 
 ## Deployment Model
 
-The intended future deployment model has three independent choices:
+The formal operator release quadrants are `online/use_existing`,
+`online/install_substrates`, `airgap/use_existing`, and
+`airgap/install_substrates`. They map to the four existing-Kubernetes machine
+profiles:
+`existing_kubernetes/external_declared/online`,
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`.
 
-- `target_cluster`: `existing_kubernetes` or `kind_rehearsal`.
+Focused producer diagnostics still use machine profile axes:
+
+- `target_cluster`: formal release paths use `existing_kubernetes`;
+  `kind_rehearsal` is accepted only where a local or CI rehearsal diagnostic
+  explicitly supports it.
 - `substrate_source`: `external_declared` or `kit_installed`.
 - `distribution`: `online` or `airgap`.
 
-The canonical declarable target profiles are
-`existing_kubernetes/external_declared/online`,
-`existing_kubernetes/external_declared/airgap`,
-`existing_kubernetes/kit_installed/online`,
-`existing_kubernetes/kit_installed/airgap`, and
-`kind_rehearsal/kit_installed/online`. Removed old input names and synonym
-axes such as `local-kind`, `existing-cluster`, `real-k8s`, `kind`, or
-`cluster` fail fast.
-
-`kind_rehearsal` is only a local or CI rehearsal target. It is not a user deployment prerequisite.
-It does not replace real Kubernetes evidence when a real Kubernetes target is in scope.
+`kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input. It
+is not a release profile, user deployment prerequisite, operator release
+target, or replacement for real Kubernetes evidence. Removed old input names
+and synonym axes such as `local-kind`, `existing-cluster`, `real-k8s`, `kind`,
+or `cluster` fail fast.
 
 For `airgap`, operators must provide all required tools, templates, artifacts,
 and images from inside the target network. Airgap flow must not download from
@@ -102,16 +107,18 @@ bash scripts/verify-release.sh --airgap-adoption \
   --output-dir <dir>
 ```
 
-The online, airgap, and airgap-bundle commands map operator choices to the
-existing producer diagnostics and write `operator-release-surface-report.json`
-with `readiness: false`. The repo-local focused surface supports
-airgap-bundle and airgap `use_existing` plus `install_substrates`: kit airgap
-bundle packaging requires `--substrate-pack-manifest`, validates the substrate
-pack manifest, binds it into `airgap-bundle-manifest.json`, and the kit airgap
-consume/deployment chain runs the focused substrate-pack-check, image load,
-bundle render-check, apply, rollout, and smoke steps. Profile mismatches fail
-before producer output, and duplicate singleton/control facade arguments fail
-fast before producer side effects.
+The online and airgap commands are the four formal operator release quadrants;
+airgap-bundle commands are packaging-side helpers for those airgap paths. All
+of them map to existing producer diagnostics and write
+`operator-release-surface-report.json` with `readiness: false`. The repo-local
+focused surface supports airgap-bundle and airgap `use_existing` plus
+`install_substrates`: kit airgap bundle packaging requires
+`--substrate-pack-manifest`, validates the substrate pack manifest, binds it
+into `airgap-bundle-manifest.json`, and the kit airgap consume/deployment chain
+runs the focused substrate-pack-check, image load, bundle render-check, apply,
+rollout, and smoke steps. Profile mismatches fail before producer output, and
+duplicate singleton/control facade arguments fail fast before producer side
+effects.
 `--airgap-adoption` aggregates matching generated airgap-bundle and
 confirmed-apply airgap surfaces for `use_existing` or `install_substrates`
 repo-local adoption preparation only. For kit airgap it binds the bundle
@@ -168,12 +175,13 @@ inventory. During release contract intake, `release_contract.required_image_ids`
 release kit consumes the dynamic image closure from the AgentSmith release
 contract instead of a hardcoded six-image list. Current fixtures/examples
 include `managed_runner`, a digest-bound inventory image supplied by the
-release contract. Every declared `target_profiles` entry
-must carry `required: boolean`; `support_level` is rejected, duplicate
-three-axis tuples are rejected, and every entry must use a canonical declarable
-profile. Existing Kubernetes profiles can be declared for both
-`external_declared` and `kit_installed` substrate choices across online and
-airgap distributions.
+release contract. Every declared `target_profiles` entry must carry
+`required: boolean`; `support_level` is rejected, duplicate three-axis tuples
+are rejected, and every entry must use an accepted pre-GA tuple. Only the four
+existing-Kubernetes tuples are formal operator release profiles. Existing
+Kubernetes profiles can be declared for both `external_declared` and
+`kit_installed` substrate choices across online and airgap distributions;
+`kind_rehearsal/kit_installed/online` remains local/CI rehearsal-only input.
 During pre-GA every target profile must use `required: false`; `required:
 true` fails fast because full deploy/package evidence is not implemented for
 every path. `intake-report.json`, `image-digest-plan.json`, and
@@ -274,8 +282,8 @@ targets:
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`, and
 `existing_kubernetes/kit_installed/airgap`.
-`kind_rehearsal/kit_installed/online` is a canonical profile tuple but out of
-scope for image-map CLI. Only canonical profile tuples are accepted in
+`kind_rehearsal/kit_installed/online` is rehearsal-only accepted input and out
+of scope for image-map CLI. Only accepted pre-GA profile tuples are accepted in
 `release_contract.target_profiles`; non-canonical pre-GA names and synonym
 axes fail fast. For online targets without
 `--target-registry`, target refs equal source refs and the action is
@@ -383,7 +391,7 @@ template archive `.tgz`, and airgap `image-map`. It accepts
 `existing_kubernetes/kit_installed/airgap`; online, kind, and non-canonical
 pre-GA target names fail fast. The release contract `target_profiles` value
 must be an array, must include the selected airgap target profile, and every
-entry must use a canonical profile tuple with `required: boolean`;
+entry must use an accepted pre-GA profile tuple with `required: boolean`;
 `support_level` is rejected. The airgap profile may remain `required: false`.
 The image-map must be a
 passing `agentsmith.image-map/v1` report with `scope: image_map_only`,
