@@ -648,6 +648,14 @@ assert_no_report() {
   [[ ! -e "$output_dir/$REPORT_FILE" ]] || fail "unexpected consume rehearsal report exists: $output_dir/$REPORT_FILE"
 }
 
+assert_no_nested_outputs() {
+  local output_dir="$1"
+  [[ ! -e "$output_dir/airgap-bundle-check" ]] ||
+    fail "unexpected airgap bundle check output exists: $output_dir/airgap-bundle-check"
+  [[ ! -e "$output_dir/airgap-deployment-gate" ]] ||
+    fail "unexpected airgap deployment gate output exists: $output_dir/airgap-deployment-gate"
+}
+
 assert_no_side_effects() {
   local label="$1"
   [[ ! -s "$KUBECTL_LOG" ]] || fail "$label must fail before kubectl"
@@ -967,5 +975,50 @@ expect_rehearsal_fail "missing-image-map-component" "$TMP_DIR/out-missing-image-
     --mode server-dry-run
 assert_no_side_effects "missing image-map component"
 [[ ! -e "$TMP_DIR/out-missing-image-map/airgap-bundle-check" ]] || fail "missing component must fail before bundle check"
+
+MISMATCHED_PROFILE_BUNDLE_ROOT="$TMP_DIR/bundle-mismatched-profile-fields"
+cp -R "$VALID_BUNDLE_ROOT" "$MISMATCHED_PROFILE_BUNDLE_ROOT"
+"$NODE_BIN" --input-type=module - "$MISMATCHED_PROFILE_BUNDLE_ROOT/airgap-bundle-manifest.json" "$KIT_AIRGAP_PROFILE" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath, profile] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+manifest.target_profile.value = profile;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+
+MISMATCHED_PROFILE_OUTPUT="$TMP_DIR/out-mismatched-profile-fields"
+reset_logs
+expect_rehearsal_fail "mismatched-profile-fields" "$MISMATCHED_PROFILE_OUTPUT" \
+  run_consume_rehearsal "$MISMATCHED_PROFILE_BUNDLE_ROOT" "$MISMATCHED_PROFILE_OUTPUT" \
+    --mode server-dry-run
+assert_no_side_effects "mismatched profile fields"
+assert_no_report "$MISMATCHED_PROFILE_OUTPUT"
+assert_no_nested_outputs "$MISMATCHED_PROFILE_OUTPUT"
+
+UNSUPPORTED_PROFILE_BUNDLE_ROOT="$TMP_DIR/bundle-unsupported-kind-offline-profile"
+cp -R "$VALID_BUNDLE_ROOT" "$UNSUPPORTED_PROFILE_BUNDLE_ROOT"
+"$NODE_BIN" --input-type=module - "$UNSUPPORTED_PROFILE_BUNDLE_ROOT/airgap-bundle-manifest.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+manifest.target_profile = {
+  value: 'kind_rehearsal/external_declared/offline',
+  target_cluster: 'kind_rehearsal',
+  substrate_source: 'external_declared',
+  distribution: 'offline'
+};
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+
+UNSUPPORTED_PROFILE_OUTPUT="$TMP_DIR/out-unsupported-kind-offline-profile"
+reset_logs
+expect_rehearsal_fail "unsupported-kind-offline-profile" "$UNSUPPORTED_PROFILE_OUTPUT" \
+  run_consume_rehearsal "$UNSUPPORTED_PROFILE_BUNDLE_ROOT" "$UNSUPPORTED_PROFILE_OUTPUT" \
+    --mode server-dry-run
+assert_no_side_effects "unsupported kind/offline profile"
+assert_no_report "$UNSUPPORTED_PROFILE_OUTPUT"
+assert_no_nested_outputs "$UNSUPPORTED_PROFILE_OUTPUT"
 
 pass "airgap consume rehearsal focused diagnostic tests completed"

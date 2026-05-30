@@ -146,6 +146,151 @@ require_arg_value() {
   printf '%s\n' "$value"
 }
 
+assert_airgap_consume_manifest_matches_machine_profile() {
+  local bundle_root="$1"
+  local bundle_manifest="$2"
+  local expected_profile="$3"
+
+  "$NODE_BIN" --input-type=module - "$bundle_root" "$bundle_manifest" "$expected_profile" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [bundleRootArg, bundleManifestArg, expectedProfile] = process.argv.slice(2);
+const BUNDLE_MANIFEST_FILE = 'airgap-bundle-manifest.json';
+const SUPPORTED_TARGET_PROFILES = [
+  'existing_kubernetes/external_declared/airgap',
+  'existing_kubernetes/kit_installed/airgap'
+];
+
+function fail(message) {
+  console.error(`FAIL: ${message}`);
+  process.exit(1);
+}
+
+function stringValue(value, label) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    fail(`${label} is required`);
+  }
+  return value;
+}
+
+function objectValue(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail(`${label} must be an object`);
+  }
+  return value;
+}
+
+function isInsidePath(rootDir, candidate) {
+  const relative = path.relative(rootDir, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function lstatChecked(file, label) {
+  try {
+    return fs.lstatSync(file);
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+}
+
+function realpathChecked(file, label) {
+  try {
+    return fs.realpathSync(file);
+  } catch (error) {
+    fail(`cannot resolve ${label}: ${error.message}`);
+  }
+}
+
+function resolveBundleRoot(input) {
+  const requested = path.resolve(stringValue(input, 'bundle root'));
+  const stat = lstatChecked(requested, 'bundle root');
+  if (stat.isSymbolicLink()) {
+    fail('bundle root must not be a symlink');
+  }
+  if (!stat.isDirectory()) {
+    fail('bundle root must be a directory');
+  }
+  return realpathChecked(requested, 'bundle root');
+}
+
+function resolveBundleFile(input, bundleRoot) {
+  const requested = path.resolve(stringValue(input, 'bundle manifest'));
+  if (!isInsidePath(bundleRoot, requested)) {
+    fail('bundle manifest must be inside bundle root');
+  }
+  const stat = lstatChecked(requested, 'bundle manifest');
+  if (stat.isSymbolicLink()) {
+    fail('bundle manifest must not be a symlink');
+  }
+  if (!stat.isFile()) {
+    fail('bundle manifest must point to a file');
+  }
+  const realPath = realpathChecked(requested, 'bundle manifest');
+  if (!isInsidePath(bundleRoot, realPath)) {
+    fail('bundle manifest must resolve inside bundle root');
+  }
+  return realPath;
+}
+
+function readJson(file, label) {
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    fail(`invalid JSON in ${label}: ${error.message}`);
+  }
+}
+
+function parseTargetProfile(profile) {
+  const value = stringValue(profile.value, 'bundle manifest target_profile.value');
+  const tuple = value.split('/');
+  if (tuple.length !== 3 || tuple.some((part) => part.trim() === '')) {
+    fail('bundle manifest target_profile.value must be <target_cluster>/<substrate_source>/<distribution>');
+  }
+
+  const [targetCluster, substrateSource, distribution] = tuple;
+  const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
+  if (!SUPPORTED_TARGET_PROFILES.includes(normalized)) {
+    fail('bundle manifest target_profile.value must be an existing Kubernetes airgap profile');
+  }
+
+  const fields = {
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution
+  };
+  for (const [field, expected] of Object.entries(fields)) {
+    if (stringValue(profile[field], `bundle manifest target_profile.${field}`) !== expected) {
+      fail('bundle manifest target_profile fields must match target_profile.value');
+    }
+  }
+  return normalized;
+}
+
+const bundleRoot = resolveBundleRoot(bundleRootArg);
+const bundleManifestPath = resolveBundleFile(
+  bundleManifestArg || path.join(bundleRoot, BUNDLE_MANIFEST_FILE),
+  bundleRoot
+);
+const manifest = objectValue(readJson(bundleManifestPath, 'bundle manifest'), 'bundle manifest');
+const targetProfile = objectValue(manifest.target_profile, 'bundle manifest target_profile');
+const manifestProfile = parseTargetProfile(targetProfile);
+
+if (manifestProfile !== expectedProfile) {
+  fail(
+    `operator airgap consume profile mismatch: facade maps to ${expectedProfile}, ` +
+      `but bundle manifest target_profile.value is ${manifestProfile}`
+  );
+}
+NODE
+}
+
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
   exit 0
@@ -244,6 +389,13 @@ elif [[ "$producer_name" == "airgap-consume-rehearsal" ]]; then
   else
     bundle_manifest=""
   fi
+fi
+
+if [[ "$producer_name" == "airgap-consume-rehearsal" ]]; then
+  assert_airgap_consume_manifest_matches_machine_profile \
+    "$bundle_root" \
+    "$bundle_manifest" \
+    "$machine_profile"
 fi
 
 remove_operator_summary_if_requested "$output_dir"

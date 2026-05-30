@@ -1110,6 +1110,42 @@ expect_operator_fail_preserves_summary() {
   pass "operator surface rejected invalid case without side effects: $label"
 }
 
+expect_operator_fail_before_airgap_consume_outputs() {
+  local label="$1"
+  local output_dir="$2"
+  shift 2
+  local sentinel='{"sentinel":"operator airgap consume fail-fast should preserve existing summary"}'
+  local producer_report
+
+  mkdir -p "$output_dir"
+  printf '%s' "$sentinel" >"$output_dir/$REPORT_FILE"
+  : >"$KUBECTL_LOG"
+  : >"$LOAD_LOG"
+
+  if "$@" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected operator airgap consume failure: $label"
+  fi
+
+  [[ -f "$output_dir/$REPORT_FILE" ]] || fail "invalid case removed existing operator summary: $label"
+  [[ "$(<"$output_dir/$REPORT_FILE")" == "$sentinel" ]] ||
+    fail "invalid case modified existing operator summary: $label"
+  [[ ! -e "$output_dir/airgap-consume-rehearsal-report.json" ]] ||
+    fail "invalid case created consume rehearsal report: $label"
+  [[ ! -e "$output_dir/airgap-bundle-check" ]] ||
+    fail "invalid case created airgap bundle check output: $label"
+  [[ ! -e "$output_dir/airgap-deployment-gate" ]] ||
+    fail "invalid case created airgap deployment gate output: $label"
+
+  producer_report="$(find "$output_dir" -type f -name '*-report.json' ! -name "$REPORT_FILE" -print -quit)"
+  [[ -z "$producer_report" ]] || fail "invalid case created producer report: $label: $producer_report"
+  [[ ! -s "$KUBECTL_LOG" ]] || fail "invalid case called kubectl before fail-fast: $label"
+  [[ ! -s "$LOAD_LOG" ]] || fail "invalid case called image loader before fail-fast: $label"
+
+  pass "operator airgap consume rejected invalid case before producer outputs: $label"
+}
+
 VALID_ARCHIVE="$TMP_DIR/agentsmith-deploy-template-package.tgz"
 VALID_CONTRACT="$TMP_DIR/release-contract.valid-material.json"
 VALID_PACKAGE="$TMP_DIR/deploy-template-package.valid-material.json"
@@ -1579,6 +1615,73 @@ assert_operator_report \
 assert_operator_airgap_manifest_digest "$custom_manifest_output" "$custom_bundle_manifest_digest"
 pass "operator airgap/use_existing summary honors non-default in-bundle bundle manifest"
 
+airgap_install_external_bundle_output="$TMP_DIR/out-airgap-install-substrates-external-bundle"
+expect_operator_fail_before_airgap_consume_outputs \
+  airgap-install-substrates-external-bundle \
+  "$airgap_install_external_bundle_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+    --bundle-root "$airgap_bundle_root" \
+    --render-values "$airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$airgap_install_external_bundle_output" \
+    --kubectl "$FAKE_KUBECTL"
+
+airgap_use_kit_bundle_output="$TMP_DIR/out-airgap-use-existing-kit-bundle"
+expect_operator_fail_before_airgap_consume_outputs \
+  airgap-use-existing-kit-bundle \
+  "$airgap_use_kit_bundle_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$kit_airgap_bundle_root" \
+    --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$kit_airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$airgap_use_kit_bundle_output" \
+    --kubectl "$FAKE_KUBECTL"
+
+mkdir -p "$kit_airgap_bundle_root/manifests"
+kit_airgap_custom_manifest="$kit_airgap_bundle_root/manifests/operator-selected-kit-manifest.json"
+cp "$kit_airgap_bundle_root/airgap-bundle-manifest.json" "$kit_airgap_custom_manifest"
+airgap_use_kit_custom_manifest_output="$TMP_DIR/out-airgap-use-existing-kit-custom-manifest"
+expect_operator_fail_before_airgap_consume_outputs \
+  airgap-use-existing-kit-custom-manifest \
+  "$airgap_use_kit_custom_manifest_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$kit_airgap_bundle_root" \
+    --bundle-manifest "$kit_airgap_custom_manifest" \
+    --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$kit_airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$airgap_use_kit_custom_manifest_output" \
+    --kubectl "$FAKE_KUBECTL"
+
+outside_airgap_bundle_manifest="$TMP_DIR/operator-selected-outside-bundle-manifest.json"
+cp "$airgap_bundle_root/airgap-bundle-manifest.json" "$outside_airgap_bundle_manifest"
+airgap_use_outside_manifest_output="$TMP_DIR/out-airgap-use-existing-outside-manifest"
+expect_operator_fail_before_airgap_consume_outputs \
+  airgap-use-existing-outside-manifest \
+  "$airgap_use_outside_manifest_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$airgap_bundle_root" \
+    --bundle-manifest "$outside_airgap_bundle_manifest" \
+    --render-values "$airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$airgap_use_outside_manifest_output" \
+    --kubectl "$FAKE_KUBECTL"
+
 missing_pack_output="$TMP_DIR/out-airgap-bundle-install-substrates-missing-pack"
 expect_operator_fail_preserves_summary airgap-bundle-install-substrates-missing-pack "$missing_pack_output" \
   bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
@@ -1696,6 +1799,26 @@ expect_operator_fail_preserves_summary raw-kit-airgap-confirm-apply "$raw_kit_ai
     --image-loader "$GOOD_LOADER" \
     --confirm-apply "$KIT_AIRGAP_PROFILE" \
     --operator-run-id operator-airgap-kit-raw
+
+raw_kit_airgap_confirm_equals_output="$TMP_DIR/out-raw-kit-airgap-confirm-apply-equals"
+expect_operator_fail_preserves_summary raw-kit-airgap-confirm-apply-equals "$raw_kit_airgap_confirm_equals_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+    FAKE_KUBECTL_LIVE_IMAGE="$kit_airgap_target_app_image" \
+    FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$kit_airgap_target_app_image" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+    --bundle-root "$kit_airgap_bundle_root" \
+    --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$kit_airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$raw_kit_airgap_confirm_equals_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --archive-probe "$GOOD_PROBE" \
+    --image-loader "$GOOD_LOADER" \
+    --confirm-apply="$KIT_AIRGAP_PROFILE" \
+    --operator-run-id operator-airgap-kit-raw-equals
 
 missing_release_contract_output="$TMP_DIR/out-missing-release-contract"
 expect_operator_fail_preserves_summary missing-release-contract "$missing_release_contract_output" \
