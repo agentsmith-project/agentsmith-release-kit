@@ -792,6 +792,156 @@ expect_adoption_fail() {
   pass "airgap adoption rejected invalid case: $label"
 }
 
+ADOPTION_REGRESSION_FAILURES=()
+
+record_adoption_regression_failure() {
+  ADOPTION_REGRESSION_FAILURES+=("$*")
+}
+
+expect_adoption_fail_or_record() {
+  local label="$1"
+  shift
+
+  if "$@" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    record_adoption_regression_failure "expected airgap adoption failure: $label"
+    return
+  fi
+
+  pass "airgap adoption rejected invalid case: $label"
+}
+
+flush_adoption_regression_failures() {
+  if [[ "${#ADOPTION_REGRESSION_FAILURES[@]}" -eq 0 ]]; then
+    return
+  fi
+
+  printf 'FAIL: %s\n' "${ADOPTION_REGRESSION_FAILURES[@]}" >&2
+  fail "airgap adoption regression guards failed"
+}
+
+mutate_bundle_check_manifest_digest() {
+  local report_file="$1"
+  local mismatched_digest="$2"
+  local explicit_manifest_digest="$3"
+
+  "$NODE_BIN" --input-type=module - \
+    "$report_file" \
+    "$mismatched_digest" \
+    "$explicit_manifest_digest" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile, mismatchedDigest, explicitManifestDigest] = process.argv.slice(2);
+if (mismatchedDigest === explicitManifestDigest) {
+  throw new Error('mismatched digest fixture must differ from explicit manifest digest');
+}
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+if (!report.artifacts?.bundle_manifest) {
+  throw new Error('bundle-check report missing artifacts.bundle_manifest');
+}
+report.artifacts.bundle_manifest.input_sha256 = mismatchedDigest;
+fs.writeFileSync(reportFile, `${JSON.stringify(report, null, 2)}\n`);
+NODE
+}
+
+update_surface_bundle_check_digest() {
+  local surface_report="$1"
+  local bundle_check_digest="$2"
+
+  "$NODE_BIN" --input-type=module - \
+    "$surface_report" \
+    "$bundle_check_digest" <<'NODE'
+import fs from 'node:fs';
+
+const [surfaceReport, bundleCheckDigest] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(surfaceReport, 'utf8'));
+if (!report.producer_report_digests || !report.airgap_handoff) {
+  throw new Error('surface report missing producer digests or handoff');
+}
+report.producer_report_digests.airgap_bundle_check_report = bundleCheckDigest;
+report.airgap_handoff.airgap_bundle_check_report_digest = bundleCheckDigest;
+fs.writeFileSync(surfaceReport, `${JSON.stringify(report, null, 2)}\n`);
+NODE
+}
+
+update_consume_report_bundle_check_digest() {
+  local consume_report="$1"
+  local bundle_check_digest="$2"
+
+  "$NODE_BIN" --input-type=module - \
+    "$consume_report" \
+    "$bundle_check_digest" <<'NODE'
+import fs from 'node:fs';
+
+const [consumeReport, bundleCheckDigest] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(consumeReport, 'utf8'));
+if (!report.producer_report_digests) {
+  throw new Error('consume report missing producer_report_digests');
+}
+report.producer_report_digests.airgap_bundle_check_report = bundleCheckDigest;
+fs.writeFileSync(consumeReport, `${JSON.stringify(report, null, 2)}\n`);
+NODE
+}
+
+update_consume_surface_digests() {
+  local surface_report="$1"
+  local bundle_check_digest="$2"
+  local consume_report_digest="$3"
+
+  "$NODE_BIN" --input-type=module - \
+    "$surface_report" \
+    "$bundle_check_digest" \
+    "$consume_report_digest" <<'NODE'
+import fs from 'node:fs';
+
+const [surfaceReport, bundleCheckDigest, consumeReportDigest] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(surfaceReport, 'utf8'));
+if (!report.producer_report_digests || !report.airgap_handoff) {
+  throw new Error('consume surface missing producer digests or handoff');
+}
+report.producer_report_digests.airgap_bundle_check_report = bundleCheckDigest;
+report.producer_report_digests.airgap_consume_rehearsal_report = consumeReportDigest;
+report.airgap_handoff.airgap_bundle_check_report_digest = bundleCheckDigest;
+fs.writeFileSync(surfaceReport, `${JSON.stringify(report, null, 2)}\n`);
+NODE
+}
+
+assert_no_stale_pass_adoption_report_or_record() {
+  local report_file="$1"
+
+  if [[ ! -e "$report_file" ]]; then
+    pass "failed airgap adoption removed stale adoption report"
+    return
+  fi
+
+  if ! "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile] = process.argv.slice(2);
+let report;
+try {
+  report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+} catch {
+  process.exit(0);
+}
+if (
+  report.schema === 'agentsmith.airgap-adoption/v1' &&
+  report.scope === 'airgap_adoption_only' &&
+  report.status === 'pass'
+) {
+  console.error('stale passing airgap adoption report remains');
+  process.exit(1);
+}
+NODE
+  then
+    record_adoption_regression_failure "failed airgap adoption left stale pass report"
+    return
+  fi
+
+  pass "failed airgap adoption did not leave stale pass report"
+}
+
 VALID_ARCHIVE="$TMP_DIR/agentsmith-deploy-template-package.tgz"
 VALID_CONTRACT="$TMP_DIR/release-contract.valid-material.json"
 VALID_PACKAGE="$TMP_DIR/deploy-template-package.valid-material.json"
@@ -839,6 +989,42 @@ run_adoption \
 assert_adoption_report "$adoption_output/$ADOPTION_REPORT_FILE"
 pass "airgap adoption aggregates bundle and consume operator surfaces"
 
+nested_mismatch_bundle_output="$TMP_DIR/out-airgap-bundle-nested-mismatch"
+nested_mismatch_consume_output="$TMP_DIR/out-airgap-consume-nested-mismatch"
+cp -R "$bundle_output" "$nested_mismatch_bundle_output"
+cp -R "$consume_output" "$nested_mismatch_consume_output"
+explicit_manifest_digest="$(sha256_file "$bundle_root/airgap-bundle-manifest.json")"
+mismatched_manifest_digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+mutate_bundle_check_manifest_digest \
+  "$nested_mismatch_bundle_output/airgap-bundle-check-report.json" \
+  "$mismatched_manifest_digest" \
+  "$explicit_manifest_digest"
+mutate_bundle_check_manifest_digest \
+  "$nested_mismatch_consume_output/airgap-bundle-check/airgap-bundle-check-report.json" \
+  "$mismatched_manifest_digest" \
+  "$explicit_manifest_digest"
+nested_bundle_check_digest="$(sha256_file "$nested_mismatch_bundle_output/airgap-bundle-check-report.json")"
+nested_consume_check_digest="$(sha256_file "$nested_mismatch_consume_output/airgap-bundle-check/airgap-bundle-check-report.json")"
+[[ "$nested_bundle_check_digest" == "$nested_consume_check_digest" ]] ||
+  fail "nested bundle-check mutation must keep bundle and consume report digests aligned"
+update_surface_bundle_check_digest \
+  "$nested_mismatch_bundle_output/$SURFACE_REPORT_FILE" \
+  "$nested_bundle_check_digest"
+update_consume_report_bundle_check_digest \
+  "$nested_mismatch_consume_output/airgap-consume-rehearsal-report.json" \
+  "$nested_consume_check_digest"
+nested_consume_report_digest="$(sha256_file "$nested_mismatch_consume_output/airgap-consume-rehearsal-report.json")"
+update_consume_surface_digests \
+  "$nested_mismatch_consume_output/$SURFACE_REPORT_FILE" \
+  "$nested_consume_check_digest" \
+  "$nested_consume_report_digest"
+expect_adoption_fail_or_record nested-bundle-check-manifest-digest-mismatch \
+  run_adoption \
+    "$nested_mismatch_bundle_output/$SURFACE_REPORT_FILE" \
+    "$nested_mismatch_consume_output/$SURFACE_REPORT_FILE" \
+    "$bundle_root/airgap-bundle-manifest.json" \
+    "$TMP_DIR/out-adoption-nested-mismatch"
+
 dry_run_consume_output="$TMP_DIR/out-airgap-consume-dry-run"
 : >"$KUBECTL_LOG"
 run_consume_surface_dry_run "$bundle_root" "$dry_run_consume_output" >"$TMP_DIR/airgap-consume-dry-run.out"
@@ -876,6 +1062,23 @@ expect_adoption_fail bundle-manifest-digest-drift \
     "$consume_output/$SURFACE_REPORT_FILE" \
     "$drifted_manifest" \
     "$TMP_DIR/out-adoption-manifest-drift"
+
+stale_adoption_output="$TMP_DIR/out-adoption-stale-clear"
+run_adoption \
+  "$bundle_output/$SURFACE_REPORT_FILE" \
+  "$consume_output/$SURFACE_REPORT_FILE" \
+  "$bundle_root/airgap-bundle-manifest.json" \
+  "$stale_adoption_output" >"$TMP_DIR/airgap-adoption-stale-pass.out"
+assert_adoption_report "$stale_adoption_output/$ADOPTION_REPORT_FILE"
+expect_adoption_fail_or_record stale-output-clear \
+  run_adoption \
+    "$bundle_output/$SURFACE_REPORT_FILE" \
+    "$consume_output/$SURFACE_REPORT_FILE" \
+    "$drifted_manifest" \
+    "$stale_adoption_output"
+assert_no_stale_pass_adoption_report_or_record \
+  "$stale_adoption_output/$ADOPTION_REPORT_FILE"
+flush_adoption_regression_failures
 
 drifted_contract="$TMP_DIR/release-contract.digest-drift.json"
 cp "$VALID_CONTRACT" "$drifted_contract"

@@ -339,6 +339,21 @@ function assertArtifactReleaseContractDigest(report, label, releaseIdentity) {
   }
 }
 
+function assertArtifactBundleManifestDigest(report, label, manifestDigest) {
+  const artifacts = requireObject(report.artifacts, `${label}.artifacts`);
+  const bundleManifest = requireObject(
+    artifacts.bundle_manifest,
+    `${label}.artifacts.bundle_manifest`
+  );
+  const digest = requireDigest(
+    bundleManifest.input_sha256,
+    `${label}.artifacts.bundle_manifest.input_sha256`
+  );
+  if (digest !== manifestDigest) {
+    fail(`${label}.artifacts.bundle_manifest.input_sha256 must match bundle manifest input`);
+  }
+}
+
 function assertSafeRelativePath(value, label) {
   const relativePath = requireString(value, label);
   if (
@@ -614,6 +629,11 @@ async function validateBundleSurface({
     'bundle_airgap_bundle_check_report',
     releaseIdentity
   );
+  assertArtifactBundleManifestDigest(
+    bundleCheckReport,
+    'bundle_airgap_bundle_check_report',
+    manifestDigest
+  );
 
   return {
     surface,
@@ -713,6 +733,11 @@ async function validateConsumeSurface({
     bundleCheckReport,
     'consume_airgap_bundle_check_report',
     releaseIdentity
+  );
+  assertArtifactBundleManifestDigest(
+    bundleCheckReport,
+    'consume_airgap_bundle_check_report',
+    manifestDigest
   );
   assertStringEquals(consumeReport.mode, 'apply', 'airgap_consume_rehearsal_report.mode');
   const inputDigests = requireObject(
@@ -852,6 +877,13 @@ async function writeReport(outputDir, report) {
   await fs.rename(tempFile, reportFile);
 }
 
+async function removeManagedReport(outputDir) {
+  if (!outputDir) {
+    return;
+  }
+  await fs.rm(path.join(path.resolve(outputDir), REPORT_FILE), { force: true });
+}
+
 async function main(argv) {
   const args = parseArgs(argv);
   if (args.help) {
@@ -859,6 +891,7 @@ async function main(argv) {
     return;
   }
 
+  await removeManagedReport(args.outputDir);
   const releaseContractInput = await readJson(args.releaseContract, 'release contract');
   const releaseIdentity = releaseIdentityFromContract(releaseContractInput);
   const bundleManifestInput = await readJson(args.bundleManifest, 'airgap bundle manifest');
