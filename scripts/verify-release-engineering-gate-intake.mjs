@@ -75,6 +75,8 @@ const LOCAL_OR_SECRET_TEXT_RE =
   /(?:^|["'\s])(?:\/(?:home|tmp|var|private)(?:\/|$)|[A-Za-z]:[\\/]|file:\/\/)|secretRef:|kubeconfig|Bearer\s+[A-Za-z0-9._~+/=-]+|token\s*[:=]|password\s*[:=]/i;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const SAFE_ARTIFACT_URI_SCHEMES = new Set(['gh-artifact', 'https']);
+const SAFE_INTAKE_REPORT_URI_SCHEMES = new Set(['gh-artifact', 'https', 'signed-operator-run']);
+const INTAKE_REPORT_URI_KEYS = new Set(['artifact_uri', 'report_uri', 'summary_uri']);
 
 class CliError extends Error {
   constructor(message) {
@@ -382,6 +384,27 @@ function percentDecodedCandidates(value) {
   return candidates;
 }
 
+function assertNoUnsafeDecodedText(value, label) {
+  if (typeof value === 'string') {
+    assertNoUnsafeText(value, label);
+    for (const decoded of percentDecodedCandidates(value)) {
+      assertNoUnsafeText(decoded, `${label} decoded`);
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertNoUnsafeDecodedText(item, `${label}[${index}]`));
+    return;
+  }
+
+  if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value)) {
+      assertNoUnsafeDecodedText(nested, `${label}.${key}`);
+    }
+  }
+}
+
 function pathSegments(parsed) {
   return parsed.pathname
     .split('/')
@@ -395,13 +418,28 @@ function pathSegments(parsed) {
     });
 }
 
-function assertNoUnsafeArtifactDecodedPath(parsed, label) {
-  const candidates = [parsed.pathname, ...percentDecodedCandidates(parsed.pathname)];
+function assertNoUnsafeUriDecodedParts(parsed, label) {
+  if (parsed.username || parsed.password) {
+    fail(`${label} must not include raw local paths, kubeconfig, or secret-looking payloads`);
+  }
+
+  const candidates = [
+    parsed.hostname,
+    parsed.pathname,
+    parsed.search,
+    parsed.hash,
+    ...percentDecodedCandidates(parsed.pathname),
+    ...percentDecodedCandidates(parsed.search),
+    ...percentDecodedCandidates(parsed.hash)
+  ];
   for (const segment of parsed.pathname.split('/').filter(Boolean)) {
     candidates.push(segment, ...percentDecodedCandidates(segment));
   }
+  for (const [key, value] of parsed.searchParams.entries()) {
+    candidates.push(key, value, ...percentDecodedCandidates(key), ...percentDecodedCandidates(value));
+  }
   for (const candidate of candidates) {
-    assertNoUnsafeText(candidate, `${label} decoded path`);
+    assertNoUnsafeText(candidate, `${label} decoded uri`);
   }
 }
 
@@ -443,33 +481,71 @@ function isSafeGhArtifactUri(parsed) {
   );
 }
 
-function requireAllowedArtifactUri(value, label) {
+function parseSafeIntakeReportUri(value, label, allowedSchemes, message) {
   const uri = requireString(value, label);
   if (
     uri !== uri.trim() ||
     /[\r\n]/.test(uri) ||
-    LOCAL_OR_SECRET_TEXT_RE.test(uri) ||
     !URI_SCHEME_RE.test(uri)
   ) {
-    fail(`${label} must be an allowed remote artifact URI`);
+    fail(message);
   }
+  assertNoUnsafeDecodedText(uri, label);
 
   let parsed;
   try {
     parsed = new URL(uri);
   } catch {
-    fail(`${label} must be an allowed remote artifact URI`);
+    fail(message);
   }
 
   const scheme = parsed.protocol.slice(0, -1).toLowerCase();
-  if (!SAFE_ARTIFACT_URI_SCHEMES.has(scheme)) {
-    fail(`${label} must be an allowed remote artifact URI`);
+  if (!allowedSchemes.has(scheme)) {
+    fail(message);
   }
-  assertNoUnsafeArtifactDecodedPath(parsed, label);
+  assertNoUnsafeUriDecodedParts(parsed, label);
+
+  return { uri, parsed };
+}
+
+function requireSafeIntakeReportUri(value, label) {
+  return parseSafeIntakeReportUri(
+    value,
+    label,
+    SAFE_INTAKE_REPORT_URI_SCHEMES,
+    `${label} must be an allowed remote provenance or summary URI`
+  ).uri;
+}
+
+function requireAllowedArtifactUri(value, label) {
+  const { uri, parsed } = parseSafeIntakeReportUri(
+    value,
+    label,
+    SAFE_ARTIFACT_URI_SCHEMES,
+    `${label} must be an allowed remote artifact URI`
+  );
   if (isSafeGhArtifactUri(parsed) || isGithubActionsArtifactUri(parsed)) {
     return uri;
   }
   fail(`${label} must be an allowed remote artifact URI`);
+}
+
+function assertSafeIntakeReportUriFields(value, label) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertSafeIntakeReportUriFields(item, `${label}[${index}]`));
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  for (const [key, nested] of Object.entries(value)) {
+    const nestedLabel = `${label}.${key}`;
+    if (INTAKE_REPORT_URI_KEYS.has(key)) {
+      requireSafeIntakeReportUri(nested, nestedLabel);
+      continue;
+    }
+    assertSafeIntakeReportUriFields(nested, nestedLabel);
+  }
 }
 
 function releaseContractSubjectDigest(contract) {
@@ -523,7 +599,7 @@ function validateReleaseContractProvenance(provenance, releaseContractSubjectSha
     ),
     subject_sha256: releaseContractSubjectSha256
   };
-  assertNoUnsafeText(sanitized, 'release_contract.artifact_provenance');
+  assertNoUnsafeDecodedText(sanitized, 'release_contract.artifact_provenance');
   return sanitized;
 }
 
@@ -566,7 +642,7 @@ function assertReleaseIdentity({ releaseId, gitSha }, releaseIdentity, label) {
 
 function validateOnlineProvenance(provenance, label) {
   const summary = requireObject(provenance, label);
-  const artifactUri = requireString(summary.artifact_uri, `${label}.artifact_uri`);
+  const artifactUri = requireSafeIntakeReportUri(summary.artifact_uri, `${label}.artifact_uri`);
   const sanitized = {
     provenance_kind: requireString(summary.provenance_kind, `${label}.provenance_kind`),
     producer_repo: requireString(summary.producer_repo, `${label}.producer_repo`),
@@ -575,7 +651,7 @@ function validateOnlineProvenance(provenance, label) {
     artifact_uri: artifactUri,
     subject_sha256: requireDigest(summary.subject_sha256, `${label}.subject_sha256`)
   };
-  assertNoUnsafeText(sanitized, label);
+  assertNoUnsafeDecodedText(sanitized, label);
   return sanitized;
 }
 
@@ -627,6 +703,7 @@ function validateOnlinePath({ pathEntry, key, spec, releaseIdentity }) {
 function validateOnlineAdoption(onlineInput, releaseIdentity) {
   const report = requireObject(onlineInput.value, 'online_adoption_report');
   rejectFocusedProducerReport(report, 'online_adoption_report');
+  assertSafeIntakeReportUriFields(report, 'online_adoption_report');
   assertNoFormalInputFields(report, 'online_adoption_report');
   assertStringEquals(report.schema, ONLINE_ADOPTION_SCHEMA, 'online_adoption_report.schema');
   assertStringEquals(report.scope, ONLINE_ADOPTION_SCOPE, 'online_adoption_report.scope');
@@ -777,6 +854,7 @@ function validateAirgapAdoption(airgapInput, releaseIdentity, index) {
   const label = `airgap_adoption_report[${index}]`;
   const report = requireObject(airgapInput.value, label);
   rejectFocusedProducerReport(report, label);
+  assertSafeIntakeReportUriFields(report, label);
   assertNoFormalInputFields(report, label);
   assertStringEquals(report.schema, AIRGAP_ADOPTION_SCHEMA, `${label}.schema`);
   assertStringEquals(report.scope, AIRGAP_ADOPTION_SCOPE, `${label}.scope`);
@@ -806,7 +884,7 @@ function validateAirgapAdoption(airgapInput, releaseIdentity, index) {
     `${label}.target_registry_summary`
   );
   requireString(targetRegistrySummary.host, `${label}.target_registry_summary.host`);
-  assertNoUnsafeText(targetRegistrySummary, `${label}.target_registry_summary`);
+  assertNoUnsafeDecodedText(targetRegistrySummary, `${label}.target_registry_summary`);
 
   const pathSummary = validateAirgapOperatorPaths(report, label);
 

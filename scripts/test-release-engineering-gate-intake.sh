@@ -324,6 +324,14 @@ switch (mutation) {
     data.artifact_provenance.artifact_uri =
       'gh-artifact://agentsmith/release-contract/10001/token%3Dabc123';
     break;
+  case 'encoded_home_online_provenance_artifact_uri':
+    data.online_paths.use_existing.provenance.artifact_uri =
+      'signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/%2Fhome%2Fpercy%2F.kube%2Fconfig';
+    break;
+  case 'encoded_token_online_provenance_artifact_uri':
+    data.online_paths.use_existing.provenance.artifact_uri =
+      'signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/token%3Dabc123';
+    break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);
 }
@@ -574,6 +582,28 @@ expect_fail encoded-token-release-contract-artifact-uri \
     "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
     "$BAD_CONTRACT_ENCODED_TOKEN_ARTIFACT_URI"
 assert_no_stale_report "$ENCODED_TOKEN_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
+BAD_ONLINE_ENCODED_HOME_ARTIFACT_URI="$TMP_DIR/bad/online-encoded-home-artifact-uri.json"
+copy_and_mutate_json "$ONLINE_REPORT" "$BAD_ONLINE_ENCODED_HOME_ARTIFACT_URI" encoded_home_online_provenance_artifact_uri
+ENCODED_HOME_ONLINE_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-online-encoded-home-artifact-uri"
+expect_fail encoded-home-online-provenance-artifact-uri \
+  run_intake \
+    "$ENCODED_HOME_ONLINE_ARTIFACT_URI_OUTPUT" \
+    "$BAD_ONLINE_ENCODED_HOME_ARTIFACT_URI" \
+    "$AIRGAP_USE_EXISTING_REPORT" \
+    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+assert_no_stale_report "$ENCODED_HOME_ONLINE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
+
+BAD_ONLINE_ENCODED_TOKEN_ARTIFACT_URI="$TMP_DIR/bad/online-encoded-token-artifact-uri.json"
+copy_and_mutate_json "$ONLINE_REPORT" "$BAD_ONLINE_ENCODED_TOKEN_ARTIFACT_URI" encoded_token_online_provenance_artifact_uri
+ENCODED_TOKEN_ONLINE_ARTIFACT_URI_OUTPUT="$TMP_DIR/out-online-encoded-token-artifact-uri"
+expect_fail encoded-token-online-provenance-artifact-uri \
+  run_intake \
+    "$ENCODED_TOKEN_ONLINE_ARTIFACT_URI_OUTPUT" \
+    "$BAD_ONLINE_ENCODED_TOKEN_ARTIFACT_URI" \
+    "$AIRGAP_USE_EXISTING_REPORT" \
+    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+assert_no_stale_report "$ENCODED_TOKEN_ONLINE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
 expect_fail focused-online-producer-as-adoption \
   run_intake \
