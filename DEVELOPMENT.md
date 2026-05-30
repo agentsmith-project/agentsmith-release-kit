@@ -30,6 +30,8 @@ bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
 bash scripts/test-online-deployment-gate.sh
+bash scripts/test-online-adoption.sh
+bash scripts/test-release-engineering-gate-intake.sh
 bash scripts/test-operator-release-surface.sh
 bash scripts/test-operator-signoff-intake.sh
 bash scripts/test-evidence.sh
@@ -44,10 +46,16 @@ for focused diagnostics and maintainer work.
 `airgap/use_existing` is the operator-facing entry for consuming an already
 assembled airgap bundle; it maps to `--airgap-consume-rehearsal` and keeps
 `readiness: false`.
-`--airgap-adoption` consumes the repo-local airgap-bundle/use_existing and
-confirmed-apply airgap/use_existing operator surface summaries plus an explicit
-release contract and bundle manifest. It writes a digest-only
-`airgap-adoption-report.json` with `readiness: false`.
+`--airgap-adoption` consumes matching repo-local airgap-bundle and
+confirmed-apply airgap operator surface summaries for `use_existing` or
+`install_substrates` plus an explicit release contract and bundle manifest. It
+writes a digest-only `airgap-adoption-report.json` with `readiness: false`.
+`--release-engineering-gate-intake` consumes only existing focused online and
+airgap adoption reports, requires the four online/airgap use-existing/install
+quadrants, and writes `release-engineering-gate-intake-report.json` with
+`readiness: false`, `status: pass`, and `formal_verdict: not_issued`. It lists
+formal operator verdict plus offline/package/release readiness as blocking gaps;
+it is not release readiness.
 
 ## Development Principles
 

@@ -113,6 +113,17 @@ verify signatures or identity, is not registry presence proof, is not accepted
 by the evidence envelope validator, and is not deploy/package/release
 readiness.
 
+For repo-local formal-gate candidate intake, run
+`--release-engineering-gate-intake` with the generated online adoption report
+and both airgap adoption reports. The command only verifies the candidate
+boundary: all four quadrants are present, release identity/digest/provenance
+bindings agree with the release contract, focused producer reports are not used
+as adoption inputs, and no input already contains readiness or verdict fields.
+It writes `release-engineering-gate-intake-report.json` with
+`readiness=false` and `formal_verdict=not_issued`, and lists formal operator
+verdict plus offline/package/release readiness as blocking gaps. It is not
+accepted by evidence intake and is not deploy/package/release readiness.
+
 ## Current Notes
 
 Pre-GA release contracts may declare the five canonical target profiles, but

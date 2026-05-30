@@ -945,6 +945,38 @@ claims. This is repo-local focused verdict preparation only, not a deploy
 capability, provider matrix, cloud provisioning flow, operator signoff, full
 release gate, or AgentSmith `release:ready` input.
 
+## Release Engineering Gate Intake Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-release-engineering-gate-intake.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--release-engineering-gate-intake`. It is the repo-local formal-gate candidate
+boundary only. It consumes the existing focused `online-adoption-report.json`
+plus two existing focused `airgap-adoption-report.json` files for
+`airgap/use_existing` and `airgap/install_substrates`; it does not consume
+producer reports directly.
+
+The intake requires all four quadrants:
+`online/use_existing`, `online/install_substrates`, `airgap/use_existing`, and
+`airgap/install_substrates`. Release id, git sha, release contract raw digest,
+release contract subject/provenance, online adoption provenance summaries, and
+airgap adoption digest chains must bind to the supplied release contract.
+Inputs containing `readiness: true`, `release_verdict`, `operator_verdict`,
+`deploy_readiness`, or `package_readiness` fail fast.
+
+The generated `release-engineering-gate-intake-report.json` uses `schema:
+agentsmith.release-engineering-gate-intake/v1`, `scope:
+release_engineering_gate_candidate_intake_only`, `readiness: false`, `status:
+pass`, and `formal_verdict: not_issued`. It lists blocking gaps for formal
+operator verdict plus offline/package/release readiness. It is not an
+operator verdict, evidence-envelope output, offline package readiness, deploy
+readiness, release readiness, registry mirror action, rollback flow, cloud
+provisioning flow, product flow, backend-real check, or AgentSmith handoff.
+
 ## Operator Signoff Intake Focused Diagnostic
 
 Run:

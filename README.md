@@ -10,8 +10,9 @@ airgap image archive materiality, airgap image load, registry presence,
 airgap bundle load-plan, airgap bundle render-check, airgap deployment focused
 chain orchestration, airgap consume rehearsal, airgap adoption aggregation,
 substrate pack check, apply-only, rollout/live digest, route smoke, and online
-focused chain orchestration diagnostics, plus operator signoff intake binding,
-but does not contain full deploy tooling yet.
+focused chain orchestration diagnostics, release engineering gate candidate
+intake, plus operator signoff intake binding, but does not contain full deploy
+tooling yet.
 
 ## Canonical Identity
 
@@ -118,6 +119,28 @@ report, consume report, deployment report, substrate pack manifest digest, and
 substrate-pack-check report truth. It writes `airgap-adoption-report.json`
 with `readiness: false`; this is not a formal release gate, operator verdict,
 deploy/package readiness, or release readiness.
+
+Release engineering gate candidate intake:
+
+```bash
+bash scripts/verify-release.sh --release-engineering-gate-intake \
+  --release-contract <json> \
+  --online-adoption-report <online-adoption-report.json> \
+  --airgap-adoption-report <airgap/use_existing airgap-adoption-report.json> \
+  --airgap-adoption-report <airgap/install_substrates airgap-adoption-report.json> \
+  --output-dir <dir>
+```
+
+This is the only repo-local formal-gate candidate boundary before a future
+formal gate. It consumes existing focused adoption outputs only, requires the
+four quadrants (`online/use_existing`, `online/install_substrates`,
+`airgap/use_existing`, `airgap/install_substrates`), binds release identity and
+release contract digest/provenance, and writes
+`release-engineering-gate-intake-report.json` with `readiness: false`,
+`scope: release_engineering_gate_candidate_intake_only`, `status: pass`, and
+`formal_verdict: not_issued`. The report lists blocking gaps for formal
+operator verdict plus offline/package/release readiness; it is not an evidence
+envelope output, operator verdict, package readiness, or release readiness.
 `verify-release.sh` remains the producer catalog and maintainer/focused
 diagnostic entry.
 
@@ -782,6 +805,23 @@ release contract raw digest, and release contract subject digest, and writes
 only `online-adoption-report.json` with digest/provenance/coverage summaries.
 The report keeps `readiness: false`; this is not deploy, package, operator
 signoff, AgentSmith product-flow, full release gate, or release readiness.
+
+Release engineering gate intake focused diagnostic:
+
+```bash
+bash scripts/test-release-engineering-gate-intake.sh
+```
+
+`--release-engineering-gate-intake` consumes only the focused online adoption
+report and the two focused airgap adoption reports. It rejects focused producer
+reports such as `online-deployment-gate-report.json`,
+`operator-release-surface-report.json`, and
+`airgap-deployment-gate-report.json`, and it fails closed on readiness/verdict
+fields in any input. The generated
+`release-engineering-gate-intake-report.json` is a candidate intake report
+only: `readiness: false`, `status: pass`, and `formal_verdict: not_issued`.
+It is not accepted by `--evidence` and is not deploy, package, offline, or
+release readiness.
 
 Release-kit evidence envelope focused diagnostic:
 
