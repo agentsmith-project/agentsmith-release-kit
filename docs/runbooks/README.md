@@ -8,6 +8,10 @@ sign off deploy, package, offline install, or release readiness.
 
 ## Formal Operator Quadrants
 
+This table is the operator-facing quadrant index for online/airgap by
+use-existing/install-substrates. It is not a formal release verdict, package
+readiness, operator readiness, or GA signoff.
+
 | Operator choice | Machine profile mapping | Operator command entry | Current result |
 | --- | --- | --- | --- |
 | `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/operator-release.sh online use_existing ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]` | Runs the existing online focused chain for declared substrate endpoints and explicit target prerequisites. Confirmed apply uses `--confirm-apply online/use_existing`; the facade maps it internally. Target-registry confirmed apply still binds registry presence through the operator probe before render/apply. |
@@ -189,10 +193,12 @@ and tool prerequisites. Bundled tool files are checked by path/sha under the
 bundle root; operator prerequisite locations/proofs are strings and must not be
 URLs, download instructions, or secret-looking content. The airgap image-map is
 also rebound to `release_contract.deploy_image_inventory`. Stdout ends with
-`readiness=false`. Evidence intake accepts only a real check report +
-manifest + `image-map.json` triplet with bundle-check-compatible components,
-image declarations, payload/tool counts, and digests; empty fake manifests are
-rejected.
+`readiness=false`. Evidence intake accepts only an
+`existing_kubernetes/external_declared/airgap` real check report + manifest +
+`image-map.json` triplet with bundle-check-compatible components, image
+declarations, payload/tool counts, and digests; empty fake manifests are
+rejected. Kit airgap bundle/adoption reports remain focused diagnostics and are
+not accepted by `--evidence`.
 
 For airgap image load/import diagnostics, use `--airgap-image-load` only after
 a bundle has already been assembled. Pass the same inputs as
@@ -222,12 +228,15 @@ report has `readiness=false`, omits `target_registry`, is not
 evidence-envelope input, and does not prove registry presence, image
 load/import, offline install, deploy, package, or release readiness.
 
-For airgap deployment gate diagnostics, use `--airgap-deployment-gate` only
-with `existing_kubernetes/external_declared/airgap`. Server dry-run runs
-target-preflight, bundle render-check, and apply dry-run only. Confirmed apply
-requires archive probe, image loader, matching confirm profile, and operator
-run id, then runs image-load, render-check, apply, rollout, and optional smoke;
-its report is not evidence-envelope input or deploy/release readiness.
+For airgap deployment gate diagnostics, use `--airgap-deployment-gate` with
+`existing_kubernetes/external_declared/airgap` or
+`existing_kubernetes/kit_installed/airgap`. Server dry-run runs
+target-preflight, bundle render-check, and apply dry-run only; kit-installed
+airgap also runs substrate-pack-check. Confirmed apply requires archive probe,
+image loader, matching confirm profile, and operator run id, then runs
+image-load, render-check, apply, rollout, and optional smoke; kit-installed
+airgap adds substrate-pack-check. Its report is not evidence-envelope input or
+deploy/release readiness.
 
 For airgap consume rehearsal, use `--airgap-consume-rehearsal` when the bundle
 is already assembled and the operator wants one offline consumption entry
@@ -236,8 +245,7 @@ bundle-local render values and substrate truth, target prerequisites,
 namespace, and Kubernetes client options. The runner discovers component paths
 from `airgap-bundle-manifest.json`, runs `--airgap-bundle-check`, then reuses
 the existing airgap deployment gate. The optional `--rehearsal-label` value is
-label-only metadata and does not change the target profile
-`existing_kubernetes/external_declared/airgap`.
+label-only metadata and does not change the bundle target profile.
 The report has
 `readiness=false`, stores only `rehearsal_label`, digests, and
 output-relative paths, is not evidence-envelope input, and does not prove

@@ -37,7 +37,7 @@ bash scripts/test-operator-release-surface.sh
 ```
 
 This focused guard exercises `bash scripts/operator-release.sh`. The facade
-accepts the four formal operator choices plus packaging-side airgap-bundle
+accepts the four operator-facing choices plus packaging-side airgap-bundle
 commands, rejects producer vocabulary such as `--target-profile`, maps the
 choice internally, and calls the existing producer diagnostic:
 
@@ -142,7 +142,8 @@ must use an accepted pre-GA profile tuple:
 `existing_kubernetes/kit_installed/online`,
 `existing_kubernetes/kit_installed/airgap`, or
 `kind_rehearsal/kit_installed/online`. Only the four existing-Kubernetes
-tuples are formal operator release profiles; the kind tuple is
+tuples are formal operator release profiles in the operator-facing taxonomy;
+this is not a formal verdict/readiness claim. The kind tuple is
 rehearsal-only accepted input. During pre-GA every entry must use
 `required: false`; any `required: true` target fails fast.
 
@@ -153,7 +154,7 @@ coverage report separates `declarable_profiles`,
 `evidence_supported_profiles`. `executable_profiles` means currently
 executable focused deployment profiles:
 `existing_kubernetes/external_declared/online`,
-`existing_kubernetes/external_declared/airgap`, and
+`existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`, and
 `existing_kubernetes/kit_installed/airgap`; it does not include kind rehearsal
 or aliases. Evidence-supported profiles include external-declared
@@ -506,8 +507,9 @@ bash scripts/test-airgap-image-archive-check.sh
 This focused guard exercises `bash scripts/verify-release.sh
 --airgap-image-archive-check`. It consumes an already assembled airgap bundle
 and first reuses the existing `--airgap-bundle-check` validator. It accepts
-only `existing_kubernetes/external_declared/airgap`; online, kind rehearsal,
-`kit_installed`, non-canonical pre-GA target names, and synonym axes fail fast.
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`; online, kind rehearsal,
+non-canonical pre-GA target names, and synonym axes fail fast.
 It does not call Docker, skopeo, oras, kubectl, curl, or wget, does not log in
 to a registry, pull, push, mirror, load/import images, apply manifests, deploy,
 or smoke.
@@ -549,8 +551,9 @@ This focused guard exercises `bash scripts/verify-release.sh
 --airgap-image-load`. It consumes an already assembled airgap bundle and first
 reuses `--airgap-image-archive-check`, so the existing bundle-check and archive
 materiality semantics must pass before any loader call. It accepts only
-`existing_kubernetes/external_declared/airgap`; online, kind rehearsal,
-`kit_installed`, non-canonical pre-GA target names, and synonym axes fail fast.
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`; online, kind rehearsal,
+non-canonical pre-GA target names, and synonym axes fail fast.
 
 The diagnostic requires both `--archive-probe <executable>` and
 `--image-loader <executable>`. The loader is operator-provided and is invoked
@@ -624,8 +627,9 @@ This focused guard exercises `bash scripts/verify-release.sh
 only. The release contract, deploy template package descriptor, archive,
 image-map, bundle manifest, render values, and substrate truth must all be
 local files inside the bundle root. It accepts only
-`existing_kubernetes/external_declared/airgap`; online, kind rehearsal,
-`kit_installed`, non-canonical pre-GA target names, and synonym axes fail fast.
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`; online, kind rehearsal,
+non-canonical pre-GA target names, and synonym axes fail fast.
 
 The diagnostic first reuses `--airgap-bundle-check`, then reuses `--render`
 with the bundle-local airgap image-map, then reuses `--render-check` against
@@ -656,14 +660,16 @@ bash scripts/test-airgap-deployment-gate.sh
 
 This focused guard exercises `bash scripts/verify-release.sh
 --airgap-deployment-gate` for `existing_kubernetes/external_declared/airgap`
-only. `server-dry-run` runs target-preflight, airgap bundle render-check, and
-apply server dry-run, and rejects archive/image loader, confirmed apply,
-operator run, and smoke options.
+and `existing_kubernetes/kit_installed/airgap`. `server-dry-run` runs
+target-preflight, airgap bundle render-check, and apply server dry-run;
+kit-installed airgap also runs substrate-pack-check. It rejects archive/image
+loader, confirmed apply, operator run, and smoke options.
 
 Confirmed `--mode apply` requires `--archive-probe`, `--image-loader`,
-matching `--confirm-apply existing_kubernetes/external_declared/airgap`, and
-`--operator-run-id`; it then runs image-load, bundle render-check, apply,
-rollout, and optional smoke only when `--smoke-url` is supplied.
+matching `--confirm-apply <target-profile>`, and `--operator-run-id`; it then
+runs image-load, bundle render-check, apply, rollout, and optional smoke only
+when `--smoke-url` is supplied. Kit-installed airgap adds substrate-pack-check
+to the chain.
 `airgap-deployment-gate-report.json` has `schema:
 agentsmith.airgap-deployment-gate/v1`, `scope:
 airgap_deployment_gate_only`, `readiness: false`, and `status: pass`; it is
@@ -680,10 +686,11 @@ bash scripts/test-airgap-consume-rehearsal.sh
 
 This focused guard exercises `bash scripts/verify-release.sh
 --airgap-consume-rehearsal`. It is a KISS consumer-side entry for an already
-assembled `existing_kubernetes/external_declared/airgap` bundle. It does not
-create bundles, create or manage clusters, install substrates, mirror images,
-choose registry tooling, run product flows, or claim offline install, package,
-deploy, or release readiness.
+assembled `existing_kubernetes/external_declared/airgap` or
+`existing_kubernetes/kit_installed/airgap` bundle. It does not create bundles,
+create or manage clusters, install substrates, mirror images, choose registry
+tooling, run product flows, or claim offline install, package, deploy, or
+release readiness.
 
 The runner requires `--bundle-root`, bundle-local `--render-values` and
 `--substrate-truth`, explicit `--target-prerequisites`, `--namespace`, and
@@ -691,17 +698,19 @@ The runner requires `--bundle-root`, bundle-local `--render-values` and
 `<bundle-root>/airgap-bundle-manifest.json` and, when provided, must still be
 inside the bundle root. The manifest is used only to discover the four fixed
 component paths: release contract, deploy template package, deploy template
-archive, and image-map. Those component paths must be safe bundle-local files
-before any producer step runs. The selected target profile remains
-`existing_kubernetes/external_declared/airgap`.
+archive, and image-map, plus the substrate pack manifest for kit-installed
+airgap bundles. Those component paths must be safe bundle-local files before
+any producer step runs. The selected target profile remains the bundle target
+profile.
 
 Default `server-dry-run` runs `--airgap-bundle-check`, then reuses
 `--airgap-deployment-gate` server dry-run for target preflight, bundle
 render-check, and Kubernetes apply dry-run. Confirmed `--mode apply` requires
 `--archive-probe`, `--image-loader`, matching `--confirm-apply
-existing_kubernetes/external_declared/airgap`, and `--operator-run-id`, then
-reuses the existing image-load, render-check, apply, rollout, and optional
-smoke steps inside the deployment gate. `--rehearsal-label
+<bundle-target-profile>`, and `--operator-run-id`, then reuses the existing
+image-load, render-check, apply, rollout, and optional smoke steps inside the
+deployment gate. Kit-installed airgap adds substrate-pack-check.
+`--rehearsal-label
 existing_kubernetes|kind_rehearsal` is operator-provided label-only metadata
 for the Kubernetes endpoint. It does not alter target profile semantics,
 create or manage kind, prove the endpoint is kind, or make kind-labeled
@@ -732,10 +741,10 @@ smoke routes, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
 `--apply` accepts only `existing_kubernetes/external_declared/online`,
-`existing_kubernetes/external_declared/airgap`, and
-`existing_kubernetes/kit_installed/online`. `kind_rehearsal`,
-`kit_installed/airgap`, aliases such as `offline`, non-canonical pre-GA names,
-and synonym axes fail fast.
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`. `kind_rehearsal`, aliases such as
+`offline`, non-canonical pre-GA names, and synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--kubeconfig`, `--context`, `--kubectl`, and `--forbidden-source-root`.
@@ -771,10 +780,10 @@ smoke routes, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
 `--rollout` accepts only `existing_kubernetes/external_declared/online`,
-`existing_kubernetes/external_declared/airgap`, and
-`existing_kubernetes/kit_installed/online`. `kind_rehearsal`,
-`kit_installed/airgap`, aliases such as `offline`, non-canonical pre-GA names,
-and synonym axes fail fast.
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`. `kind_rehearsal`, aliases such as
+`offline`, non-canonical pre-GA names, and synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--timeout` (default `120s`), `--kubeconfig`, `--context`, `--kubectl`, and
@@ -825,8 +834,9 @@ workloads, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
 
 `--smoke` accepts only `existing_kubernetes/external_declared/online`,
-`existing_kubernetes/external_declared/airgap`, and
-`existing_kubernetes/kit_installed/online`.
+`existing_kubernetes/external_declared/airgap`,
+`existing_kubernetes/kit_installed/online`, and
+`existing_kubernetes/kit_installed/airgap`.
 Required inputs are `--release-contract`, `--rollout-report`,
 `--target-profile`, `--url`, and `--output-dir`. Optional inputs are
 `--expected-status` (default `200`), `--timeout-ms` (default `5000`),
@@ -1094,7 +1104,8 @@ bundle output is accepted only for
 `airgap-bundle-manifest.json` and a re-read `image-map.json`: required four
 components, image artifact declarations, mandatory payload/tool categories and
 counts, report counts, image-map mappings, and artifact/binding digests must
-agree. The old two-file airgap output value is rejected. The provenance
+agree. Kit airgap focused adoption is not accepted by `--evidence`. The old
+two-file airgap output value is rejected. The provenance
 `subject_name` must be `release-kit-evidence-subject`. The subject file list
 must contain only `evidence.json` plus the mapped output files:
 `image-map.json`, `online-deployment-gate-report.json`, or
@@ -1265,7 +1276,7 @@ target-preflight intake profiles:
 `existing_kubernetes/kit_installed/online`,
 `existing_kubernetes/kit_installed/airgap`, and
 `kind_rehearsal/kit_installed/online`; the kind tuple is local/CI
-rehearsal-only and not a formal operator release target.
+rehearsal-only and not an operator-facing release target.
 
 For `external_declared`, the operator provides the connection truth and target
 prerequisites; the release kit only validates the documents. Raw evidence

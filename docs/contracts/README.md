@@ -85,13 +85,17 @@ release-kit evidence envelope output and must not claim deploy, package, or
 release readiness.
 
 The current `--bundle-create` validator is a focused local airgap assembler
-and self-check only. It accepts only
-`existing_kubernetes/external_declared/airgap`, reuses the existing inputs,
+and self-check only. It accepts
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`, reuses the existing inputs,
 template-package, image-map, and airgap bundle-check validators, and writes a
 bundle manifest matching `agentsmith.airgap-bundle-manifest/v1`. It creates a
 fixed local structure under `components/`, `images/`, `payload/`, optional
 `tools/`, and root `airgap-bundle-manifest.json`; image archive ids must match
-the generated image-map mappings one-to-one. Its
+the generated image-map mappings one-to-one. Kit-installed airgap requires
+`--substrate-pack-manifest`, copies it as
+`components/substrate-pack-manifest.json`, and binds its sha256 in the bundle
+manifest. Its
 `bundle-create-report.json` uses `schema:
 agentsmith.airgap-bundle-create-report/v1`, `readiness: false`, and `scope:
 airgap_bundle_create_only`, and contains only count/digest summaries. It is
@@ -101,22 +105,23 @@ presence, image load, offline install, deploy, package, or release readiness.
 The current `--airgap-bundle-check` validator is a focused local bundle
 manifest/digest diagnostic only. It consumes an explicit release contract,
 deploy template package descriptor, deploy template archive `.tgz`, airgap
-image-map, bundle root, and bundle manifest, and accepts only
-`existing_kubernetes/external_declared/airgap`. `kit_installed` airgap profiles
-may be declared in the release contract but are not bundle-check CLI targets in
-this slice. The deploy template archive
+image-map, bundle root, and bundle manifest, and accepts
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`. The deploy template archive
 sha256 must match `deploy_template_package.package_sha256` and
 `deploy_template_package.artifact_provenance.artifact_sha256`. The bundle
 manifest must use `schema_version:
 agentsmith.airgap-bundle-manifest/v1`; its `components` array must contain
 exactly one component of each `kind`: `release_contract`,
 `deploy_template_package`, `deploy_template_archive`, and `image_map`.
+Kit-installed airgap bundles must also include `substrate_pack_manifest`, with
+a matching binding digest.
 `bundle_manifest.bindings.deploy_template_archive_sha256` must match the
 archive sha256. Component paths and image artifact paths must be POSIX-style
 relative paths under the bundle root, and sha256 values must match the
-referenced files. The release contract must declare
-`existing_kubernetes/external_declared/airgap` in `target_profiles`, each
-target profile entry must carry `required: false` during pre-GA, and
+referenced files. The release contract must declare the selected airgap target
+profile in `target_profiles`, each target profile entry must carry
+`required: false` during pre-GA, and
 `support_level` is rejected. The bundle manifest accepts only the documented
 top-level, `bindings`, `components`, `image_artifact_declarations`,
 `payload_artifacts`, `operator_prerequisites`, and `substrate` fields. Image
@@ -153,9 +158,10 @@ readiness, deploy readiness, package readiness, or release readiness.
 
 The current `--airgap-image-archive-check` validator is a focused read-only
 image archive materiality diagnostic only. It consumes the same already
-assembled bundle inputs as `--airgap-bundle-check`, accepts only
-`existing_kubernetes/external_declared/airgap`, and first runs the existing
-bundle check. It then invokes an explicit local `--archive-probe <executable>`
+assembled bundle inputs as `--airgap-bundle-check`, accepts
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`, and first runs the existing bundle
+check. It then invokes an explicit local `--archive-probe <executable>`
 once per `bundle_manifest.image_artifact_declarations[]` archive path. The
 probe receives the archive path as argv and env, and stdout must contain
 exactly one `sha256:<64>` digest. The digest must match the corresponding
@@ -193,8 +199,9 @@ The current `--airgap-bundle-render-check` validator is a focused read-only
 render/check diagnostic for an already assembled airgap bundle only. It
 requires the release contract, deploy template package descriptor, archive,
 image-map, bundle manifest, render values, and substrate truth to be local
-files inside the bundle root, accepts only
-`existing_kubernetes/external_declared/airgap`, and reuses
+files inside the bundle root, accepts
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`, and reuses
 `--airgap-bundle-check`, `--render`, and `--render-check`. Its final report
 uses `schema: agentsmith.airgap-bundle-render-check-report/v1`,
 `readiness: false`, and `scope: airgap_bundle_render_check_only`; it contains
@@ -205,7 +212,8 @@ envelope output.
 
 The current `--rollout` validator is a focused Kubernetes rollout/live digest
 diagnostic only. It consumes the release contract, an already-rendered manifest
-directory, explicit target profile `existing_kubernetes/external_declared/online`,
+directory, explicit target profile
+`existing_kubernetes/<external_declared|kit_installed>/<online|airgap>`,
 namespace, and Kubernetes client options. It first runs the render/check guard,
 then accepts only Deployment, StatefulSet, and DaemonSet workloads, runs
 `kubectl rollout status`, reads `spec.selector.matchLabels` through
@@ -221,7 +229,8 @@ product-flow fields, raw kubectl stdout/stderr, kubeconfig content, `verdict`,
 The current `--smoke` validator is a focused route/service smoke diagnostic
 only. It consumes the release contract, a prior rollout report, explicit target
 profile `existing_kubernetes/external_declared/<online|airgap>` or
-`existing_kubernetes/kit_installed/online`, one URL, and an output directory.
+`existing_kubernetes/kit_installed/<online|airgap>`, one URL, and an output
+directory.
 It does not call Kubernetes, render, apply, roll out workloads, or run product
 flows. It requires the rollout report to have `status: pass`,
 `readiness: false`, `scope: kubernetes_rollout_imageid_only`, and matching
@@ -306,12 +315,13 @@ kit-installed online reports must also include `substrate-pack-check` and
 `substrate-routability` steps and remain evidence intake only, not deploy or
 release readiness; when provenance is `signed_operator_run`, the report
 `operator_run_id` must match the provenance `operator_run_id`; and the airgap
-triplet must be compatible with `--airgap-bundle-check`, binding the check
-report to an `agentsmith.airgap-bundle-manifest/v1` manifest and re-read
-`image-map.json`
+triplet is accepted only for `existing_kubernetes/external_declared/airgap` and
+must be compatible with `--airgap-bundle-check`, binding the check report to an
+`agentsmith.airgap-bundle-manifest/v1` manifest and re-read `image-map.json`
 with required components, image artifact declarations, mandatory payload/tool
 categories and counts, report counts, mapping alignment, and artifact digests
-aligned. The old two-file airgap output value is rejected.
+aligned. Kit airgap focused adoption is not accepted by `--evidence`. The old
+two-file airgap output value is rejected.
 `deploy-result.json#substrate` is future reserved and is not accepted during
 pre-GA. Render, rollout, and smoke reports remain individual focused diagnostic
 files, but their combinations are not accepted release-kit evidence envelope
