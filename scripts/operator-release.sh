@@ -10,17 +10,22 @@ usage() {
 Usage:
   bash scripts/operator-release.sh online use_existing <producer args without --target-profile>
   bash scripts/operator-release.sh online install_substrates <producer args without --target-profile>
+  bash scripts/operator-release.sh airgap use_existing <producer args without --target-profile>
+  bash scripts/operator-release.sh airgap install_substrates <producer args without --target-profile>
   bash scripts/operator-release.sh airgap-bundle use_existing <producer args without --target-profile>
   bash scripts/operator-release.sh airgap-bundle install_substrates <producer args without --target-profile>
 
 Operator surface:
   online/use_existing maps internally to existing_kubernetes/external_declared/online.
   online/install_substrates maps internally to existing_kubernetes/kit_installed/online.
+  airgap/use_existing maps internally to existing_kubernetes/external_declared/airgap.
+  airgap/install_substrates is intentionally unsupported in v0 and fails fast.
   airgap-bundle/use_existing maps internally to existing_kubernetes/external_declared/airgap.
   airgap-bundle/install_substrates is intentionally unsupported in v0 and fails fast.
 
 This facade forwards to existing producer diagnostics only:
   online/* -> scripts/verify-release.sh --online-deployment-gate
+  airgap/use_existing -> scripts/verify-release.sh --airgap-consume-rehearsal
   airgap-bundle/use_existing -> scripts/verify-release.sh --bundle-create
 USAGE
 }
@@ -169,6 +174,14 @@ case "$surface/$substrate_strategy" in
     producer_name="online-deployment-gate"
     machine_profile="existing_kubernetes/kit_installed/online"
     ;;
+  airgap/use_existing)
+    producer_mode="--airgap-consume-rehearsal"
+    producer_name="airgap-consume-rehearsal"
+    machine_profile="existing_kubernetes/external_declared/airgap"
+    ;;
+  airgap/install_substrates)
+    fail "airgap/install_substrates is not implemented in operator release surface v0"
+    ;;
   airgap-bundle/use_existing)
     producer_mode="--bundle-create"
     producer_name="bundle-create"
@@ -179,6 +192,9 @@ case "$surface/$substrate_strategy" in
     ;;
   online/*)
     fail "unknown online substrate strategy: $substrate_strategy"
+    ;;
+  airgap/*)
+    fail "unknown airgap substrate strategy: $substrate_strategy"
     ;;
   airgap-bundle/*)
     fail "unknown airgap-bundle substrate strategy: $substrate_strategy"
@@ -193,11 +209,15 @@ operator_confirm="$surface/$substrate_strategy"
 translated_args=()
 translate_operator_confirm_apply "$operator_confirm" "$machine_profile" "$@"
 
-release_contract="$(require_arg_value --release-contract "$@")"
+release_contract=""
 output_dir="$(require_arg_value --output-dir "$@")"
 bundle_root=""
 target_registry=""
 evidence_root=""
+
+if [[ "$producer_name" != "airgap-consume-rehearsal" ]]; then
+  release_contract="$(require_arg_value --release-contract "$@")"
+fi
 
 if evidence_root="$(find_arg_value --evidence-root "$@")"; then
   :
@@ -208,13 +228,23 @@ fi
 if [[ "$producer_name" == "bundle-create" ]]; then
   bundle_root="$(require_arg_value --bundle-root "$@")"
   target_registry="$(require_arg_value --target-registry "$@")"
+elif [[ "$producer_name" == "airgap-consume-rehearsal" ]]; then
+  bundle_root="$(require_arg_value --bundle-root "$@")"
 fi
 
 remove_operator_summary_if_requested "$output_dir"
 
 producer_args=(
   "$producer_mode"
-  --target-profile "$machine_profile"
+)
+
+if [[ "$producer_name" != "airgap-consume-rehearsal" ]]; then
+  producer_args+=(
+    --target-profile "$machine_profile"
+  )
+fi
+
+producer_args+=(
   "${translated_args[@]}"
 )
 
@@ -225,14 +255,23 @@ summary_args=(
   --substrate-strategy "$substrate_strategy"
   --machine-profile "$machine_profile"
   --producer-mode "$producer_name"
-  --release-contract "$release_contract"
   --output-dir "$output_dir"
 )
+
+if [[ -n "$release_contract" ]]; then
+  summary_args+=(
+    --release-contract "$release_contract"
+  )
+fi
 
 if [[ "$producer_name" == "bundle-create" ]]; then
   summary_args+=(
     --bundle-root "$bundle_root"
     --target-registry "$target_registry"
+  )
+elif [[ "$producer_name" == "airgap-consume-rehearsal" ]]; then
+  summary_args+=(
+    --bundle-root "$bundle_root"
   )
 fi
 

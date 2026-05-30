@@ -40,6 +40,9 @@ There is intentionally no `package.json` in this repository.
 Operator-facing runs should start from `scripts/operator-release.sh` for the
 supported v0 surfaces. `scripts/verify-release.sh` remains the producer catalog
 for focused diagnostics and maintainer work.
+`airgap/use_existing` is the operator-facing entry for consuming an already
+assembled airgap bundle; it maps to `--airgap-consume-rehearsal` and keeps
+`readiness: false`.
 
 ## Development Principles
 

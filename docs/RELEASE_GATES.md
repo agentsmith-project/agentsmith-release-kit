@@ -45,6 +45,9 @@ diagnostic:
   `existing_kubernetes/external_declared/online`.
 - `online/install_substrates` -> `--online-deployment-gate` with
   `existing_kubernetes/kit_installed/online`.
+- `airgap/use_existing` -> `--airgap-consume-rehearsal` with
+  `existing_kubernetes/external_declared/airgap`.
+- `airgap/install_substrates` fails fast in v0.
 - `airgap-bundle/use_existing` -> `--bundle-create` with
   `existing_kubernetes/external_declared/airgap`.
 - `airgap-bundle/install_substrates` fails fast in v0.
@@ -59,8 +62,9 @@ agentsmith.operator-release-surface-report/v1`, `scope:
 operator_release_surface_v0`, `readiness: false`, and `status: pass`. It stores
 only release identity, release contract digest, producer report digests, and
 output-relative step paths, with a small airgap handoff digest/count summary
-for bundle creation. Online confirmed apply with `--evidence-root` may also add
-a digest/provenance-only `online_handoff` summary. It is not accepted by
+for bundle creation or airgap bundle consumption. Online confirmed apply with
+`--evidence-root` may also add a digest/provenance-only `online_handoff`
+summary. It is not accepted by
 `--evidence` and is not deploy, package, or release readiness.
 
 ## Contract Intake Focused Diagnostic

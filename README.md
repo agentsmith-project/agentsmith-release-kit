@@ -89,13 +89,17 @@ Operator release surface v0:
 ```bash
 bash scripts/operator-release.sh online use_existing ...
 bash scripts/operator-release.sh online install_substrates ...
+bash scripts/operator-release.sh airgap use_existing ...
+bash scripts/operator-release.sh airgap install_substrates ...
 bash scripts/operator-release.sh airgap-bundle use_existing ...
 bash scripts/operator-release.sh airgap-bundle install_substrates ...
 ```
 
-The first three commands map operator choices to the existing producer
+The use-existing online, airgap, and airgap-bundle commands map operator
+choices to the existing producer
 diagnostics and write `operator-release-surface-report.json` with
-`readiness: false`. `airgap-bundle/install_substrates` fails fast in v0.
+`readiness: false`. `airgap/install_substrates` and
+`airgap-bundle/install_substrates` fail fast in v0.
 `verify-release.sh` remains the producer catalog and maintainer/focused
 diagnostic entry.
 

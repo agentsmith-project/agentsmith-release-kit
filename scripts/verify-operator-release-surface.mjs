@@ -8,7 +8,6 @@ const REQUIRED_ARGS = [
   'substrateStrategy',
   'machineProfile',
   'producerMode',
-  'releaseContract',
   'outputDir'
 ];
 const REPORT_SCHEMA = 'agentsmith.operator-release-surface-report/v1';
@@ -20,6 +19,8 @@ const EVIDENCE_SUBJECT_FILE = 'evidence-subject.json';
 const BUNDLE_CREATE_REPORT_FILE = 'bundle-create-report.json';
 const AIRGAP_BUNDLE_CHECK_REPORT_FILE = 'airgap-bundle-check-report.json';
 const AIRGAP_BUNDLE_MANIFEST_FILE = 'airgap-bundle-manifest.json';
+const AIRGAP_CONSUME_REPORT_FILE = 'airgap-consume-rehearsal-report.json';
+const AIRGAP_DEPLOYMENT_GATE_REPORT_FILE = 'airgap-deployment-gate-report.json';
 const ONLINE_PRODUCER_SCHEMA = 'agentsmith.online-deployment-gate/v1';
 const ONLINE_PRODUCER_SCOPE = 'online_deployment_gate_only';
 const EVIDENCE_SCHEMA = 'agentsmith.release-kit-evidence-envelope/v1';
@@ -29,6 +30,10 @@ const BUNDLE_CREATE_SCOPE = 'airgap_bundle_create_only';
 const AIRGAP_BUNDLE_CHECK_SCHEMA = 'agentsmith.airgap-bundle-check-report/v1';
 const AIRGAP_BUNDLE_CHECK_SCOPE = 'airgap_bundle_manifest_check_only';
 const AIRGAP_BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
+const AIRGAP_CONSUME_SCHEMA = 'agentsmith.airgap-consume-rehearsal/v1';
+const AIRGAP_CONSUME_SCOPE = 'airgap_consume_rehearsal_only';
+const AIRGAP_DEPLOYMENT_GATE_SCHEMA = 'agentsmith.airgap-deployment-gate/v1';
+const AIRGAP_DEPLOYMENT_GATE_SCOPE = 'airgap_deployment_gate_only';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const SAFE_RELATIVE_PATH_RE = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
@@ -52,6 +57,13 @@ const MAPPINGS = new Map([
     'airgap-bundle/use_existing',
     {
       producerMode: 'bundle-create',
+      machineProfile: 'existing_kubernetes/external_declared/airgap'
+    }
+  ],
+  [
+    'airgap/use_existing',
+    {
+      producerMode: 'airgap-consume-rehearsal',
       machineProfile: 'existing_kubernetes/external_declared/airgap'
     }
   ]
@@ -86,14 +98,15 @@ class ValidationError extends Error {
 function usage() {
   return `Usage:
   node scripts/verify-operator-release-surface.mjs \\
-    --surface online|airgap-bundle \\
+    --surface online|airgap|airgap-bundle \\
     --substrate-strategy use_existing|install_substrates \\
     --machine-profile <mapped-profile> \\
-    --producer-mode online-deployment-gate|bundle-create \\
-    --release-contract <json> \\
+    --producer-mode online-deployment-gate|airgap-consume-rehearsal|bundle-create \\
     --output-dir <dir> \\
+    [--release-contract <json>] \\
     [--evidence-root <dir>] \\
-    [--bundle-root <dir> --target-registry <registry-host[/namespace]>]`;
+    [--bundle-root <dir>] \\
+    [--target-registry <registry-host[/namespace]>]`;
 }
 
 function cliFail(message) {
@@ -302,11 +315,23 @@ function assertMapping(args) {
   if (args.producerMode !== mapping.producerMode) {
     fail('producer mode must match operator surface mapping');
   }
+  if (args.producerMode !== 'airgap-consume-rehearsal' && !args.releaseContract) {
+    cliFail(`${args.producerMode} summaries require --release-contract`);
+  }
   if (args.producerMode === 'bundle-create' && (!args.bundleRoot || !args.targetRegistry)) {
     cliFail('bundle-create summaries require --bundle-root and --target-registry');
   }
-  if (args.producerMode !== 'bundle-create' && (args.bundleRoot || args.targetRegistry)) {
+  if (args.producerMode === 'airgap-consume-rehearsal' && !args.bundleRoot) {
+    cliFail('airgap consume summaries require --bundle-root');
+  }
+  if (args.producerMode === 'airgap-consume-rehearsal' && args.targetRegistry) {
+    cliFail('airgap consume summaries do not accept --target-registry');
+  }
+  if (args.producerMode === 'online-deployment-gate' && (args.bundleRoot || args.targetRegistry)) {
     cliFail('online summaries do not accept --bundle-root or --target-registry');
+  }
+  if (args.producerMode !== 'bundle-create' && args.targetRegistry) {
+    cliFail('--target-registry is only accepted for bundle-create summaries');
   }
   if (args.evidenceRoot && args.producerMode !== 'online-deployment-gate') {
     cliFail('--evidence-root is only accepted for online summaries');
@@ -438,6 +463,31 @@ async function fixedOutputStep(outputDir, name, reportPath) {
   };
 }
 
+async function sanitizeConsumeSteps(outputDir, producerSteps) {
+  const steps = [];
+  for (const [index, stepValue] of requireArray(
+    producerSteps,
+    'airgap_consume_rehearsal_report.steps'
+  ).entries()) {
+    const step = requireObject(stepValue, `airgap_consume_rehearsal_report.steps[${index}]`);
+    const name = requireString(step.name, `airgap_consume_rehearsal_report.steps[${index}].name`);
+    const safePath = assertSafeOutputPath(
+      step.report_path,
+      `airgap_consume_rehearsal_report.steps[${index}].report_path`
+    );
+    await assertOutputFile(
+      outputDir,
+      safePath,
+      `airgap_consume_rehearsal_report.steps[${index}].report_path`
+    );
+    steps.push({
+      name,
+      report_paths: [safePath]
+    });
+  }
+  return steps;
+}
+
 function findSubjectFileDigest(subject, filePath) {
   for (const [index, item] of requireArray(subject.files, 'evidence_subject.files').entries()) {
     const entry = requireObject(item, `evidence_subject.files[${index}]`);
@@ -555,6 +605,46 @@ function parseTargetRegistry(value) {
     summary.namespace = parts.join('/');
   }
   return summary;
+}
+
+function parseTargetRegistryFromImage(value, label) {
+  const imageRef = requireString(value, label);
+  const withoutDigest = imageRef.split('@')[0];
+  const withoutTag = withoutDigest.replace(/:[^/:]*$/, '');
+  const parts = withoutTag.split('/').filter(Boolean);
+  if (parts.length < 2) {
+    fail(`${label} must include a registry host`);
+  }
+  return {
+    host: parts[0]
+  };
+}
+
+function targetRegistrySummaryFromManifest(manifest) {
+  const declarations = requireArray(
+    manifest.image_artifact_declarations,
+    'airgap_bundle_manifest.image_artifact_declarations'
+  );
+  if (declarations.length === 0) {
+    fail('airgap_bundle_manifest.image_artifact_declarations must not be empty');
+  }
+  const summaries = declarations.map((item, index) => {
+    const declaration = requireObject(
+      item,
+      `airgap_bundle_manifest.image_artifact_declarations[${index}]`
+    );
+    return parseTargetRegistryFromImage(
+      declaration.target_image,
+      `airgap_bundle_manifest.image_artifact_declarations[${index}].target_image`
+    );
+  });
+  const host = summaries[0].host;
+  if (summaries.some((summary) => summary.host !== host)) {
+    fail('airgap bundle target images must share one target registry host');
+  }
+  return {
+    host
+  };
 }
 
 function assertNoForbiddenKeys(value, label = 'report') {
@@ -705,6 +795,191 @@ async function buildAirgapSummary(args, releaseIdentity) {
   };
 }
 
+function releaseIdentityFromConsumeReport(consumeReport) {
+  const inputDigests = requireObject(
+    consumeReport.input_digests,
+    'airgap_consume_rehearsal_report.input_digests'
+  );
+  return {
+    releaseId: requireString(consumeReport.release_id, 'airgap_consume_rehearsal_report.release_id'),
+    gitSha: requireGitSha(consumeReport.git_sha, 'airgap_consume_rehearsal_report.git_sha'),
+    releaseContractDigest: requireDigest(
+      inputDigests.release_contract,
+      'airgap_consume_rehearsal_report.input_digests.release_contract'
+    )
+  };
+}
+
+function assertAirgapManifestIdentity(manifest, releaseIdentity, args) {
+  assertStringEquals(
+    manifest.schema_version,
+    AIRGAP_BUNDLE_MANIFEST_SCHEMA,
+    'airgap_bundle_manifest.schema_version'
+  );
+  assertStringEquals(
+    manifest.release_id,
+    releaseIdentity.releaseId,
+    'airgap_bundle_manifest.release_id'
+  );
+  const manifestGitSha = requireGitSha(manifest.git_sha, 'airgap_bundle_manifest.git_sha');
+  if (manifestGitSha !== releaseIdentity.gitSha) {
+    fail('airgap_bundle_manifest.git_sha must match consume report');
+  }
+  if (targetProfileValue(manifest, 'airgap_bundle_manifest') !== args.machineProfile) {
+    fail('airgap_bundle_manifest.target_profile.value must match machine profile');
+  }
+}
+
+function assertConsumeDigestBindings({
+  consumeReport,
+  consumeInput,
+  bundleCheckInput,
+  deploymentGateInput,
+  manifestInput
+}) {
+  const inputDigests = requireObject(
+    consumeReport.input_digests,
+    'airgap_consume_rehearsal_report.input_digests'
+  );
+  const producerDigests = requireObject(
+    consumeReport.producer_report_digests,
+    'airgap_consume_rehearsal_report.producer_report_digests'
+  );
+  const bundleManifestDigest = requireDigest(
+    inputDigests.bundle_manifest,
+    'airgap_consume_rehearsal_report.input_digests.bundle_manifest'
+  );
+  if (bundleManifestDigest !== manifestInput.digest) {
+    fail('airgap consume bundle manifest digest must match bundle manifest');
+  }
+  const bundleCheckDigest = requireDigest(
+    producerDigests.airgap_bundle_check_report,
+    'airgap_consume_rehearsal_report.producer_report_digests.airgap_bundle_check_report'
+  );
+  if (bundleCheckDigest !== bundleCheckInput.digest) {
+    fail('airgap consume bundle-check digest must match nested report');
+  }
+  const deploymentGateDigest = requireDigest(
+    producerDigests.airgap_deployment_gate_report,
+    'airgap_consume_rehearsal_report.producer_report_digests.airgap_deployment_gate_report'
+  );
+  if (deploymentGateDigest !== deploymentGateInput.digest) {
+    fail('airgap consume deployment-gate digest must match nested report');
+  }
+  return {
+    airgap_consume_rehearsal_report: consumeInput.digest,
+    airgap_bundle_check_report: bundleCheckInput.digest,
+    airgap_deployment_gate_report: deploymentGateInput.digest
+  };
+}
+
+async function buildAirgapConsumeSummary(args) {
+  const outputDir = path.resolve(args.outputDir);
+  const bundleRoot = path.resolve(args.bundleRoot);
+  const consumeReportPath = path.join(outputDir, AIRGAP_CONSUME_REPORT_FILE);
+  const bundleCheckReportPath = path.join(
+    outputDir,
+    'airgap-bundle-check',
+    AIRGAP_BUNDLE_CHECK_REPORT_FILE
+  );
+  const deploymentGateReportPath = path.join(
+    outputDir,
+    'airgap-deployment-gate',
+    AIRGAP_DEPLOYMENT_GATE_REPORT_FILE
+  );
+  const manifestPath = path.join(bundleRoot, AIRGAP_BUNDLE_MANIFEST_FILE);
+  const consumeInput = await readJson(consumeReportPath, 'airgap consume rehearsal report');
+  const bundleCheckInput = await readJson(bundleCheckReportPath, 'airgap bundle check report');
+  const deploymentGateInput = await readJson(
+    deploymentGateReportPath,
+    'airgap deployment gate report'
+  );
+  const manifestInput = await readJson(manifestPath, 'airgap bundle manifest');
+  const consumeReport = requireObject(
+    consumeInput.value,
+    'airgap_consume_rehearsal_report'
+  );
+  const bundleCheckReport = requireObject(
+    bundleCheckInput.value,
+    'airgap_bundle_check_report'
+  );
+  const deploymentGateReport = requireObject(
+    deploymentGateInput.value,
+    'airgap_deployment_gate_report'
+  );
+  const manifest = requireObject(manifestInput.value, 'airgap_bundle_manifest');
+  const releaseIdentity = releaseIdentityFromConsumeReport(consumeReport);
+
+  assertProducerBase({
+    report: consumeReport,
+    label: 'airgap_consume_rehearsal_report',
+    schema: AIRGAP_CONSUME_SCHEMA,
+    scope: AIRGAP_CONSUME_SCOPE,
+    args,
+    releaseIdentity
+  });
+  assertProducerBase({
+    report: bundleCheckReport,
+    label: 'airgap_bundle_check_report',
+    schema: AIRGAP_BUNDLE_CHECK_SCHEMA,
+    scope: AIRGAP_BUNDLE_CHECK_SCOPE,
+    args,
+    releaseIdentity
+  });
+  assertProducerBase({
+    report: deploymentGateReport,
+    label: 'airgap_deployment_gate_report',
+    schema: AIRGAP_DEPLOYMENT_GATE_SCHEMA,
+    scope: AIRGAP_DEPLOYMENT_GATE_SCOPE,
+    args,
+    releaseIdentity
+  });
+  assertArtifactReleaseContractDigest(
+    bundleCheckReport,
+    'airgap_bundle_check_report',
+    releaseIdentity
+  );
+  assertReleaseContractDigest(
+    deploymentGateReport,
+    'airgap_deployment_gate_report',
+    releaseIdentity
+  );
+  assertAirgapManifestIdentity(manifest, releaseIdentity, args);
+  const producerReportDigests = assertConsumeDigestBindings({
+    consumeReport,
+    consumeInput,
+    bundleCheckInput,
+    deploymentGateInput,
+    manifestInput
+  });
+
+  return {
+    releaseIdentity,
+    producerSummary: {
+      producer_report_digests: producerReportDigests,
+      steps: await sanitizeConsumeSteps(outputDir, consumeReport.steps),
+      airgap_handoff: {
+        bundle_manifest_digest: manifestInput.digest,
+        airgap_bundle_check_report_digest: bundleCheckInput.digest,
+        airgap_deployment_gate_report_digest: deploymentGateInput.digest,
+        image_count: requireNonNegativeInteger(
+          bundleCheckReport.image_artifact_declaration_count,
+          'airgap_bundle_check_report.image_artifact_declaration_count'
+        ),
+        payload_artifact_count: requireNonNegativeInteger(
+          bundleCheckReport.payload_artifact_count,
+          'airgap_bundle_check_report.payload_artifact_count'
+        ),
+        tool_count: requireNonNegativeInteger(
+          bundleCheckReport.tool_count,
+          'airgap_bundle_check_report.tool_count'
+        ),
+        target_registry_summary: targetRegistrySummaryFromManifest(manifest)
+      }
+    }
+  };
+}
+
 async function writeSummary(outputDir, summary) {
   await fs.mkdir(outputDir, { recursive: true });
   const reportFile = path.join(outputDir, REPORT_FILE);
@@ -721,11 +996,19 @@ async function main(argv) {
   }
 
   assertMapping(args);
-  const releaseIdentity = await releaseIdentityFromContract(args.releaseContract);
+  let releaseIdentity;
+  let producerSummary;
+  if (args.producerMode === 'airgap-consume-rehearsal') {
+    const airgapConsume = await buildAirgapConsumeSummary(args);
+    releaseIdentity = airgapConsume.releaseIdentity;
+    producerSummary = airgapConsume.producerSummary;
+  } else {
+    releaseIdentity = await releaseIdentityFromContract(args.releaseContract);
+    producerSummary = args.producerMode === 'online-deployment-gate'
+      ? await buildOnlineSummary(args, releaseIdentity)
+      : await buildAirgapSummary(args, releaseIdentity);
+  }
   const outputDir = path.resolve(args.outputDir);
-  const producerSummary = args.producerMode === 'online-deployment-gate'
-    ? await buildOnlineSummary(args, releaseIdentity)
-    : await buildAirgapSummary(args, releaseIdentity);
   const summary = {
     schema: REPORT_SCHEMA,
     scope: REPORT_SCOPE,

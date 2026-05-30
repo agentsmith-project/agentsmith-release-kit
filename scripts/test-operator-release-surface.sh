@@ -24,6 +24,9 @@ NODE
 )
 
 TMP_DIR="$(mktemp -d)"
+GOOD_PROBE="$TMP_DIR/tools/archive-digest-probe"
+GOOD_LOADER="$TMP_DIR/tools/image-loader"
+LOAD_LOG="$TMP_DIR/image-load.log"
 SERVER_PID=""
 trap 'if [[ -n "$SERVER_PID" ]]; then kill "$SERVER_PID" 2>/dev/null || true; fi; rm -rf "$TMP_DIR"' EXIT
 
@@ -595,9 +598,24 @@ create_image_archives() {
   local image_dir="$1"
 
   mkdir -p "$image_dir"
-  for id in "${RELEASE_IMAGE_IDS[@]}"; do
-    printf 'local oci layout tar placeholder for %s\n' "$id" >"$image_dir/$id.oci-layout.tar"
-  done
+  "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" "$image_dir" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [fixtureContract, imageDir] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(fixtureContract, 'utf8'));
+for (const image of contract.deploy_image_inventory) {
+  fs.writeFileSync(
+    path.join(imageDir, `${image.id}.oci-layout.tar`),
+    [
+      'local oci layout tar fixture',
+      `id=${image.id}`,
+      `target_digest=${image.digest}`,
+      ''
+    ].join('\n')
+  );
+}
+NODE
 }
 
 write_operator_prerequisites() {
@@ -630,6 +648,76 @@ const prerequisites = {
 };
 
 fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+write_airgap_apply_tools() {
+  mkdir -p "$(dirname "$GOOD_PROBE")"
+
+  cat >"$GOOD_PROBE" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const archivePath = process.argv[2] || process.env.AGENTSMITH_IMAGE_ARCHIVE_PATH;
+if (!archivePath) {
+  process.exit(2);
+}
+const body = fs.readFileSync(archivePath, 'utf8');
+const matches = [...body.matchAll(/^target_digest=(sha256:[0-9a-f]{64})$/gm)];
+if (matches.length !== 1) {
+  process.exit(3);
+}
+console.log(matches[0][1]);
+NODE
+  chmod +x "$GOOD_PROBE"
+
+  cat >"$GOOD_LOADER" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const [archivePath, targetImage, targetDigest] = process.argv.slice(2);
+if (!archivePath || !targetImage || !targetDigest) {
+  process.exit(2);
+}
+const body = fs.readFileSync(archivePath, 'utf8');
+const matches = [...body.matchAll(/^target_digest=(sha256:[0-9a-f]{64})$/gm)];
+if (matches.length !== 1 || matches[0][1] !== targetDigest) {
+  process.exit(3);
+}
+if (!targetImage.endsWith(`@${targetDigest}`)) {
+  process.exit(4);
+}
+if (process.env.AGENTSMITH_LOAD_LOG) {
+  fs.appendFileSync(process.env.AGENTSMITH_LOAD_LOG, `${targetDigest}\n`);
+}
+console.log(targetDigest);
+NODE
+  chmod +x "$GOOD_LOADER"
+}
+
+write_bundle_operator_inputs() {
+  local bundle_root="$1"
+
+  mkdir -p "$bundle_root/operator-inputs"
+  write_render_values "$bundle_root/operator-inputs/render-values.json"
+  write_truth "$bundle_root/operator-inputs/substrate-truth.json" "$AIRGAP_PROFILE"
+  write_prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" "$AIRGAP_PROFILE"
+}
+
+target_image_for_id() {
+  local image_map="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" --input-type=module - "$image_map" "$image_id" <<'NODE'
+import fs from 'node:fs';
+
+const [imageMapInput, imageId] = process.argv.slice(2);
+const imageMap = JSON.parse(fs.readFileSync(imageMapInput, 'utf8'));
+const mapping = imageMap.mappings.find((item) => item.id === imageId);
+if (!mapping) {
+  throw new Error(`missing image-map mapping: ${imageId}`);
+}
+console.log(mapping.target_image);
 NODE
 }
 
@@ -864,6 +952,101 @@ if (report.target_profile?.value !== expectedProfile) {
 NODE
 }
 
+assert_airgap_consume_chain() {
+  local output_dir="$1"
+  local expected_mode="$2"
+  local expected_rehearsal_label="$3"
+  local expected_consume_steps="$4"
+  local expected_deployment_steps="$5"
+
+  "$NODE_BIN" --input-type=module - \
+    "$output_dir/airgap-consume-rehearsal-report.json" \
+    "$output_dir/airgap-deployment-gate/airgap-deployment-gate-report.json" \
+    "$expected_mode" \
+    "$expected_rehearsal_label" \
+    "$expected_consume_steps" \
+    "$expected_deployment_steps" \
+    "$AIRGAP_PROFILE" <<'NODE'
+import fs from 'node:fs';
+
+const [
+  consumeReportFile,
+  deploymentReportFile,
+  expectedMode,
+  expectedRehearsalLabel,
+  expectedConsumeStepsText,
+  expectedDeploymentStepsText,
+  expectedProfile
+] = process.argv.slice(2);
+const consumeReport = JSON.parse(fs.readFileSync(consumeReportFile, 'utf8'));
+const deploymentReport = JSON.parse(fs.readFileSync(deploymentReportFile, 'utf8'));
+const consumeSteps = consumeReport.steps.map((step) => step.name).join(',');
+const deploymentSteps = deploymentReport.steps.map((step) => step.name).join(',');
+const serialized = JSON.stringify({ consumeReport, deploymentReport });
+
+if (consumeReport.schema !== 'agentsmith.airgap-consume-rehearsal/v1') {
+  throw new Error(`unexpected consume schema: ${consumeReport.schema}`);
+}
+if (consumeReport.scope !== 'airgap_consume_rehearsal_only') {
+  throw new Error(`unexpected consume scope: ${consumeReport.scope}`);
+}
+if (consumeReport.readiness !== false || consumeReport.status !== 'pass') {
+  throw new Error('consume report must pass with readiness=false');
+}
+if (consumeReport.mode !== expectedMode) {
+  throw new Error(`unexpected consume mode: ${consumeReport.mode}`);
+}
+if (consumeReport.target_profile?.value !== expectedProfile) {
+  throw new Error(`unexpected consume target profile: ${consumeReport.target_profile?.value}`);
+}
+if (
+  consumeReport.target_profile?.target_cluster !== 'existing_kubernetes' ||
+  consumeReport.target_profile?.substrate_source !== 'external_declared' ||
+  consumeReport.target_profile?.distribution !== 'airgap'
+) {
+  throw new Error('consume report target profile tuple drifted');
+}
+if (
+  consumeReport.rehearsal_label?.value !== expectedRehearsalLabel ||
+  consumeReport.rehearsal_label?.semantics !== 'label_only' ||
+  consumeReport.rehearsal_label?.target_profile_effect !== 'none'
+) {
+  throw new Error(`unexpected rehearsal label: ${JSON.stringify(consumeReport.rehearsal_label)}`);
+}
+if (consumeSteps !== expectedConsumeStepsText) {
+  throw new Error(`unexpected consume steps: ${consumeSteps}`);
+}
+if (deploymentReport.schema !== 'agentsmith.airgap-deployment-gate/v1') {
+  throw new Error(`unexpected deployment schema: ${deploymentReport.schema}`);
+}
+if (deploymentReport.readiness !== false || deploymentReport.status !== 'pass') {
+  throw new Error('deployment report must pass with readiness=false');
+}
+if (deploymentReport.target_profile?.value !== expectedProfile) {
+  throw new Error(`unexpected deployment target profile: ${deploymentReport.target_profile?.value}`);
+}
+if (deploymentSteps !== expectedDeploymentStepsText) {
+  throw new Error(`unexpected deployment steps: ${deploymentSteps}`);
+}
+for (const step of [...consumeReport.steps, ...deploymentReport.steps]) {
+  const paths = step.report_paths || (step.report_path ? [step.report_path] : []);
+  for (const reportPath of paths) {
+    if (
+      reportPath.startsWith('/') ||
+      /^[A-Za-z]:[\\/]/.test(reportPath) ||
+      reportPath.includes('\\') ||
+      reportPath.split('/').some((part) => part === '' || part === '.' || part === '..')
+    ) {
+      throw new Error(`nested report path is unsafe: ${reportPath}`);
+    }
+  }
+}
+if (/\/tmp\/|\/home\/|secretRef:|operator held|operator workstation|signed operator prerequisite|kubeconfig|Bearer|token=/i.test(serialized)) {
+  throw new Error('airgap consume/deployment reports leaked paths, operator refs, kubeconfig, or secret-ish payloads');
+}
+NODE
+}
+
 expect_operator_fail() {
   local label="$1"
   shift
@@ -937,10 +1120,12 @@ write_routability_probe "$ROUTABILITY_PROBE"
 create_payloads "$PAYLOAD_DIR" "$BUNDLED_TOOL"
 create_image_archives "$IMAGE_DIR"
 write_operator_prerequisites "$OPERATOR_PREREQUISITES" "$BUNDLED_TOOL"
+write_airgap_apply_tools
 write_evidence_provenance "$VALID_PROVENANCE" operator-run-1003
 write_evidence_provenance "$KIT_VALID_PROVENANCE" operator-run-kit-1004
 : >"$KUBECTL_LOG"
 : >"$ROUTABILITY_PROBE_LOG"
+: >"$LOAD_LOG"
 start_server
 BASE_URL="http://127.0.0.1:$SERVER_PORT"
 
@@ -1131,11 +1316,76 @@ assert_operator_report \
   true
 pass "operator airgap-bundle/use_existing maps to bundle-create and writes handoff summary"
 
+write_bundle_operator_inputs "$airgap_bundle_root"
+airgap_target_app_image="$(target_image_for_id "$airgap_bundle_root/components/image-map.json" agentsmith_app)"
+airgap_consume_output="$TMP_DIR/out-airgap-consume-use-existing"
+: >"$KUBECTL_LOG"
+: >"$LOAD_LOG"
+before_airgap_apply="$(hit_count)"
+AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+FAKE_KUBECTL_LIVE_IMAGE="$airgap_target_app_image" \
+FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$airgap_target_app_image" \
+bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+  --bundle-root "$airgap_bundle_root" \
+  --render-values "$airgap_bundle_root/operator-inputs/render-values.json" \
+  --substrate-truth "$airgap_bundle_root/operator-inputs/substrate-truth.json" \
+  --target-prerequisites "$airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+  --namespace agentsmith \
+  --output-dir "$airgap_consume_output" \
+  --kubectl "$FAKE_KUBECTL" \
+  --mode apply \
+  --archive-probe "$GOOD_PROBE" \
+  --image-loader "$GOOD_LOADER" \
+  --confirm-apply airgap/use_existing \
+  --operator-run-id operator-airgap-1005 \
+  --timeout 120s \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost >"$TMP_DIR/airgap-consume-use-existing.out"
+after_airgap_apply="$(hit_count)"
+
+[[ "$after_airgap_apply" -eq $((before_airgap_apply + 1)) ]] || fail "operator airgap apply smoke should issue one request"
+if grep -q -- '--dry-run=server' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "operator airgap apply must not dry-run confirmed apply"
+fi
+grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" || fail "operator airgap apply did not call rollout"
+grep -q 'get pods' "$KUBECTL_LOG" || fail "operator airgap apply did not check live pods"
+[[ "$(grep -c '^sha256:' "$LOAD_LOG" 2>/dev/null || true)" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] ||
+  fail "operator airgap apply must load every image exactly once"
+[[ -f "$airgap_consume_output/$REPORT_FILE" ]] || fail "operator airgap/use_existing summary missing"
+assert_producer_profile \
+  "$airgap_consume_output/airgap-deployment-gate/airgap-deployment-gate-report.json" \
+  "$AIRGAP_PROFILE"
+assert_airgap_consume_chain \
+  "$airgap_consume_output" \
+  apply \
+  existing_kubernetes \
+  "airgap-bundle-check,airgap-deployment-gate" \
+  "target-preflight,airgap-image-load,airgap-bundle-render-check,apply,rollout,smoke"
+assert_operator_report \
+  "$airgap_consume_output" \
+  airgap \
+  use_existing \
+  "$AIRGAP_PROFILE" \
+  "airgap-bundle-check,airgap-deployment-gate" \
+  "airgap_bundle_check_report,airgap_consume_rehearsal_report,airgap_deployment_gate_report" \
+  true
+pass "operator airgap/use_existing maps to consume rehearsal and writes handoff summary"
+
 unsupported_output="$TMP_DIR/out-airgap-install-substrates"
 expect_operator_fail_preserves_summary airgap-install-substrates "$unsupported_output" \
   bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
     --output-dir "$unsupported_output"
 [[ ! -e "$unsupported_output/bundle-create-report.json" ]] || fail "unsupported airgap install path called bundle-create"
+
+unsupported_airgap_output="$TMP_DIR/out-airgap-consume-install-substrates"
+expect_operator_fail_preserves_summary airgap-consume-install-substrates "$unsupported_airgap_output" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+    --output-dir "$unsupported_airgap_output"
+[[ ! -e "$unsupported_airgap_output/airgap-consume-rehearsal-report.json" ]] ||
+  fail "unsupported airgap install path called consume rehearsal"
 
 target_profile_output="$TMP_DIR/out-target-profile"
 expect_operator_fail_preserves_summary rejected-target-profile "$target_profile_output" \
@@ -1176,6 +1426,46 @@ expect_operator_fail_preserves_summary raw-confirm-apply-equals "$raw_confirm_eq
     --mode apply \
     --confirm-apply="$EXTERNAL_ONLINE_PROFILE" \
     --operator-run-id operator-run-raw-equals
+
+raw_airgap_confirm_output="$TMP_DIR/out-raw-airgap-confirm-apply"
+expect_operator_fail_preserves_summary raw-airgap-confirm-apply "$raw_airgap_confirm_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+    FAKE_KUBECTL_LIVE_IMAGE="$airgap_target_app_image" \
+    FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$airgap_target_app_image" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$airgap_bundle_root" \
+    --render-values "$airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$raw_airgap_confirm_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --archive-probe "$GOOD_PROBE" \
+    --image-loader "$GOOD_LOADER" \
+    --confirm-apply "$AIRGAP_PROFILE" \
+    --operator-run-id operator-airgap-raw
+
+raw_airgap_confirm_equals_output="$TMP_DIR/out-raw-airgap-confirm-apply-equals"
+expect_operator_fail_preserves_summary raw-airgap-confirm-apply-equals "$raw_airgap_confirm_equals_output" \
+  env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+    FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+    FAKE_KUBECTL_LIVE_IMAGE="$airgap_target_app_image" \
+    FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$airgap_target_app_image" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap use_existing \
+    --bundle-root "$airgap_bundle_root" \
+    --render-values "$airgap_bundle_root/operator-inputs/render-values.json" \
+    --substrate-truth "$airgap_bundle_root/operator-inputs/substrate-truth.json" \
+    --target-prerequisites "$airgap_bundle_root/operator-inputs/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$raw_airgap_confirm_equals_output" \
+    --kubectl "$FAKE_KUBECTL" \
+    --mode apply \
+    --archive-probe "$GOOD_PROBE" \
+    --image-loader "$GOOD_LOADER" \
+    --confirm-apply="$AIRGAP_PROFILE" \
+    --operator-run-id operator-airgap-raw-equals
 
 missing_release_contract_output="$TMP_DIR/out-missing-release-contract"
 expect_operator_fail_preserves_summary missing-release-contract "$missing_release_contract_output" \
