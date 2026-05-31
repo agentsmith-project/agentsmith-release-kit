@@ -28,10 +28,10 @@ This facade forwards to existing producer diagnostics only:
   airgap/* -> scripts/verify-release.sh --airgap-consume-rehearsal
   airgap-bundle/* -> scripts/verify-release.sh --bundle-create
 
-Planned installer surface:
-  install_substrates is not implemented. It fails fast until a separate
-  installer producer and explicit installer confirmation flag exist. Use
-  kit_provided for the current kit-supplied substrate pack/truth validation.
+Installer surface:
+  install_substrates is not implemented by this facade. Run the separate
+  --substrate-install producer and provide its report plus explicit
+  confirmation to deployment-path finalization.
 USAGE
 }
 
@@ -419,7 +419,7 @@ case "$surface/$substrate_strategy" in
     machine_profile="existing_kubernetes/kit_installed/airgap"
     ;;
   online/install_substrates|airgap/install_substrates|airgap-bundle/install_substrates)
-    fail "install_substrates is planned/not implemented; no substrate installer producer or explicit installer confirm flag exists. Use $surface/kit_provided for current substrate pack/truth validation."
+    fail "install_substrates is not implemented by operator-release.sh; provide a separate --substrate-install report and explicit confirmation to deployment-path finalization."
     ;;
   online/*)
     fail "unknown online substrate strategy: $substrate_strategy"

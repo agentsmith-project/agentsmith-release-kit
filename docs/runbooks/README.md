@@ -13,8 +13,9 @@ use-existing/kit-provided. It is not a formal release verdict, package
 readiness, operator readiness, or GA signoff.
 
 `kit_provided` is a validation path for kit-supplied substrate pack/truth
-inputs. It is not a substrate installer. A future `install_substrates` path
-needs its own installer producer plus an explicit installer confirmation flag.
+inputs. It is not a substrate installer. `install_substrates` needs a separate
+`--substrate-install` producer report plus an explicit installer confirmation
+flag.
 `installed_by` stays a provenance marker, not installer proof; it does not mean
 release-kit created databases, buckets, OIDC realms, or other substrate
 resources.
@@ -81,8 +82,9 @@ Default PR/push CI follows the quick/core path only:
 `verify-release.sh --quick`, `test-inputs.sh`, `test-template-package.sh`,
 `test-render.sh`, `test-render-check.sh`, and
 `test-operator-release-surface.sh`. Maintainer diagnostics such as adoption
-aggregation, operator signoff intake, airgap image load, substrate routability,
-and release-engineering intake are manual `workflow_dispatch` checks. They
+aggregation, operator signoff intake, airgap image load, substrate install,
+substrate routability, and release-engineering intake are manual
+`workflow_dispatch` checks. They
 are useful while changing those producers, but they are not default operator
 quick-path evidence and still do not issue deploy, package, or release
 readiness.

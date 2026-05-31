@@ -691,7 +691,18 @@ async function main() {
       schema: installSummary.schema,
       scope: installSummary.scope,
       output_substrate_truth_digest: installSummary.output_substrate_truth_digest,
-      service_count: installSummary.service_count
+      service_count: installSummary.service_count,
+      substrate_install_inputs_sha256: installSummary.input_digests.input_sha256,
+      resource_list_sha256: installSummary.input_digests.resource_list_sha256,
+      apply_resource_list_sha256: installSummary.input_digests.apply_resource_list_sha256,
+      effective_namespace: installSummary.input_digests.effective_namespace,
+      install_parameters_sha256: installSummary.input_digests.install_parameters_sha256,
+      target_prerequisites_sha256: installSummary.input_bindings.target_prerequisites_sha256,
+      resource_count: installSummary.proof.resource_count,
+      kubectl_resource_count: installSummary.proof.kubectl_resource_count,
+      namespace_scope_allowed_resource_count: installSummary.proof.namespace_scope_allowed_resource_count,
+      collision_checked_resource_count: installSummary.proof.collision_checked_resource_count,
+      kubectl_apply_applied_resource_count: installSummary.proof.kubectl_apply_applied_resource_count
     };
   }
 

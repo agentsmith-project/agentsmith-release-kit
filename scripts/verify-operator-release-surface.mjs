@@ -330,7 +330,7 @@ function requireNonNegativeInteger(value, label) {
 function assertMapping(args) {
   if (args.substrateStrategy === 'install_substrates') {
     fail(
-      'install_substrates is planned/not implemented; use kit_provided for current substrate pack/truth validation'
+      'install_substrates is not implemented by the operator facade; run verify-release.sh --substrate-install as a separate producer and provide its report to deployment-path finalization'
     );
   }
   const key = `${args.surface}/${args.substrateStrategy}`;

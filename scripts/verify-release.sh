@@ -14,7 +14,8 @@ Usage:
   #   bash scripts/operator-release.sh airgap kit_provided ...
   #   bash scripts/operator-release.sh airgap-bundle use_existing ...
   #   bash scripts/operator-release.sh airgap-bundle kit_provided ...
-  # install_substrates is planned/not implemented and fails fast in the facade.
+  # install_substrates is not implemented by the operator facade; use the
+  # separate --substrate-install producer report for deployment-path finalization.
   # verify-release.sh remains the producer catalog and focused diagnostic entry.
   bash scripts/verify-release.sh --quick
   bash scripts/verify-release.sh --inputs --release-contract <json> --deploy-template-package <json> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
@@ -35,6 +36,8 @@ Usage:
   bash scripts/verify-release.sh --airgap-adoption --release-contract <json> --bundle-surface-report <airgap-bundle/operator-release-surface-report.json> --consume-surface-report <airgap/operator-release-surface-report.json> --bundle-manifest <airgap-bundle-manifest.json> --output-dir <dir>
   bash scripts/verify-release.sh --substrate-pack-check --target-profile existing_kubernetes/kit_installed/<online|airgap> --substrate-pack-manifest <json> --substrate-truth <json> --output-dir <dir>
   bash scripts/verify-release.sh --substrate-routability --target-profile existing_kubernetes/kit_installed/online --substrate-pack-check-report <json> --substrate-truth <json> --target-prerequisites <json> --namespace <name> --kubectl <path-or-command> --routability-probe <executable> --output-dir <dir> [--context <name>] [--kubeconfig <path>] [--timeout-ms <ms>]
+  bash scripts/verify-release.sh --substrate-install --release-contract <json> --deploy-template-package <json> --target-profile existing_kubernetes/kit_installed/<online|airgap> --substrate-pack-manifest <json> --substrate-install-inputs <json> --target-prerequisites <json> --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubectl <path>] [--kubeconfig <path>] [--context <name>]
+  bash scripts/verify-release.sh --substrate-install --release-contract <json> --deploy-template-package <json> --target-profile existing_kubernetes/kit_installed/<online|airgap> --substrate-pack-manifest <json> --substrate-install-inputs <json> --target-prerequisites <json> --namespace <name> --output-dir <dir> --mode apply --confirm-substrate-install <matching-target-profile> --confirm-install-parameters <sha256:substrate-install-parameters> --operator-run-id <id> [--kubectl <path>] [--kubeconfig <path>] [--context <name>]
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/<external_declared|kit_installed>/<online|airgap> --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --apply --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/<external_declared|kit_installed>/<online|airgap> --namespace <name> --output-dir <dir> --mode apply --confirm-apply <matching-target-profile> --operator-run-id <id> [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --rollout --release-contract <json> --rendered-manifests <dir> --target-profile existing_kubernetes/<external_declared|kit_installed>/<online|airgap> --namespace <name> --output-dir <dir> [--timeout <duration>] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--forbidden-source-root <dir>]
@@ -71,6 +74,7 @@ Bootstrap status:
   --airgap-adoption aggregates already generated matching airgap-bundle and confirmed-apply airgap operator summaries for repo-local use_existing or kit_provided adoption preparation only; kit airgap binds substrate pack and substrate-pack-check truth, but this is not deploy, package, operator signoff, operator verdict, full release gate, or release readiness.
   --substrate-pack-check checks only a kit-installed substrate pack manifest and matching substrate truth for existing Kubernetes online/airgap targets; it is not substrate installation, deploy, package, or release readiness.
   --substrate-routability checks only existing Kubernetes / kit-installed / online substrate endpoint routability through an operator pod-network probe; it is not substrate installation, deploy, package, or release readiness.
+  --substrate-install installs only namespace-scoped kit substrate resources from a validated JSON resource list and writes substrate install report/truth; server-dry-run is diagnostic only and apply report/truth are producer evidence, not release readiness.
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
   --rollout checks Kubernetes rollout status and live image digests only; it is not release readiness.
   --smoke checks one route status after a bound rollout report only; it is not release readiness.
@@ -181,6 +185,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-substrate-routability.mjs" "$@"
     echo "substrate routability mode is not release readiness; readiness=false"
+    ;;
+  --substrate-install)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-substrate-install.mjs" "$@"
+    echo "substrate install mode is not release readiness; readiness=false"
     ;;
   --apply)
     shift

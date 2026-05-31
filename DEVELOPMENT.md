@@ -26,6 +26,7 @@ bash scripts/test-airgap-deployment-gate.sh
 bash scripts/test-airgap-consume-rehearsal.sh
 bash scripts/test-airgap-adoption.sh
 bash scripts/test-substrate-pack-check.sh
+bash scripts/test-substrate-install.sh
 bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
@@ -55,9 +56,9 @@ identity, signature, or verdict claims.
 entries for consuming an already assembled airgap bundle; they map to
 `--airgap-consume-rehearsal` and keep `readiness: false`.
 `kit_provided` means pack/truth validation for kit-supplied substrate material,
-not substrate installation. Future `install_substrates` needs a separate
-installer producer and explicit installer confirmation flag before it can be a
-successful operator path.
+not substrate installation. `install_substrates` needs a separate
+`--substrate-install` producer report and explicit installer confirmation flag
+before it can be a successful operator path.
 Current `installed_by: agentsmith-release-kit` values are kit-provided
 pack/truth identity and provenance markers only; `installed_by` is not
 installer proof and does not mean release-kit created databases, buckets, OIDC
@@ -423,6 +424,16 @@ claim release readiness. `substrate-pack-check-report.json` keeps
 `readiness: false`, records only input digests and non-sensitive summaries, and
 is not accepted by the evidence envelope validator.
 
+The current `--substrate-install` path is a focused diagnostic and producer
+for namespace-scoped kit substrate resources only. Confirmed apply binds the
+substrate install inputs, resource list, apply resource list, and effective
+namespace into `--confirm-install-parameters`; the report records
+`input_sha256`, `resource_list_sha256`, `apply_resource_list_sha256`, and
+`install_parameters_sha256` under `inputs.substrate_install_inputs`. Allowed
+Kubernetes resources are an
+apiVersion-aware namespace allowlist only. PersistentVolumeClaim is not
+installed by this producer; storage remains target prerequisite proof only.
+
 The current `--apply` path is a focused diagnostic for Kubernetes apply-only
 validation. It consumes a release contract, an already-rendered manifests
 directory, explicit target profile
@@ -636,8 +647,10 @@ target_preflight_prerequisite_only`; it does not connect to
 Kubernetes, render manifests, apply resources, smoke a cluster, package
 artifacts, or claim deploy or release readiness. The prerequisites document is
 the only place for namespace, RBAC policy/proof, ingress host and TLS secret
-ref, registry pull secret ref, storage class/PV policy, and substrate secret
-refs needed before a real Kubernetes or cloud target deploy. Its `registry`
+ref, registry pull secret ref, storage class/PV policy proof, and substrate
+secret refs needed before a real Kubernetes or cloud target deploy. The
+substrate installer does not create PVCs; storage readiness is proven here.
+Its `registry`
 object accepts only `pull_secret_ref`; `preloaded`, `mirror_done`, `verdict`,
 `token`, and other pseudo-proof or secret payload fields fail fast.
 

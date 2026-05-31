@@ -53,6 +53,21 @@ function sha(label) {
   return digest(Buffer.from(label));
 }
 
+function installParametersDigest(
+  installInputDigest,
+  resourceListDigest,
+  applyResourceListDigest,
+  effectiveNamespace
+) {
+  return digest(Buffer.from([
+    'agentsmith.substrate-install-parameters/v1',
+    `substrate_install_inputs=${installInputDigest}`,
+    `resource_list=${resourceListDigest}`,
+    `apply_resource_list=${applyResourceListDigest}`,
+    `effective_namespace=${effectiveNamespace}`
+  ].join('\n')));
+}
+
 function jsonDigest(value) {
   return digest(Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
 }
@@ -613,8 +628,20 @@ function airgapBundle(dir, profile) {
 }
 
 function substrateInstall(dir, profile, operatorRunId) {
-  // Future installer report shape fixture only; operator-release.sh does not
-  // produce this installer report today.
+  // Fixture for the explicit substrate installer report consumed by
+  // install_substrates finalization.
+  const installInputDigest = sha(`${profile}:substrate-install-inputs`);
+  const resourceListDigest = sha(`${profile}:substrate-resource-list`);
+  const applyResourceListDigest =
+    mutation === 'install-apply-resource-digest-mismatch'
+      ? sha(`${profile}:wrong-apply-resource-list`)
+      : sha(`${profile}:apply-resource-list`);
+  const effectiveNamespace =
+    mutation === 'install-effective-namespace-mismatch' ? 'other-ns' : 'agentsmith';
+  const targetPrerequisitesDigest =
+    mutation === 'install-target-prerequisites-digest-mismatch'
+      ? sha(`${profile}:other-target-prerequisites`)
+      : sha(`${profile}:target-prerequisites`);
   const report = {
     schema: 'agentsmith.substrate-install-report/v1',
     scope: 'substrate_install_only',
@@ -626,9 +653,92 @@ function substrateInstall(dir, profile, operatorRunId) {
     release_contract_digest: contractDigest,
     deploy_template_package_digest: templateDigest,
     target_profile: targetProfile(profile),
+    namespace: effectiveNamespace,
+    mode: mutation === 'install-server-dry-run' ? 'server-dry-run' : 'apply',
+    inputs: {
+      substrate_pack_manifest: {
+        schema_version: 'agentsmith.substrate-pack-manifest/v1',
+        input_sha256: sha(`${profile}:substrate-pack-manifest`),
+        target_profile: profile,
+        release_contract_digest: contractDigest,
+        deploy_template_package_digest: templateDigest
+      },
+      substrate_install_inputs: {
+        schema_version: 'agentsmith.substrate-install-inputs/v1',
+        input_sha256: installInputDigest,
+        resource_source: 'inline',
+        resource_list_sha256: resourceListDigest,
+        apply_resource_list_sha256: applyResourceListDigest,
+        effective_namespace: effectiveNamespace,
+        install_parameters_sha256: installParametersDigest(
+          installInputDigest,
+          resourceListDigest,
+          mutation === 'install-apply-resource-digest-mismatch'
+            ? sha(`${profile}:apply-resource-list`)
+            : applyResourceListDigest,
+          effectiveNamespace
+        )
+      },
+      target_prerequisites: {
+        schema_version: 'agentsmith.target-prerequisites.truth/v1',
+        input_sha256: targetPrerequisitesDigest,
+        target_profile: profile,
+        namespace: effectiveNamespace
+      }
+    },
     operator_run_id: operatorRunId,
     substrate_truth_digest: sha(`${profile}:substrate-truth`),
     installed_services: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc'],
+    resource_refs: [
+      {
+        apiVersion: 'v1',
+        group: '',
+        kind: 'ConfigMap',
+        resource: 'configmaps',
+        namespace: effectiveNamespace,
+        name: 'agentsmith-substrate-config',
+        document_index: 1
+      }
+    ],
+    kubectl_resource_refs: ['configmap/agentsmith-substrate-config'],
+    checks: {
+      substrate_pack_manifest: 'pass',
+      substrate_install_inputs: 'pass',
+      target_prerequisites: 'pass',
+      namespace_scope: {
+        status: 'pass',
+        namespace: effectiveNamespace,
+        resource_count: 1,
+        allowed_resource_count: 1
+      },
+      collision_guard: {
+        status: 'pass',
+        checked_resource_count: 1,
+        kubectl_get_count: 1,
+        not_found_count: 1,
+        owned_resource_count: 0
+      },
+      kubectl_apply: {
+        status: 'pass',
+        mode: mutation === 'install-server-dry-run' ? 'server-dry-run' : 'apply',
+        applied_resource_count: 1,
+        kubectl_resource_count: 1,
+        command_summary: {
+          command: 'kubectl apply --server-side --namespace agentsmith -f <apply-resource-list> -o name',
+          server_side: true,
+          namespace: effectiveNamespace,
+          output: 'name',
+          dry_run: mutation === 'install-server-dry-run' ? 'server' : 'none'
+        }
+      }
+    },
+    summary: {
+      release_kit_version: '0.1.0',
+      substrate_pack_release_kit_version: '0.1.0',
+      installed_by: 'agentsmith-release-kit',
+      resources_count: 1,
+      substrate_services_count: 5
+    },
     output_substrate_truth_digest:
       mutation === 'install-output-substrate-truth-digest-mismatch'
         ? sha(`${profile}:wrong-output-substrate-truth`)
@@ -636,6 +746,40 @@ function substrateInstall(dir, profile, operatorRunId) {
   };
   if (mutation === 'missing-install-release-contract-digest') {
     delete report.release_contract_digest;
+  }
+  if (mutation === 'missing-install-input-digests') {
+    delete report.inputs;
+  }
+  if (mutation === 'missing-install-namespace-scope-check') {
+    delete report.checks.namespace_scope;
+  }
+  if (mutation === 'missing-install-resource-refs') {
+    delete report.resource_refs;
+  }
+  if (mutation === 'install-secret-resource-ref') {
+    report.resource_refs[0] = {
+      ...report.resource_refs[0],
+      apiVersion: 'v1',
+      group: '',
+      kind: 'Secret',
+      resource: 'secrets',
+      name: 'agentsmith-substrate-secret'
+    };
+  }
+  if (mutation === 'install-kubectl-secret-resource-ref') {
+    report.kubectl_resource_refs = ['secret/agentsmith-substrate-config'];
+  }
+  if (mutation === 'install-resource-ref-namespace-mismatch') {
+    report.resource_refs[0].namespace = 'other-ns';
+  }
+  if (mutation === 'missing-install-target-prerequisites') {
+    delete report.inputs.target_prerequisites;
+  }
+  if (mutation === 'missing-install-apply-resource-digest') {
+    delete report.inputs.substrate_install_inputs.apply_resource_list_sha256;
+  }
+  if (mutation === 'missing-install-effective-namespace') {
+    delete report.inputs.substrate_install_inputs.effective_namespace;
   }
   if (mutation === 'missing-install-producer') {
     delete report.producer;
@@ -645,6 +789,13 @@ function substrateInstall(dir, profile, operatorRunId) {
   }
   if (mutation === 'missing-install-output-substrate-truth-digest') {
     delete report.output_substrate_truth_digest;
+  }
+  if (mutation === 'install-kubectl-apply-dry-run-summary') {
+    report.checks.kubectl_apply.command_summary.dry_run = 'server';
+  }
+  if (mutation === 'install-kubectl-apply-dry-run-command') {
+    report.checks.kubectl_apply.command_summary.command =
+      `${report.checks.kubectl_apply.command_summary.command} --dry-run=server`;
   }
   writeJson(path.join(dir, 'substrate-install-report.json'), report);
 }
@@ -1279,6 +1430,222 @@ grep -Fq "substrate install report.release_contract_digest is required" "$TMP_DI
   fail "missing install release contract digest failure message did not explain blocker"
 pass "install_substrates requires release contract digest binding"
 
+INSTALL_SERVER_DRY_RUN_DIR="$TMP_DIR/install-server-dry-run"
+write_fixture_set "$INSTALL_SERVER_DRY_RUN_DIR" install-server-dry-run
+if run_online_path \
+  "$INSTALL_SERVER_DRY_RUN_DIR" \
+  "online/install_substrates" \
+  "$INSTALL_SERVER_DRY_RUN_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-server-dry-run" \
+  --substrate-install-report "$INSTALL_SERVER_DRY_RUN_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-server-dry-run.out" 2>&1; then
+  fail "server-dry-run substrate install report should fail"
+fi
+grep -Fq "substrate_install_report.mode must be apply" "$TMP_DIR/deployment-path-install-server-dry-run.out" || \
+  fail "server-dry-run substrate install failure message did not explain blocker"
+pass "install_substrates rejects substrate install server-dry-run proof"
+
+INSTALL_DRY_RUN_SUMMARY_DIR="$TMP_DIR/install-kubectl-apply-dry-run-summary"
+write_fixture_set "$INSTALL_DRY_RUN_SUMMARY_DIR" install-kubectl-apply-dry-run-summary
+if run_online_path \
+  "$INSTALL_DRY_RUN_SUMMARY_DIR" \
+  "online/install_substrates" \
+  "$INSTALL_DRY_RUN_SUMMARY_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-kubectl-apply-dry-run-summary" \
+  --substrate-install-report "$INSTALL_DRY_RUN_SUMMARY_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-kubectl-apply-dry-run-summary.out" 2>&1; then
+  fail "apply-mode substrate install report with dry_run server should fail"
+fi
+grep -Fq "substrate_install_report.checks.kubectl_apply.command_summary.dry_run must be none for apply" "$TMP_DIR/deployment-path-install-kubectl-apply-dry-run-summary.out" || \
+  fail "installer apply dry_run summary failure message did not explain blocker"
+if grep -Fq "sha256 must match" "$TMP_DIR/deployment-path-install-kubectl-apply-dry-run-summary.out"; then
+  fail "installer dry_run summary negative hit digest mismatch instead of semantic validation"
+fi
+pass "install_substrates finalizer rejects apply-mode installer reports with dry_run server"
+
+INSTALL_DRY_RUN_COMMAND_DIR="$TMP_DIR/install-kubectl-apply-dry-run-command"
+write_fixture_set "$INSTALL_DRY_RUN_COMMAND_DIR" install-kubectl-apply-dry-run-command
+if run_online_path \
+  "$INSTALL_DRY_RUN_COMMAND_DIR" \
+  "online/install_substrates" \
+  "$INSTALL_DRY_RUN_COMMAND_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-kubectl-apply-dry-run-command" \
+  --substrate-install-report "$INSTALL_DRY_RUN_COMMAND_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-kubectl-apply-dry-run-command.out" 2>&1; then
+  fail "apply-mode substrate install report with --dry-run command should fail"
+fi
+grep -Fq "substrate_install_report.checks.kubectl_apply.command_summary.command must not include --dry-run for apply" "$TMP_DIR/deployment-path-install-kubectl-apply-dry-run-command.out" || \
+  fail "installer apply dry-run command failure message did not explain blocker"
+if grep -Fq "sha256 must match" "$TMP_DIR/deployment-path-install-kubectl-apply-dry-run-command.out"; then
+  fail "installer dry-run command negative hit digest mismatch instead of semantic validation"
+fi
+pass "install_substrates finalizer rejects apply-mode installer reports whose command dry-runs"
+
+MISSING_INSTALL_INPUT_DIGESTS_DIR="$TMP_DIR/missing-install-input-digests"
+write_fixture_set "$MISSING_INSTALL_INPUT_DIGESTS_DIR" missing-install-input-digests
+if run_online_path \
+  "$MISSING_INSTALL_INPUT_DIGESTS_DIR" \
+  "online/install_substrates" \
+  "$MISSING_INSTALL_INPUT_DIGESTS_DIR/online-install-substrates" \
+  "$TMP_DIR/out-missing-install-input-digests" \
+  --substrate-install-report "$MISSING_INSTALL_INPUT_DIGESTS_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-input-digests.out" 2>&1; then
+  fail "substrate install report missing input digest bindings should fail"
+fi
+grep -Fq "substrate_install_report.inputs must be an object" "$TMP_DIR/deployment-path-install-input-digests.out" || \
+  fail "missing install input digest failure message did not explain blocker"
+pass "install_substrates finalizer requires substrate install input digest bindings"
+
+MISSING_INSTALL_NAMESPACE_SCOPE_DIR="$TMP_DIR/missing-install-namespace-scope-check"
+write_fixture_set "$MISSING_INSTALL_NAMESPACE_SCOPE_DIR" missing-install-namespace-scope-check
+if run_online_path \
+  "$MISSING_INSTALL_NAMESPACE_SCOPE_DIR" \
+  "online/install_substrates" \
+  "$MISSING_INSTALL_NAMESPACE_SCOPE_DIR/online-install-substrates" \
+  "$TMP_DIR/out-missing-install-namespace-scope" \
+  --substrate-install-report "$MISSING_INSTALL_NAMESPACE_SCOPE_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-namespace-scope.out" 2>&1; then
+  fail "substrate install report missing namespace scope proof should fail"
+fi
+grep -Fq "substrate_install_report.checks.namespace_scope must be an object" "$TMP_DIR/deployment-path-install-namespace-scope.out" || \
+  fail "missing install namespace scope proof failure message did not explain blocker"
+pass "install_substrates finalizer requires namespace scope proof summary"
+
+MISSING_INSTALL_RESOURCE_REFS_DIR="$TMP_DIR/missing-install-resource-refs"
+write_fixture_set "$MISSING_INSTALL_RESOURCE_REFS_DIR" missing-install-resource-refs
+if run_online_path \
+  "$MISSING_INSTALL_RESOURCE_REFS_DIR" \
+  "online/install_substrates" \
+  "$MISSING_INSTALL_RESOURCE_REFS_DIR/online-install-substrates" \
+  "$TMP_DIR/out-missing-install-resource-refs" \
+  --substrate-install-report "$MISSING_INSTALL_RESOURCE_REFS_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-resource-refs.out" 2>&1; then
+  fail "substrate install report missing resource refs should fail"
+fi
+grep -Fq "substrate_install_report.resource_refs must be an array" "$TMP_DIR/deployment-path-install-resource-refs.out" || \
+  fail "missing install resource refs failure message did not explain blocker"
+pass "install_substrates finalizer requires resource refs materiality"
+
+INSTALL_SECRET_RESOURCE_REF_DIR="$TMP_DIR/install-secret-resource-ref"
+write_fixture_set "$INSTALL_SECRET_RESOURCE_REF_DIR" install-secret-resource-ref
+if run_online_path \
+  "$INSTALL_SECRET_RESOURCE_REF_DIR" \
+  "online/install_substrates" \
+  "$INSTALL_SECRET_RESOURCE_REF_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-secret-resource-ref" \
+  --substrate-install-report "$INSTALL_SECRET_RESOURCE_REF_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-secret-resource-ref.out" 2>&1; then
+  fail "substrate install report Secret resource_ref should fail"
+fi
+grep -Fq "substrate_install_report.resource_refs[0].kind Secret is not allowed for substrate install" "$TMP_DIR/deployment-path-install-secret-resource-ref.out" || \
+  fail "Secret installer resource_ref failure message did not explain allowlist blocker"
+pass "install_substrates finalizer rejects Secret resource_refs"
+
+INSTALL_KUBECTL_SECRET_REF_DIR="$TMP_DIR/install-kubectl-secret-resource-ref"
+write_fixture_set "$INSTALL_KUBECTL_SECRET_REF_DIR" install-kubectl-secret-resource-ref
+if run_online_path \
+  "$INSTALL_KUBECTL_SECRET_REF_DIR" \
+  "online/install_substrates" \
+  "$INSTALL_KUBECTL_SECRET_REF_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-kubectl-secret-resource-ref" \
+  --substrate-install-report "$INSTALL_KUBECTL_SECRET_REF_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-kubectl-secret-resource-ref.out" 2>&1; then
+  fail "substrate install report Secret kubectl_resource_ref should fail"
+fi
+grep -Fq "substrate_install_report.kubectl_resource_refs[0] resource secret is not allowed for substrate install" "$TMP_DIR/deployment-path-install-kubectl-secret-resource-ref.out" || \
+  fail "Secret installer kubectl_resource_ref failure message did not explain allowlist blocker"
+pass "install_substrates finalizer rejects Secret kubectl_resource_refs"
+
+INSTALL_RESOURCE_REF_NAMESPACE_DIR="$TMP_DIR/install-resource-ref-namespace-mismatch"
+write_fixture_set "$INSTALL_RESOURCE_REF_NAMESPACE_DIR" install-resource-ref-namespace-mismatch
+if run_online_path \
+  "$INSTALL_RESOURCE_REF_NAMESPACE_DIR" \
+  "online/install_substrates" \
+  "$INSTALL_RESOURCE_REF_NAMESPACE_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-resource-ref-namespace" \
+  --substrate-install-report "$INSTALL_RESOURCE_REF_NAMESPACE_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-resource-ref-namespace.out" 2>&1; then
+  fail "substrate install report resource_ref namespace mismatch should fail"
+fi
+grep -Fq "substrate_install_report.resource_refs[0].namespace must match substrate install effective namespace" "$TMP_DIR/deployment-path-install-resource-ref-namespace.out" || \
+  fail "installer resource_ref namespace mismatch failure message did not explain blocker"
+pass "install_substrates finalizer rejects resource_refs outside effective namespace"
+
+MISSING_INSTALL_TARGET_PREREQUISITES_DIR="$TMP_DIR/missing-install-target-prerequisites"
+write_fixture_set "$MISSING_INSTALL_TARGET_PREREQUISITES_DIR" missing-install-target-prerequisites
+if run_online_path \
+  "$MISSING_INSTALL_TARGET_PREREQUISITES_DIR" \
+  "online/install_substrates" \
+  "$MISSING_INSTALL_TARGET_PREREQUISITES_DIR/online-install-substrates" \
+  "$TMP_DIR/out-missing-install-target-prerequisites" \
+  --substrate-install-report "$MISSING_INSTALL_TARGET_PREREQUISITES_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-target-prerequisites.out" 2>&1; then
+  fail "substrate install report missing target prerequisites binding should fail"
+fi
+grep -Fq "substrate_install_report.inputs.target_prerequisites must be an object" "$TMP_DIR/deployment-path-install-target-prerequisites.out" || \
+  fail "missing install target prerequisites failure message did not explain blocker"
+pass "install_substrates finalizer requires target prerequisites input binding"
+
+INSTALL_TARGET_PREREQUISITES_DIGEST_DIR="$TMP_DIR/install-target-prerequisites-digest-mismatch"
+write_fixture_set "$INSTALL_TARGET_PREREQUISITES_DIGEST_DIR" install-target-prerequisites-digest-mismatch
+if run_online_path \
+  "$INSTALL_TARGET_PREREQUISITES_DIGEST_DIR" \
+  "online/install_substrates" \
+  "$INSTALL_TARGET_PREREQUISITES_DIGEST_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-target-prerequisites-digest" \
+  --substrate-install-report "$INSTALL_TARGET_PREREQUISITES_DIGEST_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-target-prerequisites-digest.out" 2>&1; then
+  fail "substrate install report target prerequisites digest mismatch should fail"
+fi
+grep -Fq "substrate_install_report.inputs.target_prerequisites.input_sha256 must match target-preflight step report.target_prerequisites.input_sha256" "$TMP_DIR/deployment-path-install-target-prerequisites-digest.out" || \
+  fail "target prerequisites digest mismatch failure message did not explain blocker"
+pass "install_substrates finalizer binds installer target prerequisites digest to target preflight"
+
+MISSING_INSTALL_APPLY_DIGEST_DIR="$TMP_DIR/missing-install-apply-resource-digest"
+write_fixture_set "$MISSING_INSTALL_APPLY_DIGEST_DIR" missing-install-apply-resource-digest
+if run_online_path \
+  "$MISSING_INSTALL_APPLY_DIGEST_DIR" \
+  "online/install_substrates" \
+  "$MISSING_INSTALL_APPLY_DIGEST_DIR/online-install-substrates" \
+  "$TMP_DIR/out-missing-install-apply-resource-digest" \
+  --substrate-install-report "$MISSING_INSTALL_APPLY_DIGEST_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-apply-digest-missing.out" 2>&1; then
+  fail "substrate install report missing apply artifact digest should fail"
+fi
+grep -Fq "substrate_install_report.inputs.substrate_install_inputs.apply_resource_list_sha256 is required" "$TMP_DIR/deployment-path-install-apply-digest-missing.out" || \
+  fail "missing install apply artifact digest failure message did not explain blocker"
+pass "install_substrates finalizer requires apply artifact digest binding"
+
+INSTALL_APPLY_DIGEST_MISMATCH_DIR="$TMP_DIR/install-apply-resource-digest-mismatch"
+write_fixture_set "$INSTALL_APPLY_DIGEST_MISMATCH_DIR" install-apply-resource-digest-mismatch
+if run_online_path \
+  "$INSTALL_APPLY_DIGEST_MISMATCH_DIR" \
+  "online/install_substrates" \
+  "$INSTALL_APPLY_DIGEST_MISMATCH_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-apply-resource-digest-mismatch" \
+  --substrate-install-report "$INSTALL_APPLY_DIGEST_MISMATCH_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-apply-digest-mismatch.out" 2>&1; then
+  fail "substrate install report apply artifact digest mismatch should fail"
+fi
+grep -Fq "install_parameters_sha256 must bind install input, resource list, apply artifact, and effective namespace" "$TMP_DIR/deployment-path-install-apply-digest-mismatch.out" || \
+  fail "install apply artifact digest mismatch failure message did not explain blocker"
+pass "install_substrates finalizer binds install parameters to exact apply artifact digest"
+
+INSTALL_EFFECTIVE_NAMESPACE_MISMATCH_DIR="$TMP_DIR/install-effective-namespace-mismatch"
+write_fixture_set "$INSTALL_EFFECTIVE_NAMESPACE_MISMATCH_DIR" install-effective-namespace-mismatch
+if run_online_path \
+  "$INSTALL_EFFECTIVE_NAMESPACE_MISMATCH_DIR" \
+  "online/install_substrates" \
+  "$INSTALL_EFFECTIVE_NAMESPACE_MISMATCH_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-effective-namespace-mismatch" \
+  --substrate-install-report "$INSTALL_EFFECTIVE_NAMESPACE_MISMATCH_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-10001" >"$TMP_DIR/deployment-path-install-effective-namespace.out" 2>&1; then
+  fail "substrate install report effective namespace mismatch should fail"
+fi
+grep -Fq "effective_namespace must match target-preflight step report.target_prerequisites.namespace" "$TMP_DIR/deployment-path-install-effective-namespace.out" || \
+  fail "install effective namespace mismatch failure message did not explain blocker"
+pass "install_substrates finalizer binds effective namespace to target preflight namespace"
+
 MISSING_INSTALL_SERVICES_DIR="$TMP_DIR/missing-install-installed-services"
 write_fixture_set "$MISSING_INSTALL_SERVICES_DIR" missing-install-installed-services
 if run_online_path \
@@ -1307,7 +1674,7 @@ if run_online_path \
 fi
 grep -Fq "substrate_install_report.producer is required" "$TMP_DIR/deployment-path-install-producer.out" || \
   fail "missing install producer failure message did not explain blocker"
-pass "future installer report shape requires repo-owned producer marker"
+pass "install_substrates requires repo-owned installer producer marker"
 
 MISSING_INSTALL_OUTPUT_TRUTH_DIR="$TMP_DIR/missing-install-output-substrate-truth-digest"
 write_fixture_set "$MISSING_INSTALL_OUTPUT_TRUTH_DIR" missing-install-output-substrate-truth-digest

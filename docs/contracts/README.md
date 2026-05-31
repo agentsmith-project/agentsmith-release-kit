@@ -90,8 +90,8 @@ pack/truth inputs. For the two install-substrates evidence paths
 GA aggregate now accept explicit installer confirmation evidence. The release
 kit can validate that installer evidence and its output substrate truth
 binding to target-preflight truth. The operator facade still does not install
-substrates automatically: the real installer producer remains an
-independent/follow-up capability. Internal
+substrates automatically: the separate `--substrate-install` producer report
+must be supplied explicitly. Internal
 `installed_by: agentsmith-release-kit` values stay as kit-provided pack/truth
 identity and provenance markers; `installed_by` stays a provenance marker, not
 facade installer proof.

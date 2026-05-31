@@ -44,6 +44,21 @@ function sha(label) {
   return digest(Buffer.from(label));
 }
 
+function installParametersDigest(
+  installInputDigest,
+  resourceListDigest,
+  applyResourceListDigest,
+  effectiveNamespace
+) {
+  return digest(Buffer.from([
+    'agentsmith.substrate-install-parameters/v1',
+    `substrate_install_inputs=${installInputDigest}`,
+    `resource_list=${resourceListDigest}`,
+    `apply_resource_list=${applyResourceListDigest}`,
+    `effective_namespace=${effectiveNamespace}`
+  ].join('\n')));
+}
+
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
@@ -549,6 +564,10 @@ function airgapGate(dir, profile, bindings) {
 }
 
 function substrateInstall(dir, profile, operatorRunId) {
+  const installInputDigest = sha(`${profile}:substrate-install-inputs`);
+  const resourceListDigest = sha(`${profile}:substrate-resource-list`);
+  const applyResourceListDigest = sha(`${profile}:apply-resource-list`);
+  const effectiveNamespace = 'agentsmith';
   writeJson(path.join(dir, 'substrate-install-report.json'), {
     schema: 'agentsmith.substrate-install-report/v1',
     scope: 'substrate_install_only',
@@ -560,9 +579,90 @@ function substrateInstall(dir, profile, operatorRunId) {
     release_contract_digest: contractDigest,
     deploy_template_package_digest: templateDigest,
     target_profile: targetProfile(profile),
+    namespace: effectiveNamespace,
+    mode: 'apply',
+    inputs: {
+      substrate_pack_manifest: {
+        schema_version: 'agentsmith.substrate-pack-manifest/v1',
+        input_sha256: sha(`${profile}:substrate-pack-manifest`),
+        target_profile: profile,
+        release_contract_digest: contractDigest,
+        deploy_template_package_digest: templateDigest
+      },
+      substrate_install_inputs: {
+        schema_version: 'agentsmith.substrate-install-inputs/v1',
+        input_sha256: installInputDigest,
+        resource_source: 'inline',
+        resource_list_sha256: resourceListDigest,
+        apply_resource_list_sha256: applyResourceListDigest,
+        effective_namespace: effectiveNamespace,
+        install_parameters_sha256: installParametersDigest(
+          installInputDigest,
+          resourceListDigest,
+          applyResourceListDigest,
+          effectiveNamespace
+        )
+      },
+      target_prerequisites: {
+        schema_version: 'agentsmith.target-prerequisites.truth/v1',
+        input_sha256: sha(`${profile}:target-prerequisites`),
+        target_profile: profile,
+        namespace: effectiveNamespace
+      }
+    },
     operator_run_id: operatorRunId,
     substrate_truth_digest: sha(`${profile}:substrate-truth`),
     installed_services: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc'],
+    resource_refs: [
+      {
+        apiVersion: 'v1',
+        group: '',
+        kind: 'ConfigMap',
+        resource: 'configmaps',
+        namespace: effectiveNamespace,
+        name: 'agentsmith-substrate-config',
+        document_index: 1
+      }
+    ],
+    kubectl_resource_refs: ['configmap/agentsmith-substrate-config'],
+    checks: {
+      substrate_pack_manifest: 'pass',
+      substrate_install_inputs: 'pass',
+      target_prerequisites: 'pass',
+      namespace_scope: {
+        status: 'pass',
+        namespace: effectiveNamespace,
+        resource_count: 1,
+        allowed_resource_count: 1
+      },
+      collision_guard: {
+        status: 'pass',
+        checked_resource_count: 1,
+        kubectl_get_count: 1,
+        not_found_count: 1,
+        owned_resource_count: 0
+      },
+      kubectl_apply: {
+        status: 'pass',
+        mode: 'apply',
+        applied_resource_count: 1,
+        kubectl_resource_count: 1,
+        command_summary: {
+          command: 'kubectl apply --server-side --namespace agentsmith -f <apply-resource-list> -o name',
+          server_side: true,
+          namespace: effectiveNamespace,
+          output: 'name',
+          dry_run: 'none'
+        }
+      }
+    },
+    summary: {
+      release_kit_version: '0.1.0',
+      substrate_pack_release_kit_version: '0.1.0',
+      installed_by: 'agentsmith-release-kit',
+      resources_count: 1,
+      substrate_services_count: 5
+    },
     output_substrate_truth_digest: sha(`${profile}:substrate-truth`)
   });
 }
@@ -825,10 +925,30 @@ mutate_path_report() {
   local mutation="$2"
 
   "$NODE_BIN" --input-type=module - "$report_file" "$mutation" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 
 const [reportFile, mutation] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+
+function digest(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function installParametersDigest({
+  installInputDigest,
+  resourceListDigest,
+  applyResourceListDigest,
+  effectiveNamespace
+}) {
+  return digest(Buffer.from([
+    'agentsmith.substrate-install-parameters/v1',
+    `substrate_install_inputs=${installInputDigest}`,
+    `resource_list=${resourceListDigest}`,
+    `apply_resource_list=${applyResourceListDigest}`,
+    `effective_namespace=${effectiveNamespace}`
+  ].join('\n')));
+}
 
 if (mutation === 'missing-install-confirmation') {
   report.install_substrates_confirmation.confirmed = false;
@@ -844,6 +964,25 @@ if (mutation === 'missing-install-confirmation') {
 } else if (mutation === 'source-ledger-step-digest-mismatch') {
   report.source_evidence.finalized_steps[0].report_digest =
     `sha256:${'9'.repeat(64)}`;
+} else if (mutation === 'source-ledger-install-input-digest-mismatch') {
+  const install = report.source_evidence.substrate_install;
+  install.substrate_install_inputs_sha256 = `sha256:${'7'.repeat(64)}`;
+  install.install_parameters_sha256 = installParametersDigest({
+    installInputDigest: install.substrate_install_inputs_sha256,
+    resourceListDigest: install.resource_list_sha256,
+    applyResourceListDigest: install.apply_resource_list_sha256,
+    effectiveNamespace: install.effective_namespace
+  });
+} else if (mutation === 'source-ledger-output-truth-digest-mismatch') {
+  report.source_evidence.substrate_install.output_substrate_truth_digest =
+    `sha256:${'6'.repeat(64)}`;
+} else if (mutation === 'source-ledger-service-count-mismatch') {
+  report.source_evidence.substrate_install.service_count += 1;
+} else if (mutation === 'source-ledger-apply-digest-missing') {
+  delete report.source_evidence.substrate_install.apply_resource_list_sha256;
+} else if (mutation === 'source-ledger-target-prerequisites-digest-mismatch') {
+  report.source_evidence.substrate_install.target_prerequisites_sha256 =
+    `sha256:${'8'.repeat(64)}`;
 } else {
   throw new Error(`unknown mutation: ${mutation}`);
 }
@@ -987,6 +1126,7 @@ if (!entry) {
 
 const materialFile = path.join(reportDir, entry.path);
 const material = JSON.parse(fs.readFileSync(materialFile, 'utf8'));
+let substrateInstallTargetPrerequisitesDigestOverride;
 if (mutation === 'forbidden-local-material') {
   material.operator_note = {
     kubeconfig_path: '/etc/kubernetes/admin.conf'
@@ -1007,6 +1147,32 @@ if (mutation === 'forbidden-local-material') {
       image.digest = replacementDigest;
     }
   }
+} else if (mutation === 'substrate-install-missing-input-digests') {
+  delete material.inputs;
+} else if (mutation === 'substrate-install-missing-kubectl-apply-check') {
+  delete material.checks.kubectl_apply;
+} else if (mutation === 'substrate-install-kubectl-apply-dry-run-summary') {
+  material.checks.kubectl_apply.command_summary.dry_run = 'server';
+} else if (mutation === 'substrate-install-kubectl-apply-dry-run-command') {
+  material.checks.kubectl_apply.command_summary.command =
+    `${material.checks.kubectl_apply.command_summary.command} --dry-run=server`;
+} else if (mutation === 'substrate-install-missing-kubectl-resource-refs') {
+  delete material.kubectl_resource_refs;
+} else if (mutation === 'substrate-install-target-prerequisites-digest-mismatch') {
+  substrateInstallTargetPrerequisitesDigestOverride = `sha256:${'b'.repeat(64)}`;
+  material.inputs.target_prerequisites.input_sha256 =
+    substrateInstallTargetPrerequisitesDigestOverride;
+} else if (mutation === 'substrate-install-secret-resource-ref') {
+  material.resource_refs[0] = {
+    ...material.resource_refs[0],
+    apiVersion: 'v1',
+    group: '',
+    kind: 'Secret',
+    resource: 'secrets',
+    name: 'agentsmith-substrate-secret'
+  };
+} else if (mutation === 'substrate-install-resource-ref-namespace-mismatch') {
+  material.resource_refs[0].namespace = 'other-ns';
 } else {
   throw new Error(`unknown source evidence mutation: ${mutation}`);
 }
@@ -1021,6 +1187,14 @@ if (!pathStep || !ledgerStep) {
 }
 pathStep.report_digest = materialDigest;
 ledgerStep.report_digest = materialDigest;
+if (stepName === 'substrate-install') {
+  report.source_evidence.substrate_install.report_digest = materialDigest;
+  report.install_substrates_confirmation.substrate_install_report_digest = materialDigest;
+  if (substrateInstallTargetPrerequisitesDigestOverride) {
+    report.source_evidence.substrate_install.target_prerequisites_sha256 =
+      substrateInstallTargetPrerequisitesDigestOverride;
+  }
+}
 writeJson(reportFile, report);
 
 manifest.path_report_sha256 = digest(reportFile);
@@ -1403,6 +1577,139 @@ grep -Fq "render-check step report.images[0].image is required" "$TMP_DIR/ga-rel
   fail "source render-check semantic failure message did not explain blocker"
 pass "GA aggregate revalidates materialized render-check source semantics"
 
+SOURCE_SUBSTRATE_INPUT_DIGESTS_DIR="$TMP_DIR/source-substrate-install-input-digests"
+write_fixture_set "$SOURCE_SUBSTRATE_INPUT_DIGESTS_DIR" valid
+generate_path_bundles "$SOURCE_SUBSTRATE_INPUT_DIGESTS_DIR" "$TMP_DIR/path-source-substrate-install-input-digests"
+mutate_source_evidence_file_with_digest_refresh \
+  "$TMP_DIR/path-source-substrate-install-input-digests/online-install-substrates" \
+  substrate-install \
+  substrate-install-missing-input-digests
+if run_ga_release "$SOURCE_SUBSTRATE_INPUT_DIGESTS_DIR" "$TMP_DIR/path-source-substrate-install-input-digests" "$TMP_DIR/out-source-substrate-install-input-digests" >"$TMP_DIR/ga-release-source-substrate-install-input-digests.out" 2>&1; then
+  fail "substrate install source evidence without input digests should fail semantic revalidation"
+fi
+grep -Fq "substrate_install_report.inputs must be an object" "$TMP_DIR/ga-release-source-substrate-install-input-digests.out" || \
+  fail "source substrate install input digest failure message did not explain blocker"
+pass "GA aggregate revalidates materialized substrate install input digest bindings"
+
+SOURCE_SUBSTRATE_KUBECTL_APPLY_DIR="$TMP_DIR/source-substrate-install-kubectl-apply"
+write_fixture_set "$SOURCE_SUBSTRATE_KUBECTL_APPLY_DIR" valid
+generate_path_bundles "$SOURCE_SUBSTRATE_KUBECTL_APPLY_DIR" "$TMP_DIR/path-source-substrate-install-kubectl-apply"
+mutate_source_evidence_file_with_digest_refresh \
+  "$TMP_DIR/path-source-substrate-install-kubectl-apply/online-install-substrates" \
+  substrate-install \
+  substrate-install-missing-kubectl-apply-check
+if run_ga_release "$SOURCE_SUBSTRATE_KUBECTL_APPLY_DIR" "$TMP_DIR/path-source-substrate-install-kubectl-apply" "$TMP_DIR/out-source-substrate-install-kubectl-apply" >"$TMP_DIR/ga-release-source-substrate-install-kubectl-apply.out" 2>&1; then
+  fail "digest-refreshed substrate install source evidence without kubectl apply proof should fail semantic revalidation"
+fi
+grep -Fq "substrate_install_report.checks.kubectl_apply must be an object" "$TMP_DIR/ga-release-source-substrate-install-kubectl-apply.out" || \
+  fail "source substrate install kubectl apply proof failure message did not explain blocker"
+if grep -Fq "sha256 must match" "$TMP_DIR/ga-release-source-substrate-install-kubectl-apply.out"; then
+  fail "source substrate install kubectl apply negative hit digest mismatch instead of semantic validation"
+fi
+pass "GA aggregate revalidates digest-refreshed substrate install kubectl apply proof"
+
+SOURCE_SUBSTRATE_DRY_RUN_SUMMARY_DIR="$TMP_DIR/source-substrate-install-kubectl-apply-dry-run-summary"
+write_fixture_set "$SOURCE_SUBSTRATE_DRY_RUN_SUMMARY_DIR" valid
+generate_path_bundles "$SOURCE_SUBSTRATE_DRY_RUN_SUMMARY_DIR" "$TMP_DIR/path-source-substrate-install-kubectl-apply-dry-run-summary"
+mutate_source_evidence_file_with_digest_refresh \
+  "$TMP_DIR/path-source-substrate-install-kubectl-apply-dry-run-summary/online-install-substrates" \
+  substrate-install \
+  substrate-install-kubectl-apply-dry-run-summary
+if run_ga_release "$SOURCE_SUBSTRATE_DRY_RUN_SUMMARY_DIR" "$TMP_DIR/path-source-substrate-install-kubectl-apply-dry-run-summary" "$TMP_DIR/out-source-substrate-install-kubectl-apply-dry-run-summary" >"$TMP_DIR/ga-release-source-substrate-install-kubectl-apply-dry-run-summary.out" 2>&1; then
+  fail "digest-refreshed apply-mode substrate install source evidence with dry_run server should fail semantic revalidation"
+fi
+grep -Fq "substrate_install_report.checks.kubectl_apply.command_summary.dry_run must be none for apply" "$TMP_DIR/ga-release-source-substrate-install-kubectl-apply-dry-run-summary.out" || \
+  fail "source substrate install apply dry_run summary failure message did not explain blocker"
+if grep -Fq "sha256 must match" "$TMP_DIR/ga-release-source-substrate-install-kubectl-apply-dry-run-summary.out"; then
+  fail "source substrate install dry_run summary negative hit digest mismatch instead of semantic validation"
+fi
+pass "GA aggregate rejects digest-refreshed apply-mode installer proof with dry_run server"
+
+SOURCE_SUBSTRATE_DRY_RUN_COMMAND_DIR="$TMP_DIR/source-substrate-install-kubectl-apply-dry-run-command"
+write_fixture_set "$SOURCE_SUBSTRATE_DRY_RUN_COMMAND_DIR" valid
+generate_path_bundles "$SOURCE_SUBSTRATE_DRY_RUN_COMMAND_DIR" "$TMP_DIR/path-source-substrate-install-kubectl-apply-dry-run-command"
+mutate_source_evidence_file_with_digest_refresh \
+  "$TMP_DIR/path-source-substrate-install-kubectl-apply-dry-run-command/online-install-substrates" \
+  substrate-install \
+  substrate-install-kubectl-apply-dry-run-command
+if run_ga_release "$SOURCE_SUBSTRATE_DRY_RUN_COMMAND_DIR" "$TMP_DIR/path-source-substrate-install-kubectl-apply-dry-run-command" "$TMP_DIR/out-source-substrate-install-kubectl-apply-dry-run-command" >"$TMP_DIR/ga-release-source-substrate-install-kubectl-apply-dry-run-command.out" 2>&1; then
+  fail "digest-refreshed apply-mode substrate install source evidence with --dry-run command should fail semantic revalidation"
+fi
+grep -Fq "substrate_install_report.checks.kubectl_apply.command_summary.command must not include --dry-run for apply" "$TMP_DIR/ga-release-source-substrate-install-kubectl-apply-dry-run-command.out" || \
+  fail "source substrate install apply dry-run command failure message did not explain blocker"
+if grep -Fq "sha256 must match" "$TMP_DIR/ga-release-source-substrate-install-kubectl-apply-dry-run-command.out"; then
+  fail "source substrate install dry-run command negative hit digest mismatch instead of semantic validation"
+fi
+pass "GA aggregate rejects digest-refreshed apply-mode installer proof whose command dry-runs"
+
+SOURCE_SUBSTRATE_KUBECTL_REFS_DIR="$TMP_DIR/source-substrate-install-kubectl-refs"
+write_fixture_set "$SOURCE_SUBSTRATE_KUBECTL_REFS_DIR" valid
+generate_path_bundles "$SOURCE_SUBSTRATE_KUBECTL_REFS_DIR" "$TMP_DIR/path-source-substrate-install-kubectl-refs"
+mutate_source_evidence_file_with_digest_refresh \
+  "$TMP_DIR/path-source-substrate-install-kubectl-refs/online-install-substrates" \
+  substrate-install \
+  substrate-install-missing-kubectl-resource-refs
+if run_ga_release "$SOURCE_SUBSTRATE_KUBECTL_REFS_DIR" "$TMP_DIR/path-source-substrate-install-kubectl-refs" "$TMP_DIR/out-source-substrate-install-kubectl-refs" >"$TMP_DIR/ga-release-source-substrate-install-kubectl-refs.out" 2>&1; then
+  fail "digest-refreshed substrate install source evidence without kubectl resource refs should fail semantic revalidation"
+fi
+grep -Fq "substrate_install_report.kubectl_resource_refs must be an array" "$TMP_DIR/ga-release-source-substrate-install-kubectl-refs.out" || \
+  fail "source substrate install kubectl refs failure message did not explain blocker"
+if grep -Fq "sha256 must match" "$TMP_DIR/ga-release-source-substrate-install-kubectl-refs.out"; then
+  fail "source substrate install kubectl refs negative hit digest mismatch instead of semantic validation"
+fi
+pass "GA aggregate revalidates digest-refreshed substrate install kubectl resource refs"
+
+SOURCE_SUBSTRATE_TARGET_PREREQ_DIR="$TMP_DIR/source-substrate-install-target-prerequisites"
+write_fixture_set "$SOURCE_SUBSTRATE_TARGET_PREREQ_DIR" valid
+generate_path_bundles "$SOURCE_SUBSTRATE_TARGET_PREREQ_DIR" "$TMP_DIR/path-source-substrate-install-target-prerequisites"
+mutate_source_evidence_file_with_digest_refresh \
+  "$TMP_DIR/path-source-substrate-install-target-prerequisites/online-install-substrates" \
+  substrate-install \
+  substrate-install-target-prerequisites-digest-mismatch
+if run_ga_release "$SOURCE_SUBSTRATE_TARGET_PREREQ_DIR" "$TMP_DIR/path-source-substrate-install-target-prerequisites" "$TMP_DIR/out-source-substrate-install-target-prerequisites" >"$TMP_DIR/ga-release-source-substrate-install-target-prerequisites.out" 2>&1; then
+  fail "digest-refreshed substrate install source evidence with target prerequisites digest drift should fail semantic revalidation"
+fi
+grep -Fq "substrate_install_report.inputs.target_prerequisites.input_sha256 must match target-preflight step report.target_prerequisites.input_sha256" "$TMP_DIR/ga-release-source-substrate-install-target-prerequisites.out" || \
+  fail "source substrate install target prerequisites digest failure message did not explain blocker"
+if grep -Fq "finalizer_manifest.source_evidence_files substrate-install sha256 must match" "$TMP_DIR/ga-release-source-substrate-install-target-prerequisites.out"; then
+  fail "source substrate install target prerequisites negative hit finalizer digest mismatch instead of semantic validation"
+fi
+pass "GA aggregate cross-checks digest-refreshed installer target prerequisites against target preflight"
+
+SOURCE_SUBSTRATE_RESOURCE_KIND_DIR="$TMP_DIR/source-substrate-install-resource-kind"
+write_fixture_set "$SOURCE_SUBSTRATE_RESOURCE_KIND_DIR" valid
+generate_path_bundles "$SOURCE_SUBSTRATE_RESOURCE_KIND_DIR" "$TMP_DIR/path-source-substrate-install-resource-kind"
+mutate_source_evidence_file_with_digest_refresh \
+  "$TMP_DIR/path-source-substrate-install-resource-kind/online-install-substrates" \
+  substrate-install \
+  substrate-install-secret-resource-ref
+if run_ga_release "$SOURCE_SUBSTRATE_RESOURCE_KIND_DIR" "$TMP_DIR/path-source-substrate-install-resource-kind" "$TMP_DIR/out-source-substrate-install-resource-kind" >"$TMP_DIR/ga-release-source-substrate-install-resource-kind.out" 2>&1; then
+  fail "digest-refreshed substrate install source evidence with Secret resource_ref should fail semantic revalidation"
+fi
+grep -Fq "substrate_install_report.resource_refs[0].kind Secret is not allowed for substrate install" "$TMP_DIR/ga-release-source-substrate-install-resource-kind.out" || \
+  fail "source substrate install resource kind failure message did not explain allowlist blocker"
+if grep -Fq "sha256 must match" "$TMP_DIR/ga-release-source-substrate-install-resource-kind.out"; then
+  fail "source substrate install resource kind negative hit digest mismatch instead of semantic validation"
+fi
+pass "GA aggregate revalidates digest-refreshed installer resource_refs kind allowlist"
+
+SOURCE_SUBSTRATE_RESOURCE_NAMESPACE_DIR="$TMP_DIR/source-substrate-install-resource-namespace"
+write_fixture_set "$SOURCE_SUBSTRATE_RESOURCE_NAMESPACE_DIR" valid
+generate_path_bundles "$SOURCE_SUBSTRATE_RESOURCE_NAMESPACE_DIR" "$TMP_DIR/path-source-substrate-install-resource-namespace"
+mutate_source_evidence_file_with_digest_refresh \
+  "$TMP_DIR/path-source-substrate-install-resource-namespace/online-install-substrates" \
+  substrate-install \
+  substrate-install-resource-ref-namespace-mismatch
+if run_ga_release "$SOURCE_SUBSTRATE_RESOURCE_NAMESPACE_DIR" "$TMP_DIR/path-source-substrate-install-resource-namespace" "$TMP_DIR/out-source-substrate-install-resource-namespace" >"$TMP_DIR/ga-release-source-substrate-install-resource-namespace.out" 2>&1; then
+  fail "digest-refreshed substrate install source evidence with resource_ref namespace drift should fail semantic revalidation"
+fi
+grep -Fq "substrate_install_report.resource_refs[0].namespace must match substrate install effective namespace" "$TMP_DIR/ga-release-source-substrate-install-resource-namespace.out" || \
+  fail "source substrate install resource namespace failure message did not explain blocker"
+if grep -Fq "sha256 must match" "$TMP_DIR/ga-release-source-substrate-install-resource-namespace.out"; then
+  fail "source substrate install resource namespace negative hit digest mismatch instead of semantic validation"
+fi
+pass "GA aggregate revalidates digest-refreshed installer resource_refs namespace"
+
 SOURCE_IMAGE_CLOSURE_DIR="$TMP_DIR/source-image-closure-digest-refresh"
 write_fixture_set "$SOURCE_IMAGE_CLOSURE_DIR" valid
 generate_path_bundles "$SOURCE_IMAGE_CLOSURE_DIR" "$TMP_DIR/path-source-image-closure"
@@ -1440,6 +1747,71 @@ fi
 grep -Fq "source_evidence.finalized_steps target-preflight report_digest must match steps[]" "$TMP_DIR/ga-release-ledger-digest.out" || \
   fail "source ledger digest mismatch failure message did not explain blocker"
 pass "GA aggregate rejects source ledger step digest drift"
+
+LEDGER_APPLY_DIGEST_MISSING_DIR="$TMP_DIR/source-ledger-apply-digest-missing"
+write_fixture_set "$LEDGER_APPLY_DIGEST_MISSING_DIR" valid
+generate_path_bundles "$LEDGER_APPLY_DIGEST_MISSING_DIR" "$TMP_DIR/path-ledger-apply-digest-missing"
+mutate_path_report \
+  "$TMP_DIR/path-ledger-apply-digest-missing/online-install-substrates/deployment-path-report.json" \
+  source-ledger-apply-digest-missing
+if run_ga_release "$LEDGER_APPLY_DIGEST_MISSING_DIR" "$TMP_DIR/path-ledger-apply-digest-missing" "$TMP_DIR/out-source-ledger-apply-digest-missing" >"$TMP_DIR/ga-release-ledger-apply-digest-missing.out" 2>&1; then
+  fail "source ledger missing substrate apply artifact digest should fail"
+fi
+grep -Fq "source_evidence.substrate_install.apply_resource_list_sha256 is required" "$TMP_DIR/ga-release-ledger-apply-digest-missing.out" || \
+  fail "source ledger apply artifact digest missing failure message did not explain blocker"
+pass "GA aggregate requires source ledger substrate apply artifact digest"
+
+LEDGER_TARGET_PREREQUISITES_MISMATCH_DIR="$TMP_DIR/source-ledger-target-prerequisites-digest-mismatch"
+write_fixture_set "$LEDGER_TARGET_PREREQUISITES_MISMATCH_DIR" valid
+generate_path_bundles "$LEDGER_TARGET_PREREQUISITES_MISMATCH_DIR" "$TMP_DIR/path-ledger-target-prerequisites-digest"
+mutate_path_report \
+  "$TMP_DIR/path-ledger-target-prerequisites-digest/online-install-substrates/deployment-path-report.json" \
+  source-ledger-target-prerequisites-digest-mismatch
+if run_ga_release "$LEDGER_TARGET_PREREQUISITES_MISMATCH_DIR" "$TMP_DIR/path-ledger-target-prerequisites-digest" "$TMP_DIR/out-source-ledger-target-prerequisites-digest-mismatch" >"$TMP_DIR/ga-release-ledger-target-prerequisites-digest.out" 2>&1; then
+  fail "fake substrate target prerequisites digest in source ledger should fail"
+fi
+grep -Fq "source_evidence.substrate_install.target_prerequisites_sha256 must match materialized substrate install report" "$TMP_DIR/ga-release-ledger-target-prerequisites-digest.out" || \
+  fail "source ledger substrate target prerequisites digest mismatch failure message did not explain blocker"
+pass "GA aggregate compares source ledger target prerequisites digest with materialized installer report"
+
+LEDGER_INSTALL_INPUT_MISMATCH_DIR="$TMP_DIR/source-ledger-install-input-digest-mismatch"
+write_fixture_set "$LEDGER_INSTALL_INPUT_MISMATCH_DIR" valid
+generate_path_bundles "$LEDGER_INSTALL_INPUT_MISMATCH_DIR" "$TMP_DIR/path-ledger-install-input-digest"
+mutate_path_report \
+  "$TMP_DIR/path-ledger-install-input-digest/online-install-substrates/deployment-path-report.json" \
+  source-ledger-install-input-digest-mismatch
+if run_ga_release "$LEDGER_INSTALL_INPUT_MISMATCH_DIR" "$TMP_DIR/path-ledger-install-input-digest" "$TMP_DIR/out-source-ledger-install-input-digest-mismatch" >"$TMP_DIR/ga-release-ledger-install-input-digest.out" 2>&1; then
+  fail "digest-refreshed fake substrate install input digest in source ledger should fail"
+fi
+grep -Fq "source_evidence.substrate_install.substrate_install_inputs_sha256 must match materialized substrate install report" "$TMP_DIR/ga-release-ledger-install-input-digest.out" || \
+  fail "source ledger substrate install digest mismatch failure message did not explain blocker"
+pass "GA aggregate compares source ledger substrate install digests with materialized installer report"
+
+LEDGER_OUTPUT_TRUTH_MISMATCH_DIR="$TMP_DIR/source-ledger-output-truth-digest-mismatch"
+write_fixture_set "$LEDGER_OUTPUT_TRUTH_MISMATCH_DIR" valid
+generate_path_bundles "$LEDGER_OUTPUT_TRUTH_MISMATCH_DIR" "$TMP_DIR/path-ledger-output-truth-digest"
+mutate_path_report \
+  "$TMP_DIR/path-ledger-output-truth-digest/online-install-substrates/deployment-path-report.json" \
+  source-ledger-output-truth-digest-mismatch
+if run_ga_release "$LEDGER_OUTPUT_TRUTH_MISMATCH_DIR" "$TMP_DIR/path-ledger-output-truth-digest" "$TMP_DIR/out-source-ledger-output-truth-digest-mismatch" >"$TMP_DIR/ga-release-ledger-output-truth-digest.out" 2>&1; then
+  fail "digest-refreshed fake substrate output truth digest in source ledger should fail"
+fi
+grep -Fq "source_evidence.substrate_install.output_substrate_truth_digest must match materialized substrate install report" "$TMP_DIR/ga-release-ledger-output-truth-digest.out" || \
+  fail "source ledger substrate output truth digest mismatch failure message did not explain blocker"
+pass "GA aggregate compares source ledger substrate truth digest with materialized installer report"
+
+LEDGER_SERVICE_COUNT_MISMATCH_DIR="$TMP_DIR/source-ledger-service-count-mismatch"
+write_fixture_set "$LEDGER_SERVICE_COUNT_MISMATCH_DIR" valid
+generate_path_bundles "$LEDGER_SERVICE_COUNT_MISMATCH_DIR" "$TMP_DIR/path-ledger-service-count"
+mutate_path_report \
+  "$TMP_DIR/path-ledger-service-count/online-install-substrates/deployment-path-report.json" \
+  source-ledger-service-count-mismatch
+if run_ga_release "$LEDGER_SERVICE_COUNT_MISMATCH_DIR" "$TMP_DIR/path-ledger-service-count" "$TMP_DIR/out-source-ledger-service-count-mismatch" >"$TMP_DIR/ga-release-ledger-service-count.out" 2>&1; then
+  fail "digest-refreshed fake substrate service_count in source ledger should fail"
+fi
+grep -Fq "source_evidence.substrate_install.service_count must match materialized substrate install report" "$TMP_DIR/ga-release-ledger-service-count.out" || \
+  fail "source ledger substrate service_count mismatch failure message did not explain blocker"
+pass "GA aggregate compares source ledger substrate service_count with materialized installer report"
 
 MUTABLE_DIR="$TMP_DIR/mutable"
 write_fixture_set "$MUTABLE_DIR" mutable-image

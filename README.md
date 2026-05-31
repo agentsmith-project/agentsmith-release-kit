@@ -82,8 +82,9 @@ Focused producer diagnostics still use machine profile axes:
 `kit_provided` means the kit validates a supplied substrate pack manifest,
 declared substrate connection truth, and related routability/materiality
 evidence. It does not install databases, buckets, OIDC realms, or other
-substrates. Future `install_substrates` requires a separate installer producer
-and an explicit installer confirmation flag; today that strategy fails fast.
+substrates. `install_substrates` requires an explicit report from the separate
+`--substrate-install` producer plus an installer confirmation flag; without
+that evidence the path fails fast.
 `installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
 It is not installer proof and does not mean release-kit created databases,
 buckets, OIDC realms, or other substrate resources.
@@ -687,6 +688,27 @@ Kubernetes, roll out workloads, smoke routes, build packages, or claim
 deploy/package/release readiness. It is not an accepted evidence envelope
 output.
 
+Substrate install focused diagnostic:
+
+```bash
+bash scripts/test-substrate-install.sh
+```
+
+`--substrate-install` is a narrow producer for namespace-scoped kit substrate
+resources. Confirmed apply requires `--confirm-install-parameters` to match a
+digest over the substrate install inputs, `resource_list_sha256`,
+`apply_resource_list_sha256`, and effective namespace; reports record
+`input_sha256`, `resource_list_sha256`,
+`apply_resource_list_sha256`, and `install_parameters_sha256` under
+`inputs.substrate_install_inputs`.
+Resources are allowed only by explicit apiVersion+kind pairs for static
+namespace-scoped resources: core `v1` ConfigMap, `networking.k8s.io/v1`
+NetworkPolicy, and core `v1` Service only when `spec.type` is omitted or
+`ClusterIP`. The installer does not run workloads or create Pods, PVCs,
+Secrets, or RBAC resources. Secret material stays in secret refs only, and
+storage proof belongs in target prerequisites rather than installer-created
+PVCs.
+
 Kubernetes apply-only focused diagnostic:
 
 ```bash
@@ -1004,7 +1026,9 @@ service endpoints, secret refs or redacted fingerprints, TLS or sslmode,
 pgvector, and reachability. Target prerequisites carry the real Kubernetes or
 cloud deployment preconditions: target profile, namespace, RBAC policy/proof,
 ingress host plus TLS secret ref, registry pull secret ref, storage class plus
-PV policy, and the substrate secret refs declared by substrate truth.
+PV policy proof, and the substrate secret refs declared by substrate truth.
+The substrate installer does not create PVCs; storage readiness is proven
+through these prerequisites.
 The target prerequisites `registry` object is fail-fast allowlisted to
 `pull_secret_ref` only; pseudo-proof or secret fields such as `preloaded`,
 `mirror_done`, `verdict`, or `token` are rejected.
@@ -1022,9 +1046,9 @@ post-deploy product smoke reports through `bash scripts/verify-release.sh
 Deployment path report finalization is internal evidence plumbing for
 maintainers/CI; it writes a sibling finalizer manifest plus copied
 `source-evidence/` JSON files for GA materiality checks and is not a new
-operator command or runbook step. `install_substrates` still depends on a
-future repo-owned installer producer; the operator facade does not install
-substrates today.
+operator command or runbook step. `install_substrates` consumes a separate
+substrate installer report plus explicit confirmation; the operator facade
+does not install substrates today.
 
 ## Handoff
 

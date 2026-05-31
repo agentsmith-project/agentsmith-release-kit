@@ -35,6 +35,7 @@ const SUBSTRATE_INSTALL_SCOPE = sourceValidation.SUBSTRATE_INSTALL_SCOPE;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const ARTIFACT_URI_RE = /^[a-z][a-z0-9+.-]*:\/\/[^\s]+$/i;
+const KUBERNETES_NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const AGENTSMITH_REPO = 'github.com/agentsmith-project/agentsmith';
 
 const REQUIRED_ARGS = [
@@ -206,6 +207,21 @@ function canonicalDigest(value) {
   return digestBuffer(Buffer.from(JSON.stringify(stableJson(value))));
 }
 
+function installParametersDigest({
+  installInputDigest,
+  resourceListDigest,
+  applyResourceListDigest,
+  effectiveNamespace
+}) {
+  return digestBuffer(Buffer.from([
+    'agentsmith.substrate-install-parameters/v1',
+    `substrate_install_inputs=${installInputDigest}`,
+    `resource_list=${resourceListDigest}`,
+    `apply_resource_list=${applyResourceListDigest}`,
+    `effective_namespace=${effectiveNamespace}`
+  ].join('\n')));
+}
+
 async function readBuffer(file, label) {
   try {
     return await fs.readFile(file);
@@ -257,11 +273,27 @@ function requireString(value, label) {
   return value;
 }
 
+function requireKubernetesNamespace(value, label) {
+  const namespace = requireString(value, label);
+  if (namespace.length > 63 || !KUBERNETES_NAMESPACE_RE.test(namespace)) {
+    fail(`${label} must be a Kubernetes namespace name`);
+  }
+  return namespace;
+}
+
 function requireInteger(value, label) {
   if (!Number.isInteger(value) || value < 0) {
     fail(`${label} must be a non-negative integer`);
   }
   return value;
+}
+
+function requirePositiveInteger(value, label) {
+  const integer = requireInteger(value, label);
+  if (integer <= 0) {
+    fail(`${label} must be greater than zero`);
+  }
+  return integer;
 }
 
 function optionalString(value, label) {
@@ -770,6 +802,41 @@ function validateSourceEvidenceLedger(report, requirement, requiredSteps, steps,
       install.output_substrate_truth_digest,
       'deployment_path_report.source_evidence.substrate_install.output_substrate_truth_digest'
     );
+    const installInputDigest = requireDigest(
+      install.substrate_install_inputs_sha256,
+      'deployment_path_report.source_evidence.substrate_install.substrate_install_inputs_sha256'
+    );
+    const resourceListDigest = requireDigest(
+      install.resource_list_sha256,
+      'deployment_path_report.source_evidence.substrate_install.resource_list_sha256'
+    );
+    const applyResourceListDigest = requireDigest(
+      install.apply_resource_list_sha256,
+      'deployment_path_report.source_evidence.substrate_install.apply_resource_list_sha256'
+    );
+    const effectiveNamespace = requireKubernetesNamespace(
+      install.effective_namespace,
+      'deployment_path_report.source_evidence.substrate_install.effective_namespace'
+    );
+    const installParametersSha256 = requireDigest(
+      install.install_parameters_sha256,
+      'deployment_path_report.source_evidence.substrate_install.install_parameters_sha256'
+    );
+    requireDigest(
+      install.target_prerequisites_sha256,
+      'deployment_path_report.source_evidence.substrate_install.target_prerequisites_sha256'
+    );
+    if (
+      installParametersSha256 !==
+      installParametersDigest({
+        installInputDigest,
+        resourceListDigest,
+        applyResourceListDigest,
+        effectiveNamespace
+      })
+    ) {
+      fail('deployment_path_report.source_evidence.substrate_install.install_parameters_sha256 must bind install input, resource list, apply artifact, and effective namespace');
+    }
     const serviceCount = requireInteger(
       install.service_count,
       'deployment_path_report.source_evidence.substrate_install.service_count'
@@ -777,11 +844,122 @@ function validateSourceEvidenceLedger(report, requirement, requiredSteps, steps,
     if (serviceCount === 0) {
       fail('deployment_path_report.source_evidence.substrate_install.service_count must be greater than zero');
     }
+    const resourceCount = requirePositiveInteger(
+      install.resource_count,
+      'deployment_path_report.source_evidence.substrate_install.resource_count'
+    );
+    const proofCounts = [
+      ['kubectl_resource_count', 'kubectl_resource_count'],
+      ['namespace_scope_allowed_resource_count', 'namespace_scope_allowed_resource_count'],
+      ['collision_checked_resource_count', 'collision_checked_resource_count'],
+      ['kubectl_apply_applied_resource_count', 'kubectl_apply_applied_resource_count']
+    ];
+    for (const [field, labelSuffix] of proofCounts) {
+      if (
+        requirePositiveInteger(
+          install[field],
+          `deployment_path_report.source_evidence.substrate_install.${labelSuffix}`
+        ) !== resourceCount
+      ) {
+        fail(`deployment_path_report.source_evidence.substrate_install.${labelSuffix} must match resource_count`);
+      }
+    }
   } else if (Object.prototype.hasOwnProperty.call(ledger, 'substrate_install')) {
     fail('deployment_path_report.source_evidence.substrate_install is only accepted for install_substrates paths');
   }
 
   return ledger;
+}
+
+function validateMaterializedSubstrateInstallLedger({ ledger, materializedSummary, requirement }) {
+  if (!requirement.installSubstrates) {
+    return;
+  }
+  const install = requireObject(
+    ledger.substrate_install,
+    'deployment_path_report.source_evidence.substrate_install'
+  );
+  const installSummary = requireObject(
+    materializedSummary?.substrateInstallSummary,
+    'materialized substrate install report summary'
+  );
+  const inputDigests = requireObject(
+    installSummary.input_digests,
+    'materialized substrate install report input_digests'
+  );
+  const proof = requireObject(
+    installSummary.proof,
+    'materialized substrate install report proof'
+  );
+  const inputBindings = requireObject(
+    installSummary.input_bindings,
+    'materialized substrate install report input_bindings'
+  );
+  if (
+    requireDigest(
+      install.output_substrate_truth_digest,
+      'deployment_path_report.source_evidence.substrate_install.output_substrate_truth_digest'
+    ) !== installSummary.output_substrate_truth_digest
+  ) {
+    fail('deployment_path_report.source_evidence.substrate_install.output_substrate_truth_digest must match materialized substrate install report');
+  }
+  if (
+    requireInteger(
+      install.service_count,
+      'deployment_path_report.source_evidence.substrate_install.service_count'
+    ) !== installSummary.service_count
+  ) {
+    fail('deployment_path_report.source_evidence.substrate_install.service_count must match materialized substrate install report');
+  }
+  const comparisons = [
+    ['substrate_install_inputs_sha256', 'input_sha256'],
+    ['resource_list_sha256', 'resource_list_sha256'],
+    ['apply_resource_list_sha256', 'apply_resource_list_sha256'],
+    ['install_parameters_sha256', 'install_parameters_sha256']
+  ];
+  for (const [ledgerField, reportField] of comparisons) {
+    if (
+      requireDigest(
+        install[ledgerField],
+        `deployment_path_report.source_evidence.substrate_install.${ledgerField}`
+      ) !== inputDigests[reportField]
+    ) {
+      fail(`deployment_path_report.source_evidence.substrate_install.${ledgerField} must match materialized substrate install report`);
+    }
+  }
+  if (
+    requireDigest(
+      install.target_prerequisites_sha256,
+      'deployment_path_report.source_evidence.substrate_install.target_prerequisites_sha256'
+    ) !== inputBindings.target_prerequisites_sha256
+  ) {
+    fail('deployment_path_report.source_evidence.substrate_install.target_prerequisites_sha256 must match materialized substrate install report');
+  }
+  if (
+    requireKubernetesNamespace(
+      install.effective_namespace,
+      'deployment_path_report.source_evidence.substrate_install.effective_namespace'
+    ) !== inputDigests.effective_namespace
+  ) {
+    fail('deployment_path_report.source_evidence.substrate_install.effective_namespace must match materialized substrate install report');
+  }
+  const proofComparisons = [
+    ['resource_count', 'resource_count'],
+    ['kubectl_resource_count', 'kubectl_resource_count'],
+    ['namespace_scope_allowed_resource_count', 'namespace_scope_allowed_resource_count'],
+    ['collision_checked_resource_count', 'collision_checked_resource_count'],
+    ['kubectl_apply_applied_resource_count', 'kubectl_apply_applied_resource_count']
+  ];
+  for (const [ledgerField, reportField] of proofComparisons) {
+    if (
+      requirePositiveInteger(
+        install[ledgerField],
+        `deployment_path_report.source_evidence.substrate_install.${ledgerField}`
+      ) !== proof[reportField]
+    ) {
+      fail(`deployment_path_report.source_evidence.substrate_install.${ledgerField} must match materialized substrate install report`);
+    }
+  }
 }
 
 function safeSourceEvidencePath(value, label) {
@@ -1160,7 +1338,7 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
     release,
     deployTemplate
   });
-  sourceValidation.validateMaterializedDeploymentPathSourceEvidence({
+  const materializedSummary = sourceValidation.validateMaterializedDeploymentPathSourceEvidence({
     operatorPath,
     release: {
       ...release,
@@ -1168,6 +1346,11 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
     },
     ...materializedSourceEvidence,
     installOperatorRunId: report.install_substrates_confirmation?.operator_run_id
+  });
+  validateMaterializedSubstrateInstallLedger({
+    ledger,
+    materializedSummary,
+    requirement
   });
 
   return {

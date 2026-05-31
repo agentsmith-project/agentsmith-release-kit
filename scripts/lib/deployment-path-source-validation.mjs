@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
 
 import { validateImageMapEvidence } from './image-map-validation.mjs';
@@ -21,11 +22,39 @@ export const AIRGAP_BUNDLE_CHECK_SCOPE = 'airgap_bundle_manifest_check_only';
 
 const SUBSTRATE_CONNECTION_SCHEMA = 'agentsmith.substrate-connection.truth/v1';
 const TARGET_PREREQUISITES_SCHEMA = 'agentsmith.target-prerequisites.truth/v1';
+const SUBSTRATE_PACK_MANIFEST_SCHEMA = 'agentsmith.substrate-pack-manifest/v1';
+const SUBSTRATE_INSTALL_INPUTS_SCHEMA = 'agentsmith.substrate-install-inputs/v1';
 const SUBSTRATE_INSTALL_PRODUCER = 'agentsmith-release-kit-substrate-installer';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const OPERATOR_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const KUBERNETES_NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const SERVICE_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
+const SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST = new Map([
+  ['ConfigMap', {
+    apiVersion: 'v1',
+    group: '',
+    resource: 'configmaps',
+    kubectlResources: new Set(['configmap', 'configmaps'])
+  }],
+  ['NetworkPolicy', {
+    apiVersion: 'networking.k8s.io/v1',
+    group: 'networking.k8s.io',
+    resource: 'networkpolicies.networking.k8s.io',
+    kubectlResources: new Set([
+      'networkpolicy',
+      'networkpolicies',
+      'networkpolicy.networking.k8s.io',
+      'networkpolicies.networking.k8s.io'
+    ])
+  }],
+  ['Service', {
+    apiVersion: 'v1',
+    group: '',
+    resource: 'services',
+    kubectlResources: new Set(['service', 'services'])
+  }]
+]);
 const TARGET_PREFLIGHT_SUBSTRATE_SERVICES = [
   'postgresql',
   'mongodb',
@@ -278,6 +307,35 @@ function requireDigest(value, label) {
   return digest;
 }
 
+function digestText(value) {
+  return `sha256:${crypto.createHash('sha256').update(Buffer.from(value)).digest('hex')}`;
+}
+
+function requireKubernetesNamespace(value, label) {
+  const namespace = requireString(value, label);
+  if (namespace.length > 63 || !KUBERNETES_NAMESPACE_RE.test(namespace)) {
+    fail(`${label} must be a Kubernetes namespace name`);
+  }
+  return namespace;
+}
+
+function installParametersDigest({
+  installInputDigest,
+  resourceListDigest,
+  applyResourceListDigest,
+  effectiveNamespace
+}) {
+  return digestText(
+    [
+      'agentsmith.substrate-install-parameters/v1',
+      `substrate_install_inputs=${installInputDigest}`,
+      `resource_list=${resourceListDigest}`,
+      `apply_resource_list=${applyResourceListDigest}`,
+      `effective_namespace=${effectiveNamespace}`
+    ].join('\n')
+  );
+}
+
 function requireGitSha(value, label) {
   const gitSha = requireString(value, label);
   if (!GIT_SHA_RE.test(gitSha)) {
@@ -304,6 +362,12 @@ function requireCheckPass(value, label) {
   if (value !== 'pass') {
     fail(`${label} must be pass`);
   }
+}
+
+function requireCheckObjectPass(value, label) {
+  const check = requireObject(value, label);
+  requireStatusPass(check, label);
+  return check;
 }
 
 function requireSchema(report, schema, label) {
@@ -499,6 +563,298 @@ function requireReportSubstrateTruthDigest(report, label) {
   return requireDigest(digest, `${label}.substrate_truth_digest`);
 }
 
+function requireSubstrateInstallInputDigests(report) {
+  const inputs = requireObject(report.inputs, 'substrate_install_report.inputs');
+  const installInputs = requireObject(
+    inputs.substrate_install_inputs,
+    'substrate_install_report.inputs.substrate_install_inputs'
+  );
+  const schemaVersion = requireString(
+    installInputs.schema_version,
+    'substrate_install_report.inputs.substrate_install_inputs.schema_version'
+  );
+  if (schemaVersion !== SUBSTRATE_INSTALL_INPUTS_SCHEMA) {
+    fail(
+      `substrate_install_report.inputs.substrate_install_inputs.schema_version must be ${SUBSTRATE_INSTALL_INPUTS_SCHEMA}`
+    );
+  }
+  const resourceSource = requireString(
+    installInputs.resource_source,
+    'substrate_install_report.inputs.substrate_install_inputs.resource_source'
+  );
+  if (!new Set(['inline', 'resource_list_path']).has(resourceSource)) {
+    fail('substrate_install_report.inputs.substrate_install_inputs.resource_source must be inline or resource_list_path');
+  }
+  if (resourceSource === 'resource_list_path') {
+    requireString(
+      installInputs.resource_list_path,
+      'substrate_install_report.inputs.substrate_install_inputs.resource_list_path'
+    );
+  }
+  const inputSha256 = requireDigest(
+    installInputs.input_sha256,
+    'substrate_install_report.inputs.substrate_install_inputs.input_sha256'
+  );
+  const resourceListSha256 = requireDigest(
+    installInputs.resource_list_sha256,
+    'substrate_install_report.inputs.substrate_install_inputs.resource_list_sha256'
+  );
+  const applyResourceListSha256 = requireDigest(
+    installInputs.apply_resource_list_sha256,
+    'substrate_install_report.inputs.substrate_install_inputs.apply_resource_list_sha256'
+  );
+  const effectiveNamespace = requireKubernetesNamespace(
+    installInputs.effective_namespace,
+    'substrate_install_report.inputs.substrate_install_inputs.effective_namespace'
+  );
+  const installParametersSha256 = requireDigest(
+    installInputs.install_parameters_sha256,
+    'substrate_install_report.inputs.substrate_install_inputs.install_parameters_sha256'
+  );
+  if (
+    installParametersSha256 !==
+    installParametersDigest({
+      installInputDigest: inputSha256,
+      resourceListDigest: resourceListSha256,
+      applyResourceListDigest: applyResourceListSha256,
+      effectiveNamespace
+    })
+  ) {
+    fail('substrate_install_report.inputs.substrate_install_inputs.install_parameters_sha256 must bind install input, resource list, apply artifact, and effective namespace');
+  }
+  return {
+    input_sha256: inputSha256,
+    resource_list_sha256: resourceListSha256,
+    apply_resource_list_sha256: applyResourceListSha256,
+    effective_namespace: effectiveNamespace,
+    install_parameters_sha256: installParametersSha256,
+    resource_source: resourceSource
+  };
+}
+
+function requireInputBindingDigest(binding, label) {
+  for (const key of ['input_sha256', 'digest', 'sha256']) {
+    if (Object.prototype.hasOwnProperty.call(binding, key)) {
+      return requireDigest(binding[key], `${label}.${key}`);
+    }
+  }
+  return requireDigest(undefined, `${label}.input_sha256`);
+}
+
+function requireTargetProfileBinding(value, expected, label) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return requireTargetProfile(value, expected, label);
+  }
+  return requireTargetProfileString(value, expected, label);
+}
+
+function requireCountEquals(value, expected, label, expectedLabel) {
+  const count = requirePositiveInteger(value, label);
+  if (count !== expected) {
+    fail(`${label} must match ${expectedLabel}`);
+  }
+  return count;
+}
+
+function containsKubectlDryRunFlag(value) {
+  return /(?:^|\s)--dry-run(?:=|\s|$)/.test(value);
+}
+
+function assertNoDryRunFlag(value, label) {
+  if (typeof value === 'string') {
+    if (containsKubectlDryRunFlag(value)) {
+      fail(`${label} must not include --dry-run for apply`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      assertNoDryRunFlag(item, `${label}[${index}]`);
+    }
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      assertNoDryRunFlag(item, `${label}.${key}`);
+    }
+  }
+}
+
+function validateSubstrateInstallInputBindings({ report, release, expectedTargetProfile, effectiveNamespace }) {
+  const inputs = requireObject(report.inputs, 'substrate_install_report.inputs');
+
+  const packManifest = requireObject(
+    inputs.substrate_pack_manifest,
+    'substrate_install_report.inputs.substrate_pack_manifest'
+  );
+  requireSchema(
+    packManifest,
+    SUBSTRATE_PACK_MANIFEST_SCHEMA,
+    'substrate_install_report.inputs.substrate_pack_manifest'
+  );
+  const packManifestDigest = requireInputBindingDigest(
+    packManifest,
+    'substrate_install_report.inputs.substrate_pack_manifest'
+  );
+  requireTargetProfileBinding(
+    packManifest.target_profile,
+    expectedTargetProfile,
+    'substrate_install_report.inputs.substrate_pack_manifest.target_profile'
+  );
+  if (
+    requireDigest(
+      packManifest.release_contract_digest,
+      'substrate_install_report.inputs.substrate_pack_manifest.release_contract_digest'
+    ) !== release.release_contract_digest
+  ) {
+    fail('substrate_install_report.inputs.substrate_pack_manifest.release_contract_digest must match release contract input');
+  }
+  if (
+    requireDigest(
+      packManifest.deploy_template_package_digest,
+      'substrate_install_report.inputs.substrate_pack_manifest.deploy_template_package_digest'
+    ) !== release.deploy_template_package_digest
+  ) {
+    fail('substrate_install_report.inputs.substrate_pack_manifest.deploy_template_package_digest must match deploy template package input');
+  }
+
+  const targetPrerequisites = requireObject(
+    inputs.target_prerequisites,
+    'substrate_install_report.inputs.target_prerequisites'
+  );
+  requireSchema(
+    targetPrerequisites,
+    TARGET_PREREQUISITES_SCHEMA,
+    'substrate_install_report.inputs.target_prerequisites'
+  );
+  const targetPrerequisitesDigest = requireInputBindingDigest(
+    targetPrerequisites,
+    'substrate_install_report.inputs.target_prerequisites'
+  );
+  requireTargetProfileBinding(
+    targetPrerequisites.target_profile,
+    expectedTargetProfile,
+    'substrate_install_report.inputs.target_prerequisites.target_profile'
+  );
+  if (
+    requireKubernetesNamespace(
+      targetPrerequisites.namespace,
+      'substrate_install_report.inputs.target_prerequisites.namespace'
+    ) !== effectiveNamespace
+  ) {
+    fail('substrate_install_report.inputs.target_prerequisites.namespace must match substrate install effective namespace');
+  }
+
+  return {
+    substrate_pack_manifest_sha256: packManifestDigest,
+    target_prerequisites_sha256: targetPrerequisitesDigest
+  };
+}
+
+function validateSubstrateInstallProof({ report, effectiveNamespace, resourceRefs, kubectlResourceRefs }) {
+  const resourceCount = resourceRefs.length;
+  const kubectlResourceCount = kubectlResourceRefs.length;
+  if (resourceCount !== kubectlResourceCount) {
+    fail('substrate_install_report.kubectl_resource_refs length must match resource_refs length');
+  }
+
+  const checks = requireObject(report.checks, 'substrate_install_report.checks');
+  const namespaceScope = requireCheckObjectPass(
+    checks.namespace_scope,
+    'substrate_install_report.checks.namespace_scope'
+  );
+  requireCountEquals(
+    namespaceScope.resource_count,
+    resourceCount,
+    'substrate_install_report.checks.namespace_scope.resource_count',
+    'substrate_install_report.resource_refs length'
+  );
+  requireCountEquals(
+    namespaceScope.allowed_resource_count,
+    resourceCount,
+    'substrate_install_report.checks.namespace_scope.allowed_resource_count',
+    'substrate_install_report.resource_refs length'
+  );
+  if (
+    requireKubernetesNamespace(
+      namespaceScope.namespace,
+      'substrate_install_report.checks.namespace_scope.namespace'
+    ) !== effectiveNamespace
+  ) {
+    fail('substrate_install_report.checks.namespace_scope.namespace must match substrate install effective namespace');
+  }
+
+  const collisionGuard = requireCheckObjectPass(
+    checks.collision_guard,
+    'substrate_install_report.checks.collision_guard'
+  );
+  requireCountEquals(
+    collisionGuard.checked_resource_count,
+    resourceCount,
+    'substrate_install_report.checks.collision_guard.checked_resource_count',
+    'substrate_install_report.resource_refs length'
+  );
+  requireCountEquals(
+    collisionGuard.kubectl_get_count,
+    resourceCount,
+    'substrate_install_report.checks.collision_guard.kubectl_get_count',
+    'substrate_install_report.resource_refs length'
+  );
+
+  const kubectlApply = requireCheckObjectPass(
+    checks.kubectl_apply,
+    'substrate_install_report.checks.kubectl_apply'
+  );
+  if (requireString(kubectlApply.mode, 'substrate_install_report.checks.kubectl_apply.mode') !== 'apply') {
+    fail('substrate_install_report.checks.kubectl_apply.mode must be apply');
+  }
+  requireCountEquals(
+    kubectlApply.applied_resource_count,
+    resourceCount,
+    'substrate_install_report.checks.kubectl_apply.applied_resource_count',
+    'substrate_install_report.resource_refs length'
+  );
+  requireCountEquals(
+    kubectlApply.kubectl_resource_count,
+    kubectlResourceCount,
+    'substrate_install_report.checks.kubectl_apply.kubectl_resource_count',
+    'substrate_install_report.kubectl_resource_refs length'
+  );
+  const commandSummary = requireObject(
+    kubectlApply.command_summary,
+    'substrate_install_report.checks.kubectl_apply.command_summary'
+  );
+  requireString(commandSummary.command, 'substrate_install_report.checks.kubectl_apply.command_summary.command');
+  if (
+    requireString(
+      commandSummary.dry_run,
+      'substrate_install_report.checks.kubectl_apply.command_summary.dry_run'
+    ) !== 'none'
+  ) {
+    fail('substrate_install_report.checks.kubectl_apply.command_summary.dry_run must be none for apply');
+  }
+  assertNoDryRunFlag(kubectlApply, 'substrate_install_report.checks.kubectl_apply');
+  if (commandSummary.server_side !== true) {
+    fail('substrate_install_report.checks.kubectl_apply.command_summary.server_side must be true');
+  }
+  if (
+    requireKubernetesNamespace(
+      commandSummary.namespace,
+      'substrate_install_report.checks.kubectl_apply.command_summary.namespace'
+    ) !== effectiveNamespace
+  ) {
+    fail('substrate_install_report.checks.kubectl_apply.command_summary.namespace must match substrate install effective namespace');
+  }
+
+  return {
+    resource_count: resourceCount,
+    kubectl_resource_count: kubectlResourceCount,
+    namespace_scope_allowed_resource_count: namespaceScope.allowed_resource_count,
+    collision_checked_resource_count: collisionGuard.checked_resource_count,
+    kubectl_apply_applied_resource_count: kubectlApply.applied_resource_count
+  };
+}
+
 function requireScope(report, expectedScope, label) {
   if (requireString(report.scope, `${label}.scope`) !== expectedScope) {
     fail(`${label}.scope must be ${expectedScope}`);
@@ -578,6 +934,7 @@ function validateResourceRef(value, label, options = {}) {
   if (Object.prototype.hasOwnProperty.call(ref, 'document_index')) {
     requirePositiveInteger(ref.document_index, `${label}.document_index`);
   }
+  return ref;
 }
 
 function validateResourceRefs(value, label, options = {}) {
@@ -585,6 +942,114 @@ function validateResourceRefs(value, label, options = {}) {
   for (const [index, ref] of refs.entries()) {
     validateResourceRef(ref, `${label}[${index}]`, options);
   }
+  return refs;
+}
+
+function validateSubstrateInstallResourceRefs(value, label, effectiveNamespace) {
+  const refs = validateResourceRefs(value, label);
+  for (const [index, ref] of refs.entries()) {
+    const itemLabel = `${label}[${index}]`;
+    const kind = requireString(ref.kind, `${itemLabel}.kind`);
+    const identity = SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST.get(kind);
+    if (!identity) {
+      fail(`${itemLabel}.kind ${kind} is not allowed for substrate install; allowed kinds are ConfigMap, NetworkPolicy, Service`);
+    }
+    if (requireString(ref.apiVersion, `${itemLabel}.apiVersion`) !== identity.apiVersion) {
+      fail(`${itemLabel}.apiVersion must match substrate install resource kind ${kind}`);
+    }
+    if (typeof ref.group !== 'string') {
+      fail(`${itemLabel}.group must be a string`);
+    }
+    if (ref.group !== identity.group) {
+      fail(`${itemLabel}.group must match substrate install resource kind ${kind}`);
+    }
+    if (requireString(ref.resource, `${itemLabel}.resource`) !== identity.resource) {
+      fail(`${itemLabel}.resource must match substrate install resource kind ${kind}`);
+    }
+    if (
+      requireKubernetesNamespace(ref.namespace, `${itemLabel}.namespace`) !==
+      effectiveNamespace
+    ) {
+      fail(`${itemLabel}.namespace must match substrate install effective namespace`);
+    }
+  }
+  return refs;
+}
+
+function substrateInstallRefKey({ kind, namespace, name }) {
+  return `${kind}\0${namespace}\0${name}`;
+}
+
+function incrementCount(map, key) {
+  map.set(key, (map.get(key) || 0) + 1);
+}
+
+function decrementCount(map, key) {
+  const current = map.get(key) || 0;
+  if (current <= 0) {
+    return false;
+  }
+  if (current === 1) {
+    map.delete(key);
+  } else {
+    map.set(key, current - 1);
+  }
+  return true;
+}
+
+function substrateInstallKindFromKubectlResource(resource) {
+  for (const [kind, identity] of SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST) {
+    if (identity.kubectlResources.has(resource)) {
+      return kind;
+    }
+  }
+  return undefined;
+}
+
+function parseSubstrateInstallKubectlResourceRef(value, label) {
+  const ref = requireString(value, label);
+  const parts = ref.split('/');
+  if (parts.length !== 2 || parts[0] === '' || parts[1] === '') {
+    fail(`${label} must be a kubectl resource/name reference`);
+  }
+  const [resource, name] = parts;
+  const kind = substrateInstallKindFromKubectlResource(resource);
+  if (!kind) {
+    fail(`${label} resource ${resource} is not allowed for substrate install; allowed resources are configmap, service, and networkpolicy.networking.k8s.io`);
+  }
+  return { kind, name };
+}
+
+function validateSubstrateInstallKubectlResourceRefs(value, label, resourceRefs, effectiveNamespace) {
+  const kubectlRefs = requireNonEmptyStringArray(value, label);
+  const expectedRefs = new Map();
+  for (const ref of resourceRefs) {
+    incrementCount(
+      expectedRefs,
+      substrateInstallRefKey({
+        kind: ref.kind,
+        namespace: effectiveNamespace,
+        name: ref.name
+      })
+    );
+  }
+
+  for (const [index, rawRef] of kubectlRefs.entries()) {
+    const parsed = parseSubstrateInstallKubectlResourceRef(rawRef, `${label}[${index}]`);
+    const key = substrateInstallRefKey({
+      kind: parsed.kind,
+      namespace: effectiveNamespace,
+      name: parsed.name
+    });
+    if (!decrementCount(expectedRefs, key)) {
+      fail(`${label}[${index}] must match substrate_install_report.resource_refs`);
+    }
+  }
+
+  if (expectedRefs.size > 0) {
+    fail(`${label} must exactly match substrate_install_report.resource_refs`);
+  }
+  return kubectlRefs;
 }
 
 function validateLiveDigestSummary(value, label, imageInventory, expectedDigestSet) {
@@ -770,7 +1235,10 @@ function validateTargetPreflightStepReport(report, expectedTargetProfile) {
     expectedTargetProfile,
     'target-preflight step report.target_prerequisites.target_profile'
   );
-  requireString(prerequisites.namespace, 'target-preflight step report.target_prerequisites.namespace');
+  requireKubernetesNamespace(
+    prerequisites.namespace,
+    'target-preflight step report.target_prerequisites.namespace'
+  );
   requireString(
     prerequisites.ingress_host,
     'target-preflight step report.target_prerequisites.ingress_host'
@@ -922,6 +1390,31 @@ export function validateInstallSubstrateTruthBinding(installSummary, sourceInput
       'substrate_install_report.output_substrate_truth_digest must match target-preflight step report.substrate_truth.input_sha256'
     );
   }
+  const prerequisites = requireObject(
+    targetPreflightReport.target_prerequisites,
+    'target-preflight step report.target_prerequisites'
+  );
+  const targetPreflightNamespace = requireKubernetesNamespace(
+    prerequisites.namespace,
+    'target-preflight step report.target_prerequisites.namespace'
+  );
+  const targetPreflightPrerequisitesDigest = requireDigest(
+    prerequisites.input_sha256,
+    'target-preflight step report.target_prerequisites.input_sha256'
+  );
+  if (installSummary.input_digests.effective_namespace !== targetPreflightNamespace) {
+    fail(
+      'substrate_install_report.inputs.substrate_install_inputs.effective_namespace must match target-preflight step report.target_prerequisites.namespace'
+    );
+  }
+  if (
+    installSummary.input_bindings.target_prerequisites_sha256 !==
+    targetPreflightPrerequisitesDigest
+  ) {
+    fail(
+      'substrate_install_report.inputs.target_prerequisites.input_sha256 must match target-preflight step report.target_prerequisites.input_sha256'
+    );
+  }
 }
 
 export function validateRouteSmokeRolloutBinding(sourceInputsByStep) {
@@ -1054,6 +1547,9 @@ export function validateSubstrateInstallReport(report, release, expectedTargetPr
     fail(`substrate_install_report.producer must be ${SUBSTRATE_INSTALL_PRODUCER}`);
   }
   requireTargetProfile(report.target_profile, expectedTargetProfile, 'substrate_install_report.target_profile');
+  if (report.mode !== 'apply') {
+    fail('substrate_install_report.mode must be apply');
+  }
   if (operatorRunId !== undefined && requireOperatorRunId(report.operator_run_id, 'substrate_install_report.operator_run_id') !== operatorRunId) {
     fail('substrate install report operator_run_id must match --confirm-install-substrates');
   }
@@ -1063,6 +1559,36 @@ export function validateSubstrateInstallReport(report, release, expectedTargetPr
   requireReportReleaseContractDigest(report, release, 'substrate install report');
   requireReportDeployTemplateDigest(report, release, 'substrate install report');
   requireReportSubstrateTruthDigest(report, 'substrate install report');
+  const inputDigests = requireSubstrateInstallInputDigests(report);
+  if (
+    requireKubernetesNamespace(report.namespace, 'substrate_install_report.namespace') !==
+    inputDigests.effective_namespace
+  ) {
+    fail('substrate_install_report.namespace must match substrate install effective namespace');
+  }
+  const inputBindings = validateSubstrateInstallInputBindings({
+    report,
+    release,
+    expectedTargetProfile,
+    effectiveNamespace: inputDigests.effective_namespace
+  });
+  const resourceRefs = validateSubstrateInstallResourceRefs(
+    report.resource_refs,
+    'substrate_install_report.resource_refs',
+    inputDigests.effective_namespace
+  );
+  const kubectlResourceRefs = validateSubstrateInstallKubectlResourceRefs(
+    report.kubectl_resource_refs,
+    'substrate_install_report.kubectl_resource_refs',
+    resourceRefs,
+    inputDigests.effective_namespace
+  );
+  const proof = validateSubstrateInstallProof({
+    report,
+    effectiveNamespace: inputDigests.effective_namespace,
+    resourceRefs,
+    kubectlResourceRefs
+  });
   const installedServices = requireArray(report.installed_services, 'substrate_install_report.installed_services');
   if (installedServices.length === 0) {
     fail('substrate_install_report.installed_services must not be empty');
@@ -1082,11 +1608,29 @@ export function validateSubstrateInstallReport(report, release, expectedTargetPr
     report.output_substrate_truth_digest,
     'substrate_install_report.output_substrate_truth_digest'
   );
+  const summary = requireObject(report.summary, 'substrate_install_report.summary');
+  if (
+    requirePositiveInteger(summary.resources_count, 'substrate_install_report.summary.resources_count') !==
+    proof.resource_count
+  ) {
+    fail('substrate_install_report.summary.resources_count must match resource_refs length');
+  }
+  if (
+    requirePositiveInteger(
+      summary.substrate_services_count,
+      'substrate_install_report.summary.substrate_services_count'
+    ) !== installedServices.length
+  ) {
+    fail('substrate_install_report.summary.substrate_services_count must match installed_services length');
+  }
   return {
     schema: reportSchema(report),
     scope: report.scope,
     output_substrate_truth_digest: report.output_substrate_truth_digest,
-    service_count: installedServices.length
+    service_count: installedServices.length,
+    input_digests: inputDigests,
+    input_bindings: inputBindings,
+    proof
   };
 }
 
@@ -1294,4 +1838,7 @@ export function validateMaterializedDeploymentPathSourceEvidence({
 
   validateInstallSubstrateTruthBinding(installSummary, sourceInputsByStep);
   validateRouteSmokeRolloutBinding(sourceInputsByStep);
+  return {
+    substrateInstallSummary: installSummary
+  };
 }

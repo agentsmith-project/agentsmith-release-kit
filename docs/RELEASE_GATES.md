@@ -57,8 +57,9 @@ choice internally, and calls the existing producer diagnostic:
 
 `kit_provided` validates kit-supplied substrate pack/truth inputs and related
 focused evidence only; it is not substrate installation. `install_substrates`
-is planned/not implemented and must fail fast until a separate installer
-producer and explicit installer confirmation flag exist.
+is not implemented by the operator facade. Run `verify-release.sh
+--substrate-install` as a separate producer, then provide its explicit report
+and confirmation to deployment-path finalization and GA.
 `installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
 It is not installer proof and does not mean release-kit created databases,
 buckets, OIDC realms, or other substrate resources.
@@ -1254,6 +1255,32 @@ release verdicts, deploy readiness, package readiness, product-flow fields, or
 operator signoff fields. It is not an accepted release-kit evidence envelope
 output.
 
+## Substrate Install Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-substrate-install.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--substrate-install`. It is a producer for namespace-scoped kit substrate
+resources only and still writes `readiness: false`. Confirmed apply binds the
+substrate install inputs, resource list, apply resource list, and effective
+namespace through
+`--confirm-install-parameters`; the producer report records
+`input_sha256`, `resource_list_sha256`, `apply_resource_list_sha256`, and
+`install_parameters_sha256` under `inputs.substrate_install_inputs`.
+
+The Kubernetes resource guard is apiVersion-aware. It accepts only the narrow
+namespace-scoped allowlist used by the installer: core `v1` ConfigMap,
+`networking.k8s.io/v1` NetworkPolicy, and core `v1` Service only when
+`spec.type` is omitted or `ClusterIP`. This producer does not run workloads or
+create Pods, PVCs, Secrets, or RBAC resources. Secret material stays in secret
+refs only, unknown apiVersions are rejected even when the kind name is
+familiar, and storage remains target prerequisites proof rather than something
+installed by this producer.
+
 ## Substrate Routability Focused Diagnostic
 
 Run:
@@ -1339,8 +1366,10 @@ object storage, and `issuer_url` for OIDC), secret references, TLS or sslmode
 declarations, `extensions.pgvector.status: installed`, and reachability status
 `declared_reachable` or `verified_by_operator` with proof. Target prerequisites
 must include target profile, namespace, RBAC policy or proof, ingress host plus
-TLS secret ref, registry pull secret ref, storage class plus PV policy, and the
-substrate secret refs declared in substrate truth. The prerequisites `registry`
+TLS secret ref, registry pull secret ref, storage class plus PV policy proof,
+and the substrate secret refs declared in substrate truth. The substrate
+installer does not create PVCs; storage readiness is proven through target
+prerequisites. The prerequisites `registry`
 object accepts only `pull_secret_ref`; pseudo-evidence or secret payload fields
 such as `preloaded`, `mirror_done`, `verdict`, or `token` are rejected. Plaintext credentials,
 connection strings, kubeconfig payloads, file or source URIs, localhost,
@@ -1369,8 +1398,8 @@ reports to digests, and writes one `deployment-path-report.json` with
 `readiness: false` for the final GA aggregate. The report also carries a
 minimal `source_evidence` ledger for maintainer/internal finalization: the
 finalizer schema/tool/mode, source deployment gate schema/scope/digest,
-per-step source schema/scope/digests, and the airgap or future installer
-digest bindings required by `--ga-release`. The finalizer also writes sibling
+per-step source schema/scope/digests, and the airgap or installer digest
+bindings required by `--ga-release`. The finalizer also writes sibling
 `deployment-path-finalizer-manifest.json` and `source-evidence/` JSON copies so
 GA can bind the report bytes to materialized source files.
 
@@ -1384,7 +1413,7 @@ Install-substrate paths fail fast unless a real substrate install report and
 matching explicit confirmation id are provided. Existing kit-provided
 substrate pack checks, routability checks, and `installed_by` provenance
 markers are not treated as installer proof. The accepted install report shape
-is reserved for a future repo-owned installer producer; `operator-release.sh`
+comes from the separate `--substrate-install` producer; `operator-release.sh`
 does not implement substrate installation today.
 
 ## GA Release Aggregate Gate
