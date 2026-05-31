@@ -53,7 +53,7 @@ const MAPPINGS = new Map([
     }
   ],
   [
-    'online/install_substrates',
+    'online/kit_provided',
     {
       producerMode: 'online-deployment-gate',
       machineProfile: 'existing_kubernetes/kit_installed/online'
@@ -67,7 +67,7 @@ const MAPPINGS = new Map([
     }
   ],
   [
-    'airgap-bundle/install_substrates',
+    'airgap-bundle/kit_provided',
     {
       producerMode: 'bundle-create',
       machineProfile: 'existing_kubernetes/kit_installed/airgap'
@@ -81,7 +81,7 @@ const MAPPINGS = new Map([
     }
   ],
   [
-    'airgap/install_substrates',
+    'airgap/kit_provided',
     {
       producerMode: 'airgap-consume-rehearsal',
       machineProfile: 'existing_kubernetes/kit_installed/airgap'
@@ -119,7 +119,7 @@ function usage() {
   return `Usage:
   node scripts/verify-operator-release-surface.mjs \\
     --surface online|airgap|airgap-bundle \\
-    --substrate-strategy use_existing|install_substrates \\
+    --substrate-strategy use_existing|kit_provided \\
     --machine-profile <mapped-profile> \\
     --producer-mode online-deployment-gate|airgap-consume-rehearsal|bundle-create \\
     --output-dir <dir> \\
@@ -328,6 +328,11 @@ function requireNonNegativeInteger(value, label) {
 }
 
 function assertMapping(args) {
+  if (args.substrateStrategy === 'install_substrates') {
+    fail(
+      'install_substrates is planned/not implemented; use kit_provided for current substrate pack/truth validation'
+    );
+  }
   const key = `${args.surface}/${args.substrateStrategy}`;
   const mapping = MAPPINGS.get(key);
   if (!mapping) {

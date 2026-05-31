@@ -92,7 +92,7 @@ function usage() {
     --output-dir <dir>
 
 This is repo-local focused adoption aggregation for airgap/use_existing and
-airgap/install_substrates only. It validates already generated matching
+airgap/kit_provided only. It validates already generated matching
 operator-facing airgap-bundle/* packaging summaries and confirmed-apply
 airgap/* consume summaries and writes ${REPORT_FILE} with readiness=false; it is
 not deploy, package, operator signoff, full release gate, or formal release readiness.`;
@@ -268,7 +268,7 @@ function assertProfile(report, label, expectedProfile) {
 }
 
 function strategyForProfile(profile) {
-  return profile === KIT_AIRGAP_PROFILE ? 'install_substrates' : 'use_existing';
+  return profile === KIT_AIRGAP_PROFILE ? 'kit_provided' : 'use_existing';
 }
 
 function releaseIdentityFromContract(releaseContractInput) {

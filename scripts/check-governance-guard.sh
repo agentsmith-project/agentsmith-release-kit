@@ -138,6 +138,19 @@ doc_policy_paths=(
   scripts/verify-release-engineering-gate-intake.mjs
 )
 
+operator_substrate_surface_paths=(
+  README.md
+  DEVELOPMENT.md
+  docs/RELEASE_GATES.md
+  docs/runbooks/README.md
+  docs/contracts/README.md
+  scripts/operator-release.sh
+  scripts/verify-operator-release-surface.mjs
+  scripts/verify-online-adoption.mjs
+  scripts/verify-airgap-adoption.mjs
+  scripts/verify-release-engineering-gate-intake.mjs
+)
+
 reject_scan \
   "formal operator release taxonomy wording found" \
   'formal operator release quadrants?|Formal Operator Quadrants|formal operator release profiles|operator-facing release quadrants?|operator release quadrants?|formal release quadrants?' \
@@ -152,6 +165,11 @@ reject_scan \
   "operator release choice wording found" \
   'operator release choices?' \
   "${doc_policy_paths[@]}"
+
+reject_scan \
+  "install_substrates exposed as successful operator substrate surface" \
+  'operator-release[.]sh[[:space:]]+(online|airgap|airgap-bundle)[[:space:]]+install_substrates|`(online|airgap|airgap-bundle)/install_substrates`[[:space:]]*(->|backed|requires|repo-local|and)|install_substrates[[:space:]]+maps|--substrate-strategy[[:space:]]+use_existing[|]install_substrates' \
+  "${operator_substrate_surface_paths[@]}"
 
 require_text README.md "$EXPECTED_IDENTITY"
 require_text README.md "AgentSmith release contract"
@@ -168,23 +186,30 @@ require_text README.md "Cloud resource provisioning"
 require_text README.md "release management UI"
 require_text README.md "operator choice matrix"
 require_text README.md '`online/use_existing`'
-require_text README.md '`online/install_substrates`'
+require_text README.md '`online/kit_provided`'
 require_text README.md '`airgap/use_existing`'
-require_text README.md '`airgap/install_substrates`'
+require_text README.md '`airgap/kit_provided`'
+require_text README.md 'Future `install_substrates` requires'
+require_text README.md 'kit-provided pack/truth identity marker / provenance marker'
+require_text README.md 'not installer proof'
 require_text README.md '`kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input'
 require_text README.md "is not a release profile, user deployment prerequisite, operator release"
 require_text README.md "target, or replacement for real Kubernetes evidence"
 require_text docs/runbooks/README.md "## Operator Choice Matrix"
 require_text docs/runbooks/README.md "Airgap bundle packaging commands are packaging-side helpers"
 require_text docs/runbooks/README.md "not standalone operator choices"
-require_text docs/runbooks/README.md 'use `airgap/install_substrates` for the consume/deployment-focused path'
+require_text docs/runbooks/README.md 'use `airgap/kit_provided` for the consume/deployment-focused path'
+require_text docs/runbooks/README.md '`installed_by` stays a provenance marker, not installer proof'
 require_text docs/RELEASE_GATES.md "map to the operator choice surface"
+require_text docs/RELEASE_GATES.md 'kit-provided pack/truth identity marker / provenance marker'
 require_text docs/RELEASE_GATES.md "rehearsal-only accepted input"
 require_text docs/contracts/README.md "Only accepted pre-GA profile tuples are accepted"
 require_text docs/contracts/README.md "not an operator choice"
+require_text docs/contracts/README.md '`installed_by` stays a provenance'
 require_text DEVELOPMENT.md "There is intentionally no"
 require_text DEVELOPMENT.md "package.json"
 require_text DEVELOPMENT.md "four existing-Kubernetes operator choice mappings"
+require_text DEVELOPMENT.md '`installed_by` is not'
 require_text DEVELOPMENT.md '`kind_rehearsal/kit_installed/online` remains'
 require_text DEVELOPMENT.md "rehearsal-only accepted input"
 require_text DEVELOPMENT.md "profile, release target, or user deployment prerequisite"

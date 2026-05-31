@@ -430,7 +430,7 @@ const manifest = {
   },
   payload: {
     install_plan: {
-      path: 'payload/install-substrates.json',
+      path: 'payload/kit-provided.json',
       sha256: digest('6')
     }
   },
@@ -670,7 +670,7 @@ run_kit_bundle_surface() {
   local output_dir="$2"
   shift 2
 
-  bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle kit_provided \
     --release-contract "$VALID_CONTRACT" \
     --deploy-template-package "$VALID_PACKAGE" \
     --archive "$VALID_ARCHIVE" \
@@ -741,7 +741,7 @@ run_kit_consume_surface() {
   FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
   FAKE_KUBECTL_LIVE_IMAGE="$target_app_image" \
   FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$target_app_image" \
-  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap kit_provided \
     --bundle-root "$bundle_root" \
     --render-values "$bundle_root/operator-inputs/render-values.json" \
     --substrate-truth "$bundle_root/operator-inputs/substrate-truth.json" \
@@ -752,7 +752,7 @@ run_kit_consume_surface() {
     --mode apply \
     --archive-probe "$GOOD_PROBE" \
     --image-loader "$GOOD_LOADER" \
-    --confirm-apply airgap/install_substrates \
+    --confirm-apply airgap/kit_provided \
     --operator-run-id "$operator_run_id" \
     --timeout 120s \
     "${smoke_args[@]}" \
@@ -1148,8 +1148,8 @@ start_server
 "$NODE_BIN" "$ROOT_DIR/scripts/verify-airgap-adoption.mjs" --help >"$TMP_DIR/airgap-adoption-help.out"
 grep -q 'airgap/use_existing and' "$TMP_DIR/airgap-adoption-help.out" ||
   fail "airgap adoption help must mention airgap/use_existing"
-grep -q 'airgap/install_substrates' "$TMP_DIR/airgap-adoption-help.out" ||
-  fail "airgap adoption help must mention airgap/install_substrates"
+grep -q 'airgap/kit_provided' "$TMP_DIR/airgap-adoption-help.out" ||
+  fail "airgap adoption help must mention airgap/kit_provided"
 grep -q 'readiness=false' "$TMP_DIR/airgap-adoption-help.out" ||
   fail "airgap adoption help must keep readiness=false boundary"
 grep -q 'formal release readiness' "$TMP_DIR/airgap-adoption-help.out" ||
@@ -1183,14 +1183,14 @@ run_adoption \
 assert_adoption_report "$adoption_output/$ADOPTION_REPORT_FILE"
 pass "airgap adoption aggregates bundle and consume operator surfaces"
 
-kit_bundle_output="$TMP_DIR/out-airgap-bundle-install-substrates"
-kit_bundle_root="$TMP_DIR/bundle-airgap-install-substrates"
+kit_bundle_output="$TMP_DIR/out-airgap-bundle-kit-provided"
+kit_bundle_root="$TMP_DIR/bundle-airgap-kit-provided"
 run_kit_bundle_surface "$kit_bundle_root" "$kit_bundle_output" >"$TMP_DIR/kit-airgap-bundle.out"
 [[ -f "$kit_bundle_output/$SURFACE_REPORT_FILE" ]] || fail "kit bundle operator surface report missing"
 [[ -f "$kit_bundle_root/airgap-bundle-manifest.json" ]] || fail "kit bundle manifest missing"
 
 write_bundle_operator_inputs "$kit_bundle_root" "$KIT_AIRGAP_PROFILE"
-kit_consume_output="$TMP_DIR/out-airgap-consume-install-substrates"
+kit_consume_output="$TMP_DIR/out-airgap-consume-kit-provided"
 : >"$LOAD_LOG"
 : >"$KUBECTL_LOG"
 run_kit_consume_surface "$kit_bundle_root" "$kit_consume_output" operator-airgap-adoption-kit-1002 "http://127.0.0.1:$SERVER_PORT/ok" >"$TMP_DIR/kit-airgap-consume.out"
@@ -1202,7 +1202,7 @@ run_adoption \
   "$kit_consume_output/$SURFACE_REPORT_FILE" \
   "$kit_bundle_root/airgap-bundle-manifest.json" \
   "$kit_adoption_output" >"$TMP_DIR/kit-airgap-adoption.out"
-assert_adoption_report "$kit_adoption_output/$ADOPTION_REPORT_FILE" "$KIT_AIRGAP_PROFILE" install_substrates
+assert_adoption_report "$kit_adoption_output/$ADOPTION_REPORT_FILE" "$KIT_AIRGAP_PROFILE" kit_provided
 pass "kit airgap adoption aggregates bundle packaging and consume/deploy chain"
 
 expect_adoption_fail kit-profile-mismatch \

@@ -20,13 +20,13 @@ const EVIDENCE_SUBJECT_SCHEMA = 'agentsmith.release-kit-evidence-subject/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
 const RELEASE_CONTRACT_SUBJECT_NAME = 'agentsmith-release-contract';
 const USE_EXISTING_PROFILE = 'existing_kubernetes/external_declared/online';
-const INSTALL_SUBSTRATES_PROFILE = 'existing_kubernetes/kit_installed/online';
+const KIT_PROVIDED_PROFILE = 'existing_kubernetes/kit_installed/online';
 const REQUIRED_ARGS = [
   'releaseContract',
   'useExistingReport',
   'useExistingEvidenceRoot',
-  'installSubstratesReport',
-  'installSubstratesEvidenceRoot',
+  'kitProvidedReport',
+  'kitProvidedEvidenceRoot',
   'outputDir'
 ];
 const REQUIRED_PATHS = [
@@ -48,11 +48,11 @@ const REQUIRED_PATHS = [
     ]
   },
   {
-    key: 'install_substrates',
-    operatorPath: 'online/install_substrates',
-    reportArg: 'installSubstratesReport',
-    evidenceRootArg: 'installSubstratesEvidenceRoot',
-    targetProfile: INSTALL_SUBSTRATES_PROFILE,
+    key: 'kit_provided',
+    operatorPath: 'online/kit_provided',
+    reportArg: 'kitProvidedReport',
+    evidenceRootArg: 'kitProvidedEvidenceRoot',
+    targetProfile: KIT_PROVIDED_PROFILE,
     requiredSteps: [
       'inputs',
       'target-preflight',
@@ -112,8 +112,8 @@ function usage() {
     --release-contract <json> \\
     --use-existing-report <online-deployment-gate-report.json> \\
     --use-existing-evidence-root <dir> \\
-    --install-substrates-report <online-deployment-gate-report.json> \\
-    --install-substrates-evidence-root <dir> \\
+    --kit-provided-report <online-deployment-gate-report.json> \\
+    --kit-provided-evidence-root <dir> \\
     --output-dir <dir>
 
 This is repo-local online adoption aggregation only. It validates two existing
@@ -162,11 +162,11 @@ function parseArgs(argv) {
       case '--use-existing-evidence-root':
         parsed.useExistingEvidenceRoot = nextValue();
         break;
-      case '--install-substrates-report':
-        parsed.installSubstratesReport = nextValue();
+      case '--kit-provided-report':
+        parsed.kitProvidedReport = nextValue();
         break;
-      case '--install-substrates-evidence-root':
-        parsed.installSubstratesEvidenceRoot = nextValue();
+      case '--kit-provided-evidence-root':
+        parsed.kitProvidedEvidenceRoot = nextValue();
         break;
       case '--output-dir':
         parsed.outputDir = nextValue();

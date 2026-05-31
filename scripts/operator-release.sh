@@ -9,24 +9,29 @@ usage() {
   cat <<'USAGE'
 Usage:
   bash scripts/operator-release.sh online use_existing <producer args without --target-profile>
-  bash scripts/operator-release.sh online install_substrates <producer args without --target-profile>
+  bash scripts/operator-release.sh online kit_provided <producer args without --target-profile>
   bash scripts/operator-release.sh airgap use_existing <producer args without --target-profile>
-  bash scripts/operator-release.sh airgap install_substrates <producer args without --target-profile>
+  bash scripts/operator-release.sh airgap kit_provided <producer args without --target-profile>
   bash scripts/operator-release.sh airgap-bundle use_existing <producer args without --target-profile>
-  bash scripts/operator-release.sh airgap-bundle install_substrates <producer args without --target-profile>
+  bash scripts/operator-release.sh airgap-bundle kit_provided <producer args without --target-profile>
 
 Operator surface:
   online/use_existing maps internally to existing_kubernetes/external_declared/online.
-  online/install_substrates maps internally to existing_kubernetes/kit_installed/online.
+  online/kit_provided maps internally to existing_kubernetes/kit_installed/online.
   airgap/use_existing maps internally to existing_kubernetes/external_declared/airgap.
-  airgap/install_substrates maps internally to existing_kubernetes/kit_installed/airgap.
+  airgap/kit_provided maps internally to existing_kubernetes/kit_installed/airgap.
   airgap-bundle/use_existing maps internally to existing_kubernetes/external_declared/airgap.
-  airgap-bundle/install_substrates maps internally to existing_kubernetes/kit_installed/airgap.
+  airgap-bundle/kit_provided maps internally to existing_kubernetes/kit_installed/airgap.
 
 This facade forwards to existing producer diagnostics only:
   online/* -> scripts/verify-release.sh --online-deployment-gate
   airgap/* -> scripts/verify-release.sh --airgap-consume-rehearsal
   airgap-bundle/* -> scripts/verify-release.sh --bundle-create
+
+Planned installer surface:
+  install_substrates is not implemented. It fails fast until a separate
+  installer producer and explicit installer confirmation flag exist. Use
+  kit_provided for the current kit-supplied substrate pack/truth validation.
 USAGE
 }
 
@@ -388,7 +393,7 @@ case "$surface/$substrate_strategy" in
     producer_name="online-deployment-gate"
     machine_profile="existing_kubernetes/external_declared/online"
     ;;
-  online/install_substrates)
+  online/kit_provided)
     producer_mode="--online-deployment-gate"
     producer_name="online-deployment-gate"
     machine_profile="existing_kubernetes/kit_installed/online"
@@ -398,7 +403,7 @@ case "$surface/$substrate_strategy" in
     producer_name="airgap-consume-rehearsal"
     machine_profile="existing_kubernetes/external_declared/airgap"
     ;;
-  airgap/install_substrates)
+  airgap/kit_provided)
     producer_mode="--airgap-consume-rehearsal"
     producer_name="airgap-consume-rehearsal"
     machine_profile="existing_kubernetes/kit_installed/airgap"
@@ -408,10 +413,13 @@ case "$surface/$substrate_strategy" in
     producer_name="bundle-create"
     machine_profile="existing_kubernetes/external_declared/airgap"
     ;;
-  airgap-bundle/install_substrates)
+  airgap-bundle/kit_provided)
     producer_mode="--bundle-create"
     producer_name="bundle-create"
     machine_profile="existing_kubernetes/kit_installed/airgap"
+    ;;
+  online/install_substrates|airgap/install_substrates|airgap-bundle/install_substrates)
+    fail "install_substrates is planned/not implemented; no substrate installer producer or explicit installer confirm flag exists. Use $surface/kit_provided for current substrate pack/truth validation."
     ;;
   online/*)
     fail "unknown online substrate strategy: $substrate_strategy"
@@ -451,7 +459,7 @@ else
   evidence_root=""
 fi
 
-if [[ "$surface/$substrate_strategy" == "airgap-bundle/install_substrates" ]]; then
+if [[ "$surface/$substrate_strategy" == "airgap-bundle/kit_provided" ]]; then
   require_arg_value --substrate-pack-manifest "$@" >/dev/null
 fi
 

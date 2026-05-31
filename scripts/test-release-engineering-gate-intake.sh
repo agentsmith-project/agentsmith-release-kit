@@ -109,7 +109,7 @@ writeJson(path.join(outputDir, 'online-adoption-report.json'), {
     subject_sha256: contractSubjectDigest
   },
   coverage: {
-    required_operator_paths: ['online/use_existing', 'online/install_substrates'],
+    required_operator_paths: ['online/use_existing', 'online/kit_provided'],
     target_profiles: [
       'existing_kubernetes/external_declared/online',
       'existing_kubernetes/kit_installed/online'
@@ -125,10 +125,10 @@ writeJson(path.join(outputDir, 'online-adoption-report.json'), {
       runId: 'operator-online-use-existing',
       digestChars: ['1', '2', '3', '4']
     }),
-    install_substrates: onlinePath({
-      operatorPath: 'online/install_substrates',
+    kit_provided: onlinePath({
+      operatorPath: 'online/kit_provided',
       targetProfile: 'existing_kubernetes/kit_installed/online',
-      runId: 'operator-online-install-substrates',
+      runId: 'operator-online-kit-provided',
       digestChars: ['5', '6', '7', '8']
     })
   },
@@ -194,9 +194,9 @@ writeJson(
   })
 );
 writeJson(
-  path.join(outputDir, 'airgap-install-substrates', 'airgap-adoption-report.json'),
+  path.join(outputDir, 'airgap-kit-provided', 'airgap-adoption-report.json'),
   airgapAdoption({
-    strategy: 'install_substrates',
+    strategy: 'kit_provided',
     profile: 'existing_kubernetes/kit_installed/airgap',
     digestChars: ['a', 'b', 'c', 'd', 'e', 'f', '1']
   })
@@ -428,9 +428,9 @@ const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const digestRe = /^sha256:[0-9a-f]{64}$/;
 const requiredQuadrants = [
   'online/use_existing',
-  'online/install_substrates',
+  'online/kit_provided',
   'airgap/use_existing',
-  'airgap/install_substrates'
+  'airgap/kit_provided'
 ];
 const requiredGaps = new Set([
   'formal_operator_verdict',
@@ -462,7 +462,7 @@ for (const digest of [
   report.release_contract?.subject_sha256,
   report.adoption_report_digests?.online,
   report.adoption_report_digests?.airgap?.use_existing,
-  report.adoption_report_digests?.airgap?.install_substrates
+  report.adoption_report_digests?.airgap?.kit_provided
 ]) {
   if (!digestRe.test(digest || '')) {
     throw new Error(`invalid digest in intake report: ${digest}`);
@@ -512,7 +512,7 @@ write_candidate_inputs "$INPUT_DIR"
 
 ONLINE_REPORT="$INPUT_DIR/online-adoption-report.json"
 AIRGAP_USE_EXISTING_REPORT="$INPUT_DIR/airgap-use-existing/airgap-adoption-report.json"
-AIRGAP_INSTALL_SUBSTRATES_REPORT="$INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json"
+AIRGAP_KIT_PROVIDED_REPORT="$INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json"
 ONLINE_PRODUCER_REPORT="$INPUT_DIR/producers/online-deployment-gate-report.json"
 OPERATOR_SURFACE_REPORT="$INPUT_DIR/producers/operator-release-surface-report.json"
 AIRGAP_PRODUCER_REPORT="$INPUT_DIR/producers/airgap-deployment-gate-report.json"
@@ -522,7 +522,7 @@ run_intake \
   "$PASS_OUTPUT" \
   "$ONLINE_REPORT" \
   "$AIRGAP_USE_EXISTING_REPORT" \
-  "$AIRGAP_INSTALL_SUBSTRATES_REPORT" >"$TMP_DIR/pass.out"
+  "$AIRGAP_KIT_PROVIDED_REPORT" >"$TMP_DIR/pass.out"
 [[ -f "$PASS_OUTPUT/$REPORT_FILE" ]] || fail "release engineering gate intake report missing"
 assert_intake_report "$PASS_OUTPUT/$REPORT_FILE"
 grep -q 'not release readiness' "$TMP_DIR/pass.out" ||
@@ -538,7 +538,7 @@ run_intake \
   "$GITHUB_ACTIONS_OUTPUT" \
   "$GITHUB_ACTIONS_INPUT_DIR/online-adoption-report.json" \
   "$GITHUB_ACTIONS_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-  "$GITHUB_ACTIONS_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+  "$GITHUB_ACTIONS_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
   "$GITHUB_ACTIONS_CONTRACT_ARTIFACT_URI" >"$TMP_DIR/github-actions-artifact-uri.out"
 [[ -f "$GITHUB_ACTIONS_OUTPUT/$REPORT_FILE" ]] || fail "GitHub Actions artifact URI intake report missing"
 assert_intake_report "$GITHUB_ACTIONS_OUTPUT/$REPORT_FILE"
@@ -551,7 +551,7 @@ expect_fail readiness-true \
     "$TMP_DIR/out-readiness-true" \
     "$BAD_ONLINE" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 
 BAD_ONLINE_RELEASE_VERDICT="$TMP_DIR/bad/online-release-verdict.json"
 copy_and_mutate_json "$ONLINE_REPORT" "$BAD_ONLINE_RELEASE_VERDICT" release_verdict
@@ -560,7 +560,7 @@ expect_fail release-verdict \
     "$TMP_DIR/out-release-verdict" \
     "$BAD_ONLINE_RELEASE_VERDICT" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 
 BAD_AIRGAP_OPERATOR_VERDICT="$TMP_DIR/bad/airgap-operator-verdict.json"
 copy_and_mutate_json "$AIRGAP_USE_EXISTING_REPORT" "$BAD_AIRGAP_OPERATOR_VERDICT" operator_verdict
@@ -569,10 +569,10 @@ expect_fail operator-verdict \
     "$TMP_DIR/out-operator-verdict" \
     "$ONLINE_REPORT" \
     "$BAD_AIRGAP_OPERATOR_VERDICT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 
 BAD_AIRGAP_DEPLOY_READINESS="$TMP_DIR/bad/airgap-deploy-readiness.json"
-copy_and_mutate_json "$AIRGAP_INSTALL_SUBSTRATES_REPORT" "$BAD_AIRGAP_DEPLOY_READINESS" deploy_readiness
+copy_and_mutate_json "$AIRGAP_KIT_PROVIDED_REPORT" "$BAD_AIRGAP_DEPLOY_READINESS" deploy_readiness
 expect_fail deploy-readiness \
   run_intake \
     "$TMP_DIR/out-deploy-readiness" \
@@ -587,7 +587,7 @@ expect_fail package-readiness \
     "$TMP_DIR/out-package-readiness" \
     "$ONLINE_REPORT" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT" \
+    "$AIRGAP_KIT_PROVIDED_REPORT" \
     "$BAD_CONTRACT_PACKAGE_READINESS"
 
 BAD_CONTRACT_UNSAFE_ARTIFACT_URI="$TMP_DIR/bad/release-contract-unsafe-artifact-uri.json"
@@ -600,7 +600,7 @@ expect_fail unsafe-release-contract-artifact-uri \
     "$UNSAFE_ARTIFACT_URI_OUTPUT" \
     "$UNSAFE_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
     "$UNSAFE_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-    "$UNSAFE_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$UNSAFE_ARTIFACT_URI_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
     "$BAD_CONTRACT_UNSAFE_ARTIFACT_URI"
 assert_no_stale_report "$UNSAFE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
@@ -614,7 +614,7 @@ expect_fail encoded-home-release-contract-artifact-uri \
     "$ENCODED_HOME_ARTIFACT_URI_OUTPUT" \
     "$ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
     "$ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-    "$ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
     "$BAD_CONTRACT_ENCODED_HOME_ARTIFACT_URI"
 assert_no_stale_report "$ENCODED_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
@@ -628,7 +628,7 @@ expect_fail fragment-home-release-contract-artifact-uri \
     "$FRAGMENT_HOME_ARTIFACT_URI_OUTPUT" \
     "$FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
     "$FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-    "$FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
     "$BAD_CONTRACT_FRAGMENT_HOME_ARTIFACT_URI"
 assert_no_stale_report "$FRAGMENT_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
@@ -642,7 +642,7 @@ expect_fail double-encoded-home-release-contract-artifact-uri \
     "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_OUTPUT" \
     "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
     "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-    "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
     "$BAD_CONTRACT_DOUBLE_ENCODED_HOME_ARTIFACT_URI"
 assert_no_stale_report "$DOUBLE_ENCODED_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
@@ -656,7 +656,7 @@ expect_fail deep-fragment-home-release-contract-artifact-uri \
     "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_OUTPUT" \
     "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
     "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-    "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
     "$BAD_CONTRACT_DEEP_FRAGMENT_HOME_ARTIFACT_URI"
 assert_no_stale_report "$DEEP_FRAGMENT_HOME_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
@@ -670,7 +670,7 @@ expect_fail malformed-percent-release-contract-artifact-uri \
     "$MALFORMED_PERCENT_ARTIFACT_URI_OUTPUT" \
     "$MALFORMED_PERCENT_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
     "$MALFORMED_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-    "$MALFORMED_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$MALFORMED_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
     "$BAD_CONTRACT_MALFORMED_PERCENT_ARTIFACT_URI"
 assert_no_stale_report "$MALFORMED_PERCENT_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
@@ -684,7 +684,7 @@ expect_fail overdeep-percent-release-contract-artifact-uri \
     "$OVERDEEP_PERCENT_ARTIFACT_URI_OUTPUT" \
     "$OVERDEEP_PERCENT_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
     "$OVERDEEP_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-    "$OVERDEEP_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$OVERDEEP_PERCENT_ARTIFACT_URI_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
     "$BAD_CONTRACT_OVERDEEP_PERCENT_ARTIFACT_URI"
 assert_no_stale_report "$OVERDEEP_PERCENT_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
@@ -698,7 +698,7 @@ expect_fail fragment-secret-release-contract-artifact-uri \
     "$FRAGMENT_SECRET_ARTIFACT_URI_OUTPUT" \
     "$FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
     "$FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-    "$FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$FRAGMENT_SECRET_ARTIFACT_URI_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
     "$BAD_CONTRACT_FRAGMENT_SECRET_ARTIFACT_URI"
 assert_no_stale_report "$FRAGMENT_SECRET_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
@@ -712,7 +712,7 @@ expect_fail encoded-token-release-contract-artifact-uri \
     "$ENCODED_TOKEN_ARTIFACT_URI_OUTPUT" \
     "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR/online-adoption-report.json" \
     "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR/airgap-use-existing/airgap-adoption-report.json" \
-    "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR/airgap-install-substrates/airgap-adoption-report.json" \
+    "$ENCODED_TOKEN_ARTIFACT_URI_INPUT_DIR/airgap-kit-provided/airgap-adoption-report.json" \
     "$BAD_CONTRACT_ENCODED_TOKEN_ARTIFACT_URI"
 assert_no_stale_report "$ENCODED_TOKEN_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
@@ -724,7 +724,7 @@ expect_fail fragment-home-online-report-uri \
     "$FRAGMENT_HOME_ONLINE_REPORT_URI_OUTPUT" \
     "$BAD_ONLINE_FRAGMENT_HOME_REPORT_URI" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 assert_no_stale_report "$FRAGMENT_HOME_ONLINE_REPORT_URI_OUTPUT/$REPORT_FILE"
 
 BAD_ONLINE_ENCODED_HOME_ARTIFACT_URI="$TMP_DIR/bad/online-encoded-home-artifact-uri.json"
@@ -735,7 +735,7 @@ expect_fail encoded-home-online-provenance-artifact-uri \
     "$ENCODED_HOME_ONLINE_ARTIFACT_URI_OUTPUT" \
     "$BAD_ONLINE_ENCODED_HOME_ARTIFACT_URI" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 assert_no_stale_report "$ENCODED_HOME_ONLINE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
 BAD_ONLINE_DEEP_HOME_ARTIFACT_URI="$TMP_DIR/bad/online-deep-home-artifact-uri.json"
@@ -746,7 +746,7 @@ expect_fail deep-home-online-provenance-artifact-uri \
     "$DEEP_HOME_ONLINE_ARTIFACT_URI_OUTPUT" \
     "$BAD_ONLINE_DEEP_HOME_ARTIFACT_URI" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 assert_no_stale_report "$DEEP_HOME_ONLINE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
 BAD_ONLINE_ENCODED_TOKEN_ARTIFACT_URI="$TMP_DIR/bad/online-encoded-token-artifact-uri.json"
@@ -757,7 +757,7 @@ expect_fail encoded-token-online-provenance-artifact-uri \
     "$ENCODED_TOKEN_ONLINE_ARTIFACT_URI_OUTPUT" \
     "$BAD_ONLINE_ENCODED_TOKEN_ARTIFACT_URI" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 assert_no_stale_report "$ENCODED_TOKEN_ONLINE_ARTIFACT_URI_OUTPUT/$REPORT_FILE"
 
 BAD_AIRGAP_FRAGMENT_HOME_SUMMARY_URI="$TMP_DIR/bad/airgap-fragment-home-summary-uri.json"
@@ -768,7 +768,7 @@ expect_fail fragment-home-airgap-summary-uri \
     "$FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT" \
     "$ONLINE_REPORT" \
     "$BAD_AIRGAP_FRAGMENT_HOME_SUMMARY_URI" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 assert_no_stale_report "$FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT/$REPORT_FILE"
 
 BAD_AIRGAP_DEEP_FRAGMENT_HOME_SUMMARY_URI="$TMP_DIR/bad/airgap-deep-fragment-home-summary-uri.json"
@@ -779,7 +779,7 @@ expect_fail deep-fragment-home-airgap-summary-uri \
     "$DEEP_FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT" \
     "$ONLINE_REPORT" \
     "$BAD_AIRGAP_DEEP_FRAGMENT_HOME_SUMMARY_URI" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 assert_no_stale_report "$DEEP_FRAGMENT_HOME_AIRGAP_SUMMARY_URI_OUTPUT/$REPORT_FILE"
 
 expect_fail focused-online-producer-as-adoption \
@@ -787,14 +787,14 @@ expect_fail focused-online-producer-as-adoption \
     "$TMP_DIR/out-focused-online" \
     "$ONLINE_PRODUCER_REPORT" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 
 expect_fail focused-operator-surface-as-airgap-adoption \
   run_intake \
     "$TMP_DIR/out-focused-surface" \
     "$ONLINE_REPORT" \
     "$OPERATOR_SURFACE_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 
 expect_fail focused-airgap-producer-as-adoption \
   run_intake \
@@ -803,7 +803,7 @@ expect_fail focused-airgap-producer-as-adoption \
     "$AIRGAP_USE_EXISTING_REPORT" \
     "$AIRGAP_PRODUCER_REPORT"
 
-expect_fail missing-airgap-install-substrates \
+expect_fail missing-airgap-kit-provided \
   bash "$ROOT_DIR/scripts/verify-release.sh" --release-engineering-gate-intake \
     --release-contract "$VALID_CONTRACT" \
     --online-adoption-report "$ONLINE_REPORT" \
@@ -824,7 +824,7 @@ expect_fail release-id-drift \
     "$TMP_DIR/out-release-id-drift" \
     "$BAD_ONLINE_RELEASE_ID" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 
 BAD_AIRGAP_GIT_SHA="$TMP_DIR/bad/airgap-git-sha-drift.json"
 copy_and_mutate_json "$AIRGAP_USE_EXISTING_REPORT" "$BAD_AIRGAP_GIT_SHA" git_sha_drift
@@ -833,7 +833,7 @@ expect_fail git-sha-drift \
     "$TMP_DIR/out-git-sha-drift" \
     "$ONLINE_REPORT" \
     "$BAD_AIRGAP_GIT_SHA" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 
 BAD_ONLINE_CONTRACT_DIGEST="$TMP_DIR/bad/online-release-contract-digest-drift.json"
 copy_and_mutate_json "$ONLINE_REPORT" "$BAD_ONLINE_CONTRACT_DIGEST" release_contract_digest_drift
@@ -842,21 +842,21 @@ expect_fail release-contract-digest-drift \
     "$TMP_DIR/out-release-contract-digest-drift" \
     "$BAD_ONLINE_CONTRACT_DIGEST" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 
 STALE_OUTPUT="$TMP_DIR/out-stale-clear"
 run_intake \
   "$STALE_OUTPUT" \
   "$ONLINE_REPORT" \
   "$AIRGAP_USE_EXISTING_REPORT" \
-  "$AIRGAP_INSTALL_SUBSTRATES_REPORT" >"$TMP_DIR/stale-pass.out"
+  "$AIRGAP_KIT_PROVIDED_REPORT" >"$TMP_DIR/stale-pass.out"
 [[ -f "$STALE_OUTPUT/$REPORT_FILE" ]] || fail "stale setup report missing"
 expect_fail stale-report-clear \
   run_intake \
     "$STALE_OUTPUT" \
     "$BAD_ONLINE" \
     "$AIRGAP_USE_EXISTING_REPORT" \
-    "$AIRGAP_INSTALL_SUBSTRATES_REPORT"
+    "$AIRGAP_KIT_PROVIDED_REPORT"
 assert_no_stale_report "$STALE_OUTPUT/$REPORT_FILE"
 
 STALE_CLI_OUTPUT="$TMP_DIR/out-stale-cli-clear"
@@ -864,7 +864,7 @@ run_intake \
   "$STALE_CLI_OUTPUT" \
   "$ONLINE_REPORT" \
   "$AIRGAP_USE_EXISTING_REPORT" \
-  "$AIRGAP_INSTALL_SUBSTRATES_REPORT" >"$TMP_DIR/stale-cli-pass.out"
+  "$AIRGAP_KIT_PROVIDED_REPORT" >"$TMP_DIR/stale-cli-pass.out"
 [[ -f "$STALE_CLI_OUTPUT/$REPORT_FILE" ]] || fail "stale CLI setup report missing"
 expect_fail stale-cli-report-clear \
   bash "$ROOT_DIR/scripts/verify-release.sh" --release-engineering-gate-intake \

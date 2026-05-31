@@ -9,15 +9,22 @@ sign off deploy, package, offline install, or release readiness.
 ## Operator Choice Matrix
 
 This table is the operator-facing choice matrix for online/airgap by
-use-existing/install-substrates. It is not a formal release verdict, package
+use-existing/kit-provided. It is not a formal release verdict, package
 readiness, operator readiness, or GA signoff.
+
+`kit_provided` is a validation path for kit-supplied substrate pack/truth
+inputs. It is not a substrate installer. A future `install_substrates` path
+needs its own installer producer plus an explicit installer confirmation flag.
+`installed_by` stays a provenance marker, not installer proof; it does not mean
+release-kit created databases, buckets, OIDC realms, or other substrate
+resources.
 
 | Operator choice | Machine profile mapping | Operator command entry | Current result |
 | --- | --- | --- | --- |
 | `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/operator-release.sh online use_existing ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]` | Runs the existing online focused chain for declared substrate endpoints and explicit target prerequisites. Confirmed apply uses `--confirm-apply online/use_existing`; the facade maps it internally. Target-registry confirmed apply still binds registry presence through the operator probe before render/apply. |
-| `online/install_substrates` | `existing_kubernetes/kit_installed/online` | `bash scripts/operator-release.sh online install_substrates ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the existing online focused chain for kit-installed substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope. It is source-registry only, rejects `--target-registry` and `--registry-probe`, and is not a substrate installer or release readiness. |
+| `online/kit_provided` | `existing_kubernetes/kit_installed/online` | `bash scripts/operator-release.sh online kit_provided ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the existing online focused chain for kit-installed substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope. It is source-registry only, rejects `--target-registry` and `--registry-probe`, and is not a substrate installer or release readiness. |
 | `airgap/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap use_existing ... --bundle-root ... --render-values ... --substrate-truth ... --target-prerequisites ...` | Consumes an already assembled bundle through the existing airgap consume/deployment-focused chain: bundle check, preflight, render-check, apply, rollout, and optional smoke when confirmed apply is requested. It is not full readiness or an operator verdict. |
-| `airgap/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap install_substrates ... --bundle-root ... --render-values ... --substrate-truth ... --target-prerequisites ...` | Consumes an already assembled kit-installed bundle through the focused chain: substrate-pack-check, image load, bundle render-check, apply, rollout, and optional smoke when confirmed apply is requested. It does not install substrates and is not full readiness or an operator verdict. |
+| `airgap/kit_provided` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap kit_provided ... --bundle-root ... --render-values ... --substrate-truth ... --target-prerequisites ...` | Consumes an already assembled kit-installed bundle through the focused chain: substrate-pack-check, image load, bundle render-check, apply, rollout, and optional smoke when confirmed apply is requested. It does not install substrates and is not full readiness or an operator verdict. |
 
 Airgap bundle packaging commands are packaging-side helpers for the airgap
 operator choices, not standalone operator choices.
@@ -25,7 +32,7 @@ operator choices, not standalone operator choices.
 | Packaging surface | Machine profile mapping | Operator command entry | Current result |
 | --- | --- | --- | --- |
 | `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the existing local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
-| `airgap-bundle/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle install_substrates ... --substrate-pack-manifest ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the packaging-side local bundle assembler and immediate self-check, binds the substrate pack manifest as a bundle component, then writes the operator surface summary. It does not consume/deploy the bundle or install substrates. |
+| `airgap-bundle/kit_provided` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle kit_provided ... --substrate-pack-manifest ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the packaging-side local bundle assembler and immediate self-check, binds the substrate pack manifest as a bundle component, then writes the operator surface summary. It does not consume/deploy the bundle or install substrates. |
 
 ## Optional Rehearsal
 
@@ -44,11 +51,11 @@ endpoint is kind.
 | Path | Implemented now | Not yet |
 | --- | --- | --- |
 | `online/use_existing` | Inputs, target-preflight over substrate truth plus target prerequisites, template-package, optional image-map target-ref adoption, optional registry presence through an operator probe, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke through the online focused chain. | Cloud provisioning, substrate provisioning, registry mirroring, registry login, rollback, product-flow checks, deploy readiness, release readiness. |
-| `online/install_substrates` | Contract declaration, target-preflight substrate/prerequisites intake, standalone image-map planning, substrate pack focused materiality, Pod-network substrate routability, template-package, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope through the online focused chain. | Substrate installer, target-registry/registry-probe support, deploy readiness, package readiness, release readiness. |
+| `online/kit_provided` | Contract declaration, target-preflight substrate/prerequisites intake, standalone image-map planning, substrate pack focused materiality, Pod-network substrate routability, template-package, render, render-check, apply dry-run or confirmed apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope through the online focused chain. | Substrate installer, target-registry/registry-probe support, deploy readiness, package readiness, release readiness. |
 | `airgap/use_existing` | Bundle consume/deployment-focused diagnostics for an already assembled existing-substrate airgap bundle: bundle check, image load, bundle render-check, apply, rollout, optional smoke, and operator surface summary. | Registry mirroring, offline install, full readiness, operator verdict, deploy readiness, package readiness, release readiness. |
-| `airgap/install_substrates` | Bundle consume/deployment-focused diagnostics for an already assembled kit-installed airgap bundle: bundle check, substrate-pack-check, image load, bundle render-check, apply, rollout, optional smoke, and operator surface summary. | Substrate installer, full readiness, operator verdict, deploy readiness, package readiness, release readiness. |
+| `airgap/kit_provided` | Bundle consume/deployment-focused diagnostics for an already assembled kit-installed airgap bundle: bundle check, substrate-pack-check, image load, bundle render-check, apply, rollout, optional smoke, and operator surface summary. | Substrate installer, full readiness, operator verdict, deploy readiness, package readiness, release readiness. |
 | `airgap-bundle/use_existing` | Image-map mirror plan through the bundle-create producer, local bundle assembler plus self-check, and operator surface summary. Other airgap checks remain focused producer diagnostics. | Registry mirroring, offline install, deploy readiness, package readiness. |
-| `airgap-bundle/install_substrates` | Packaging-side bundle assembly, substrate pack manifest component/digest binding, bundle self-check, and operator surface summary. | Bundle consume/deploy execution by this command; use `airgap/install_substrates` for the consume/deployment-focused path. Still no substrate installer, full readiness, operator verdict, deploy readiness, package readiness, or release readiness. |
+| `airgap-bundle/kit_provided` | Packaging-side bundle assembly, substrate pack manifest component/digest binding, bundle self-check, and operator surface summary. | Bundle consume/deploy execution by this command; use `airgap/kit_provided` for the consume/deployment-focused path. Still no substrate installer, full readiness, operator verdict, deploy readiness, package readiness, or release readiness. |
 
 ## Command Roles
 
@@ -180,7 +187,7 @@ payload and operator prerequisite inputs. The bundle root must be absent or
 empty. The command writes `bundle-create-report.json` with `readiness=false`
 after the generated bundle passes `--airgap-bundle-check`; that report is not
 accepted by the evidence envelope validator.
-For `airgap-bundle/use_existing` and `airgap-bundle/install_substrates`,
+For `airgap-bundle/use_existing` and `airgap-bundle/kit_provided`,
 optional
 `--evidence-root <dir> --evidence-provenance <json>` writes an unsigned focused
 evidence root only after bundle self-check passes, then revalidates it through
@@ -203,7 +210,7 @@ digest, evidence root digests, and the safe runbook path/digest from the bundle
 manifest. It rejects kind/local-kind profiles, signed provenance, operator
 identity/signature fields, and formal/readiness/verdict fields in the
 acceptance inputs.
-For `airgap-bundle/install_substrates`, also provide
+For `airgap-bundle/kit_provided`, also provide
 `--substrate-pack-manifest <json>`; the generated bundle records it as
 `components/substrate-pack-manifest.json`,
 `components[].kind: substrate_pack_manifest`, and

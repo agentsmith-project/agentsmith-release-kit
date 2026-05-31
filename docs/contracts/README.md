@@ -67,6 +67,12 @@ agentsmith.image-map/v1`, `readiness: false`, and `scope: image_map_only`.
 The report is a plan for source/target digest references only; it must not
 claim registry presence, deploy readiness, package readiness, release
 readiness, product-flow evidence, or registry credential handling.
+The operator-facing kit path is `kit_provided`: it validates kit-supplied
+substrate pack/truth inputs only. `install_substrates` remains planned until a
+separate installer producer and explicit installer confirmation flag exist.
+Internal `installed_by: agentsmith-release-kit` values stay as kit-provided
+pack/truth identity and provenance markers; `installed_by` stays a provenance
+marker, not installer proof.
 If `managed_runner` is present in the dynamic closure, this validator maps it
 through the same source/target digest mechanism as every other id; it is not a
 dedicated runner runtime or backend-real gate.

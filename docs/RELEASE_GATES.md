@@ -43,17 +43,25 @@ choice internally, and calls the existing producer diagnostic:
 
 - `online/use_existing` -> `--online-deployment-gate` with
   `existing_kubernetes/external_declared/online`.
-- `online/install_substrates` -> `--online-deployment-gate` with
+- `online/kit_provided` -> `--online-deployment-gate` with
   `existing_kubernetes/kit_installed/online`.
 - `airgap/use_existing` -> `--airgap-consume-rehearsal` with
   `existing_kubernetes/external_declared/airgap`.
-- `airgap/install_substrates` -> `--airgap-consume-rehearsal` with
+- `airgap/kit_provided` -> `--airgap-consume-rehearsal` with
   `existing_kubernetes/kit_installed/airgap`.
 - `airgap-bundle/use_existing` -> `--bundle-create` with
   `existing_kubernetes/external_declared/airgap`.
-- `airgap-bundle/install_substrates` -> `--bundle-create` with
+- `airgap-bundle/kit_provided` -> `--bundle-create` with
   `existing_kubernetes/kit_installed/airgap` and required
   `--substrate-pack-manifest`.
+
+`kit_provided` validates kit-supplied substrate pack/truth inputs and related
+focused evidence only; it is not substrate installation. `install_substrates`
+is planned/not implemented and must fail fast until a separate installer
+producer and explicit installer confirmation flag exist.
+`installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
+It is not installer proof and does not mean release-kit created databases,
+buckets, OIDC realms, or other substrate resources.
 
 For confirmed apply, the operator passes the same operator choice to
 `--confirm-apply`, for example `--confirm-apply online/use_existing`; the facade
@@ -112,7 +120,7 @@ bash scripts/test-airgap-adoption.sh
 This focused guard exercises `bash scripts/verify-release.sh
 --airgap-adoption`. It consumes matching generated airgap-bundle and
 confirmed-apply airgap `operator-release-surface-report.json` files for either
-`use_existing` or `install_substrates`, plus an explicit release contract and
+`use_existing` or `kit_provided`, plus an explicit release contract and
 `airgap-bundle-manifest.json`.
 
 The generated `airgap-adoption-report.json` keeps `schema:
@@ -976,7 +984,7 @@ This focused guard exercises `bash scripts/verify-release.sh
 --online-adoption`. It aggregates only existing online focused reports and
 evidence roots for `online/use_existing`
 (`existing_kubernetes/external_declared/online`) and
-`online/install_substrates` (`existing_kubernetes/kit_installed/online`).
+`online/kit_provided` (`existing_kubernetes/kit_installed/online`).
 Both paths are required, both must be confirmed apply with passing apply,
 rollout, and smoke steps, and both evidence roots must pass the existing
 `--evidence` diagnostic.
@@ -1005,11 +1013,11 @@ This focused guard exercises `bash scripts/verify-release.sh
 candidate intake boundary for explicit GA or compliance trigger work. It
 consumes the existing focused `online-adoption-report.json` plus two existing
 focused `airgap-adoption-report.json` files for `airgap/use_existing` and
-`airgap/install_substrates`; it does not consume producer reports directly.
+`airgap/kit_provided`; it does not consume producer reports directly.
 
 The intake requires all four operator choices:
-`online/use_existing`, `online/install_substrates`, `airgap/use_existing`, and
-`airgap/install_substrates`. Release id, git sha, release contract raw digest,
+`online/use_existing`, `online/kit_provided`, `airgap/use_existing`, and
+`airgap/kit_provided`. Release id, git sha, release contract raw digest,
 release contract subject/provenance, online adoption provenance summaries, and
 airgap adoption digest chains must bind to the supplied release contract.
 Inputs containing `readiness: true`, `release_verdict`, `operator_verdict`,
@@ -1219,6 +1227,8 @@ The substrate pack manifest schema is
 `agentsmith.substrate-pack-manifest/v1`. It must declare
 `installed_by: agentsmith-release-kit`, a plain semver `release_kit_version`,
 and a `target_profile` string that exactly matches the CLI target profile.
+That `installed_by` value is a pack/truth identity and provenance marker, not
+installer proof.
 `images` must include `postgresql`, `mongodb`, `redis`, `object_storage`, and
 `oidc`. Every image must be digest-pinned as `...@sha256:<64>` and must not use
 `latest`, URI syntax, localhost, loopback, local/source paths, or empty/relative

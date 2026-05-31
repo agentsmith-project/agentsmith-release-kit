@@ -338,8 +338,8 @@ run_adoption() {
     --release-contract "$VALID_CONTRACT" \
     --use-existing-report "$use_existing_report" \
     --use-existing-evidence-root "$use_existing_evidence" \
-    --install-substrates-report "$install_report" \
-    --install-substrates-evidence-root "$install_evidence" \
+    --kit-provided-report "$install_report" \
+    --kit-provided-evidence-root "$install_evidence" \
     --output-dir "$output_dir"
 }
 
@@ -448,13 +448,13 @@ if (!/^sha256:[0-9a-f]{64}$/.test(report.release_contract?.input_sha256 || '')) 
 if (!/^sha256:[0-9a-f]{64}$/.test(report.release_contract?.subject_sha256 || '')) {
   throw new Error('online adoption report must include release contract subject digest');
 }
-if (report.coverage?.required_operator_paths?.join(',') !== 'online/use_existing,online/install_substrates') {
+if (report.coverage?.required_operator_paths?.join(',') !== 'online/use_existing,online/kit_provided') {
   throw new Error('online adoption report must summarize required operator paths');
 }
 if (report.coverage.confirmed_apply_paths !== 2) {
   throw new Error('online adoption report must count two confirmed apply paths');
 }
-for (const key of ['use_existing', 'install_substrates']) {
+for (const key of ['use_existing', 'kit_provided']) {
   const entry = report.online_paths?.[key];
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
     throw new Error(`missing online path summary: ${key}`);
@@ -498,10 +498,10 @@ NODE
 
 USE_EXISTING_REPORT_DIR="$TMP_DIR/use-existing-report"
 USE_EXISTING_EVIDENCE="$TMP_DIR/use-existing-evidence"
-INSTALL_REPORT_DIR="$TMP_DIR/install-substrates-report"
-INSTALL_EVIDENCE="$TMP_DIR/install-substrates-evidence"
+INSTALL_REPORT_DIR="$TMP_DIR/kit-provided-report"
+INSTALL_EVIDENCE="$TMP_DIR/kit-provided-evidence"
 write_online_evidence "$USE_EXISTING_REPORT_DIR" "$USE_EXISTING_EVIDENCE" "$EXTERNAL_ONLINE_PROFILE" operator-run-use-existing
-write_online_evidence "$INSTALL_REPORT_DIR" "$INSTALL_EVIDENCE" "$KIT_ONLINE_PROFILE" operator-run-install-substrates
+write_online_evidence "$INSTALL_REPORT_DIR" "$INSTALL_EVIDENCE" "$KIT_ONLINE_PROFILE" operator-run-kit-provided
 
 PASS_OUTPUT="$TMP_DIR/out-pass"
 run_adoption \
@@ -519,17 +519,17 @@ expect_fail missing-use-existing \
   bash "$ROOT_DIR/scripts/verify-release.sh" --online-adoption \
     --release-contract "$VALID_CONTRACT" \
     --use-existing-evidence-root "$USE_EXISTING_EVIDENCE" \
-    --install-substrates-report "$INSTALL_REPORT_DIR/online-deployment-gate-report.json" \
-    --install-substrates-evidence-root "$INSTALL_EVIDENCE" \
+    --kit-provided-report "$INSTALL_REPORT_DIR/online-deployment-gate-report.json" \
+    --kit-provided-evidence-root "$INSTALL_EVIDENCE" \
     --output-dir "$TMP_DIR/out-missing-use-existing"
 
-expect_fail missing-install-substrates \
+expect_fail missing-kit-provided \
   bash "$ROOT_DIR/scripts/verify-release.sh" --online-adoption \
     --release-contract "$VALID_CONTRACT" \
     --use-existing-report "$USE_EXISTING_REPORT_DIR/online-deployment-gate-report.json" \
     --use-existing-evidence-root "$USE_EXISTING_EVIDENCE" \
-    --install-substrates-evidence-root "$INSTALL_EVIDENCE" \
-    --output-dir "$TMP_DIR/out-missing-install-substrates"
+    --kit-provided-evidence-root "$INSTALL_EVIDENCE" \
+    --output-dir "$TMP_DIR/out-missing-kit-provided"
 
 MISMATCH_REPORT_DIR="$TMP_DIR/mismatch-report"
 MISMATCH_EVIDENCE="$TMP_DIR/mismatch-evidence"

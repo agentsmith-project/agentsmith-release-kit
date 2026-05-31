@@ -49,15 +49,23 @@ Airgap-bundle surfaces may optionally write unsigned scoped
 digest-only airgap evidence handoff fields; runbook acceptance is checked by
 `scripts/test-operator-runbook-acceptance.sh` and does not issue readiness,
 identity, signature, or verdict claims.
-`airgap/use_existing` and `airgap/install_substrates` are the operator-facing
+`airgap/use_existing` and `airgap/kit_provided` are the operator-facing
 entries for consuming an already assembled airgap bundle; they map to
 `--airgap-consume-rehearsal` and keep `readiness: false`.
+`kit_provided` means pack/truth validation for kit-supplied substrate material,
+not substrate installation. Future `install_substrates` needs a separate
+installer producer and explicit installer confirmation flag before it can be a
+successful operator path.
+Current `installed_by: agentsmith-release-kit` values are kit-provided
+pack/truth identity and provenance markers only; `installed_by` is not
+installer proof and does not mean release-kit created databases, buckets, OIDC
+realms, or other substrate resources.
 `--airgap-adoption` consumes matching repo-local airgap-bundle and
 confirmed-apply airgap operator surface summaries for `use_existing` or
-`install_substrates` plus an explicit release contract and bundle manifest. It
+`kit_provided` plus an explicit release contract and bundle manifest. It
 writes a digest-only `airgap-adoption-report.json` with `readiness: false`.
 `--release-engineering-gate-intake` consumes only existing focused online and
-airgap adoption reports, requires the four online/airgap use-existing/install
+airgap adoption reports, requires the four online/airgap use-existing/kit-provided
 operator choices, and writes `release-engineering-gate-intake-report.json`
 with `readiness: false`, `status: pass`, and `formal_verdict: not_issued`.
 This maintainer-only path is for explicit GA or compliance trigger work; it
@@ -403,6 +411,8 @@ manifest requires `installed_by: agentsmith-release-kit`, plain semver
 `release_kit_version`, exact target-profile binding, digest-pinned
 PostgreSQL/MongoDB/Redis/object-storage/OIDC images, and payload/template/tool
 checksum material that is only sha256 digests or safe relative pack paths. It
+uses `installed_by` only as the kit-provided pack/truth identity marker, not
+as proof that an installer created the substrate. It
 reuses the shared substrate truth validator for required services, secret
 refs, TLS or sslmode, pgvector, reachability, and kit-installed identity. It
 does not create or install substrates, create databases/buckets/realms, log in

@@ -479,7 +479,7 @@ const manifest = {
   },
   payload: {
     install_plan: {
-      path: 'payload/install-substrates.json',
+      path: 'payload/kit-provided.json',
       sha256: digest('6')
     }
   },
@@ -1342,12 +1342,12 @@ assert_operator_report \
   true
 pass "operator online/use_existing confirmed apply accepts operator confirmation and writes handoff summary"
 
-kit_online_output="$TMP_DIR/out-online-install-substrates"
+kit_online_output="$TMP_DIR/out-online-kit-provided"
 : >"$KUBECTL_LOG"
 : >"$ROUTABILITY_PROBE_LOG"
 FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
 ROUTABILITY_PROBE_LOG="$ROUTABILITY_PROBE_LOG" \
-bash "$ROOT_DIR/scripts/operator-release.sh" online install_substrates \
+bash "$ROOT_DIR/scripts/operator-release.sh" online kit_provided \
   --release-contract "$VALID_CONTRACT" \
   --deploy-template-package "$VALID_PACKAGE" \
   --archive "$VALID_ARCHIVE" \
@@ -1358,27 +1358,27 @@ bash "$ROOT_DIR/scripts/operator-release.sh" online install_substrates \
   --routability-probe "$ROUTABILITY_PROBE" \
   --namespace agentsmith \
   --output-dir "$kit_online_output" \
-  --kubectl "$FAKE_KUBECTL" >"$TMP_DIR/online-install-substrates.out"
+  --kubectl "$FAKE_KUBECTL" >"$TMP_DIR/online-kit-provided.out"
 
 [[ -s "$ROUTABILITY_PROBE_LOG" ]] || fail "kit online path did not call fake routability probe"
 assert_producer_profile "$kit_online_output/online-deployment-gate-report.json" "$KIT_ONLINE_PROFILE"
 assert_operator_report \
   "$kit_online_output" \
   online \
-  install_substrates \
+  kit_provided \
   "$KIT_ONLINE_PROFILE" \
   "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,render,render-check,apply" \
   "online_deployment_gate_report"
-pass "operator online/install_substrates maps to kit-installed online producer gate"
+pass "operator online/kit_provided maps to kit-installed online producer gate"
 
-kit_online_apply_output="$TMP_DIR/out-online-install-substrates-apply"
-kit_online_evidence_root="$TMP_DIR/evidence-online-install-substrates-apply"
+kit_online_apply_output="$TMP_DIR/out-online-kit-provided-apply"
+kit_online_evidence_root="$TMP_DIR/evidence-online-kit-provided-apply"
 : >"$KUBECTL_LOG"
 : >"$ROUTABILITY_PROBE_LOG"
 before_kit_online_apply="$(hit_count)"
 FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
 ROUTABILITY_PROBE_LOG="$ROUTABILITY_PROBE_LOG" \
-bash "$ROOT_DIR/scripts/operator-release.sh" online install_substrates \
+bash "$ROOT_DIR/scripts/operator-release.sh" online kit_provided \
   --release-contract "$VALID_CONTRACT" \
   --deploy-template-package "$VALID_PACKAGE" \
   --archive "$VALID_ARCHIVE" \
@@ -1391,14 +1391,14 @@ bash "$ROOT_DIR/scripts/operator-release.sh" online install_substrates \
   --output-dir "$kit_online_apply_output" \
   --kubectl "$FAKE_KUBECTL" \
   --mode apply \
-  --confirm-apply online/install_substrates \
+  --confirm-apply online/kit_provided \
   --operator-run-id operator-run-kit-1004 \
   --timeout 120s \
   --smoke-url "$BASE_URL/ok" \
   --allow-http \
   --allow-localhost \
   --evidence-root "$kit_online_evidence_root" \
-  --evidence-provenance "$KIT_VALID_PROVENANCE" >"$TMP_DIR/online-install-substrates-apply.out"
+  --evidence-provenance "$KIT_VALID_PROVENANCE" >"$TMP_DIR/online-kit-provided-apply.out"
 after_kit_online_apply="$(hit_count)"
 
 [[ "$after_kit_online_apply" -eq $((before_kit_online_apply + 1)) ]] || fail "operator kit online apply smoke should issue one request"
@@ -1415,14 +1415,14 @@ assert_producer_profile "$kit_online_apply_output/online-deployment-gate-report.
 assert_operator_report \
   "$kit_online_apply_output" \
   online \
-  install_substrates \
+  kit_provided \
   "$KIT_ONLINE_PROFILE" \
   "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,render,render-check,apply,rollout,smoke" \
   "online_deployment_gate_report" \
   false \
   true \
   operator-run-kit-1004
-pass "operator online/install_substrates confirmed apply accepts operator confirmation and writes handoff summary"
+pass "operator online/kit_provided confirmed apply accepts operator confirmation and writes handoff summary"
 
 airgap_output="$TMP_DIR/out-airgap-use-existing"
 airgap_bundle_root="$TMP_DIR/bundle-airgap-use-existing"
@@ -1452,10 +1452,10 @@ assert_operator_report \
   true
 pass "operator airgap-bundle/use_existing maps to bundle-create and writes handoff summary"
 
-kit_airgap_output="$TMP_DIR/out-airgap-bundle-install-substrates"
-kit_airgap_bundle_root="$TMP_DIR/bundle-airgap-install-substrates"
-kit_airgap_evidence_root="$TMP_DIR/evidence-airgap-bundle-install-substrates"
-bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
+kit_airgap_output="$TMP_DIR/out-airgap-bundle-kit-provided"
+kit_airgap_bundle_root="$TMP_DIR/bundle-airgap-kit-provided"
+kit_airgap_evidence_root="$TMP_DIR/evidence-airgap-bundle-kit-provided"
+bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle kit_provided \
   --release-contract "$VALID_CONTRACT" \
   --deploy-template-package "$VALID_PACKAGE" \
   --archive "$VALID_ARCHIVE" \
@@ -1470,10 +1470,10 @@ bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
   --bundle-root "$kit_airgap_bundle_root" \
   --output-dir "$kit_airgap_output" \
   --evidence-root "$kit_airgap_evidence_root" \
-  --evidence-provenance "$KIT_AIRGAP_BUNDLE_PROVENANCE" >"$TMP_DIR/airgap-bundle-install-substrates.out"
+  --evidence-provenance "$KIT_AIRGAP_BUNDLE_PROVENANCE" >"$TMP_DIR/airgap-bundle-kit-provided.out"
 
 [[ -f "$kit_airgap_output/$REPORT_FILE" ]] ||
-  fail "operator airgap-bundle/install_substrates summary missing"
+  fail "operator airgap-bundle/kit_provided summary missing"
 [[ -f "$kit_airgap_evidence_root/evidence.json" ]] ||
   fail "operator kit airgap bundle evidence missing evidence.json"
 [[ -f "$kit_airgap_evidence_root/evidence-subject.json" ]] ||
@@ -1486,7 +1486,7 @@ assert_producer_profile "$kit_airgap_output/bundle-create-report.json" "$KIT_AIR
 assert_operator_report \
   "$kit_airgap_output" \
   airgap-bundle \
-  install_substrates \
+  kit_provided \
   "$KIT_AIRGAP_PROFILE" \
   "bundle-create,airgap-bundle-check" \
   "airgap_bundle_check_report,bundle_create_report" \
@@ -1518,7 +1518,7 @@ if (manifest.bindings?.substrate_pack_manifest_sha256 !== packDigest) {
   throw new Error('operator kit airgap bundle missing substrate pack binding digest');
 }
 NODE
-pass "operator airgap-bundle/install_substrates maps to kit-installed bundle-create"
+pass "operator airgap-bundle/kit_provided maps to kit-installed bundle-create"
 
 missing_substrate_pack_evidence_root="$TMP_DIR/evidence-airgap-bundle-missing-substrate-pack"
 cp -R "$kit_airgap_evidence_root" "$missing_substrate_pack_evidence_root"
@@ -1526,7 +1526,7 @@ rm "$missing_substrate_pack_evidence_root/substrate-pack-manifest.json"
 expect_operator_fail kit-airgap-evidence-missing-substrate-pack \
   "$NODE_BIN" "$ROOT_DIR/scripts/verify-operator-release-surface.mjs" \
     --surface airgap-bundle \
-    --substrate-strategy install_substrates \
+    --substrate-strategy kit_provided \
     --machine-profile "$KIT_AIRGAP_PROFILE" \
     --producer-mode bundle-create \
     --release-contract "$VALID_CONTRACT" \
@@ -1582,7 +1582,7 @@ NODE
 expect_operator_fail kit-airgap-evidence-missing-substrate-pack-subject \
   "$NODE_BIN" "$ROOT_DIR/scripts/verify-operator-release-surface.mjs" \
     --surface airgap-bundle \
-    --substrate-strategy install_substrates \
+    --substrate-strategy kit_provided \
     --machine-profile "$KIT_AIRGAP_PROFILE" \
     --producer-mode bundle-create \
     --release-contract "$VALID_CONTRACT" \
@@ -1652,7 +1652,7 @@ NODE
 expect_operator_fail kit-airgap-evidence-stale-bundle-check-report \
   "$NODE_BIN" "$ROOT_DIR/scripts/verify-operator-release-surface.mjs" \
     --surface airgap-bundle \
-    --substrate-strategy install_substrates \
+    --substrate-strategy kit_provided \
     --machine-profile "$KIT_AIRGAP_PROFILE" \
     --producer-mode bundle-create \
     --release-contract "$VALID_CONTRACT" \
@@ -1722,7 +1722,7 @@ NODE
 expect_operator_fail kit-airgap-evidence-stale-bundle-manifest \
   "$NODE_BIN" "$ROOT_DIR/scripts/verify-operator-release-surface.mjs" \
     --surface airgap-bundle \
-    --substrate-strategy install_substrates \
+    --substrate-strategy kit_provided \
     --machine-profile "$KIT_AIRGAP_PROFILE" \
     --producer-mode bundle-create \
     --release-contract "$VALID_CONTRACT" \
@@ -1791,7 +1791,7 @@ pass "operator airgap/use_existing maps to consume rehearsal and writes handoff 
 
 write_bundle_operator_inputs "$kit_airgap_bundle_root" "$KIT_AIRGAP_PROFILE"
 kit_airgap_target_app_image="$(target_image_for_id "$kit_airgap_bundle_root/components/image-map.json" agentsmith_app)"
-kit_airgap_consume_output="$TMP_DIR/out-airgap-consume-install-substrates"
+kit_airgap_consume_output="$TMP_DIR/out-airgap-consume-kit-provided"
 : >"$KUBECTL_LOG"
 : >"$LOAD_LOG"
 before_kit_airgap_apply="$(hit_count)"
@@ -1799,7 +1799,7 @@ AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
 FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
 FAKE_KUBECTL_LIVE_IMAGE="$kit_airgap_target_app_image" \
 FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$kit_airgap_target_app_image" \
-bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+bash "$ROOT_DIR/scripts/operator-release.sh" airgap kit_provided \
   --bundle-root "$kit_airgap_bundle_root" \
   --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
   --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
@@ -1810,12 +1810,12 @@ bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
   --mode apply \
   --archive-probe "$GOOD_PROBE" \
   --image-loader "$GOOD_LOADER" \
-  --confirm-apply airgap/install_substrates \
+  --confirm-apply airgap/kit_provided \
   --operator-run-id operator-airgap-kit-1006 \
   --timeout 120s \
   --smoke-url "$BASE_URL/ok" \
   --allow-http \
-  --allow-localhost >"$TMP_DIR/airgap-consume-install-substrates.out"
+  --allow-localhost >"$TMP_DIR/airgap-consume-kit-provided.out"
 after_kit_airgap_apply="$(hit_count)"
 
 [[ "$after_kit_airgap_apply" -eq $((before_kit_airgap_apply + 1)) ]] ||
@@ -1830,7 +1830,7 @@ grep -q 'get pods' "$KUBECTL_LOG" || fail "operator kit airgap apply did not che
 [[ "$(grep -c '^sha256:' "$LOAD_LOG" 2>/dev/null || true)" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] ||
   fail "operator kit airgap apply must load every image exactly once"
 [[ -f "$kit_airgap_consume_output/$REPORT_FILE" ]] ||
-  fail "operator airgap/install_substrates summary missing"
+  fail "operator airgap/kit_provided summary missing"
 [[ -f "$kit_airgap_consume_output/airgap-deployment-gate/substrate-pack-check/substrate-pack-check-report.json" ]] ||
   fail "operator kit airgap consume must run nested substrate-pack-check"
 assert_producer_profile \
@@ -1846,12 +1846,12 @@ assert_airgap_consume_chain \
 assert_operator_report \
   "$kit_airgap_consume_output" \
   airgap \
-  install_substrates \
+  kit_provided \
   "$KIT_AIRGAP_PROFILE" \
   "airgap-bundle-check,airgap-deployment-gate" \
   "airgap_bundle_check_report,airgap_consume_rehearsal_report,airgap_deployment_gate_report" \
   true
-pass "operator airgap/install_substrates maps to kit consume rehearsal and writes handoff summary"
+pass "operator airgap/kit_provided maps to kit consume rehearsal and writes handoff summary"
 
 custom_manifest_bundle_root="$TMP_DIR/bundle-airgap-custom-manifest"
 custom_manifest_output="$TMP_DIR/out-airgap-custom-manifest"
@@ -2075,7 +2075,7 @@ expect_operator_fail_before_airgap_consume_outputs \
     FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
     FAKE_KUBECTL_LIVE_IMAGE="$kit_airgap_target_app_image" \
     FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$kit_airgap_target_app_image" \
-  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap kit_provided \
     --bundle-root "$kit_airgap_bundle_root" \
     --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
     --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
@@ -2086,21 +2086,21 @@ expect_operator_fail_before_airgap_consume_outputs \
     --mode apply \
     --archive-probe "$GOOD_PROBE" \
     --image-loader "$GOOD_LOADER" \
-    --confirm-apply airgap/install_substrates \
-    --confirm-apply=airgap/install_substrates \
+    --confirm-apply airgap/kit_provided \
+    --confirm-apply=airgap/kit_provided \
     --operator-run-id operator-airgap-kit-duplicate-confirm \
     --timeout 120s \
     --smoke-url "$BASE_URL/ok" \
     --allow-http \
     --allow-localhost
 
-airgap_install_external_bundle_output="$TMP_DIR/out-airgap-install-substrates-external-bundle"
+airgap_install_external_bundle_output="$TMP_DIR/out-airgap-kit-provided-external-bundle"
 expect_operator_fail_before_airgap_consume_outputs \
-  airgap-install-substrates-external-bundle \
+  airgap-kit-provided-external-bundle \
   "$airgap_install_external_bundle_output" \
   env AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
     FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
-  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap kit_provided \
     --bundle-root "$airgap_bundle_root" \
     --render-values "$airgap_bundle_root/operator-inputs/render-values.json" \
     --substrate-truth "$airgap_bundle_root/operator-inputs/substrate-truth.json" \
@@ -2161,9 +2161,9 @@ expect_operator_fail_before_airgap_consume_outputs \
     --output-dir "$airgap_use_outside_manifest_output" \
     --kubectl "$FAKE_KUBECTL"
 
-missing_pack_output="$TMP_DIR/out-airgap-bundle-install-substrates-missing-pack"
-expect_operator_fail_preserves_summary airgap-bundle-install-substrates-missing-pack "$missing_pack_output" \
-  bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
+missing_pack_output="$TMP_DIR/out-airgap-bundle-kit-provided-missing-pack"
+expect_operator_fail_preserves_summary airgap-bundle-kit-provided-missing-pack "$missing_pack_output" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle kit_provided \
     --release-contract "$VALID_CONTRACT" \
     --deploy-template-package "$VALID_PACKAGE" \
     --archive "$VALID_ARCHIVE" \
@@ -2265,7 +2265,7 @@ expect_operator_fail_preserves_summary raw-kit-airgap-confirm-apply "$raw_kit_ai
     FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
     FAKE_KUBECTL_LIVE_IMAGE="$kit_airgap_target_app_image" \
     FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$kit_airgap_target_app_image" \
-  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap kit_provided \
     --bundle-root "$kit_airgap_bundle_root" \
     --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
     --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
@@ -2285,7 +2285,7 @@ expect_operator_fail_preserves_summary raw-kit-airgap-confirm-apply-equals "$raw
     FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
     FAKE_KUBECTL_LIVE_IMAGE="$kit_airgap_target_app_image" \
     FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$kit_airgap_target_app_image" \
-  bash "$ROOT_DIR/scripts/operator-release.sh" airgap install_substrates \
+  bash "$ROOT_DIR/scripts/operator-release.sh" airgap kit_provided \
     --bundle-root "$kit_airgap_bundle_root" \
     --render-values "$kit_airgap_bundle_root/operator-inputs/render-values.json" \
     --substrate-truth "$kit_airgap_bundle_root/operator-inputs/substrate-truth.json" \
@@ -2303,6 +2303,13 @@ missing_release_contract_output="$TMP_DIR/out-missing-release-contract"
 expect_operator_fail_preserves_summary missing-release-contract "$missing_release_contract_output" \
   bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
     --output-dir "$missing_release_contract_output"
+
+for planned_surface in online airgap airgap-bundle; do
+  planned_install_output="$TMP_DIR/out-planned-install-substrates-${planned_surface}"
+  expect_operator_fail_preserves_summary "planned-install-substrates-${planned_surface}" "$planned_install_output" \
+    bash "$ROOT_DIR/scripts/operator-release.sh" "$planned_surface" install_substrates \
+      --output-dir "$planned_install_output"
+done
 
 for vocabulary in \
   "--target-profile" \

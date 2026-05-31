@@ -18,17 +18,17 @@ const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const REQUIRED_ARGS = ['releaseContract', 'onlineAdoptionReport', 'outputDir'];
 const REQUIRED_QUADRANTS = [
   'online/use_existing',
-  'online/install_substrates',
+  'online/kit_provided',
   'airgap/use_existing',
-  'airgap/install_substrates'
+  'airgap/kit_provided'
 ];
 const REQUIRED_ONLINE_PATHS = {
   use_existing: {
     operatorPath: 'online/use_existing',
     targetProfile: 'existing_kubernetes/external_declared/online'
   },
-  install_substrates: {
-    operatorPath: 'online/install_substrates',
+  kit_provided: {
+    operatorPath: 'online/kit_provided',
     targetProfile: 'existing_kubernetes/kit_installed/online'
   }
 };
@@ -37,8 +37,8 @@ const REQUIRED_AIRGAP_STRATEGIES = {
     quadrant: 'airgap/use_existing',
     targetProfile: 'existing_kubernetes/external_declared/airgap'
   },
-  install_substrates: {
-    quadrant: 'airgap/install_substrates',
+  kit_provided: {
+    quadrant: 'airgap/kit_provided',
     targetProfile: 'existing_kubernetes/kit_installed/airgap'
   }
 };
@@ -103,7 +103,7 @@ function usage() {
     --release-contract <json> \\
     --online-adoption-report <online-adoption-report.json> \\
     --airgap-adoption-report <airgap use_existing airgap-adoption-report.json> \\
-    --airgap-adoption-report <airgap install_substrates airgap-adoption-report.json> \\
+    --airgap-adoption-report <airgap kit_provided airgap-adoption-report.json> \\
     --output-dir <dir>
 
 This maintainer-only intake is for explicit GA or compliance trigger work.
@@ -1080,7 +1080,7 @@ async function main(argv) {
       online: onlineSummary.digest,
       airgap: {
         use_existing: airgapSummaries.get('use_existing').digest,
-        install_substrates: airgapSummaries.get('install_substrates').digest
+        kit_provided: airgapSummaries.get('kit_provided').digest
       }
     },
     identity_bindings: {
@@ -1088,11 +1088,11 @@ async function main(argv) {
       online_release_contract_digest: releaseIdentity.releaseContractDigest,
       airgap_release_contract_digests: {
         use_existing: releaseIdentity.releaseContractDigest,
-        install_substrates: releaseIdentity.releaseContractDigest
+        kit_provided: releaseIdentity.releaseContractDigest
       },
       airgap_bundle_manifest_digests: {
         use_existing: airgapSummaries.get('use_existing').bundleManifestDigest,
-        install_substrates: airgapSummaries.get('install_substrates').bundleManifestDigest
+        kit_provided: airgapSummaries.get('kit_provided').bundleManifestDigest
       }
     },
     blocking_gaps: [

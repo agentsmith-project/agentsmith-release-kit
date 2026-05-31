@@ -61,8 +61,8 @@ AgentSmith Release Kit does not own:
 ## Deployment Model
 
 The operator choice matrix is the current operator-facing surface:
-`online/use_existing`, `online/install_substrates`, `airgap/use_existing`, and
-`airgap/install_substrates`. This names the supported operator surface only; it
+`online/use_existing`, `online/kit_provided`, `airgap/use_existing`, and
+`airgap/kit_provided`. This names the supported operator surface only; it
 is not a formal release verdict, package readiness, operator readiness, or GA
 signoff. These choices map to the four existing-Kubernetes machine profiles:
 `existing_kubernetes/external_declared/online`,
@@ -77,6 +77,15 @@ Focused producer diagnostics still use machine profile axes:
   explicitly supports it.
 - `substrate_source`: `external_declared` or `kit_installed`.
 - `distribution`: `online` or `airgap`.
+
+`kit_provided` means the kit validates a supplied substrate pack manifest,
+declared substrate connection truth, and related routability/materiality
+evidence. It does not install databases, buckets, OIDC realms, or other
+substrates. Future `install_substrates` requires a separate installer producer
+and an explicit installer confirmation flag; today that strategy fails fast.
+`installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
+It is not installer proof and does not mean release-kit created databases,
+buckets, OIDC realms, or other substrate resources.
 
 `kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input. It
 is not a release profile, user deployment prerequisite, operator release
@@ -95,11 +104,11 @@ Operator release surface v0:
 
 ```bash
 bash scripts/operator-release.sh online use_existing ...
-bash scripts/operator-release.sh online install_substrates ...
+bash scripts/operator-release.sh online kit_provided ...
 bash scripts/operator-release.sh airgap use_existing ...
-bash scripts/operator-release.sh airgap install_substrates ...
+bash scripts/operator-release.sh airgap kit_provided ...
 bash scripts/operator-release.sh airgap-bundle use_existing ...
-bash scripts/operator-release.sh airgap-bundle install_substrates ...
+bash scripts/operator-release.sh airgap-bundle kit_provided ...
 bash scripts/verify-release.sh --airgap-adoption \
   --release-contract <json> \
   --bundle-surface-report <airgap-bundle/operator-release-surface-report.json> \
@@ -113,7 +122,7 @@ airgap-bundle commands are packaging-side helpers for those airgap paths. All
 of them map to existing producer diagnostics and write
 `operator-release-surface-report.json` with `readiness: false`. The repo-local
 focused surface supports airgap-bundle and airgap `use_existing` plus
-`install_substrates`: kit airgap bundle packaging requires
+`kit_provided`: kit airgap bundle packaging requires
 `--substrate-pack-manifest`, validates the substrate pack manifest, binds it
 into `airgap-bundle-manifest.json`, and the kit airgap consume/deployment chain
 runs the focused substrate-pack-check, image load, bundle render-check, apply,
@@ -126,7 +135,7 @@ operator choice, existing-Kubernetes airgap machine profile, surface report,
 evidence root, and safe runbook path/digest without adding identity,
 signature, verdict, or readiness semantics.
 `--airgap-adoption` aggregates matching generated airgap-bundle and
-confirmed-apply airgap surfaces for `use_existing` or `install_substrates`
+confirmed-apply airgap surfaces for `use_existing` or `kit_provided`
 repo-local adoption preparation only. For kit airgap it binds the bundle
 report, consume report, deployment report, substrate pack manifest digest, and
 substrate-pack-check report truth. It writes `airgap-adoption-report.json`
@@ -140,15 +149,15 @@ bash scripts/verify-release.sh --release-engineering-gate-intake \
   --release-contract <json> \
   --online-adoption-report <online-adoption-report.json> \
   --airgap-adoption-report <airgap/use_existing airgap-adoption-report.json> \
-  --airgap-adoption-report <airgap/install_substrates airgap-adoption-report.json> \
+  --airgap-adoption-report <airgap/kit_provided airgap-adoption-report.json> \
   --output-dir <dir>
 ```
 
 This is a maintainer-only candidate intake boundary for explicit GA or
 compliance trigger work. It consumes existing focused adoption outputs only,
 requires the four operator choices (`online/use_existing`,
-`online/install_substrates`,
-`airgap/use_existing`, `airgap/install_substrates`), binds release identity and
+`online/kit_provided`,
+`airgap/use_existing`, `airgap/kit_provided`), binds release identity and
 release contract digest/provenance, and writes
 `release-engineering-gate-intake-report.json` with `readiness: false`,
 `scope: release_engineering_gate_candidate_intake_only`, `status: pass`, and
@@ -655,6 +664,8 @@ local/source paths, or URI syntax. Pack `payload`, `templates`, `tools`, and
 `checksums` entries may contain only sha256 digests or safe relative pack
 paths; public-download wording, file/local/source URIs, workspace source paths,
 absolute paths, kubeconfig text, and secret-looking values fail fast.
+Here, `installed_by` marks kit-provided pack/truth identity and provenance; it
+is not installer proof.
 
 The substrate truth is then checked by the shared substrate truth validator
 with `requiredSubstrateSource: kit_installed`, so service presence, endpoint
@@ -842,7 +853,7 @@ bash scripts/test-online-adoption.sh
 `--online-adoption` reads two already generated confirmed-apply online focused
 paths: `online/use_existing` backed by
 `existing_kubernetes/external_declared/online`, and
-`online/install_substrates` backed by
+`online/kit_provided` backed by
 `existing_kubernetes/kit_installed/online`. Each input must provide its
 `online-deployment-gate-report.json` plus the matching evidence root. The check
 reuses `--evidence`, requires both paths to bind the same release id, git sha,

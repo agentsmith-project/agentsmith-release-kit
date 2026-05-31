@@ -6,7 +6,7 @@ NODE_BIN="${NODE:-node}"
 VERIFIER="$ROOT_DIR/scripts/verify-operator-runbook-acceptance.mjs"
 REPORT_FILE="operator-runbook-acceptance-report.json"
 MACHINE_PROFILE="existing_kubernetes/kit_installed/airgap"
-OPERATOR_CHOICE="airgap-bundle/install_substrates"
+OPERATOR_CHOICE="airgap-bundle/kit_provided"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -107,7 +107,7 @@ if (report.scope !== 'operator_runbook_acceptance_v0') {
 if (report.status !== 'pass') {
   throw new Error(`unexpected status: ${report.status}`);
 }
-if (report.operator_choice !== 'airgap-bundle/install_substrates') {
+if (report.operator_choice !== 'airgap-bundle/kit_provided') {
   throw new Error(`unexpected operator choice: ${report.operator_choice}`);
 }
 if (report.machine_profile !== 'existing_kubernetes/kit_installed/airgap') {
@@ -239,7 +239,7 @@ const substratePack = {
   },
   payload: {
     install_plan: {
-      path: 'payload/install-substrates.json',
+      path: 'payload/kit-provided.json',
       sha256: 'sha256:' + '6'.repeat(64)
     }
   },
@@ -423,7 +423,7 @@ const surface = {
   readiness: false,
   status: 'pass',
   surface: 'airgap-bundle',
-  substrate_strategy: 'install_substrates',
+  substrate_strategy: 'kit_provided',
   machine_profile: profile,
   release_id: releaseId,
   git_sha: gitSha,

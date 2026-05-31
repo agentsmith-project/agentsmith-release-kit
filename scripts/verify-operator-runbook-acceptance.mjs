@@ -30,7 +30,7 @@ const URI_SCHEME_RE = /^[A-Za-z][A-Za-z0-9+.-]*:/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:[\\/]/;
 const CHOICE_TO_PROFILE = new Map([
   ['airgap-bundle/use_existing', 'existing_kubernetes/external_declared/airgap'],
-  ['airgap-bundle/install_substrates', 'existing_kubernetes/kit_installed/airgap']
+  ['airgap-bundle/kit_provided', 'existing_kubernetes/kit_installed/airgap']
 ]);
 
 class CliError extends Error {
@@ -50,7 +50,7 @@ class ValidationError extends Error {
 function usage() {
   return `Usage:
   node scripts/verify-operator-runbook-acceptance.mjs \\
-    --operator-choice airgap-bundle/use_existing|airgap-bundle/install_substrates \\
+    --operator-choice airgap-bundle/use_existing|airgap-bundle/kit_provided \\
     --machine-profile existing_kubernetes/<external_declared|kit_installed>/airgap \\
     --surface-report <operator-release-surface-report.json> \\
     --evidence-root <dir> \\
