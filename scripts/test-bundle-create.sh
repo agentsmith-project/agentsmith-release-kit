@@ -35,6 +35,7 @@ PAYLOAD_DIR="$TMP_DIR/payload"
 IMAGE_DIR="$TMP_DIR/image-archives"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
 KIT_SUBSTRATE_PACK="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
+VALID_PROVENANCE="$TMP_DIR/evidence-provenance.valid.json"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -311,6 +312,34 @@ fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
+write_evidence_provenance() {
+  local output="$1"
+
+  "$NODE_BIN" --input-type=module - "$output" <<'NODE'
+import fs from 'node:fs';
+
+const [output] = process.argv.slice(2);
+const provenance = {
+  schema_version: 'agentsmith.artifact-provenance/v1',
+  provenance_kind: 'ci_artifact',
+  producer_repo: 'github.com/agentsmith-project/agentsmith-release-kit',
+  normalized_remote: 'github.com/agentsmith-project/agentsmith-release-kit',
+  commit_sha: 'fedcba9876543210fedcba9876543210fedcba98',
+  artifact_uri: 'gh-artifact://agentsmith-release-kit/evidence/20001/airgap-bundle-evidence.tgz',
+  generated_at: '2026-05-23T12:00:00.000Z',
+  generator_command: 'bash scripts/verify-release.sh --bundle-create --evidence-root',
+  generator_version: '0.1.0',
+  attestation: 'none',
+  workflow_name: 'release-kit-focused-evidence',
+  run_id: '20001',
+  run_attempt: '1',
+  job: 'bundle-create'
+};
+
+fs.writeFileSync(output, `${JSON.stringify(provenance, null, 2)}\n`);
+NODE
+}
+
 common_payload_args=()
 default_image_args=()
 
@@ -386,6 +415,34 @@ write_stale_reports() {
   mkdir -p "$output_dir"
   printf '%s\n' '{"stale":true}' >"$output_dir/$REPORT_FILE"
   printf '%s\n' '{"stale":true}' >"$output_dir/$CHECK_REPORT_FILE"
+}
+
+write_stale_evidence_outputs() {
+  local evidence_root="$1"
+  local label="${2:-stale}"
+  mkdir -p "$evidence_root"
+  for evidence_file in \
+    evidence.json \
+    evidence-subject.json \
+    airgap-bundle-check-report.json \
+    airgap-bundle-manifest.json \
+    image-map.json; do
+    printf '{"stale":"%s:%s"}\n' "$label" "$evidence_file" >"$evidence_root/$evidence_file"
+  done
+}
+
+assert_stale_evidence_outputs() {
+  local evidence_root="$1"
+  local label="$2"
+  for evidence_file in \
+    evidence.json \
+    evidence-subject.json \
+    airgap-bundle-check-report.json \
+    airgap-bundle-manifest.json \
+    image-map.json; do
+    grep -q "\"stale\":\"$label:$evidence_file\"" "$evidence_root/$evidence_file" || \
+      fail "early evidence validation failure modified stale evidence file: $evidence_root/$evidence_file"
+  done
 }
 
 assert_bundle_and_report() {
@@ -527,6 +584,124 @@ if (/payload\/|tools\/|operator held|operator workstation|signed operator prereq
 NODE
 }
 
+assert_airgap_bundle_evidence() {
+  local evidence_root="$1"
+
+  "$NODE_BIN" --input-type=module - "$evidence_root" "$VALID_CONTRACT" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [evidenceRoot, validContract] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(validContract, 'utf8'));
+const expectedFiles = [
+  'evidence.json',
+  'evidence-subject.json',
+  'airgap-bundle-check-report.json',
+  'airgap-bundle-manifest.json',
+  'image-map.json'
+];
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function canonicalDigest(value) {
+  return digestBuffer(Buffer.from(JSON.stringify(stableJson(value))));
+}
+
+function readJson(relativePath) {
+  return JSON.parse(fs.readFileSync(path.join(evidenceRoot, relativePath), 'utf8'));
+}
+
+for (const relativePath of expectedFiles) {
+  if (!fs.statSync(path.join(evidenceRoot, relativePath)).isFile()) {
+    throw new Error(`missing evidence file: ${relativePath}`);
+  }
+}
+
+const serializedEvidenceRoot = expectedFiles
+  .map((relativePath) => fs.readFileSync(path.join(evidenceRoot, relativePath), 'utf8'))
+  .join('\n');
+if (/"(?:signature_uri|operator_identity|formal_verdict)"\s*:/.test(serializedEvidenceRoot)) {
+  throw new Error('unsigned bundle evidence must not contain signature, operator identity, or formal verdict fields');
+}
+if (/"readiness"\s*:\s*true/.test(serializedEvidenceRoot)) {
+  throw new Error('bundle evidence outputs must not contain readiness=true');
+}
+
+const evidence = readJson('evidence.json');
+const subject = readJson('evidence-subject.json');
+const checkReport = readJson('airgap-bundle-check-report.json');
+const manifest = readJson('airgap-bundle-manifest.json');
+const imageMap = readJson('image-map.json');
+const evidenceProjection = { ...evidence };
+delete evidenceProjection.artifact_provenance;
+const subjectPaths = subject.files.map((file) => file.path).sort();
+const expectedSubjectPaths = expectedFiles.filter((file) => file !== 'evidence-subject.json').sort();
+
+if (evidence.schema_version !== 'agentsmith.release-kit-evidence-envelope/v1') {
+  throw new Error(`unexpected evidence schema: ${evidence.schema_version}`);
+}
+if (evidence.release_kit_output !== 'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json') {
+  throw new Error(`unexpected evidence output: ${evidence.release_kit_output}`);
+}
+if (
+  evidence.target_cluster !== 'existing_kubernetes' ||
+  evidence.substrate_source !== 'external_declared' ||
+  evidence.distribution !== 'airgap'
+) {
+  throw new Error('evidence target profile must be external-declared airgap');
+}
+if (Object.prototype.hasOwnProperty.call(evidence, 'substrate_connection_truth')) {
+  throw new Error('bundle-create evidence must not include inline substrate connection truth');
+}
+if (evidence.release_id !== contract.release_id || evidence.git_sha !== contract.git_sha) {
+  throw new Error('evidence release identity must match release contract');
+}
+if (evidence.artifact_provenance?.provenance_kind !== 'ci_artifact') {
+  throw new Error('bundle-create evidence must be unsigned ci_artifact provenance');
+}
+if (JSON.stringify(subjectPaths) !== JSON.stringify(expectedSubjectPaths)) {
+  throw new Error(`unexpected evidence subject files: ${subjectPaths.join(',')}`);
+}
+const evidenceSubjectEntry = subject.files.find((file) => file.path === 'evidence.json');
+if (evidenceSubjectEntry.sha256 !== canonicalDigest(evidenceProjection)) {
+  throw new Error('evidence subject must bind canonical evidence projection');
+}
+if (evidence.artifact_provenance.subject_sha256 !== canonicalDigest(subject)) {
+  throw new Error('artifact provenance must bind evidence-subject canonical digest');
+}
+for (const relativePath of expectedSubjectPaths.filter((file) => file !== 'evidence.json')) {
+  const entry = subject.files.find((file) => file.path === relativePath);
+  const actual = digestBuffer(fs.readFileSync(path.join(evidenceRoot, relativePath)));
+  if (entry.sha256 !== actual) {
+    throw new Error(`subject digest mismatch for ${relativePath}`);
+  }
+}
+if (checkReport.readiness !== false || imageMap.readiness !== false) {
+  throw new Error('focused bundle evidence reports must keep readiness=false');
+}
+if (manifest.substrate?.mode !== 'external_declared' || manifest.substrate?.bundled !== false) {
+  throw new Error('bundle manifest evidence must be external-declared use_existing');
+}
+NODE
+}
+
 assert_kit_bundle_and_report() {
   local bundle_root="$1"
   local output_dir="$2"
@@ -604,6 +779,27 @@ expect_create_fail() {
   pass "bundle create rejected invalid case: $label"
 }
 
+expect_create_fail_with_evidence() {
+  local label="$1"
+  local bundle_root="$2"
+  local output_dir="$3"
+  local evidence_root="$4"
+  shift 4
+
+  write_stale_reports "$output_dir"
+  write_stale_evidence_outputs "$evidence_root" "$label"
+  if "$@" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+    cat "$TMP_DIR/$label.out" >&2
+    cat "$TMP_DIR/$label.err" >&2
+    fail "expected bundle create evidence failure: $label"
+  fi
+
+  assert_no_create_report "$output_dir"
+  assert_no_self_check_report "$output_dir"
+  assert_stale_evidence_outputs "$evidence_root" "$label"
+  pass "bundle create rejected invalid evidence case: $label"
+}
+
 manifest_sha="$(create_plain_archive "$VALID_ARCHIVE")"
 archive_sha="$(sha256_file "$VALID_ARCHIVE")"
 write_materials "$manifest_sha" "$archive_sha"
@@ -611,6 +807,7 @@ create_payloads
 create_image_archives
 write_operator_prerequisites "$OPERATOR_PREREQUISITES"
 write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK" "$KIT_AIRGAP_PROFILE"
+write_evidence_provenance "$VALID_PROVENANCE"
 refresh_args
 
 valid_bundle_root="$TMP_DIR/bundle-valid"
@@ -623,6 +820,22 @@ if ! tail -n 1 "$TMP_DIR/valid-create.out" | grep -q 'bundle create mode is not 
 fi
 pass "valid bundle create assembled bundle and wrote focused non-readiness report"
 
+evidence_bundle_root="$TMP_DIR/bundle-evidence"
+evidence_output_dir="$TMP_DIR/out-evidence"
+evidence_root="$TMP_DIR/evidence-root"
+run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$evidence_bundle_root" "$evidence_output_dir" \
+  "${default_image_args[@]}" \
+  "${common_payload_args[@]}" \
+  --evidence-root "$evidence_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/evidence-create.out"
+assert_bundle_and_report "$evidence_bundle_root" "$evidence_output_dir"
+assert_airgap_bundle_evidence "$evidence_root"
+if ! grep -q 'PASS: release-kit evidence accepted' "$TMP_DIR/evidence-create.out"; then
+  cat "$TMP_DIR/evidence-create.out" >&2
+  fail "bundle-create evidence path must call --evidence self-check"
+fi
+pass "valid external-declared airgap bundle create wrote unsigned focused evidence root"
+
 valid_kit_bundle_root="$TMP_DIR/bundle-valid-kit"
 valid_kit_output_dir="$TMP_DIR/out-valid-kit"
 run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$valid_kit_bundle_root" "$valid_kit_output_dir" \
@@ -631,6 +844,44 @@ run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$valid_kit_bund
   --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" >"$TMP_DIR/valid-create-kit.out"
 assert_kit_bundle_and_report "$valid_kit_bundle_root" "$valid_kit_output_dir" "$KIT_SUBSTRATE_PACK"
 pass "valid kit-installed airgap bundle create binds substrate pack manifest"
+
+expect_create_fail_with_evidence missing-evidence-provenance "$TMP_DIR/bundle-missing-evidence-provenance" "$TMP_DIR/out-missing-evidence-provenance" "$TMP_DIR/evidence-missing-provenance" \
+  run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-missing-evidence-provenance" "$TMP_DIR/out-missing-evidence-provenance" \
+    "${default_image_args[@]}" \
+    "${common_payload_args[@]}" \
+    --evidence-root "$TMP_DIR/evidence-missing-provenance"
+
+expect_create_fail_with_evidence kit-airgap-evidence-root "$TMP_DIR/bundle-kit-evidence" "$TMP_DIR/out-kit-evidence" "$TMP_DIR/evidence-kit" \
+  run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-kit-evidence" "$TMP_DIR/out-kit-evidence" \
+    "${default_image_args[@]}" \
+    "${common_payload_args[@]}" \
+    --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" \
+    --evidence-root "$TMP_DIR/evidence-kit" \
+    --evidence-provenance "$VALID_PROVENANCE"
+
+evidence_dir_root="$TMP_DIR/evidence-managed-dir"
+mkdir -p "$evidence_dir_root/evidence.json"
+write_stale_reports "$TMP_DIR/out-evidence-managed-dir"
+if run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-evidence-managed-dir" "$TMP_DIR/out-evidence-managed-dir" \
+  "${default_image_args[@]}" \
+  "${common_payload_args[@]}" \
+  --evidence-root "$evidence_dir_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/evidence-managed-dir.out" 2>"$TMP_DIR/evidence-managed-dir.err"; then
+  cat "$TMP_DIR/evidence-managed-dir.out" >&2
+  cat "$TMP_DIR/evidence-managed-dir.err" >&2
+  fail "expected bundle create to reject managed evidence directory"
+fi
+assert_no_create_report "$TMP_DIR/out-evidence-managed-dir"
+assert_no_self_check_report "$TMP_DIR/out-evidence-managed-dir"
+[[ ! -e "$TMP_DIR/bundle-evidence-managed-dir/airgap-bundle-manifest.json" ]] || \
+  fail "managed evidence directory failure must happen before bundle assembly"
+[[ -d "$evidence_dir_root/evidence.json" ]] || fail "managed evidence directory must not be recursively removed"
+if ! grep -q 'managed evidence entry evidence.json must be a file or symlink' "$TMP_DIR/evidence-managed-dir.err"; then
+  cat "$TMP_DIR/evidence-managed-dir.out" >&2
+  cat "$TMP_DIR/evidence-managed-dir.err" >&2
+  fail "managed evidence directory failure must be explicit"
+fi
+pass "bundle create rejects managed evidence directories without recursive cleanup"
 
 rerun_output_dir="$TMP_DIR/out-rerun-check"
 run_airgap_bundle_check "$valid_bundle_root" "$rerun_output_dir" >"$TMP_DIR/rerun-check.out"

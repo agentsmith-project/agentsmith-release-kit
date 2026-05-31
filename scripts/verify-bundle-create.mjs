@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { validateSubstratePackManifest } from './lib/substrate-pack-manifest-validation.mjs';
+import { CURRENT_RELEASE_KIT_VERSION } from './lib/release-kit-version-policy.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SCRIPT_DIR, '..');
@@ -34,6 +35,43 @@ const REPORT_SCOPE = 'airgap_bundle_create_only';
 const REPORT_FILE = 'bundle-create-report.json';
 const SELF_CHECK_REPORT_FILE = 'airgap-bundle-check-report.json';
 const BUNDLE_MANIFEST_FILE = 'airgap-bundle-manifest.json';
+const EVIDENCE_SCHEMA = 'agentsmith.release-kit-evidence-envelope/v1';
+const EVIDENCE_SUBJECT_SCHEMA = 'agentsmith.release-kit-evidence-subject/v1';
+const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
+const PRODUCER_REPO = 'github.com/agentsmith-project/agentsmith-release-kit';
+const EVIDENCE_SUBJECT_NAME = 'release-kit-evidence-subject';
+const EVIDENCE_SUBJECT_URI = 'evidence-subject.json';
+const EVIDENCE_RELEASE_KIT_OUTPUT =
+  'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json';
+const EVIDENCE_OUTPUT_FILES = [
+  'airgap-bundle-check-report.json',
+  'airgap-bundle-manifest.json',
+  'image-map.json'
+];
+const MANAGED_EVIDENCE_ENTRIES = [
+  'evidence.json',
+  'evidence-subject.json',
+  ...EVIDENCE_OUTPUT_FILES
+];
+const COMMON_PROVENANCE_INPUT_FIELDS = [
+  'schema_version',
+  'provenance_kind',
+  'producer_repo',
+  'normalized_remote',
+  'commit_sha',
+  'artifact_uri',
+  'generated_at',
+  'generator_command',
+  'generator_version',
+  'attestation'
+];
+const CI_PROVENANCE_INPUT_FIELDS = new Set([
+  ...COMMON_PROVENANCE_INPUT_FIELDS,
+  'workflow_name',
+  'run_id',
+  'run_attempt',
+  'job'
+]);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -93,7 +131,8 @@ function usage() {
     [--substrate-pack-manifest <json> for existing_kubernetes/kit_installed/airgap] \\
     --operator-prerequisites <json> \\
     --bundle-root <dir> \\
-    --output-dir <dir>`;
+    --output-dir <dir> \\
+    [--evidence-root <dir> --evidence-provenance <json> for existing_kubernetes/external_declared/airgap]`;
 }
 
 function cliFail(message) {
@@ -172,6 +211,12 @@ function parseArgs(argv) {
       case '--output-dir':
         parsed.outputDir = nextValue();
         break;
+      case '--evidence-root':
+        parsed.evidenceRoot = nextValue();
+        break;
+      case '--evidence-provenance':
+        parsed.evidenceProvenance = nextValue();
+        break;
       case '--help':
       case '-h':
         parsed.help = true;
@@ -193,6 +238,12 @@ function parseArgs(argv) {
   if (parsed.imageArchives.length === 0) {
     cliFail('missing required argument: --image-archive');
   }
+  if (parsed.evidenceProvenance && !parsed.evidenceRoot) {
+    cliFail('--evidence-provenance requires --evidence-root <dir>');
+  }
+  if (parsed.evidenceRoot && !parsed.evidenceProvenance) {
+    cliFail('--evidence-root requires --evidence-provenance <json>');
+  }
 
   return parsed;
 }
@@ -212,6 +263,24 @@ function findOutputDirArg(argv) {
 
 function digestBuffer(buffer) {
   return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function canonicalDigest(value) {
+  return digestBuffer(Buffer.from(JSON.stringify(stableJson(value))));
 }
 
 async function digestFile(file, label) {
@@ -246,6 +315,70 @@ async function readJson(file, label) {
 async function removeManagedReports(outputDir) {
   await fs.rm(path.join(outputDir, REPORT_FILE), { force: true });
   await fs.rm(path.join(outputDir, SELF_CHECK_REPORT_FILE), { force: true });
+}
+
+async function removeManagedEvidenceOutputs(evidenceRoot) {
+  for (const entry of MANAGED_EVIDENCE_ENTRIES) {
+    const file = path.join(evidenceRoot, entry);
+    let stat;
+    try {
+      stat = await fs.lstat(file);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        continue;
+      }
+      fail(`cannot inspect managed evidence entry ${entry}: ${error.message}`);
+    }
+    if (!stat.isFile() && !stat.isSymbolicLink()) {
+      fail(`managed evidence entry ${entry} must be a file or symlink; remove it manually`);
+    }
+    try {
+      await fs.unlink(file);
+    } catch (error) {
+      fail(`cannot remove managed evidence entry ${entry}: ${error.message}`);
+    }
+  }
+}
+
+async function assertEvidenceRootPreflight(args) {
+  if (!args.evidenceRoot) {
+    return;
+  }
+
+  const evidenceRoot = path.resolve(args.evidenceRoot);
+  let rootStat;
+  try {
+    rootStat = await fs.lstat(evidenceRoot);
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      fail(`cannot inspect evidence root: ${error.message}`);
+    }
+  }
+
+  if (rootStat) {
+    if (rootStat.isSymbolicLink()) {
+      fail('evidence root must not be a symlink');
+    }
+    if (!rootStat.isDirectory()) {
+      fail('evidence root must be absent or a directory');
+    }
+  }
+
+  for (const entry of MANAGED_EVIDENCE_ENTRIES) {
+    const file = path.join(evidenceRoot, entry);
+    let stat;
+    try {
+      stat = await fs.lstat(file);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        continue;
+      }
+      fail(`cannot inspect managed evidence entry ${entry}: ${error.message}`);
+    }
+    if (!stat.isFile() && !stat.isSymbolicLink()) {
+      fail(`managed evidence entry ${entry} must be a file or symlink; remove it manually`);
+    }
+  }
 }
 
 function requireObject(value, label) {
@@ -305,6 +438,12 @@ function parseTargetProfile(value) {
     substrate_source: substrateSource,
     distribution
   };
+}
+
+function validateEvidenceArgs(args, targetProfile) {
+  if (args.evidenceRoot && targetProfile.value !== AIRGAP_TARGET_PROFILE) {
+    cliFail(`--evidence-root is only accepted for ${AIRGAP_TARGET_PROFILE}`);
+  }
 }
 
 function assertSafeSegment(value, label) {
@@ -418,6 +557,71 @@ function assertOperatorRef(value, label) {
     fail(`${label} must not contain secret-looking content`);
   }
   return ref;
+}
+
+function validateEvidenceProvenanceInput(value) {
+  const provenance = requireObject(value, 'evidence_provenance');
+  assertStringEquals(
+    provenance.schema_version,
+    ARTIFACT_PROVENANCE_SCHEMA,
+    'evidence_provenance.schema_version'
+  );
+  const provenanceKind = assertStringEquals(
+    provenance.provenance_kind,
+    'ci_artifact',
+    'evidence_provenance.provenance_kind'
+  );
+  assertAllowedKeys(provenance, CI_PROVENANCE_INPUT_FIELDS, 'evidence_provenance');
+
+  const producerRepo = requireString(
+    provenance.producer_repo,
+    'evidence_provenance.producer_repo'
+  );
+  const normalizedRemote = requireString(
+    provenance.normalized_remote,
+    'evidence_provenance.normalized_remote'
+  );
+  if (producerRepo !== normalizedRemote) {
+    fail('evidence_provenance.producer_repo must match normalized_remote');
+  }
+  if (producerRepo !== PRODUCER_REPO) {
+    fail(`evidence_provenance.producer_repo must be ${PRODUCER_REPO}`);
+  }
+
+  const runId = requireString(provenance.run_id, 'evidence_provenance.run_id');
+  if (typeof provenance.attestation === 'undefined') {
+    fail('evidence_provenance.attestation is required');
+  }
+  return {
+    schema_version: ARTIFACT_PROVENANCE_SCHEMA,
+    provenance_kind: provenanceKind,
+    producer_repo: producerRepo,
+    normalized_remote: normalizedRemote,
+    commit_sha: requireString(provenance.commit_sha, 'evidence_provenance.commit_sha'),
+    artifact_uri: requireString(provenance.artifact_uri, 'evidence_provenance.artifact_uri'),
+    generated_at: requireString(provenance.generated_at, 'evidence_provenance.generated_at'),
+    generator_command: requireString(
+      provenance.generator_command,
+      'evidence_provenance.generator_command'
+    ),
+    generator_version: requireString(
+      provenance.generator_version,
+      'evidence_provenance.generator_version'
+    ),
+    attestation: provenance.attestation,
+    workflow_name: requireString(provenance.workflow_name, 'evidence_provenance.workflow_name'),
+    run_id: runId,
+    run_attempt: requireString(provenance.run_attempt, 'evidence_provenance.run_attempt'),
+    job: requireString(provenance.job, 'evidence_provenance.job')
+  };
+}
+
+async function loadEvidenceProvenance(args) {
+  if (!args.evidenceRoot) {
+    return undefined;
+  }
+  const input = await readJson(args.evidenceProvenance, 'evidence provenance');
+  return validateEvidenceProvenanceInput(input.value);
 }
 
 async function normalizeOperatorPrerequisites(inputFile) {
@@ -908,6 +1112,155 @@ function buildReport({
   };
 }
 
+function evidenceProjection(evidence) {
+  const { artifact_provenance: _artifactProvenance, ...subject } = evidence;
+  return subject;
+}
+
+function buildEvidenceBase({ targetProfile, assembly }) {
+  return {
+    schema_version: EVIDENCE_SCHEMA,
+    release_kit_output: EVIDENCE_RELEASE_KIT_OUTPUT,
+    release_contract_digest: assembly.releaseContractInputDigest,
+    release_id: assembly.releaseId,
+    git_sha: assembly.gitSha,
+    release_kit_version: CURRENT_RELEASE_KIT_VERSION,
+    target_cluster: targetProfile.target_cluster,
+    substrate_source: targetProfile.substrate_source,
+    distribution: targetProfile.distribution,
+    target: {
+      cluster: targetProfile.target_cluster,
+      server: targetProfile.value
+    },
+    status: 'passed',
+    failure_class: 'none'
+  };
+}
+
+function buildEvidenceSubject({ evidence, outputDigests }) {
+  return {
+    schema_version: EVIDENCE_SUBJECT_SCHEMA,
+    files: [
+      {
+        path: 'evidence.json',
+        sha256: canonicalDigest(evidenceProjection(evidence))
+      },
+      ...outputDigests.map(([relativePath, sha256]) => ({
+        path: relativePath,
+        sha256
+      }))
+    ]
+  };
+}
+
+function buildEvidenceArtifactProvenance(provenance, subjectSha256) {
+  return {
+    schema_version: provenance.schema_version,
+    provenance_kind: provenance.provenance_kind,
+    producer_repo: provenance.producer_repo,
+    normalized_remote: provenance.normalized_remote,
+    commit_sha: provenance.commit_sha,
+    artifact_uri: provenance.artifact_uri,
+    generated_at: provenance.generated_at,
+    generator_command: provenance.generator_command,
+    generator_version: provenance.generator_version,
+    attestation: provenance.attestation,
+    subject_name: EVIDENCE_SUBJECT_NAME,
+    subject_uri: EVIDENCE_SUBJECT_URI,
+    subject_sha256: subjectSha256,
+    workflow_name: provenance.workflow_name,
+    run_id: provenance.run_id,
+    run_attempt: provenance.run_attempt,
+    job: provenance.job
+  };
+}
+
+async function copyEvidenceOutputFile(source, stagingRoot, relativePath) {
+  const destination = path.join(stagingRoot, relativePath);
+  await fs.copyFile(source, destination);
+  return [relativePath, await digestFile(destination, relativePath)];
+}
+
+async function moveManagedEvidenceFiles(stagingRoot, evidenceRoot) {
+  await fs.mkdir(evidenceRoot, { recursive: true });
+  for (const entry of MANAGED_EVIDENCE_ENTRIES) {
+    await fs.rename(path.join(stagingRoot, entry), path.join(evidenceRoot, entry));
+  }
+}
+
+async function writeAndValidateEvidenceRoot({
+  args,
+  bundleRoot,
+  targetProfile,
+  assembly,
+  provenance
+}) {
+  if (!args.evidenceRoot) {
+    return;
+  }
+
+  const evidenceRoot = path.resolve(args.evidenceRoot);
+  const stagingRoot = path.join(evidenceRoot, `.bundle-create-evidence.${process.pid}.tmp`);
+
+  await fs.rm(stagingRoot, { recursive: true, force: true });
+  await fs.mkdir(stagingRoot, { recursive: true });
+
+  try {
+    const outputDigests = [];
+    outputDigests.push(
+      await copyEvidenceOutputFile(
+        path.join(args.outputDir, SELF_CHECK_REPORT_FILE),
+        stagingRoot,
+        'airgap-bundle-check-report.json'
+      )
+    );
+    outputDigests.push(
+      await copyEvidenceOutputFile(
+        assembly.manifestPath,
+        stagingRoot,
+        'airgap-bundle-manifest.json'
+      )
+    );
+    outputDigests.push(
+      await copyEvidenceOutputFile(
+        path.join(bundleRoot, 'components/image-map.json'),
+        stagingRoot,
+        'image-map.json'
+      )
+    );
+
+    const evidence = buildEvidenceBase({ targetProfile, assembly });
+    const subject = buildEvidenceSubject({ evidence, outputDigests });
+    evidence.artifact_provenance = buildEvidenceArtifactProvenance(
+      provenance,
+      canonicalDigest(subject)
+    );
+
+    await writeJsonFile(path.join(stagingRoot, 'evidence.json'), evidence);
+    await writeJsonFile(path.join(stagingRoot, 'evidence-subject.json'), subject);
+
+    runNodeScript(
+      'verify-evidence.mjs',
+      [
+        '--release-contract',
+        args.releaseContract,
+        '--evidence-root',
+        stagingRoot,
+        '--target-profile',
+        targetProfile.value,
+        '--output-dir',
+        path.join(stagingRoot, '.evidence-validation')
+      ],
+      'evidence self-check'
+    );
+
+    await removeManagedEvidenceOutputs(evidenceRoot);
+    await moveManagedEvidenceFiles(stagingRoot, evidenceRoot);
+  } finally {
+    await fs.rm(stagingRoot, { recursive: true, force: true });
+  }
+}
+
 async function writeReport(outputDir, report) {
   await fs.mkdir(outputDir, { recursive: true });
   const reportFile = path.join(outputDir, REPORT_FILE);
@@ -936,6 +1289,9 @@ async function main() {
 
   try {
     const targetProfile = parseTargetProfile(args.targetProfile);
+    validateEvidenceArgs(args, targetProfile);
+    const evidenceProvenance = await loadEvidenceProvenance(args);
+    await assertEvidenceRootPreflight(args);
     const bundleRoot = await assertBundleRootAvailable(args.bundleRoot);
     const imageArchives = await normalizeImageArchives(args.imageArchives);
     const payloadInputs = await normalizePayloadInputs(args);
@@ -1035,16 +1391,22 @@ async function main() {
       assembly.manifestPath,
       'airgap bundle manifest'
     );
-    await writeReport(
-      args.outputDir,
-      buildReport({
-        targetProfile,
-        assembly,
-        bundleManifestInputDigest,
-        checkReportInputDigest: checkReportInput.inputDigest,
-        checkReport: requireObject(checkReportInput.value, 'airgap_bundle_check_report')
-      })
-    );
+    await writeAndValidateEvidenceRoot({
+      args,
+      bundleRoot,
+      targetProfile,
+      assembly,
+      provenance: evidenceProvenance
+    });
+
+    const report = buildReport({
+      targetProfile,
+      assembly,
+      bundleManifestInputDigest,
+      checkReportInputDigest: checkReportInput.inputDigest,
+      checkReport: requireObject(checkReportInput.value, 'airgap_bundle_check_report')
+    });
+    await writeReport(args.outputDir, report);
 
     console.log('PASS: airgap bundle assembled and self-check accepted readiness=false');
   } catch (error) {

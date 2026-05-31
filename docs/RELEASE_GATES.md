@@ -416,6 +416,18 @@ summaries. The report must not contain raw local paths, bundle root, operator
 refs, locations, proofs, verdicts, registry presence, image-load claims, or
 readiness claims. It is not an accepted release-kit evidence envelope output.
 
+For `existing_kubernetes/external_declared/airgap`, the same producer may add
+`--evidence-root <dir> --evidence-provenance <json>` after bundle self-check.
+It writes only the existing unsigned focused envelope files:
+`evidence.json`, `evidence-subject.json`,
+`airgap-bundle-check-report.json`, `airgap-bundle-manifest.json`, and
+`image-map.json`, then immediately calls `--evidence` on that root. The
+provenance input must be `ci_artifact`; signed operator-run fields, operator
+identity, signature URI, formal verdicts, and readiness claims are not emitted.
+`existing_kubernetes/kit_installed/airgap` rejects evidence output for now.
+This is scoped bundle evidence with `readiness: false`, not package readiness,
+operator signoff, deploy readiness, or release readiness.
+
 ## Airgap Bundle Manifest/Digest Focused Diagnostic
 
 Run:
@@ -1280,11 +1292,12 @@ target-preflight intake profiles:
 rehearsal-only and not an operator-facing release target.
 
 For `external_declared`, the operator provides the connection truth and target
-prerequisites; the release kit only validates the documents. Raw evidence
-envelopes for `external_declared` must include inline neutral connection truth
-under `substrate_connection_truth`. For `kit_installed`, the same neutral truth
-schema is used and the document must declare `installed_by` and
-`release_kit_version` as plain `x.y.z` semver. Both paths must include the
+prerequisites; the release kit only validates the documents. Raw deploy-focused
+evidence envelopes for `external_declared` must include inline neutral
+connection truth under `substrate_connection_truth`; the airgap bundle-create
+packaging triplet must not include inline substrate truth. For `kit_installed`,
+the same neutral truth schema is used and the document must declare
+`installed_by` and `release_kit_version` as plain `x.y.z` semver. Both paths must include the
 required substrate services, canonical endpoint declarations (`host` for
 PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and `bucket` for
 object storage, and `issuer_url` for OIDC), secret references, TLS or sslmode

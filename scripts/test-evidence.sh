@@ -705,8 +705,11 @@ function useImageMapOutput() {
   ];
 }
 
-function useAirgapBundleOutput() {
+function useAirgapBundleOutput({ includeSubstrateTruth = false } = {}) {
   useTargetProfile(AIRGAP_PROFILE);
+  if (!includeSubstrateTruth) {
+    delete evidence.substrate_connection_truth;
+  }
   releaseKitOutput = AIRGAP_BUNDLE_EVIDENCE_OUTPUT;
   evidence.release_kit_output = releaseKitOutput;
   outputFiles = [
@@ -913,6 +916,9 @@ switch (mutation) {
     break;
   case 'valid_airgap_bundle_output':
     useAirgapBundleOutput();
+    break;
+  case 'airgap_bundle_inline_substrate_truth':
+    useAirgapBundleOutput({ includeSubstrateTruth: true });
     break;
   case 'airgap_old_two_file_pair':
     useAirgapBundleOutput();
@@ -1492,7 +1498,7 @@ VALID_AIRGAP_BUNDLE_OUT="$TMP_DIR/out-valid-airgap-bundle"
 write_evidence "$VALID_AIRGAP_BUNDLE_ROOT" ci_artifact valid_airgap_bundle_output
 run_evidence "$VALID_AIRGAP_BUNDLE_ROOT" "$VALID_AIRGAP_BUNDLE_OUT" "$AIRGAP_PROFILE" >/dev/null
 assert_pass_report "$VALID_AIRGAP_BUNDLE_OUT/evidence-validation-report.json" "airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json"
-pass "valid airgap bundle check release_kit_output evidence accepted"
+pass "valid airgap bundle check release_kit_output evidence accepted without inline substrate truth"
 
 VALID_SECRET_REF_ROOT="$TMP_DIR/evidence-valid-secret-ref"
 VALID_SECRET_REF_OUT="$TMP_DIR/out-valid-secret-ref"
@@ -1563,6 +1569,7 @@ expect_fail image-map-mirror-target-drift ci_artifact image_map_mirror_target_dr
 expect_fail standalone-airgap-image-map-use-source ci_artifact image_map_airgap_use_source "$AIRGAP_PROFILE"
 expect_fail standalone-kind-image-map-output ci_artifact image_map_kind_rehearsal_output "$KIND_PROFILE"
 expect_fail airgap-old-two-file-pair ci_artifact airgap_old_two_file_pair "$AIRGAP_PROFILE"
+expect_fail airgap-bundle-inline-substrate-truth ci_artifact airgap_bundle_inline_substrate_truth "$AIRGAP_PROFILE"
 expect_fail airgap-image-map-missing ci_artifact airgap_image_map_missing "$AIRGAP_PROFILE"
 expect_fail airgap-image-map-mirror-required-false ci_artifact airgap_image_map_mirror_required_false "$AIRGAP_PROFILE"
 expect_fail airgap-manifest-target-image-drift ci_artifact airgap_manifest_target_image_drift "$AIRGAP_PROFILE"

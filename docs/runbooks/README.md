@@ -179,6 +179,15 @@ payload and operator prerequisite inputs. The bundle root must be absent or
 empty. The command writes `bundle-create-report.json` with `readiness=false`
 after the generated bundle passes `--airgap-bundle-check`; that report is not
 accepted by the evidence envelope validator.
+For `airgap-bundle/use_existing`, optional
+`--evidence-root <dir> --evidence-provenance <json>` writes an unsigned focused
+evidence root only after bundle self-check passes, then revalidates it through
+`--evidence`. The root contains `evidence.json`, `evidence-subject.json`,
+`airgap-bundle-check-report.json`, `airgap-bundle-manifest.json`, and
+`image-map.json`; it keeps `readiness=false` and does not add signature,
+operator identity, formal verdict, package readiness, deploy readiness, or
+release readiness semantics. `airgap-bundle/install_substrates` does not accept
+this evidence root yet.
 For `airgap-bundle/install_substrates`, also provide
 `--substrate-pack-manifest <json>`; the generated bundle records it as
 `components/substrate-pack-manifest.json`,

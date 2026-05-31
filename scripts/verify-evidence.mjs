@@ -2438,7 +2438,13 @@ async function main() {
   assertTarget(evidence, targetProfile);
   assertReleaseContractIncludesTargetProfile(releaseContractInput.value, targetProfile);
   assertReleaseKitOutputTarget(releaseKitOutput, targetProfile);
-  assertSubstrateConnectionTruth(evidence, targetProfile);
+  if (releaseKitOutput === AIRGAP_BUNDLE_EVIDENCE_OUTPUT) {
+    if (Object.prototype.hasOwnProperty.call(evidence, 'substrate_connection_truth')) {
+      fail('airgap bundle evidence must not include substrate_connection_truth');
+    }
+  } else {
+    assertSubstrateConnectionTruth(evidence, targetProfile);
+  }
   assertStatus(evidence);
 
   const subjectFiles = await assertSubjectFiles(

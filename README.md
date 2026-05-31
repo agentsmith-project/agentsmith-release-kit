@@ -383,6 +383,17 @@ bundle triplet remains limited to `existing_kubernetes/external_declared/airgap`
 kit airgap bundle/adoption reports are focused diagnostics, not accepted
 evidence envelopes.
 
+For `existing_kubernetes/external_declared/airgap`, `--bundle-create` can also
+take `--evidence-root <dir> --evidence-provenance <json>`. This writes an
+unsigned focused evidence root containing only `evidence.json`,
+`evidence-subject.json`, `airgap-bundle-check-report.json`,
+`airgap-bundle-manifest.json`, and `image-map.json`, then immediately
+revalidates that root with `--evidence`. The provenance input is `ci_artifact`
+only; signed operator-run fields such as signature URI or operator identity are
+not produced. This remains `readiness: false` focused evidence, not package,
+operator signoff, deploy, or release readiness. Kit-installed airgap rejects
+evidence output for now.
+
 Airgap bundle manifest/digest focused diagnostic:
 
 ```bash
@@ -894,8 +905,10 @@ contain only `evidence.json` plus the mapped output files: `image-map.json`,
 `subject_name` is `release-kit-evidence-subject`. For online evidence, the
 envelope must include matching inline
 `agentsmith.substrate-connection.truth/v1` connection truth; kit-installed
-truth keeps the kit installation identity fields. This parity is still focused
-evidence with `readiness: false`, not deploy/package/release readiness.
+truth keeps the kit installation identity fields. Airgap bundle triplet
+evidence must not include inline substrate connection truth. This parity is
+still focused evidence with `readiness: false`, not deploy/package/release
+readiness.
 `evidence-validation-report.json` is written with `readiness: false`,
 `scope: release_kit_evidence_intake_only`, and `status: pass`; it is not
 render, apply, smoke, package, deploy, or release readiness.
