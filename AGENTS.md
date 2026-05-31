@@ -5,7 +5,7 @@ Guidance for coding agents working in `agentsmith-release-kit`.
 ## Repository Boundary
 
 This repository is the AgentSmith release kit. Work here only inside
-`/home/percy/works/mbos-v1/agentsmith-release-kit`.
+`$WORKSPACE/agentsmith-release-kit` or this repository root.
 
 Do not modify sibling repositories while working from this repo. In particular,
 do not edit `agentsmith`, `agentsmith-fs-control-plane`, `mbos-sandbox-v1`, or

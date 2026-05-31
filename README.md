@@ -21,10 +21,11 @@ not contain full deploy tooling yet.
 | Repository | `github.com/agentsmith-project/agentsmith-release-kit` |
 | Remote URL | `https://github.com/agentsmith-project/agentsmith-release-kit.git` |
 | Default branch | `main` |
-| Local bootstrap path | `/home/percy/works/mbos-v1/agentsmith-release-kit` |
+| Local bootstrap path | `$WORKSPACE/agentsmith-release-kit` |
 
-The local bootstrap path is a workspace convention only. CI and future release
-evidence must use the normalized GitHub repository identity.
+The local bootstrap path is a workspace convention only; use this repository
+root when working outside that layout. CI and future release evidence must use
+the normalized GitHub repository identity.
 
 ## Scope
 

@@ -41,6 +41,9 @@ if (mutation === 'duplicate-required-image-id') {
     ...templateOut.required_image_ids.slice(2)
   ];
 }
+if (mutation === 'contract-image-inventory-closure-drift') {
+  contract.deploy_image_inventory = contract.deploy_image_inventory.slice(0, -1);
+}
 
 function digest(buffer) {
   return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
@@ -621,6 +624,7 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
   release_id: contract.release_id,
   git_sha: contract.git_sha,
   release_contract_digest: contractDigest,
+  artifact_provenance: provenance('post-deploy-product-smoke-report'),
   covered_flows: [
     'auth_profile',
     'workspace_project',
@@ -962,6 +966,19 @@ fi
 grep -Fq "required_image_ids must match" "$TMP_DIR/deployment-path-required-images.out" || \
   fail "duplicate required image ids failure message did not explain blocker"
 pass "deploy template image set drift fails fast"
+
+CONTRACT_IMAGE_CLOSURE_DIR="$TMP_DIR/contract-image-inventory-closure-drift"
+write_fixture_set "$CONTRACT_IMAGE_CLOSURE_DIR" contract-image-inventory-closure-drift
+if run_online_path \
+  "$CONTRACT_IMAGE_CLOSURE_DIR" \
+  "online/use_existing" \
+  "$CONTRACT_IMAGE_CLOSURE_DIR/online-use-existing" \
+  "$TMP_DIR/out-contract-image-inventory-closure" >"$TMP_DIR/deployment-path-contract-image-closure.out" 2>&1; then
+  fail "release contract image inventory closure drift should fail"
+fi
+grep -Fq "release_contract.deploy_template_package.required_image_ids must exactly match release_contract.deploy_image_inventory ids" "$TMP_DIR/deployment-path-contract-image-closure.out" || \
+  fail "release contract image inventory closure failure message did not explain blocker"
+pass "release contract image inventory closure fails fast"
 
 STEP_FORMAL_VERDICT_DIR="$TMP_DIR/step-formal-verdict"
 write_fixture_set "$STEP_FORMAL_VERDICT_DIR" step-formal-verdict

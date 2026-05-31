@@ -397,12 +397,25 @@ function validateReleaseInputs(contractInput, deployTemplateInput) {
   ) {
     fail('deploy template package manifest_sha256 must match release contract');
   }
-  if (
-    !sameArraySet(
-      requireArray(deployTemplate.required_image_ids, 'deploy_template_package.required_image_ids'),
-      requireArray(contractTemplate.required_image_ids, 'release_contract.deploy_template_package.required_image_ids')
-    )
-  ) {
+  const deployTemplateRequiredImageIds = requireNonEmptyStringArray(
+    deployTemplate.required_image_ids,
+    'deploy_template_package.required_image_ids'
+  );
+  const contractRequiredImageIds = requireNonEmptyStringArray(
+    contractTemplate.required_image_ids,
+    'release_contract.deploy_template_package.required_image_ids'
+  );
+  const contractInventoryImageIds = requireNonEmptyArray(
+    contract.deploy_image_inventory,
+    'release_contract.deploy_image_inventory'
+  ).map((entry, index) => requireString(
+    requireObject(entry, `release_contract.deploy_image_inventory[${index}]`).id,
+    `release_contract.deploy_image_inventory[${index}].id`
+  ));
+  if (!sameArraySet(contractRequiredImageIds, contractInventoryImageIds)) {
+    fail('release_contract.deploy_template_package.required_image_ids must exactly match release_contract.deploy_image_inventory ids');
+  }
+  if (!sameArraySet(deployTemplateRequiredImageIds, contractRequiredImageIds)) {
     fail('deploy template package required_image_ids must match release contract');
   }
 

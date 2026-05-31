@@ -54,6 +54,25 @@ const REQUIRED_PRODUCT_SMOKE_FLOWS = [
 ];
 
 const REQUIRED_IMAGE_IDS = ['agentsmith_app', 'managed_runner', 'llmup', 'afscp', 'asbcp'];
+const FINALIZER_MANIFEST_KEYS = new Set([
+  'schema',
+  'tool',
+  'operator_path',
+  'deployment_profile',
+  'release_contract_digest',
+  'template_digest',
+  'path_report_sha256',
+  'source_evidence_files',
+  'created_at'
+]);
+const FINALIZER_MANIFEST_SOURCE_EVIDENCE_KEYS = new Set([
+  'kind',
+  'path',
+  'sha256',
+  'schema',
+  'scope',
+  'step'
+]);
 class CliError extends Error {
   constructor(message) {
     super(message);
@@ -210,6 +229,14 @@ function requireObject(value, label) {
   return value;
 }
 
+function rejectUnknownKeys(value, allowedKeys, label) {
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.has(key)) {
+      fail(`${label} contains unknown field: ${key}`);
+    }
+  }
+}
+
 function requireArray(value, label) {
   if (!Array.isArray(value)) {
     fail(`${label} must be an array`);
@@ -244,6 +271,35 @@ function requireDigest(value, label) {
     fail(`${label} must be a sha256 digest`);
   }
   return digest;
+}
+
+function requireIsoTimestamp(value, label) {
+  const timestamp = requireString(value, label);
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== timestamp) {
+    fail(`${label} must be an ISO timestamp`);
+  }
+  return timestamp;
+}
+
+function requireStringSet(value, label) {
+  const items = requireArray(value, label);
+  if (items.length === 0) {
+    fail(`${label} must not be empty`);
+  }
+  const set = new Set();
+  for (const [index, item] of items.entries()) {
+    const text = requireString(item, `${label}[${index}]`);
+    if (set.has(text)) {
+      fail(`${label} must not contain duplicate values`);
+    }
+    set.add(text);
+  }
+  return set;
+}
+
+function sameSet(left, right) {
+  return left.size === right.size && [...left].every((item) => right.has(item));
 }
 
 function requireGitSha(value, label) {
@@ -394,9 +450,25 @@ function validateDeployTemplatePackage(descriptor, contract, descriptorDigest) {
   if (descriptor.manifest_sha256 !== contractDescriptor.manifest_sha256) {
     fail('deploy template package manifest_sha256 must match release contract');
   }
-  const requiredIds = new Set(requireArray(descriptor.required_image_ids, 'deploy_template_package.required_image_ids'));
-  const inventoryIds = new Set(requireArray(contract.deploy_image_inventory, 'release_contract.deploy_image_inventory').map((entry) => entry.id));
-  if (requiredIds.size !== inventoryIds.size || [...requiredIds].some((id) => !inventoryIds.has(id))) {
+  const descriptorRequiredIds = requireStringSet(
+    descriptor.required_image_ids,
+    'deploy_template_package.required_image_ids'
+  );
+  const contractRequiredIds = requireStringSet(
+    contractDescriptor.required_image_ids,
+    'release_contract.deploy_template_package.required_image_ids'
+  );
+  const inventoryIds = new Set(
+    requireArray(contract.deploy_image_inventory, 'release_contract.deploy_image_inventory')
+      .map((entry, index) => requireString(
+        requireObject(entry, `release_contract.deploy_image_inventory[${index}]`).id,
+        `release_contract.deploy_image_inventory[${index}].id`
+      ))
+  );
+  if (!sameSet(contractRequiredIds, inventoryIds)) {
+    fail('release_contract.deploy_template_package.required_image_ids must exactly match release_contract.deploy_image_inventory ids');
+  }
+  if (!sameSet(descriptorRequiredIds, contractRequiredIds) || !sameSet(descriptorRequiredIds, inventoryIds)) {
     fail('deploy template package required_image_ids must exactly match release contract deploy_image_inventory ids');
   }
   return {
@@ -433,13 +505,17 @@ function validateProductReadiness(report, reportDigest, release) {
 function validateProductSmoke(report, reportDigest, release) {
   requireSchema(report, PRODUCT_SMOKE_SCHEMA, 'post-deploy product smoke report');
   commonReportChecks(report, 'post-deploy product smoke report', release);
+  const provenance = requireProvenance(report.artifact_provenance, 'post_deploy_product_smoke.artifact_provenance');
+  if (provenance.normalized_remote !== AGENTSMITH_REPO || provenance.commit_sha !== release.git_sha) {
+    fail('post-deploy product smoke provenance must match AgentSmith repo and git sha');
+  }
   const flows = new Set(requireArray(report.covered_flows, 'post_deploy_product_smoke.covered_flows'));
   for (const flow of REQUIRED_PRODUCT_SMOKE_FLOWS) {
     if (!flows.has(flow)) {
       fail(`post-deploy product smoke missing required flow: ${flow}`);
     }
   }
-  return { report_digest: reportDigest, covered_flows: [...flows].sort() };
+  return { report_digest: reportDigest, provenance, covered_flows: [...flows].sort() };
 }
 
 function requireEquals(actual, expected, label) {
@@ -811,7 +887,13 @@ async function validateFinalizerManifest({
     path.join(reportDir, FINALIZER_MANIFEST_FILE),
     'deployment path finalizer manifest'
   );
+  scanReportForForbiddenContent({
+    value: manifestInput.value,
+    buffer: manifestInput.buffer,
+    label: 'deployment path finalizer manifest'
+  });
   const manifest = requireObject(manifestInput.value, 'deployment path finalizer manifest');
+  rejectUnknownKeys(manifest, FINALIZER_MANIFEST_KEYS, 'finalizer_manifest');
   requireSchema(manifest, FINALIZER_MANIFEST_SCHEMA, 'deployment path finalizer manifest');
   if (
     requireString(manifest.tool, 'finalizer_manifest.tool') !== FINALIZER_MANIFEST_TOOL
@@ -845,12 +927,20 @@ async function validateFinalizerManifest({
   ) {
     fail('finalizer_manifest.path_report_sha256 must match deployment path report bytes');
   }
-  requireString(manifest.created_at, 'finalizer_manifest.created_at');
+  requireIsoTimestamp(manifest.created_at, 'finalizer_manifest.created_at');
 
   const actualEntries = requireArray(
     manifest.source_evidence_files,
     'finalizer_manifest.source_evidence_files'
   );
+  for (const [index, rawEntry] of actualEntries.entries()) {
+    const entry = requireObject(rawEntry, `finalizer_manifest.source_evidence_files[${index}]`);
+    rejectUnknownKeys(
+      entry,
+      FINALIZER_MANIFEST_SOURCE_EVIDENCE_KEYS,
+      `finalizer_manifest.source_evidence_files[${index}]`
+    );
+  }
   const manifestPaths = sourceEvidenceManifestPathSet(actualEntries);
   await validateSourceEvidenceDirectoryClosure(reportDir, manifestPaths);
   const expectedEntries = expectedSourceEvidenceFiles({ ledger, requirement });

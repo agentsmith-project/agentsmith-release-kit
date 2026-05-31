@@ -542,6 +542,7 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
   release_id: contract.release_id,
   git_sha: contract.git_sha,
   release_contract_digest: contractDigest,
+  artifact_provenance: provenance('post-deploy-product-smoke-report'),
   covered_flows: [
     'auth_profile',
     'workspace_project',
@@ -655,6 +656,45 @@ fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
+mutate_product_smoke_report() {
+  local report_file="$1"
+  local mutation="$2"
+
+  "$NODE_BIN" --input-type=module - "$report_file" "$mutation" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile, mutation] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+
+if (mutation === 'missing-provenance') {
+  delete report.artifact_provenance;
+} else if (mutation === 'wrong-repo') {
+  report.artifact_provenance.producer_repo = 'github.com/example/not-agentsmith';
+  report.artifact_provenance.normalized_remote = 'github.com/example/not-agentsmith';
+} else if (mutation === 'wrong-sha') {
+  report.artifact_provenance.commit_sha = `${'9'.repeat(40)}`;
+} else {
+  throw new Error(`unknown product smoke mutation: ${mutation}`);
+}
+
+fs.writeFileSync(reportFile, `${JSON.stringify(report, null, 2)}\n`);
+NODE
+}
+
+mutate_release_contract_image_closure() {
+  local contract_file="$1"
+
+  "$NODE_BIN" --input-type=module - "$contract_file" <<'NODE'
+import fs from 'node:fs';
+
+const contractFile = process.argv[2];
+const contract = JSON.parse(fs.readFileSync(contractFile, 'utf8'));
+contract.deploy_template_package.required_image_ids =
+  contract.deploy_template_package.required_image_ids.slice(0, -1);
+fs.writeFileSync(contractFile, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
 mutate_path_report() {
   local report_file="$1"
   local mutation="$2"
@@ -697,6 +737,46 @@ import fs from 'node:fs';
 const manifestFile = process.argv[2];
 const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
 manifest.path_report_sha256 = `sha256:${'8'.repeat(64)}`;
+fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+mutate_manifest_created_at() {
+  local report_dir="$1"
+  local created_at="$2"
+
+  "$NODE_BIN" --input-type=module - "$report_dir/deployment-path-finalizer-manifest.json" "$created_at" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestFile, createdAt] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+manifest.created_at = createdAt;
+fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+add_manifest_secret_like_field() {
+  local report_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$report_dir/deployment-path-finalizer-manifest.json" <<'NODE'
+import fs from 'node:fs';
+
+const manifestFile = process.argv[2];
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+manifest.private_key = 'leaked-private-key-material';
+fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+add_manifest_unknown_entry_field() {
+  local report_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$report_dir/deployment-path-finalizer-manifest.json" <<'NODE'
+import fs from 'node:fs';
+
+const manifestFile = process.argv[2];
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+manifest.source_evidence_files[0].operator_note = 'ordinary diagnostic note';
 fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
@@ -829,6 +909,33 @@ NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
 pass "valid GA aggregate consumes finalizer-generated path bundles"
 
+for mutation in missing-provenance wrong-repo wrong-sha; do
+  PRODUCT_SMOKE_DIR="$TMP_DIR/product-smoke-$mutation"
+  write_fixture_set "$PRODUCT_SMOKE_DIR" valid
+  mutate_product_smoke_report "$PRODUCT_SMOKE_DIR/post-deploy-product-smoke-report.json" "$mutation"
+  if run_ga_release "$PRODUCT_SMOKE_DIR" "$PATH_DIR" "$TMP_DIR/out-product-smoke-$mutation" >"$TMP_DIR/ga-release-product-smoke-$mutation.out" 2>&1; then
+    fail "product smoke $mutation should fail"
+  fi
+  if [[ "$mutation" == "missing-provenance" ]]; then
+    grep -Fq "post_deploy_product_smoke.artifact_provenance must be an object" "$TMP_DIR/ga-release-product-smoke-$mutation.out" || \
+      fail "product smoke missing provenance failure message did not explain blocker"
+  else
+    grep -Fq "post-deploy product smoke provenance must match AgentSmith repo and git sha" "$TMP_DIR/ga-release-product-smoke-$mutation.out" || \
+      fail "product smoke provenance drift failure message did not explain blocker"
+  fi
+done
+pass "GA aggregate requires post-deploy product smoke AgentSmith provenance"
+
+IMAGE_CLOSURE_DIR="$TMP_DIR/release-contract-image-closure"
+write_fixture_set "$IMAGE_CLOSURE_DIR" valid
+mutate_release_contract_image_closure "$IMAGE_CLOSURE_DIR/release-contract.json"
+if run_ga_release "$IMAGE_CLOSURE_DIR" "$PATH_DIR" "$TMP_DIR/out-release-contract-image-closure" >"$TMP_DIR/ga-release-image-closure.out" 2>&1; then
+  fail "release contract image closure drift should fail"
+fi
+grep -Fq "release_contract.deploy_template_package.required_image_ids must exactly match release_contract.deploy_image_inventory ids" "$TMP_DIR/ga-release-image-closure.out" || \
+  fail "release contract image closure failure message did not explain blocker"
+pass "GA aggregate rejects release contract required image closure drift"
+
 MISSING_DIR="$TMP_DIR/missing"
 write_fixture_set "$MISSING_DIR" valid
 generate_path_bundles "$MISSING_DIR" "$TMP_DIR/path-missing"
@@ -868,6 +975,39 @@ fi
 grep -Fq "finalizer_manifest.path_report_sha256 must match deployment path report bytes" "$TMP_DIR/ga-release-manifest-drift.out" || \
   fail "manifest path digest drift failure message did not explain blocker"
 pass "GA aggregate rejects manifest path report digest drift"
+
+MANIFEST_CREATED_AT_DIR="$TMP_DIR/manifest-created-at"
+write_fixture_set "$MANIFEST_CREATED_AT_DIR" valid
+generate_path_bundles "$MANIFEST_CREATED_AT_DIR" "$TMP_DIR/path-manifest-created-at"
+mutate_manifest_created_at "$TMP_DIR/path-manifest-created-at/online-use-existing" "not-an-iso-timestamp"
+if run_ga_release "$MANIFEST_CREATED_AT_DIR" "$TMP_DIR/path-manifest-created-at" "$TMP_DIR/out-manifest-created-at" >"$TMP_DIR/ga-release-manifest-created-at.out" 2>&1; then
+  fail "manifest created_at with non-ISO text should fail"
+fi
+grep -Fq "finalizer_manifest.created_at must be an ISO timestamp" "$TMP_DIR/ga-release-manifest-created-at.out" || \
+  fail "manifest created_at failure message did not explain blocker"
+pass "GA aggregate rejects non-ISO finalizer manifest created_at"
+
+MANIFEST_SECRET_DIR="$TMP_DIR/manifest-secret-like-field"
+write_fixture_set "$MANIFEST_SECRET_DIR" valid
+generate_path_bundles "$MANIFEST_SECRET_DIR" "$TMP_DIR/path-manifest-secret-like-field"
+add_manifest_secret_like_field "$TMP_DIR/path-manifest-secret-like-field/online-use-existing"
+if run_ga_release "$MANIFEST_SECRET_DIR" "$TMP_DIR/path-manifest-secret-like-field" "$TMP_DIR/out-manifest-secret-like-field" >"$TMP_DIR/ga-release-manifest-secret.out" 2>&1; then
+  fail "manifest secret-like field should fail"
+fi
+grep -Fq "deployment path finalizer manifest contains forbidden local path or secret-like text" "$TMP_DIR/ga-release-manifest-secret.out" || \
+  fail "manifest secret-like field failure message did not explain blocker"
+pass "GA aggregate scans finalizer manifest before acceptance"
+
+MANIFEST_UNKNOWN_DIR="$TMP_DIR/manifest-unknown-entry-field"
+write_fixture_set "$MANIFEST_UNKNOWN_DIR" valid
+generate_path_bundles "$MANIFEST_UNKNOWN_DIR" "$TMP_DIR/path-manifest-unknown-entry-field"
+add_manifest_unknown_entry_field "$TMP_DIR/path-manifest-unknown-entry-field/online-use-existing"
+if run_ga_release "$MANIFEST_UNKNOWN_DIR" "$TMP_DIR/path-manifest-unknown-entry-field" "$TMP_DIR/out-manifest-unknown-entry-field" >"$TMP_DIR/ga-release-manifest-unknown.out" 2>&1; then
+  fail "manifest unknown source evidence field should fail"
+fi
+grep -Fq "finalizer_manifest.source_evidence_files[0] contains unknown field: operator_note" "$TMP_DIR/ga-release-manifest-unknown.out" || \
+  fail "manifest unknown source evidence field failure message did not explain blocker"
+pass "GA aggregate rejects unknown finalizer manifest entry fields"
 
 SOURCE_DRIFT_DIR="$TMP_DIR/source-drift"
 write_fixture_set "$SOURCE_DRIFT_DIR" valid
