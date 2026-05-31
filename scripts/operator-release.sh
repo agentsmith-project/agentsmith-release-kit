@@ -522,7 +522,7 @@ elif [[ "$producer_name" == "airgap-consume-rehearsal" ]]; then
   fi
 fi
 
-if [[ "$producer_name" == "online-deployment-gate" && -n "$evidence_root" ]]; then
+if [[ "$producer_name" =~ ^(online-deployment-gate|bundle-create)$ && -n "$evidence_root" ]]; then
   summary_args+=(
     --evidence-root "$evidence_root"
   )

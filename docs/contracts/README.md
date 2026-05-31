@@ -302,7 +302,7 @@ shape. The evidence `git_sha` is the AgentSmith product release commit;
 `artifact_provenance.commit_sha` is the release-kit producer commit and is not
 required to equal it. The raw envelope must include `release_kit_output` as
 `image-map.json`, `online-deployment-gate-report.json`, or
-`airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json`;
+`airgap_bundle_check`;
 release-kit must not output AgentSmith product-flow evidence. Evidence intake accepts only
 outputs that can be re-read and semantically checked: image-map reports bind
 schema/scope/readiness/status, release identity, target profile, and
@@ -316,13 +316,18 @@ kit-installed online reports must also include `substrate-pack-check` and
 `substrate-routability` steps and remain evidence intake only, not deploy or
 release readiness; when provenance is `signed_operator_run`, the report
 `operator_run_id` must match the provenance `operator_run_id`; and the airgap
-triplet is accepted only for `existing_kubernetes/external_declared/airgap` and
-must be compatible with `--airgap-bundle-check`, binding the check report to an
-`agentsmith.airgap-bundle-manifest/v1` manifest and re-read `image-map.json`
+`airgap_bundle_check` output is accepted for
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap` only. It must be compatible with
+`--airgap-bundle-check`, binding `airgap-bundle-check-report.json` to an
+`agentsmith.airgap-bundle-manifest/v1` manifest and a re-read `image-map.json`
 with required components, image artifact declarations, mandatory payload/tool
 categories and counts, report counts, mapping alignment, and artifact digests
-aligned. Kit airgap focused adoption is not accepted by `--evidence`. The old
-two-file airgap output value is rejected.
+aligned. Kit-installed airgap evidence must also include
+`substrate-pack-manifest.json` and bind the manifest
+`substrate_pack_manifest` component plus
+`bindings.substrate_pack_manifest_sha256`. The old two-file and old
+three-file airgap output values are rejected.
 `deploy-result.json#substrate` is future reserved and is not accepted during
 pre-GA. Render, rollout, and smoke reports remain individual focused diagnostic
 files, but their combinations are not accepted release-kit evidence envelope
@@ -334,16 +339,21 @@ load/import, offline install, package, deploy, registry, or release readiness.
 `evidence_subject.files` must contain only subject entries for
 `evidence.json` plus the mapped output files: `image-map.json`,
 `online-deployment-gate-report.json`, or `airgap-bundle-check-report.json` plus
-`airgap-bundle-manifest.json` plus `image-map.json`.
+`airgap-bundle-manifest.json` plus `image-map.json`, plus
+`substrate-pack-manifest.json` for kit airgap.
 Artifact provenance uses `subject_name: release-kit-evidence-subject`.
-`external_declared` envelopes must include inline neutral
-`substrate_connection_truth`. The subject file
+`image-map.json` and `online-deployment-gate-report.json` envelopes must
+include matching inline `substrate_connection_truth`; `airgap_bundle_check`
+envelopes must not include inline substrate truth. The subject file
 entry for `evidence.json` must use the
 canonical evidence body without `artifact_provenance` as its listed sha256. All
 other subject file entries use their raw file sha256. This prevents
 `artifact_provenance.subject_sha256` from self-referencing the evidence file
 that carries it. AgentSmith `product_flows` and `product_flow_results` remain
 AgentSmith-produced evidence and are rejected here.
+The evidence validation report remains `readiness: false` focused intake only;
+it is not package, deploy, or release readiness, and is not a formal verdict or
+signature/identity verification.
 
 The current `--target-preflight` validator is a focused substrate plus target
 prerequisites intake diagnostic only. It accepts

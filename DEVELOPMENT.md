@@ -33,6 +33,7 @@ bash scripts/test-online-deployment-gate.sh
 bash scripts/test-online-adoption.sh
 bash scripts/test-release-engineering-gate-intake.sh
 bash scripts/test-operator-release-surface.sh
+bash scripts/test-operator-runbook-acceptance.sh
 bash scripts/test-operator-signoff-intake.sh
 bash scripts/test-evidence.sh
 bash scripts/test-target-preflight.sh
@@ -43,6 +44,11 @@ There is intentionally no `package.json` in this repository.
 Operator-facing runs should start from `scripts/operator-release.sh` for the
 supported v0 surfaces. `scripts/verify-release.sh` remains the producer catalog
 for focused diagnostics and maintainer work.
+Airgap-bundle surfaces may optionally write unsigned scoped
+`airgap_bundle_check` evidence roots. The operator surface summary only carries
+digest-only airgap evidence handoff fields; runbook acceptance is checked by
+`scripts/test-operator-runbook-acceptance.sh` and does not issue readiness,
+identity, signature, or verdict claims.
 `airgap/use_existing` and `airgap/install_substrates` are the operator-facing
 entries for consuming an already assembled airgap bundle; they map to
 `--airgap-consume-rehearsal` and keep `readiness: false`.
@@ -546,7 +552,7 @@ profile. The raw envelope schema is
 `agentsmith.release-kit-evidence/v1` is the separate adapter/canonical shape.
 The raw envelope must explicitly name `release_kit_output` as
 `image-map.json`, `online-deployment-gate-report.json`, or
-`airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json`;
+`airgap_bundle_check`;
 release-kit cannot produce AgentSmith product-flow evidence. Intake accepts only
 outputs that can be re-read and semantically checked against the envelope and
 release contract:
@@ -564,13 +570,15 @@ kit-installed online reports must also include `substrate-pack-check` and
 `substrate-routability` steps and remain evidence intake only, not deploy or
 release readiness; when provenance is `signed_operator_run`, the
 report `operator_run_id` must match the provenance `operator_run_id`; and
-the airgap triplet is accepted only for
-`existing_kubernetes/external_declared/airgap` and must be a real bundle-check
-report, manifest, and image-map set with required component kinds, image
-artifact declarations, payload/tool kinds and counts, report counts, and digest
-bindings aligned. Kit airgap focused adoption is not accepted by `--evidence`.
-`components: []`, dry-run online reports, old two-file airgap values, and
-hand-written empty airgap sets are rejected.
+the `airgap_bundle_check` output is accepted for external-declared and
+kit-installed airgap only. It must be a real bundle-check report, manifest,
+and image-map set with required component kinds, image artifact declarations,
+payload/tool kinds and counts, report counts, and digest bindings aligned. Kit
+airgap evidence must also include `substrate-pack-manifest.json` and bind the
+manifest `substrate_pack_manifest` component plus
+`bindings.substrate_pack_manifest_sha256`. `components: []`, dry-run online
+reports, old two-file or old three-file airgap values, and hand-written empty
+airgap sets are rejected.
 `deploy-result.json#substrate` is future reserved and is not accepted during
 pre-GA; do not preserve future/unimplemented output compatibility here. Render,
 rollout, and smoke reports remain individual focused diagnostic files, but

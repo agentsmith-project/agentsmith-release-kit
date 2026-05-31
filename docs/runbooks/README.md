@@ -179,18 +179,29 @@ payload and operator prerequisite inputs. The bundle root must be absent or
 empty. The command writes `bundle-create-report.json` with `readiness=false`
 after the generated bundle passes `--airgap-bundle-check`; that report is not
 accepted by the evidence envelope validator.
-For `airgap-bundle/use_existing`, optional
+For `airgap-bundle/use_existing` and `airgap-bundle/install_substrates`,
+optional
 `--evidence-root <dir> --evidence-provenance <json>` writes an unsigned focused
 evidence root only after bundle self-check passes, then revalidates it through
 `--evidence`. The root contains `evidence.json`, `evidence-subject.json`,
 `airgap-bundle-check-report.json`, `airgap-bundle-manifest.json`, and
-`image-map.json`; it keeps `readiness=false` and does not add signature,
+`image-map.json`; kit-installed airgap also contains
+`substrate-pack-manifest.json`. The envelope uses `release_kit_output:
+airgap_bundle_check`, keeps `readiness=false`, and does not add signature,
 operator identity, formal verdict, package readiness, deploy readiness, or
-release readiness semantics. `airgap-bundle/install_substrates` does not accept
-this evidence root yet.
+release readiness semantics. The operator surface summary carries only a
+digest-only airgap evidence handoff; for kit-installed airgap it includes the
+substrate pack manifest digest.
 The evidence root must be absent, empty, or contain only those managed evidence
 files from a previous run; any other direct entry fails fast and is left in
 place.
+Scoped runbook acceptance is checked separately with
+`scripts/verify-operator-runbook-acceptance.mjs`. It binds only the operator
+choice, existing-Kubernetes airgap machine profile, operator surface report
+digest, evidence root digests, and the safe runbook path/digest from the bundle
+manifest. It rejects kind/local-kind profiles, signed provenance, operator
+identity/signature fields, and formal/readiness/verdict fields in the
+acceptance inputs.
 For `airgap-bundle/install_substrates`, also provide
 `--substrate-pack-manifest <json>`; the generated bundle records it as
 `components/substrate-pack-manifest.json`,
@@ -206,12 +217,14 @@ and tool prerequisites. Bundled tool files are checked by path/sha under the
 bundle root; operator prerequisite locations/proofs are strings and must not be
 URLs, download instructions, or secret-looking content. The airgap image-map is
 also rebound to `release_contract.deploy_image_inventory`. Stdout ends with
-`readiness=false`. Evidence intake accepts only an
-`existing_kubernetes/external_declared/airgap` real check report + manifest +
-`image-map.json` triplet with bundle-check-compatible components, image
+`readiness=false`. Evidence intake for `airgap_bundle_check` accepts
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap` real check report + manifest +
+`image-map.json` inputs with bundle-check-compatible components, image
 declarations, payload/tool counts, and digests; empty fake manifests are
-rejected. Kit airgap bundle/adoption reports remain focused diagnostics and are
-not accepted by `--evidence`.
+rejected. Kit-installed airgap additionally requires
+`substrate-pack-manifest.json`, a `components[].kind` entry set to
+`substrate_pack_manifest`, and `bindings.substrate_pack_manifest_sha256`.
 
 For airgap image load/import diagnostics, use `--airgap-image-load` only after
 a bundle has already been assembled. Pass the same inputs as

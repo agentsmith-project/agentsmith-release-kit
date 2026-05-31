@@ -348,6 +348,35 @@ fs.writeFileSync(output, `${JSON.stringify(provenance, null, 2)}\n`);
 NODE
 }
 
+write_bundle_evidence_provenance() {
+  local output="$1"
+
+  "$NODE_BIN" --input-type=module - "$output" <<'NODE'
+import fs from 'node:fs';
+
+const [output] = process.argv.slice(2);
+
+const provenance = {
+  schema_version: 'agentsmith.artifact-provenance/v1',
+  provenance_kind: 'ci_artifact',
+  producer_repo: 'github.com/agentsmith-project/agentsmith-release-kit',
+  normalized_remote: 'github.com/agentsmith-project/agentsmith-release-kit',
+  commit_sha: 'fedcba9876543210fedcba9876543210fedcba98',
+  artifact_uri: 'gh-artifact://agentsmith-release-kit/evidence/20002/airgap-bundle-evidence.tgz',
+  generated_at: '2026-05-23T12:00:00.000Z',
+  generator_command: 'bash scripts/verify-release.sh --bundle-create --evidence-root',
+  generator_version: '0.1.0',
+  attestation: 'none',
+  workflow_name: 'release-kit-focused-evidence',
+  run_id: '20002',
+  run_attempt: '1',
+  job: 'bundle-create'
+};
+
+fs.writeFileSync(output, `${JSON.stringify(provenance, null, 2)}\n`);
+NODE
+}
+
 write_fake_kubectl() {
   local fake_kubectl="$1"
 
@@ -733,6 +762,7 @@ assert_operator_report() {
   local expect_airgap="${7:-false}"
   local expect_online_handoff="${8:-false}"
   local expected_online_handoff_run="${9:-operator-run-1003}"
+  local expect_airgap_evidence_handoff="${10:-false}"
 
   "$NODE_BIN" --input-type=module - \
     "$output_dir/$REPORT_FILE" \
@@ -744,7 +774,8 @@ assert_operator_report() {
     "$expected_digest_keys" \
     "$expect_airgap" \
     "$expect_online_handoff" \
-    "$expected_online_handoff_run" <<'NODE'
+    "$expected_online_handoff_run" \
+    "$expect_airgap_evidence_handoff" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -758,7 +789,8 @@ const [
   expectedDigestKeysText,
   expectAirgapText,
   expectOnlineHandoffText,
-  expectedOnlineHandoffRun
+  expectedOnlineHandoffRun,
+  expectAirgapEvidenceHandoffText
 ] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
@@ -766,6 +798,7 @@ const expectedSteps = expectedStepsText.split(',');
 const expectedDigestKeys = expectedDigestKeysText.split(',');
 const expectAirgap = expectAirgapText === 'true';
 const expectOnlineHandoff = expectOnlineHandoffText === 'true';
+const expectAirgapEvidenceHandoff = expectAirgapEvidenceHandoffText === 'true';
 const allowedTopLevelKeys = new Set([
   'schema',
   'scope',
@@ -780,7 +813,8 @@ const allowedTopLevelKeys = new Set([
   'producer_report_digests',
   'steps',
   ...(expectAirgap ? ['airgap_handoff'] : []),
-  ...(expectOnlineHandoff ? ['online_handoff'] : [])
+  ...(expectOnlineHandoff ? ['online_handoff'] : []),
+  ...(expectAirgapEvidenceHandoff ? ['airgap_evidence_handoff'] : [])
 ]);
 const forbiddenKeys = new Set([
   'verdict',
@@ -931,6 +965,44 @@ if (expectOnlineHandoff) {
     `signed-operator-run://agentsmith-release-kit/evidence/${expectedOnlineHandoffRun}/`;
   if (!String(handoff.artifact_uri || '').startsWith(expectedArtifactPrefix)) {
     throw new Error('online handoff must include sanitized artifact uri');
+  }
+}
+if (expectAirgapEvidenceHandoff) {
+  const handoff = report.airgap_evidence_handoff;
+  if (!handoff || typeof handoff !== 'object' || Array.isArray(handoff)) {
+    throw new Error('airgap summary must include evidence handoff digest summary');
+  }
+  const expectedHandoffKeys = [
+    'airgap_bundle_check_report_digest',
+    'airgap_bundle_manifest_digest',
+    'evidence_digest',
+    'evidence_subject_digest',
+    'image_map_digest'
+  ];
+  if (machineProfile === 'existing_kubernetes/kit_installed/airgap') {
+    expectedHandoffKeys.push('substrate_pack_manifest_digest');
+  }
+  const actualHandoffKeys = Object.keys(handoff).sort();
+  if (JSON.stringify(actualHandoffKeys) !== JSON.stringify(expectedHandoffKeys.sort())) {
+    throw new Error(`unexpected airgap evidence handoff keys: ${actualHandoffKeys.join(',')}`);
+  }
+  for (const [key, digest] of Object.entries(handoff)) {
+    if (!/^sha256:[0-9a-f]{64}$/.test(digest || '')) {
+      throw new Error(`airgap evidence handoff missing digest: ${key}`);
+    }
+  }
+  for (const forbidden of [
+    'operator_identity',
+    'signature_uri',
+    'signature_sha256',
+    'formal_verdict',
+    'release_verdict',
+    'verdict',
+    'readiness'
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(handoff, forbidden)) {
+      throw new Error(`airgap evidence handoff must not include ${forbidden}`);
+    }
   }
 }
 if (/\/tmp\/|\/home\/|secretRef:|operator held|operator workstation|signed operator prerequisite|kubeconfig|kubectl|probe|TOKEN|Bearer/i.test(serialized)) {
@@ -1166,6 +1238,7 @@ BUNDLED_TOOL="$TMP_DIR/kubectl-local"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
 VALID_PROVENANCE="$TMP_DIR/evidence-provenance.signed-operator-run.json"
 KIT_VALID_PROVENANCE="$TMP_DIR/evidence-provenance.signed-operator-run-kit.json"
+KIT_AIRGAP_BUNDLE_PROVENANCE="$TMP_DIR/evidence-provenance.kit-airgap-bundle.json"
 
 manifest_sha="$(create_archive "$VALID_ARCHIVE")"
 archive_sha="$(sha256_file "$VALID_ARCHIVE")"
@@ -1185,6 +1258,7 @@ write_operator_prerequisites "$OPERATOR_PREREQUISITES" "$BUNDLED_TOOL"
 write_airgap_apply_tools
 write_evidence_provenance "$VALID_PROVENANCE" operator-run-1003
 write_evidence_provenance "$KIT_VALID_PROVENANCE" operator-run-kit-1004
+write_bundle_evidence_provenance "$KIT_AIRGAP_BUNDLE_PROVENANCE"
 : >"$KUBECTL_LOG"
 : >"$ROUTABILITY_PROBE_LOG"
 : >"$LOAD_LOG"
@@ -1380,6 +1454,7 @@ pass "operator airgap-bundle/use_existing maps to bundle-create and writes hando
 
 kit_airgap_output="$TMP_DIR/out-airgap-bundle-install-substrates"
 kit_airgap_bundle_root="$TMP_DIR/bundle-airgap-install-substrates"
+kit_airgap_evidence_root="$TMP_DIR/evidence-airgap-bundle-install-substrates"
 bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
   --release-contract "$VALID_CONTRACT" \
   --deploy-template-package "$VALID_PACKAGE" \
@@ -1393,10 +1468,20 @@ bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle install_substrates \
   --operator-prerequisites "$OPERATOR_PREREQUISITES" \
   --substrate-pack-manifest "$KIT_AIRGAP_SUBSTRATE_PACK" \
   --bundle-root "$kit_airgap_bundle_root" \
-  --output-dir "$kit_airgap_output" >"$TMP_DIR/airgap-bundle-install-substrates.out"
+  --output-dir "$kit_airgap_output" \
+  --evidence-root "$kit_airgap_evidence_root" \
+  --evidence-provenance "$KIT_AIRGAP_BUNDLE_PROVENANCE" >"$TMP_DIR/airgap-bundle-install-substrates.out"
 
 [[ -f "$kit_airgap_output/$REPORT_FILE" ]] ||
   fail "operator airgap-bundle/install_substrates summary missing"
+[[ -f "$kit_airgap_evidence_root/evidence.json" ]] ||
+  fail "operator kit airgap bundle evidence missing evidence.json"
+[[ -f "$kit_airgap_evidence_root/evidence-subject.json" ]] ||
+  fail "operator kit airgap bundle evidence missing evidence-subject.json"
+[[ -f "$kit_airgap_evidence_root/airgap-bundle-check-report.json" ]] ||
+  fail "operator kit airgap bundle evidence missing bundle check report"
+[[ -f "$kit_airgap_evidence_root/substrate-pack-manifest.json" ]] ||
+  fail "operator kit airgap bundle evidence missing substrate pack manifest"
 assert_producer_profile "$kit_airgap_output/bundle-create-report.json" "$KIT_AIRGAP_PROFILE"
 assert_operator_report \
   "$kit_airgap_output" \
@@ -1405,6 +1490,9 @@ assert_operator_report \
   "$KIT_AIRGAP_PROFILE" \
   "bundle-create,airgap-bundle-check" \
   "airgap_bundle_check_report,bundle_create_report" \
+  true \
+  false \
+  operator-run-1003 \
   true
 "$NODE_BIN" --input-type=module - \
   "$kit_airgap_bundle_root/airgap-bundle-manifest.json" \
@@ -1431,6 +1519,217 @@ if (manifest.bindings?.substrate_pack_manifest_sha256 !== packDigest) {
 }
 NODE
 pass "operator airgap-bundle/install_substrates maps to kit-installed bundle-create"
+
+missing_substrate_pack_evidence_root="$TMP_DIR/evidence-airgap-bundle-missing-substrate-pack"
+cp -R "$kit_airgap_evidence_root" "$missing_substrate_pack_evidence_root"
+rm "$missing_substrate_pack_evidence_root/substrate-pack-manifest.json"
+expect_operator_fail kit-airgap-evidence-missing-substrate-pack \
+  "$NODE_BIN" "$ROOT_DIR/scripts/verify-operator-release-surface.mjs" \
+    --surface airgap-bundle \
+    --substrate-strategy install_substrates \
+    --machine-profile "$KIT_AIRGAP_PROFILE" \
+    --producer-mode bundle-create \
+    --release-contract "$VALID_CONTRACT" \
+    --bundle-root "$kit_airgap_bundle_root" \
+    --target-registry "$AIRGAP_REGISTRY" \
+    --evidence-root "$missing_substrate_pack_evidence_root" \
+    --output-dir "$kit_airgap_output"
+
+missing_substrate_pack_subject_root="$TMP_DIR/evidence-airgap-bundle-missing-substrate-pack-subject"
+cp -R "$kit_airgap_evidence_root" "$missing_substrate_pack_subject_root"
+"$NODE_BIN" --input-type=module - "$missing_substrate_pack_subject_root" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [evidenceRoot] = process.argv.slice(2);
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function canonicalDigest(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
+
+function writeJson(relativePath, value) {
+  fs.writeFileSync(
+    path.join(evidenceRoot, relativePath),
+    `${JSON.stringify(value, null, 2)}\n`
+  );
+}
+
+const subject = JSON.parse(
+  fs.readFileSync(path.join(evidenceRoot, 'evidence-subject.json'), 'utf8')
+);
+subject.files = subject.files.filter((file) => file.path !== 'substrate-pack-manifest.json');
+writeJson('evidence-subject.json', subject);
+
+const evidence = JSON.parse(fs.readFileSync(path.join(evidenceRoot, 'evidence.json'), 'utf8'));
+evidence.artifact_provenance.subject_sha256 = canonicalDigest(subject);
+writeJson('evidence.json', evidence);
+NODE
+expect_operator_fail kit-airgap-evidence-missing-substrate-pack-subject \
+  "$NODE_BIN" "$ROOT_DIR/scripts/verify-operator-release-surface.mjs" \
+    --surface airgap-bundle \
+    --substrate-strategy install_substrates \
+    --machine-profile "$KIT_AIRGAP_PROFILE" \
+    --producer-mode bundle-create \
+    --release-contract "$VALID_CONTRACT" \
+    --bundle-root "$kit_airgap_bundle_root" \
+    --target-registry "$AIRGAP_REGISTRY" \
+    --evidence-root "$missing_substrate_pack_subject_root" \
+    --output-dir "$kit_airgap_output"
+
+stale_bundle_check_evidence_root="$TMP_DIR/evidence-airgap-bundle-stale-check-report"
+cp -R "$kit_airgap_evidence_root" "$stale_bundle_check_evidence_root"
+"$NODE_BIN" --input-type=module - "$stale_bundle_check_evidence_root" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [evidenceRoot] = process.argv.slice(2);
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestFile(file) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+}
+
+function canonicalDigest(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
+
+function writeJson(relativePath, value) {
+  fs.writeFileSync(
+    path.join(evidenceRoot, relativePath),
+    `${JSON.stringify(value, null, 2)}\n`
+  );
+}
+
+const report = JSON.parse(
+  fs.readFileSync(path.join(evidenceRoot, 'airgap-bundle-check-report.json'), 'utf8')
+);
+report.tool_count += 1;
+writeJson('airgap-bundle-check-report.json', report);
+
+const subject = JSON.parse(
+  fs.readFileSync(path.join(evidenceRoot, 'evidence-subject.json'), 'utf8')
+);
+subject.files = subject.files.map((file) => (
+  file.path === 'airgap-bundle-check-report.json'
+    ? { ...file, sha256: digestFile(path.join(evidenceRoot, file.path)) }
+    : file
+));
+writeJson('evidence-subject.json', subject);
+
+const evidence = JSON.parse(fs.readFileSync(path.join(evidenceRoot, 'evidence.json'), 'utf8'));
+evidence.artifact_provenance.subject_sha256 = canonicalDigest(subject);
+writeJson('evidence.json', evidence);
+NODE
+expect_operator_fail kit-airgap-evidence-stale-bundle-check-report \
+  "$NODE_BIN" "$ROOT_DIR/scripts/verify-operator-release-surface.mjs" \
+    --surface airgap-bundle \
+    --substrate-strategy install_substrates \
+    --machine-profile "$KIT_AIRGAP_PROFILE" \
+    --producer-mode bundle-create \
+    --release-contract "$VALID_CONTRACT" \
+    --bundle-root "$kit_airgap_bundle_root" \
+    --target-registry "$AIRGAP_REGISTRY" \
+    --evidence-root "$stale_bundle_check_evidence_root" \
+    --output-dir "$kit_airgap_output"
+
+stale_manifest_evidence_root="$TMP_DIR/evidence-airgap-bundle-stale-manifest"
+cp -R "$kit_airgap_evidence_root" "$stale_manifest_evidence_root"
+"$NODE_BIN" --input-type=module - "$stale_manifest_evidence_root" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [evidenceRoot] = process.argv.slice(2);
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestFile(file) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+}
+
+function canonicalDigest(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
+
+function writeJson(relativePath, value) {
+  fs.writeFileSync(
+    path.join(evidenceRoot, relativePath),
+    `${JSON.stringify(value, null, 2)}\n`
+  );
+}
+
+const manifest = JSON.parse(
+  fs.readFileSync(path.join(evidenceRoot, 'airgap-bundle-manifest.json'), 'utf8')
+);
+manifest.evidence_root_fixture = 'stale-manifest-copy';
+writeJson('airgap-bundle-manifest.json', manifest);
+
+const subject = JSON.parse(
+  fs.readFileSync(path.join(evidenceRoot, 'evidence-subject.json'), 'utf8')
+);
+subject.files = subject.files.map((file) => (
+  file.path === 'airgap-bundle-manifest.json'
+    ? { ...file, sha256: digestFile(path.join(evidenceRoot, file.path)) }
+    : file
+));
+writeJson('evidence-subject.json', subject);
+
+const evidence = JSON.parse(fs.readFileSync(path.join(evidenceRoot, 'evidence.json'), 'utf8'));
+evidence.artifact_provenance.subject_sha256 = canonicalDigest(subject);
+writeJson('evidence.json', evidence);
+NODE
+expect_operator_fail kit-airgap-evidence-stale-bundle-manifest \
+  "$NODE_BIN" "$ROOT_DIR/scripts/verify-operator-release-surface.mjs" \
+    --surface airgap-bundle \
+    --substrate-strategy install_substrates \
+    --machine-profile "$KIT_AIRGAP_PROFILE" \
+    --producer-mode bundle-create \
+    --release-contract "$VALID_CONTRACT" \
+    --bundle-root "$kit_airgap_bundle_root" \
+    --target-registry "$AIRGAP_REGISTRY" \
+    --evidence-root "$stale_manifest_evidence_root" \
+    --output-dir "$kit_airgap_output"
 
 write_bundle_operator_inputs "$airgap_bundle_root"
 airgap_target_app_image="$(target_image_for_id "$airgap_bundle_root/components/image-map.json" agentsmith_app)"

@@ -11,8 +11,8 @@ airgap bundle load-plan, airgap bundle render-check, airgap deployment focused
 chain orchestration, airgap consume rehearsal, airgap adoption aggregation,
 substrate pack check, apply-only, rollout/live digest, route smoke, and online
 focused chain orchestration diagnostics, release engineering gate candidate
-intake, plus operator signoff intake binding, but does not contain full deploy
-tooling yet.
+intake, plus operator signoff and scoped runbook acceptance binding, but does
+not contain full deploy tooling yet.
 
 ## Canonical Identity
 
@@ -120,6 +120,11 @@ runs the focused substrate-pack-check, image load, bundle render-check, apply,
 rollout, and smoke steps. Profile mismatches fail before producer output, and
 duplicate singleton/control facade arguments fail fast before producer side
 effects.
+Airgap-bundle evidence handoff in the surface summary is digest-only. Scoped
+operator runbook acceptance is a separate focused check that binds the
+operator choice, existing-Kubernetes airgap machine profile, surface report,
+evidence root, and safe runbook path/digest without adding identity,
+signature, verdict, or readiness semantics.
 `--airgap-adoption` aggregates matching generated airgap-bundle and
 confirmed-apply airgap surfaces for `use_existing` or `install_substrates`
 repo-local adoption preparation only. For kit airgap it binds the bundle
@@ -379,20 +384,20 @@ count/digest summaries. It does not log in to a registry, pull, push, mirror,
 save, load, parse OCI tar contents, prove registry presence, install offline,
 deploy, package, or claim release readiness. `bundle-create-report.json` is
 not an accepted release-kit evidence envelope output. The `--evidence` airgap
-bundle triplet remains limited to `existing_kubernetes/external_declared/airgap`;
-kit airgap bundle/adoption reports are focused diagnostics, not accepted
-evidence envelopes.
+bundle output is the scoped `airgap_bundle_check` value for
+`existing_kubernetes/external_declared/airgap` and
+`existing_kubernetes/kit_installed/airgap`.
 
-For `existing_kubernetes/external_declared/airgap`, `--bundle-create` can also
-take `--evidence-root <dir> --evidence-provenance <json>`. This writes an
-unsigned focused evidence root containing only `evidence.json`,
-`evidence-subject.json`, `airgap-bundle-check-report.json`,
-`airgap-bundle-manifest.json`, and `image-map.json`, then immediately
-revalidates that root with `--evidence`. The provenance input is `ci_artifact`
-only; signed operator-run fields such as signature URI or operator identity are
-not produced. This remains `readiness: false` focused evidence, not package,
-operator signoff, deploy, or release readiness. Kit-installed airgap rejects
-evidence output for now.
+For either airgap bundle profile, `--bundle-create` can also take
+`--evidence-root <dir> --evidence-provenance <json>`. This writes an unsigned
+focused evidence root containing `evidence.json`, `evidence-subject.json`,
+`airgap-bundle-check-report.json`, `airgap-bundle-manifest.json`,
+`image-map.json`, and, for kit-installed airgap,
+`substrate-pack-manifest.json`, then immediately revalidates that root with
+`--evidence`. The provenance input is `ci_artifact` only; signed operator-run
+fields such as signature URI or operator identity are not produced. This
+remains `readiness: false` focused evidence, not package, operator signoff,
+deploy, or release readiness.
 The evidence root must be absent, empty, or contain only those managed evidence
 files from a previous run; any other direct entry fails fast and is left in
 place.
@@ -877,8 +882,7 @@ redaction/source-safety rules. The raw envelope schema is
 adapter/canonical `agentsmith.release-kit-evidence/v1` shape.
 The raw envelope must set `release_kit_output` to one mapped release-kit output:
 `image-map.json`, `online-deployment-gate-report.json`, or
-`airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json`;
-release-kit must
+`airgap_bundle_check`; release-kit must
 not emit AgentSmith product-flow evidence. Each accepted output is re-read and
 semantically checked. Image-map evidence follows the same image adoption rule as
 render: `mirror_required: false` must omit `target_registry` and keep
@@ -893,18 +897,23 @@ accepted only from confirmed apply output on
 steps must be non-empty and include apply plus rollout, and `server-dry-run`
 reports are rejected. Kit-installed online evidence must also include the
 canonical substrate-pack-check and substrate-routability steps. Airgap bundle
-evidence is accepted only for `existing_kubernetes/external_declared/airgap`
-and must be a real bundle-check triplet: the report,
-`airgap-bundle-manifest.json`, and
-`image-map.json` must agree on required component, image artifact, payload/tool
-count, and digest bindings; `components: []` is invalid. The old two-file
-airgap output value is rejected. `deploy-result.json#substrate` is future
-reserved and is not accepted during pre-GA. Render, rollout, and smoke reports
-remain individual focused diagnostic files, but their combinations are not
-accepted release-kit evidence envelope outputs. `evidence_subject.files` must
-contain only `evidence.json` plus the mapped output files: `image-map.json`,
-`online-deployment-gate-report.json`, or `airgap-bundle-check-report.json` plus
-`airgap-bundle-manifest.json` plus `image-map.json`. Its provenance
+evidence is accepted for external-declared and kit-installed airgap. The
+kit-installed profile must include `substrate-pack-manifest.json` in the
+subject file list and must bind the bundle manifest
+`substrate_pack_manifest` component plus
+`bindings.substrate_pack_manifest_sha256`. The bundle-check report,
+`airgap-bundle-manifest.json`, and `image-map.json` must agree on required
+component, image artifact, payload/tool count, and digest bindings;
+`components: []` is invalid. The old two-file and old three-file airgap output
+values are rejected. `deploy-result.json#substrate` is future reserved and is
+not accepted during pre-GA. Render, rollout, and smoke reports remain
+individual focused diagnostic files, but their combinations are not accepted
+release-kit evidence envelope outputs. `evidence_subject.files` must contain
+only `evidence.json` plus the mapped output files: `image-map.json`,
+`online-deployment-gate-report.json`, or the airgap bundle check files
+(`airgap-bundle-check-report.json`, `airgap-bundle-manifest.json`,
+`image-map.json`, and, for kit-installed airgap,
+`substrate-pack-manifest.json`). Its provenance
 `subject_name` is `release-kit-evidence-subject`. For online evidence, the
 envelope must include matching inline
 `agentsmith.substrate-connection.truth/v1` connection truth; kit-installed

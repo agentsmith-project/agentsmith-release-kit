@@ -586,14 +586,23 @@ NODE
 
 assert_airgap_bundle_evidence() {
   local evidence_root="$1"
+  local expected_profile="${2:-$AIRGAP_PROFILE}"
+  local substrate_pack_manifest="${3:-}"
 
-  "$NODE_BIN" --input-type=module - "$evidence_root" "$VALID_CONTRACT" <<'NODE'
+  "$NODE_BIN" --input-type=module - \
+    "$evidence_root" \
+    "$VALID_CONTRACT" \
+    "$expected_profile" \
+    "$substrate_pack_manifest" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [evidenceRoot, validContract] = process.argv.slice(2);
+const [evidenceRoot, validContract, expectedProfile, substratePackManifest] =
+  process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(validContract, 'utf8'));
+const [expectedTargetCluster, expectedSubstrateSource, expectedDistribution] =
+  expectedProfile.split('/');
 const expectedFiles = [
   'evidence.json',
   'evidence-subject.json',
@@ -601,6 +610,9 @@ const expectedFiles = [
   'airgap-bundle-manifest.json',
   'image-map.json'
 ];
+if (expectedSubstrateSource === 'kit_installed') {
+  expectedFiles.push('substrate-pack-manifest.json');
+}
 
 function stableJson(value) {
   if (Array.isArray(value)) {
@@ -657,15 +669,15 @@ const expectedSubjectPaths = expectedFiles.filter((file) => file !== 'evidence-s
 if (evidence.schema_version !== 'agentsmith.release-kit-evidence-envelope/v1') {
   throw new Error(`unexpected evidence schema: ${evidence.schema_version}`);
 }
-if (evidence.release_kit_output !== 'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json') {
+if (evidence.release_kit_output !== 'airgap_bundle_check') {
   throw new Error(`unexpected evidence output: ${evidence.release_kit_output}`);
 }
 if (
-  evidence.target_cluster !== 'existing_kubernetes' ||
-  evidence.substrate_source !== 'external_declared' ||
-  evidence.distribution !== 'airgap'
+  evidence.target_cluster !== expectedTargetCluster ||
+  evidence.substrate_source !== expectedSubstrateSource ||
+  evidence.distribution !== expectedDistribution
 ) {
-  throw new Error('evidence target profile must be external-declared airgap');
+  throw new Error(`evidence target profile must be ${expectedProfile}`);
 }
 if (Object.prototype.hasOwnProperty.call(evidence, 'substrate_connection_truth')) {
   throw new Error('bundle-create evidence must not include inline substrate connection truth');
@@ -696,8 +708,37 @@ for (const relativePath of expectedSubjectPaths.filter((file) => file !== 'evide
 if (checkReport.readiness !== false || imageMap.readiness !== false) {
   throw new Error('focused bundle evidence reports must keep readiness=false');
 }
-if (manifest.substrate?.mode !== 'external_declared' || manifest.substrate?.bundled !== false) {
-  throw new Error('bundle manifest evidence must be external-declared use_existing');
+if (checkReport.target_profile?.value !== expectedProfile) {
+  throw new Error(`bundle check evidence target profile must be ${expectedProfile}`);
+}
+if (manifest.target_profile?.value !== expectedProfile) {
+  throw new Error(`bundle manifest evidence target profile must be ${expectedProfile}`);
+}
+if (
+  manifest.substrate?.mode !== expectedSubstrateSource ||
+  manifest.substrate?.bundled !== (expectedSubstrateSource === 'kit_installed')
+) {
+  throw new Error(`bundle manifest substrate summary must match ${expectedProfile}`);
+}
+const packComponent = manifest.components.find((component) => (
+  component.kind === 'substrate_pack_manifest'
+));
+if (expectedSubstrateSource === 'kit_installed') {
+  if (!substratePackManifest) {
+    throw new Error('kit evidence assertion requires substrate pack manifest input');
+  }
+  const packDigest = digestBuffer(fs.readFileSync(substratePackManifest));
+  if (!packComponent || packComponent.path !== 'components/substrate-pack-manifest.json') {
+    throw new Error('kit bundle evidence must include substrate pack manifest component');
+  }
+  if (packComponent.sha256 !== packDigest) {
+    throw new Error('kit bundle evidence substrate pack component digest mismatch');
+  }
+  if (manifest.bindings?.substrate_pack_manifest_sha256 !== packDigest) {
+    throw new Error('kit bundle evidence substrate pack binding digest mismatch');
+  }
+} else if (packComponent || manifest.bindings?.substrate_pack_manifest_sha256) {
+  throw new Error('external bundle evidence must not include substrate pack binding');
 }
 NODE
 }
@@ -851,13 +892,22 @@ expect_create_fail_with_evidence missing-evidence-provenance "$TMP_DIR/bundle-mi
     "${common_payload_args[@]}" \
     --evidence-root "$TMP_DIR/evidence-missing-provenance"
 
-expect_create_fail_with_evidence kit-airgap-evidence-root "$TMP_DIR/bundle-kit-evidence" "$TMP_DIR/out-kit-evidence" "$TMP_DIR/evidence-kit" \
-  run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-kit-evidence" "$TMP_DIR/out-kit-evidence" \
-    "${default_image_args[@]}" \
-    "${common_payload_args[@]}" \
-    --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" \
-    --evidence-root "$TMP_DIR/evidence-kit" \
-    --evidence-provenance "$VALID_PROVENANCE"
+kit_evidence_bundle_root="$TMP_DIR/bundle-kit-evidence"
+kit_evidence_output_dir="$TMP_DIR/out-kit-evidence"
+kit_evidence_root="$TMP_DIR/evidence-kit"
+run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$kit_evidence_bundle_root" "$kit_evidence_output_dir" \
+  "${default_image_args[@]}" \
+  "${common_payload_args[@]}" \
+  --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" \
+  --evidence-root "$kit_evidence_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/kit-evidence-create.out"
+assert_kit_bundle_and_report "$kit_evidence_bundle_root" "$kit_evidence_output_dir" "$KIT_SUBSTRATE_PACK"
+assert_airgap_bundle_evidence "$kit_evidence_root" "$KIT_AIRGAP_PROFILE" "$KIT_SUBSTRATE_PACK"
+if ! grep -q 'PASS: release-kit evidence accepted' "$TMP_DIR/kit-evidence-create.out"; then
+  cat "$TMP_DIR/kit-evidence-create.out" >&2
+  fail "kit bundle-create evidence path must call --evidence self-check"
+fi
+pass "valid kit-installed airgap bundle create wrote unsigned focused evidence root"
 
 evidence_dir_root="$TMP_DIR/evidence-managed-dir"
 mkdir -p "$evidence_dir_root/evidence.json"

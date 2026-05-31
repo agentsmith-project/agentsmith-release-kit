@@ -41,12 +41,12 @@ const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
 const PRODUCER_REPO = 'github.com/agentsmith-project/agentsmith-release-kit';
 const EVIDENCE_SUBJECT_NAME = 'release-kit-evidence-subject';
 const EVIDENCE_SUBJECT_URI = 'evidence-subject.json';
-const EVIDENCE_RELEASE_KIT_OUTPUT =
-  'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json';
+const EVIDENCE_RELEASE_KIT_OUTPUT = 'airgap_bundle_check';
 const EVIDENCE_OUTPUT_FILES = [
   'airgap-bundle-check-report.json',
   'airgap-bundle-manifest.json',
-  'image-map.json'
+  'image-map.json',
+  'substrate-pack-manifest.json'
 ];
 const MANAGED_EVIDENCE_ENTRIES = [
   'evidence.json',
@@ -133,7 +133,7 @@ function usage() {
     --operator-prerequisites <json> \\
     --bundle-root <dir> \\
     --output-dir <dir> \\
-    [--evidence-root <dir> --evidence-provenance <json> for existing_kubernetes/external_declared/airgap]`;
+    [--evidence-root <dir> --evidence-provenance <json> for existing_kubernetes/<external_declared|kit_installed>/airgap]`;
 }
 
 function cliFail(message) {
@@ -453,8 +453,10 @@ function parseTargetProfile(value) {
 }
 
 function validateEvidenceArgs(args, targetProfile) {
-  if (args.evidenceRoot && targetProfile.value !== AIRGAP_TARGET_PROFILE) {
-    cliFail(`--evidence-root is only accepted for ${AIRGAP_TARGET_PROFILE}`);
+  if (args.evidenceRoot && !AIRGAP_BUNDLE_TARGET_PROFILE_SET.has(targetProfile.value)) {
+    cliFail(
+      `--evidence-root is only accepted for ${AIRGAP_BUNDLE_TARGET_PROFILE_VALUES.join(' or ')}`
+    );
   }
 }
 
@@ -1196,7 +1198,15 @@ async function copyEvidenceOutputFile(source, stagingRoot, relativePath) {
 async function moveManagedEvidenceFiles(stagingRoot, evidenceRoot) {
   await fs.mkdir(evidenceRoot, { recursive: true });
   for (const entry of MANAGED_EVIDENCE_ENTRIES) {
-    await fs.rename(path.join(stagingRoot, entry), path.join(evidenceRoot, entry));
+    const source = path.join(stagingRoot, entry);
+    try {
+      await fs.rename(source, path.join(evidenceRoot, entry));
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        continue;
+      }
+      throw error;
+    }
   }
 }
 
@@ -1240,6 +1250,15 @@ async function writeAndValidateEvidenceRoot({
         'image-map.json'
       )
     );
+    if (targetProfile.value === KIT_AIRGAP_TARGET_PROFILE) {
+      outputDigests.push(
+        await copyEvidenceOutputFile(
+          path.join(bundleRoot, 'components/substrate-pack-manifest.json'),
+          stagingRoot,
+          'substrate-pack-manifest.json'
+        )
+      );
+    }
 
     const evidence = buildEvidenceBase({ targetProfile, assembly });
     const subject = buildEvidenceSubject({ evidence, outputDigests });

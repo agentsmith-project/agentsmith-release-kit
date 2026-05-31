@@ -6,6 +6,7 @@ NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
 KIT_ONLINE_PROFILE="existing_kubernetes/kit_installed/online"
+KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 KIND_PROFILE="kind_rehearsal/kit_installed/online"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 
@@ -117,9 +118,10 @@ const contractDigest = digestBuffer(contractRaw);
 const ONLINE_PROFILE = 'existing_kubernetes/external_declared/online';
 const AIRGAP_PROFILE = 'existing_kubernetes/external_declared/airgap';
 const KIT_ONLINE_PROFILE = 'existing_kubernetes/kit_installed/online';
+const KIT_AIRGAP_PROFILE = 'existing_kubernetes/kit_installed/airgap';
 const KIND_PROFILE = 'kind_rehearsal/kit_installed/online';
 const AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
-  'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json';
+  'airgap_bundle_check';
 const OLD_AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
   'airgap-bundle-check-report.json+airgap-bundle-manifest.json';
 let releaseKitOutput = 'online-deployment-gate-report.json';
@@ -455,8 +457,22 @@ const componentPaths = {
   release_contract: 'components/release-contract.json',
   deploy_template_package: 'components/deploy-template-package.json',
   deploy_template_archive: 'components/agentsmith-deploy-template-package.tgz',
-  image_map: 'components/image-map.json'
+  image_map: 'components/image-map.json',
+  substrate_pack_manifest: 'components/substrate-pack-manifest.json'
 };
+const substratePackManifest = {
+  schema_version: 'agentsmith.substrate-pack-manifest/v1',
+  target_profile: targetProfileObject(KIT_AIRGAP_PROFILE),
+  release_kit_version: '0.1.0',
+  installation_id: 'kit-install-10001',
+  substrates: {
+    postgresql: {
+      image: `registry.example.internal/substrates/postgresql@${fixtureDigest('5')}`
+    }
+  },
+  tools: []
+};
+const substratePackManifestDigest = jsonDigest(substratePackManifest);
 const imageArtifactDeclarations = airgapImageMap.mappings.map((mapping, index) => ({
   id: mapping.id,
   source_image: mapping.source_image,
@@ -705,13 +721,39 @@ function useImageMapOutput() {
   ];
 }
 
-function useAirgapBundleOutput({ includeSubstrateTruth = false } = {}) {
-  useTargetProfile(AIRGAP_PROFILE);
+function useAirgapBundleOutput({
+  includeSubstrateTruth = false,
+  profile = AIRGAP_PROFILE,
+  includeSubstratePack = profile === KIT_AIRGAP_PROFILE
+} = {}) {
+  const [, substrateSource] = profile.split('/');
+  useTargetProfile(profile);
   if (!includeSubstrateTruth) {
     delete evidence.substrate_connection_truth;
   }
   releaseKitOutput = AIRGAP_BUNDLE_EVIDENCE_OUTPUT;
   evidence.release_kit_output = releaseKitOutput;
+  Object.assign(airgapImageMap, buildImageMap(profile, 'registry.example.internal/releases'));
+  airgapBundleCheckReport.target_profile = targetProfileObject(profile);
+  airgapBundleManifest.target_profile = targetProfileObject(profile);
+  airgapBundleManifest.substrate = {
+    mode: substrateSource,
+    bundled: substrateSource === 'kit_installed'
+  };
+  airgapBundleManifest.components = airgapBundleManifest.components.filter(
+    (component) => component.kind !== 'substrate_pack_manifest'
+  );
+  delete airgapBundleManifest.bindings.substrate_pack_manifest_sha256;
+  airgapBundleCheckReport.components_count = 4;
+  if (includeSubstratePack) {
+    airgapBundleManifest.bindings.substrate_pack_manifest_sha256 = substratePackManifestDigest;
+    airgapBundleManifest.components.push({
+      kind: 'substrate_pack_manifest',
+      path: componentPaths.substrate_pack_manifest,
+      sha256: substratePackManifestDigest
+    });
+    airgapBundleCheckReport.components_count = 5;
+  }
   outputFiles = [
     {
       path: 'airgap-bundle-check-report.json',
@@ -726,6 +768,12 @@ function useAirgapBundleOutput({ includeSubstrateTruth = false } = {}) {
       value: airgapImageMap
     }
   ];
+  if (includeSubstratePack) {
+    outputFiles.push({
+      path: 'substrate-pack-manifest.json',
+      value: substratePackManifest
+    });
+  }
 }
 
 switch (mutation) {
@@ -916,6 +964,15 @@ switch (mutation) {
     break;
   case 'valid_airgap_bundle_output':
     useAirgapBundleOutput();
+    break;
+  case 'valid_kit_airgap_bundle_output':
+    useAirgapBundleOutput({ profile: KIT_AIRGAP_PROFILE });
+    break;
+  case 'kit_airgap_bundle_missing_substrate_pack_binding':
+    useAirgapBundleOutput({
+      profile: KIT_AIRGAP_PROFILE,
+      includeSubstratePack: false
+    });
     break;
   case 'airgap_bundle_inline_substrate_truth':
     useAirgapBundleOutput({ includeSubstrateTruth: true });
@@ -1497,8 +1554,15 @@ VALID_AIRGAP_BUNDLE_ROOT="$TMP_DIR/evidence-valid-airgap-bundle"
 VALID_AIRGAP_BUNDLE_OUT="$TMP_DIR/out-valid-airgap-bundle"
 write_evidence "$VALID_AIRGAP_BUNDLE_ROOT" ci_artifact valid_airgap_bundle_output
 run_evidence "$VALID_AIRGAP_BUNDLE_ROOT" "$VALID_AIRGAP_BUNDLE_OUT" "$AIRGAP_PROFILE" >/dev/null
-assert_pass_report "$VALID_AIRGAP_BUNDLE_OUT/evidence-validation-report.json" "airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json"
+assert_pass_report "$VALID_AIRGAP_BUNDLE_OUT/evidence-validation-report.json" "airgap_bundle_check"
 pass "valid airgap bundle check release_kit_output evidence accepted without inline substrate truth"
+
+VALID_KIT_AIRGAP_BUNDLE_ROOT="$TMP_DIR/evidence-valid-kit-airgap-bundle"
+VALID_KIT_AIRGAP_BUNDLE_OUT="$TMP_DIR/out-valid-kit-airgap-bundle"
+write_evidence "$VALID_KIT_AIRGAP_BUNDLE_ROOT" ci_artifact valid_kit_airgap_bundle_output
+run_evidence "$VALID_KIT_AIRGAP_BUNDLE_ROOT" "$VALID_KIT_AIRGAP_BUNDLE_OUT" "$KIT_AIRGAP_PROFILE" >/dev/null
+assert_pass_report "$VALID_KIT_AIRGAP_BUNDLE_OUT/evidence-validation-report.json" "airgap_bundle_check"
+pass "valid kit-installed airgap bundle check release_kit_output evidence accepted with substrate pack binding"
 
 VALID_SECRET_REF_ROOT="$TMP_DIR/evidence-valid-secret-ref"
 VALID_SECRET_REF_OUT="$TMP_DIR/out-valid-secret-ref"
@@ -1569,6 +1633,7 @@ expect_fail image-map-mirror-target-drift ci_artifact image_map_mirror_target_dr
 expect_fail standalone-airgap-image-map-use-source ci_artifact image_map_airgap_use_source "$AIRGAP_PROFILE"
 expect_fail standalone-kind-image-map-output ci_artifact image_map_kind_rehearsal_output "$KIND_PROFILE"
 expect_fail airgap-old-two-file-pair ci_artifact airgap_old_two_file_pair "$AIRGAP_PROFILE"
+expect_fail kit-airgap-bundle-missing-substrate-pack-binding ci_artifact kit_airgap_bundle_missing_substrate_pack_binding "$KIT_AIRGAP_PROFILE"
 expect_fail airgap-bundle-inline-substrate-truth ci_artifact airgap_bundle_inline_substrate_truth "$AIRGAP_PROFILE"
 expect_fail airgap-image-map-missing ci_artifact airgap_image_map_missing "$AIRGAP_PROFILE"
 expect_fail airgap-image-map-mirror-required-false ci_artifact airgap_image_map_mirror_required_false "$AIRGAP_PROFILE"

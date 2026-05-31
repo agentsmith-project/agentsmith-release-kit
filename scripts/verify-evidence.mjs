@@ -36,6 +36,7 @@ const ONLINE_DEPLOYMENT_GATE_SCOPE = 'online_deployment_gate_only';
 const AIRGAP_BUNDLE_CHECK_REPORT_SCHEMA = 'agentsmith.airgap-bundle-check-report/v1';
 const AIRGAP_BUNDLE_CHECK_REPORT_SCOPE = 'airgap_bundle_manifest_check_only';
 const AIRGAP_BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
+const SUBSTRATE_PACK_MANIFEST_SCHEMA = 'agentsmith.substrate-pack-manifest/v1';
 const EVIDENCE_SUBJECT_NAME = 'release-kit-evidence-subject';
 const EVIDENCE_SUBJECT_URI = 'evidence-subject.json';
 const IMAGE_MAP_TARGET_PROFILES = new Set([
@@ -50,7 +51,13 @@ const ONLINE_DEPLOYMENT_GATE_TARGET_PROFILES = new Set([
   KIT_ONLINE_DEPLOYMENT_GATE_TARGET_PROFILE
 ]);
 const AIRGAP_BUNDLE_TARGET_PROFILE = 'existing_kubernetes/external_declared/airgap';
-const AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
+const KIT_AIRGAP_BUNDLE_TARGET_PROFILE = 'existing_kubernetes/kit_installed/airgap';
+const AIRGAP_BUNDLE_TARGET_PROFILE_VALUES = new Set([
+  AIRGAP_BUNDLE_TARGET_PROFILE,
+  KIT_AIRGAP_BUNDLE_TARGET_PROFILE
+]);
+const AIRGAP_BUNDLE_EVIDENCE_OUTPUT = 'airgap_bundle_check';
+const LEGACY_AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
   'airgap-bundle-check-report.json+airgap-bundle-manifest.json+image-map.json';
 const OLD_AIRGAP_BUNDLE_EVIDENCE_OUTPUT =
   'airgap-bundle-check-report.json+airgap-bundle-manifest.json';
@@ -78,13 +85,17 @@ const RELEASE_KIT_OUTPUT_TARGET_PROFILE_VALUES = new Map([
   ],
   [
     AIRGAP_BUNDLE_EVIDENCE_OUTPUT,
-    new Set([AIRGAP_BUNDLE_TARGET_PROFILE])
+    AIRGAP_BUNDLE_TARGET_PROFILE_VALUES
   ]
 ]);
 const FUTURE_RESERVED_RELEASE_KIT_OUTPUT_VALUES = new Set([
   'deploy-result.json#substrate'
 ]);
 const INVALID_RELEASE_KIT_OUTPUT_VALUES = new Map([
+  [
+    LEGACY_AIRGAP_BUNDLE_EVIDENCE_OUTPUT,
+    `${LEGACY_AIRGAP_BUNDLE_EVIDENCE_OUTPUT} is no longer accepted; use ${AIRGAP_BUNDLE_EVIDENCE_OUTPUT}`
+  ],
   [
     OLD_AIRGAP_BUNDLE_EVIDENCE_OUTPUT,
     `${OLD_AIRGAP_BUNDLE_EVIDENCE_OUTPUT} is no longer accepted; use ${AIRGAP_BUNDLE_EVIDENCE_OUTPUT}`
@@ -288,18 +299,26 @@ const KIT_ONLINE_DEPLOYMENT_GATE_ALLOWED_STEP_SEQUENCES = [
     'smoke'
   ]
 ];
-const AIRGAP_BUNDLE_COMPONENT_KINDS = new Set([
+const AIRGAP_BUNDLE_BASE_COMPONENT_KINDS = new Set([
   'release_contract',
   'deploy_template_package',
   'deploy_template_archive',
   'image_map'
 ]);
-const AIRGAP_BUNDLE_BINDING_KEYS = new Set([
+const AIRGAP_BUNDLE_KIT_COMPONENT_KINDS = new Set([
+  ...AIRGAP_BUNDLE_BASE_COMPONENT_KINDS,
+  'substrate_pack_manifest'
+]);
+const AIRGAP_BUNDLE_BASE_BINDING_KEYS = new Set([
   'release_contract_sha256',
   'deploy_template_package_sha256',
   'deploy_template_archive_sha256',
   'deploy_template_manifest_sha256',
   'image_map_sha256'
+]);
+const AIRGAP_BUNDLE_KIT_BINDING_KEYS = new Set([
+  ...AIRGAP_BUNDLE_BASE_BINDING_KEYS,
+  'substrate_pack_manifest_sha256'
 ]);
 const AIRGAP_BUNDLE_COMPONENT_KEYS = new Set(['kind', 'path', 'sha256']);
 const AIRGAP_IMAGE_ARTIFACT_DECLARATION_KEYS = new Set([
@@ -903,7 +922,13 @@ async function assertSubjectFile({
   return relativePath;
 }
 
-async function assertSubjectFiles(evidenceRoot, evidence, evidenceSubject, releaseKitOutput) {
+async function assertSubjectFiles(
+  evidenceRoot,
+  evidence,
+  evidenceSubject,
+  releaseKitOutput,
+  targetProfile
+) {
   const files = requireArray(evidenceSubject.files, 'evidence_subject.files');
   const seen = new Set();
 
@@ -924,7 +949,15 @@ async function assertSubjectFiles(evidenceRoot, evidence, evidenceSubject, relea
     fail('evidence_subject.files must include evidence.json');
   }
 
-  const requiredFiles = RELEASE_KIT_OUTPUT_REQUIRED_FILES.get(releaseKitOutput) || [];
+  const requiredFiles = [
+    ...(RELEASE_KIT_OUTPUT_REQUIRED_FILES.get(releaseKitOutput) || [])
+  ];
+  if (
+    releaseKitOutput === AIRGAP_BUNDLE_EVIDENCE_OUTPUT &&
+    targetProfile.value === KIT_AIRGAP_BUNDLE_TARGET_PROFILE
+  ) {
+    requiredFiles.push('substrate-pack-manifest.json');
+  }
   const expectedFiles = new Set(['evidence.json', ...requiredFiles]);
   for (const requiredFile of requiredFiles) {
     if (!seen.has(requiredFile)) {
@@ -1905,9 +1938,13 @@ function assertAirgapReportArtifacts({
   };
 }
 
-function assertAirgapBindings({ bindings, expected }) {
+function assertAirgapBindings({ bindings, expected, targetProfile }) {
   const object = requireObject(bindings, 'airgap_bundle_manifest.bindings');
-  assertAllowedKeys(object, AIRGAP_BUNDLE_BINDING_KEYS, 'airgap_bundle_manifest.bindings');
+  const allowedKeys =
+    targetProfile.value === KIT_AIRGAP_BUNDLE_TARGET_PROFILE
+      ? AIRGAP_BUNDLE_KIT_BINDING_KEYS
+      : AIRGAP_BUNDLE_BASE_BINDING_KEYS;
+  assertAllowedKeys(object, allowedKeys, 'airgap_bundle_manifest.bindings');
   for (const [key, expectedDigest] of Object.entries(expected)) {
     assertDigestEquals(
       object[key],
@@ -1917,10 +1954,16 @@ function assertAirgapBindings({ bindings, expected }) {
   }
 }
 
-function assertAirgapComponents({ components, expected }) {
+function assertAirgapComponents({ components, expected, targetProfile }) {
   const items = requireArray(components, 'airgap_bundle_manifest.components');
-  if (items.length !== AIRGAP_BUNDLE_COMPONENT_KINDS.size) {
-    fail('airgap_bundle_manifest.components must contain release_contract, deploy_template_package, deploy_template_archive, and image_map');
+  const expectedKinds =
+    targetProfile.value === KIT_AIRGAP_BUNDLE_TARGET_PROFILE
+      ? AIRGAP_BUNDLE_KIT_COMPONENT_KINDS
+      : AIRGAP_BUNDLE_BASE_COMPONENT_KINDS;
+  if (items.length !== expectedKinds.size) {
+    fail(
+      `airgap_bundle_manifest.components must contain ${[...expectedKinds].join(', ')}`
+    );
   }
 
   const seen = new Set();
@@ -1929,7 +1972,7 @@ function assertAirgapComponents({ components, expected }) {
     const component = requireObject(value, label);
     assertAllowedKeys(component, AIRGAP_BUNDLE_COMPONENT_KEYS, label);
     const kind = requireString(component.kind, `${label}.kind`);
-    if (!AIRGAP_BUNDLE_COMPONENT_KINDS.has(kind)) {
+    if (!expectedKinds.has(kind)) {
       fail(`${label}.kind is invalid`);
     }
     if (seen.has(kind)) {
@@ -1940,7 +1983,7 @@ function assertAirgapComponents({ components, expected }) {
     assertDigestEquals(component.sha256, expected[kind], `${label}.sha256`);
   }
 
-  for (const kind of AIRGAP_BUNDLE_COMPONENT_KINDS) {
+  for (const kind of expectedKinds) {
     if (!seen.has(kind)) {
       fail(`airgap_bundle_manifest.components is missing ${kind}`);
     }
@@ -2148,11 +2191,18 @@ function assertAirgapOperatorPrerequisites({
   };
 }
 
-function assertAirgapSubstrate(value) {
+function assertAirgapSubstrate(value, targetProfile) {
   const substrate = requireObject(value, 'airgap_bundle_manifest.substrate');
   assertAllowedKeys(substrate, AIRGAP_SUBSTRATE_KEYS, 'airgap_bundle_manifest.substrate');
-  assertStringEquals(substrate.mode, 'external_declared', 'airgap_bundle_manifest.substrate.mode');
-  requireBooleanFalse(substrate.bundled, 'airgap_bundle_manifest.substrate.bundled');
+  assertStringEquals(
+    substrate.mode,
+    targetProfile.substrate_source,
+    'airgap_bundle_manifest.substrate.mode'
+  );
+  const expectedBundled = targetProfile.substrate_source === 'kit_installed';
+  if (substrate.bundled !== expectedBundled) {
+    fail(`airgap_bundle_manifest.substrate.bundled must be ${expectedBundled}`);
+  }
 }
 
 function assertAirgapBundleOutput({
@@ -2161,12 +2211,18 @@ function assertAirgapBundleOutput({
   manifestInputDigest,
   imageMap,
   imageMapInputDigest,
+  substratePackInput,
   evidence,
   releaseContractInput,
   targetProfile
 }) {
-  if (targetProfile.value !== AIRGAP_BUNDLE_TARGET_PROFILE) {
-    fail(`airgap_bundle target_profile must be ${AIRGAP_BUNDLE_TARGET_PROFILE}`);
+  const isKitAirgap = targetProfile.value === KIT_AIRGAP_BUNDLE_TARGET_PROFILE;
+  if (!AIRGAP_BUNDLE_TARGET_PROFILE_VALUES.has(targetProfile.value)) {
+    fail(
+      `airgap_bundle target_profile must be one of: ${[
+        ...AIRGAP_BUNDLE_TARGET_PROFILE_VALUES
+      ].join(', ')}`
+    );
   }
 
   assertFocusedReportHeader(report, {
@@ -2228,8 +2284,14 @@ function assertAirgapBundleOutput({
       deploy_template_package_sha256: reportArtifactSummary.deployTemplatePackageInputSha,
       deploy_template_archive_sha256: reportArtifactSummary.deployTemplateArchiveInputSha,
       deploy_template_manifest_sha256: reportArtifactSummary.deployTemplateManifestSha,
-      image_map_sha256: reportArtifactSummary.imageMapInputSha
-    }
+      image_map_sha256: reportArtifactSummary.imageMapInputSha,
+      ...(isKitAirgap
+        ? {
+            substrate_pack_manifest_sha256: substratePackInput?.inputDigest
+          }
+        : {})
+    },
+    targetProfile
   });
 
   const componentsCount = assertAirgapComponents({
@@ -2238,8 +2300,14 @@ function assertAirgapBundleOutput({
       release_contract: releaseContractInput.inputDigest,
       deploy_template_package: reportArtifactSummary.deployTemplatePackageInputSha,
       deploy_template_archive: reportArtifactSummary.deployTemplateArchiveInputSha,
-      image_map: reportArtifactSummary.imageMapInputSha
-    }
+      image_map: reportArtifactSummary.imageMapInputSha,
+      ...(isKitAirgap
+        ? {
+            substrate_pack_manifest: substratePackInput?.inputDigest
+          }
+        : {})
+    },
+    targetProfile
   });
   const imageArtifactDeclarationCount = assertAirgapImageArtifactDeclarations({
     declarations: manifest.image_artifact_declarations,
@@ -2268,7 +2336,21 @@ function assertAirgapBundleOutput({
       'airgap_bundle_check_report.operator_prerequisite_tool_count'
     )
   });
-  assertAirgapSubstrate(manifest.substrate);
+  assertAirgapSubstrate(manifest.substrate, targetProfile);
+
+  if (isKitAirgap) {
+    const substratePack = requireObject(
+      substratePackInput?.value,
+      'substrate_pack_manifest'
+    );
+    assertSchemaVersion(
+      substratePack.schema_version,
+      SUBSTRATE_PACK_MANIFEST_SCHEMA,
+      'substrate_pack_manifest.schema_version'
+    );
+  } else if (substratePackInput) {
+    fail('external-declared airgap bundle evidence must not include substrate-pack-manifest.json');
+  }
 
   assertIntegerEquals(
     report.components_count,
@@ -2340,12 +2422,17 @@ async function assertReleaseKitOutputSemantics({
         'airgap-bundle-manifest.json'
       );
       const imageMapInput = await readEvidenceOutputJson(evidenceRoot, 'image-map.json');
+      const substratePackInput =
+        targetProfile.value === KIT_AIRGAP_BUNDLE_TARGET_PROFILE
+          ? await readEvidenceOutputJson(evidenceRoot, 'substrate-pack-manifest.json')
+          : undefined;
       assertAirgapBundleOutput({
         report: requireObject(reportInput.value, 'airgap_bundle_check_report'),
         manifest: requireObject(manifestInput.value, 'airgap_bundle_manifest'),
         manifestInputDigest: manifestInput.inputDigest,
         imageMap: requireObject(imageMapInput.value, 'image_map'),
         imageMapInputDigest: imageMapInput.inputDigest,
+        substratePackInput,
         evidence,
         releaseContractInput,
         targetProfile
@@ -2451,7 +2538,8 @@ async function main() {
     evidenceRoot,
     evidence,
     evidenceSubject,
-    releaseKitOutput
+    releaseKitOutput,
+    targetProfile
   );
   const evidenceSubjectDigest = canonicalDigest(evidenceSubject);
   const provenance = assertProvenance(evidence, evidenceSubjectDigest);

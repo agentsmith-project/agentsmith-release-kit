@@ -19,6 +19,8 @@ const EVIDENCE_SUBJECT_FILE = 'evidence-subject.json';
 const BUNDLE_CREATE_REPORT_FILE = 'bundle-create-report.json';
 const AIRGAP_BUNDLE_CHECK_REPORT_FILE = 'airgap-bundle-check-report.json';
 const AIRGAP_BUNDLE_MANIFEST_FILE = 'airgap-bundle-manifest.json';
+const SUBSTRATE_PACK_MANIFEST_FILE = 'substrate-pack-manifest.json';
+const SUBSTRATE_PACK_COMPONENT_PATH = 'components/substrate-pack-manifest.json';
 const AIRGAP_CONSUME_REPORT_FILE = 'airgap-consume-rehearsal-report.json';
 const AIRGAP_DEPLOYMENT_GATE_REPORT_FILE = 'airgap-deployment-gate-report.json';
 const ONLINE_PRODUCER_SCHEMA = 'agentsmith.online-deployment-gate/v1';
@@ -34,6 +36,8 @@ const AIRGAP_CONSUME_SCHEMA = 'agentsmith.airgap-consume-rehearsal/v1';
 const AIRGAP_CONSUME_SCOPE = 'airgap_consume_rehearsal_only';
 const AIRGAP_DEPLOYMENT_GATE_SCHEMA = 'agentsmith.airgap-deployment-gate/v1';
 const AIRGAP_DEPLOYMENT_GATE_SCOPE = 'airgap_deployment_gate_only';
+const AIRGAP_BUNDLE_EVIDENCE_OUTPUT = 'airgap_bundle_check';
+const KIT_AIRGAP_PROFILE = 'existing_kubernetes/kit_installed/airgap';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const SAFE_RELATIVE_PATH_RE = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
@@ -359,8 +363,11 @@ function assertMapping(args) {
   if (args.bundleManifest && args.producerMode !== 'airgap-consume-rehearsal') {
     cliFail('--bundle-manifest is only accepted for airgap consume summaries');
   }
-  if (args.evidenceRoot && args.producerMode !== 'online-deployment-gate') {
-    cliFail('--evidence-root is only accepted for online summaries');
+  if (
+    args.evidenceRoot &&
+    !['online-deployment-gate', 'bundle-create'].includes(args.producerMode)
+  ) {
+    cliFail('--evidence-root is only accepted for online or airgap bundle summaries');
   }
 }
 
@@ -369,6 +376,10 @@ function targetProfileValue(report, label) {
     requireObject(report.target_profile, `${label}.target_profile`).value,
     `${label}.target_profile.value`
   );
+}
+
+function isKitAirgapProfile(machineProfile) {
+  return machineProfile === KIT_AIRGAP_PROFILE;
 }
 
 function assertProducerBase({
@@ -598,6 +609,62 @@ function findSubjectFileDigest(subject, filePath) {
   fail(`evidence_subject.files must include ${filePath}`);
 }
 
+function substratePackManifestDigestFromBinding(manifest, label) {
+  const bindings = requireObject(manifest.bindings, `${label}.bindings`);
+  const bindingDigest = requireDigest(
+    bindings.substrate_pack_manifest_sha256,
+    `${label}.bindings.substrate_pack_manifest_sha256`
+  );
+
+  const components = requireArray(manifest.components, `${label}.components`);
+  let matchedComponent;
+  for (const [index, componentValue] of components.entries()) {
+    const component = requireObject(componentValue, `${label}.components[${index}]`);
+    const kind = requireString(component.kind, `${label}.components[${index}].kind`);
+    if (kind !== 'substrate_pack_manifest') {
+      continue;
+    }
+    if (matchedComponent) {
+      fail(`${label}.components contains duplicate substrate_pack_manifest`);
+    }
+    matchedComponent = {
+      value: component,
+      label: `${label}.components[${index}]`
+    };
+  }
+
+  if (!matchedComponent) {
+    fail(`${label}.components must include substrate_pack_manifest`);
+  }
+
+  assertStringEquals(
+    matchedComponent.value.path,
+    SUBSTRATE_PACK_COMPONENT_PATH,
+    `${matchedComponent.label}.path`
+  );
+  const componentDigest = requireDigest(
+    matchedComponent.value.sha256,
+    `${matchedComponent.label}.sha256`
+  );
+  if (componentDigest !== bindingDigest) {
+    fail(`${matchedComponent.label}.sha256 must match substrate pack binding`);
+  }
+
+  return bindingDigest;
+}
+
+function assertSubstratePackManifestBinding(
+  manifest,
+  expectedDigest,
+  label,
+  expectedLabel = 'evidence root'
+) {
+  const bindingDigest = substratePackManifestDigestFromBinding(manifest, label);
+  if (bindingDigest !== expectedDigest) {
+    fail(`${label}.bindings.substrate_pack_manifest_sha256 must match ${expectedLabel}`);
+  }
+}
+
 async function buildOnlineHandoff(args, releaseIdentity) {
   if (!args.evidenceRoot) {
     return undefined;
@@ -690,6 +757,205 @@ async function buildOnlineHandoff(args, releaseIdentity) {
       ONLINE_HANDOFF_PROVENANCE_KINDS
     ),
     subject_sha256: subjectSha256
+  };
+}
+
+function assertNoAirgapSignedOrVerdictFields(value, label = 'airgap_evidence') {
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      assertNoAirgapSignedOrVerdictFields(item, `${label}[${index}]`)
+    );
+    return;
+  }
+  const forbiddenKeys = new Set([
+    'operator_identity',
+    'signature',
+    'signature_uri',
+    'signature_sha256',
+    'formal_verdict',
+    'release_verdict',
+    'verdict',
+    'readiness',
+    'ready',
+    'deploy_readiness',
+    'package_readiness',
+    'offline_install_readiness'
+  ]);
+  for (const [key, nested] of Object.entries(value)) {
+    if (forbiddenKeys.has(key)) {
+      fail(`${label}.${key} is not allowed for airgap evidence handoff`);
+    }
+    assertNoAirgapSignedOrVerdictFields(nested, `${label}.${key}`);
+  }
+}
+
+async function buildAirgapEvidenceHandoff(args, releaseIdentity, expectedDigests = {}) {
+  if (!args.evidenceRoot) {
+    return undefined;
+  }
+
+  const evidenceRoot = path.resolve(args.evidenceRoot);
+  const evidenceInput = await readJson(path.join(evidenceRoot, EVIDENCE_FILE), 'airgap evidence');
+  const subjectInput = await readJson(
+    path.join(evidenceRoot, EVIDENCE_SUBJECT_FILE),
+    'airgap evidence subject'
+  );
+  const checkReportInput = await readJson(
+    path.join(evidenceRoot, AIRGAP_BUNDLE_CHECK_REPORT_FILE),
+    'airgap evidence bundle check report'
+  );
+  const manifestInput = await readJson(
+    path.join(evidenceRoot, AIRGAP_BUNDLE_MANIFEST_FILE),
+    'airgap evidence bundle manifest'
+  );
+  const substratePackInput = isKitAirgapProfile(args.machineProfile)
+    ? await readJson(
+        path.join(evidenceRoot, SUBSTRATE_PACK_MANIFEST_FILE),
+        'airgap evidence substrate pack manifest'
+      )
+    : undefined;
+  const imageMapInput = await readJson(
+    path.join(evidenceRoot, 'image-map.json'),
+    'airgap evidence image map'
+  );
+  const evidence = requireObject(evidenceInput.value, 'airgap_evidence');
+  const subject = requireObject(subjectInput.value, 'airgap_evidence_subject');
+  const checkReport = requireObject(
+    checkReportInput.value,
+    'airgap_evidence_bundle_check_report'
+  );
+  const manifest = requireObject(manifestInput.value, 'airgap_evidence_bundle_manifest');
+
+  if (
+    expectedDigests.airgapBundleCheckReportDigest &&
+    checkReportInput.digest !== expectedDigests.airgapBundleCheckReportDigest
+  ) {
+    fail('airgap evidence bundle check digest must match current producer output');
+  }
+  if (
+    expectedDigests.bundleManifestDigest &&
+    manifestInput.digest !== expectedDigests.bundleManifestDigest
+  ) {
+    fail('airgap evidence bundle manifest digest must match current bundle manifest');
+  }
+  if (
+    substratePackInput &&
+    expectedDigests.substratePackManifestDigest &&
+    substratePackInput.digest !== expectedDigests.substratePackManifestDigest
+  ) {
+    fail('airgap evidence substrate pack digest must match current bundle manifest');
+  }
+
+  assertNoAirgapSignedOrVerdictFields(evidence);
+  assertStringEquals(
+    evidence.schema_version,
+    EVIDENCE_SCHEMA,
+    'airgap_evidence.schema_version'
+  );
+  assertStringEquals(
+    evidence.release_kit_output,
+    AIRGAP_BUNDLE_EVIDENCE_OUTPUT,
+    'airgap_evidence.release_kit_output'
+  );
+  assertStringEquals(evidence.release_id, releaseIdentity.releaseId, 'airgap_evidence.release_id');
+  const evidenceGitSha = requireGitSha(evidence.git_sha, 'airgap_evidence.git_sha');
+  if (evidenceGitSha !== releaseIdentity.gitSha) {
+    fail('airgap_evidence.git_sha must match release contract');
+  }
+  const evidenceReleaseContractDigest = requireDigest(
+    evidence.release_contract_digest,
+    'airgap_evidence.release_contract_digest'
+  );
+  if (evidenceReleaseContractDigest !== releaseIdentity.releaseContractDigest) {
+    fail('airgap_evidence.release_contract_digest must match release contract input');
+  }
+  const evidenceProfile =
+    `${requireString(evidence.target_cluster, 'airgap_evidence.target_cluster')}/` +
+    `${requireString(evidence.substrate_source, 'airgap_evidence.substrate_source')}/` +
+    `${requireString(evidence.distribution, 'airgap_evidence.distribution')}`;
+  if (evidenceProfile !== args.machineProfile) {
+    fail('airgap_evidence target profile must match machine profile');
+  }
+
+  const provenance = requireObject(
+    evidence.artifact_provenance,
+    'airgap_evidence.artifact_provenance'
+  );
+  assertNoAirgapSignedOrVerdictFields(provenance, 'airgap_evidence.artifact_provenance');
+  assertStringEquals(
+    provenance.provenance_kind,
+    'ci_artifact',
+    'airgap_evidence.artifact_provenance.provenance_kind'
+  );
+  const subjectSha256 = requireDigest(
+    provenance.subject_sha256,
+    'airgap_evidence.artifact_provenance.subject_sha256'
+  );
+  if (subjectSha256 !== canonicalDigest(subject)) {
+    fail('airgap_evidence.artifact_provenance.subject_sha256 must match evidence subject');
+  }
+
+  assertStringEquals(
+    subject.schema_version,
+    EVIDENCE_SUBJECT_SCHEMA,
+    'airgap_evidence_subject.schema_version'
+  );
+  findSubjectFileDigest(subject, EVIDENCE_FILE);
+  const subjectCheckDigest = findSubjectFileDigest(subject, AIRGAP_BUNDLE_CHECK_REPORT_FILE);
+  const subjectManifestDigest = findSubjectFileDigest(subject, AIRGAP_BUNDLE_MANIFEST_FILE);
+  const subjectImageMapDigest = findSubjectFileDigest(subject, 'image-map.json');
+  const subjectSubstratePackDigest = substratePackInput
+    ? findSubjectFileDigest(subject, SUBSTRATE_PACK_MANIFEST_FILE)
+    : undefined;
+  if (subjectCheckDigest !== checkReportInput.digest) {
+    fail('airgap_evidence_subject bundle check digest must match evidence root');
+  }
+  if (subjectManifestDigest !== manifestInput.digest) {
+    fail('airgap_evidence_subject bundle manifest digest must match evidence root');
+  }
+  if (subjectImageMapDigest !== imageMapInput.digest) {
+    fail('airgap_evidence_subject image map digest must match evidence root');
+  }
+  if (substratePackInput && subjectSubstratePackDigest !== substratePackInput.digest) {
+    fail('airgap_evidence_subject substrate pack digest must match evidence root');
+  }
+
+  assertProducerBase({
+    report: checkReport,
+    label: 'airgap_evidence_bundle_check_report',
+    schema: AIRGAP_BUNDLE_CHECK_SCHEMA,
+    scope: AIRGAP_BUNDLE_CHECK_SCOPE,
+    args,
+    releaseIdentity
+  });
+  assertStringEquals(
+    manifest.schema_version,
+    AIRGAP_BUNDLE_MANIFEST_SCHEMA,
+    'airgap_evidence_bundle_manifest.schema_version'
+  );
+  if (targetProfileValue(manifest, 'airgap_evidence_bundle_manifest') !== args.machineProfile) {
+    fail('airgap_evidence_bundle_manifest.target_profile.value must match machine profile');
+  }
+  if (substratePackInput) {
+    assertSubstratePackManifestBinding(
+      manifest,
+      substratePackInput.digest,
+      'airgap_evidence_bundle_manifest'
+    );
+  }
+
+  return {
+    evidence_digest: evidenceInput.digest,
+    evidence_subject_digest: subjectInput.digest,
+    airgap_bundle_check_report_digest: checkReportInput.digest,
+    airgap_bundle_manifest_digest: manifestInput.digest,
+    image_map_digest: imageMapInput.digest,
+    ...(substratePackInput
+      ? { substrate_pack_manifest_digest: substratePackInput.digest }
+      : {})
   };
 }
 
@@ -828,6 +1094,12 @@ async function buildAirgapSummary(args, releaseIdentity) {
   const bundleCreateReport = requireObject(bundleCreateInput.value, 'bundle_create_report');
   const checkReport = requireObject(checkReportInput.value, 'airgap_bundle_check_report');
   const manifest = requireObject(manifestInput.value, 'airgap_bundle_manifest');
+  const substratePackInput = isKitAirgapProfile(args.machineProfile)
+    ? await readJson(
+        path.join(bundleRoot, SUBSTRATE_PACK_COMPONENT_PATH),
+        'airgap bundle substrate pack manifest'
+      )
+    : undefined;
 
   assertProducerBase({
     report: bundleCreateReport,
@@ -864,6 +1136,21 @@ async function buildAirgapSummary(args, releaseIdentity) {
   }
   assertArtifactReleaseContractDigest(bundleCreateReport, 'bundle_create_report', releaseIdentity);
   assertArtifactReleaseContractDigest(checkReport, 'airgap_bundle_check_report', releaseIdentity);
+  if (substratePackInput) {
+    assertSubstratePackManifestBinding(
+      manifest,
+      substratePackInput.digest,
+      'airgap_bundle_manifest',
+      'current bundle file'
+    );
+  }
+  const airgapEvidenceHandoff = await buildAirgapEvidenceHandoff(args, releaseIdentity, {
+    airgapBundleCheckReportDigest: checkReportInput.digest,
+    bundleManifestDigest: manifestInput.digest,
+    ...(substratePackInput
+      ? { substratePackManifestDigest: substratePackInput.digest }
+      : {})
+  });
 
   return {
     producer_report_digests: {
@@ -890,7 +1177,12 @@ async function buildAirgapSummary(args, releaseIdentity) {
         'airgap_bundle_check_report.tool_count'
       ),
       target_registry_summary: parseTargetRegistry(args.targetRegistry)
-    }
+    },
+    ...(airgapEvidenceHandoff
+      ? {
+          airgap_evidence_handoff: airgapEvidenceHandoff
+        }
+      : {})
   };
 }
 
@@ -1126,6 +1418,9 @@ async function main(argv) {
       : {}),
     ...(producerSummary.airgap_handoff
       ? { airgap_handoff: producerSummary.airgap_handoff }
+      : {}),
+    ...(producerSummary.airgap_evidence_handoff
+      ? { airgap_evidence_handoff: producerSummary.airgap_evidence_handoff }
       : {})
   };
 
