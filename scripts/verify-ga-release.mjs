@@ -475,7 +475,12 @@ function validateImageRef(entry, label) {
   if (!image.includes(`@${digest}`)) {
     fail(`${label}.image must include its digest`);
   }
-  return { id, image, digest };
+  return {
+    id,
+    image,
+    digest,
+    source: typeof value.source === 'string' && value.source.trim() !== '' ? value.source : undefined
+  };
 }
 
 function validateReleaseContract(contract, contractDigest) {

@@ -385,6 +385,7 @@ function validateDeployImageInventory(value) {
     seenIds.add(id);
     return {
       id,
+      source: typeof image.source === 'string' && image.source.trim() !== '' ? image.source : undefined,
       image: requireString(image.image, `release_contract.deploy_image_inventory[${index}].image`),
       digest: requireDigest(image.digest, `release_contract.deploy_image_inventory[${index}].digest`)
     };

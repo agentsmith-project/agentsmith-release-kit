@@ -84,6 +84,22 @@ function digestPinnedImage(image) {
   return `${imageRepository(image.image)}@${image.digest}`;
 }
 
+function sourceRepositoryPath(image) {
+  const withoutDigest = image.image.split('@sha256:')[0];
+  const lastSlash = withoutDigest.lastIndexOf('/');
+  const lastColon = withoutDigest.lastIndexOf(':');
+  const withoutTag = lastColon > lastSlash ? withoutDigest.slice(0, lastColon) : withoutDigest;
+  const parts = withoutTag.split('/');
+  if (parts.length > 1 && (parts[0].includes('.') || parts[0].includes(':') || parts[0] === 'localhost')) {
+    return parts.slice(1).join('/');
+  }
+  return withoutTag;
+}
+
+function targetImage(image) {
+  return `registry.example.test/agentsmith/${sourceRepositoryPath(image)}@${image.digest}`;
+}
+
 const appImage = inventoryImage('agentsmith_app');
 const sidecarDigest = `sha256:${'f'.repeat(64)}`;
 const renderCheckImageRef =
@@ -499,8 +515,17 @@ function airgapGate(dir, profile, bindings) {
 
 function airgapBundle(dir, profile) {
   const imageMapPath = 'components/image-map.json';
+  const mappings = contract.deploy_image_inventory.map((image) => ({
+    id: image.id,
+    source: image.source,
+    source_image: image.image,
+    source_digest: image.digest,
+    target_image: targetImage(image),
+    target_digest: image.digest,
+    action: 'mirror_required'
+  }));
   fs.mkdirSync(path.join(dir, 'components'), { recursive: true });
-  writeJson(path.join(dir, imageMapPath), {
+  const imageMap = {
     schema: 'agentsmith.image-map/v1',
     scope: 'image_map_only',
     readiness: false,
@@ -510,17 +535,25 @@ function airgapBundle(dir, profile) {
     target_profile: targetProfile(profile),
     mirror_required: true,
     target_registry: 'registry.example.test/agentsmith',
-    image_count: 1,
-    mappings: [
-      {
-        id: 'agentsmith_app',
-        source_image: digestPinnedImage(appImage),
-        source_digest: appImage.digest,
-        target_image: `registry.example.test/agentsmith/agentsmith-app@${appImage.digest}`,
-        target_digest: appImage.digest
-      }
-    ]
-  });
+    release_contract: {
+      input_sha256: contractDigest,
+      deploy_image_inventory_count: contract.deploy_image_inventory.length
+    },
+    image_count: mappings.length,
+    mappings
+  };
+  if (mutation === 'airgap-image-map-mirror-required-false') {
+    imageMap.mirror_required = false;
+    imageMap.mappings = imageMap.mappings.map((mapping) => ({
+      ...mapping,
+      action: 'use_source'
+    }));
+  }
+  if (mutation === 'airgap-image-map-empty-mappings') {
+    imageMap.image_count = 0;
+    imageMap.mappings = [];
+  }
+  writeJson(path.join(dir, imageMapPath), imageMap);
   const imageMapDigest = digest(fs.readFileSync(path.join(dir, imageMapPath)));
   const manifest = {
     schema_version: 'agentsmith.airgap-bundle-manifest/v1',
@@ -1125,6 +1158,19 @@ fi
 grep -Fq "airgap bundle check report.scope must be airgap_bundle_manifest_check_only" "$TMP_DIR/deployment-path-bundle-scope.out" || \
   fail "bundle check scope failure message did not explain blocker"
 pass "airgap bundle-check source scope is bound before ledger finalization"
+
+AIRGAP_IMAGE_MAP_SEMANTIC_DIR="$TMP_DIR/airgap-image-map-mirror-required-false"
+write_fixture_set "$AIRGAP_IMAGE_MAP_SEMANTIC_DIR" airgap-image-map-mirror-required-false
+if run_airgap_path \
+  "$AIRGAP_IMAGE_MAP_SEMANTIC_DIR" \
+  "airgap/use_existing" \
+  "$AIRGAP_IMAGE_MAP_SEMANTIC_DIR/airgap-use-existing" \
+  "$TMP_DIR/out-airgap-image-map-mirror-required-false" >"$TMP_DIR/deployment-path-airgap-image-map-semantic.out" 2>&1; then
+  fail "airgap image-map with digest-refreshed bad mirror semantics should fail"
+fi
+grep -Fq "airgap image map.mirror_required must be true" "$TMP_DIR/deployment-path-airgap-image-map-semantic.out" || \
+  fail "airgap image-map semantic failure message did not explain blocker"
+pass "finalizer revalidates airgap image-map mirror semantics after digest refresh"
 
 SCHEMA_RENDER_DIR="$TMP_DIR/schema-shaped-render-check"
 write_fixture_set "$SCHEMA_RENDER_DIR" schema-shaped-render-check

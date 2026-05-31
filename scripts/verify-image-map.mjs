@@ -9,6 +9,12 @@ import {
   IMAGE_MAP_TARGET_PROFILE_SET,
   IMAGE_MAP_TARGET_PROFILE_VALUES
 } from './lib/release-kit-version-policy.mjs';
+import {
+  imageDigestSuffix,
+  targetImageFor,
+  validateImageMapEvidence,
+  validateTargetRegistry
+} from './lib/image-map-validation.mjs';
 
 const REQUIRED_ARGS = ['releaseContract', 'targetProfile', 'outputDir'];
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
@@ -26,9 +32,6 @@ const DECLARED_MANAGED_RUNNER_IMAGE_ID = 'agentsmith-runner';
 const DEPLOY_MANAGED_RUNNER_IMAGE_ID = 'managed_runner';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
-const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
-const DNS_HOST_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i;
-const TARGET_NAMESPACE_COMPONENT_RE = /^[a-z0-9]+(?:(?:[._-]|__)[a-z0-9]+)*$/;
 
 class CliError extends Error {
   constructor(message) {
@@ -284,37 +287,6 @@ function assertContractTargetProfile(contract, targetProfile) {
   }
 }
 
-function imageDigestSuffix(image, label) {
-  if (/\s/.test(image)) {
-    fail(`${label} must not contain whitespace`);
-  }
-  if (URI_SCHEME_RE.test(image)) {
-    fail(`${label} must be an image reference, not a URI`);
-  }
-  if (/[?#]/.test(image)) {
-    fail(`${label} must not contain query or hash text`);
-  }
-
-  const marker = '@sha256:';
-  const index = image.lastIndexOf(marker);
-  if (index < 0) {
-    fail(`${label} must be digest-pinned with @sha256`);
-  }
-  const imageWithoutDigest = image.slice(0, index);
-  if (imageWithoutDigest === '') {
-    fail(`${label} must include an image repository`);
-  }
-  if (imageWithoutDigest.includes('@')) {
-    fail(`${label} must contain only one digest separator`);
-  }
-
-  const digest = `sha256:${image.slice(index + marker.length)}`;
-  if (!DIGEST_RE.test(digest)) {
-    fail(`${label} has invalid sha256 suffix`);
-  }
-  return { digest, image_without_digest: imageWithoutDigest };
-}
-
 function assertNoDuplicate(value, seen, duplicateLabel) {
   if (seen.has(value)) {
     fail(`${duplicateLabel}: ${value}`);
@@ -487,132 +459,6 @@ function buildInventory(contract) {
   return normalized;
 }
 
-function parseRegistryHostPort(hostPort, label) {
-  if (hostPort.startsWith('[') || hostPort.includes(']')) {
-    fail(`${label} must use a DNS host or IPv4 address, not an IPv6 literal`);
-  }
-
-  const colonParts = hostPort.split(':');
-  if (colonParts.length > 2) {
-    fail(`${label} must use a DNS host or IPv4 address with optional port`);
-  }
-
-  const [host, port] = colonParts;
-  if (!host) {
-    fail(`${label} host is required`);
-  }
-  if (port !== undefined) {
-    if (!/^[0-9]+$/.test(port)) {
-      fail(`${label} port must be numeric`);
-    }
-    const portNumber = Number(port);
-    if (portNumber < 1 || portNumber > 65535) {
-      fail(`${label} port must be between 1 and 65535`);
-    }
-  }
-
-  return host;
-}
-
-function isIpv4Address(host) {
-  const parts = host.split('.');
-  return (
-    parts.length === 4 &&
-    parts.every((part) => /^[0-9]+$/.test(part) && Number(part) >= 0 && Number(part) <= 255)
-  );
-}
-
-function isLocalRegistryHost(host) {
-  const normalized = host.toLowerCase();
-  return (
-    normalized === 'localhost' ||
-    normalized === 'host.docker.internal' ||
-    normalized === '::1' ||
-    normalized === '0.0.0.0' ||
-    /^127\./.test(normalized)
-  );
-}
-
-function validateTargetRegistry(input) {
-  const value = requireString(input, 'target_registry');
-  if (value.trim() !== value || /\s/.test(value)) {
-    fail('target_registry must not contain whitespace');
-  }
-  if (URI_SCHEME_RE.test(value)) {
-    fail('target_registry must not include a URI scheme');
-  }
-  if (value.includes('@')) {
-    fail('target_registry must not include userinfo');
-  }
-  if (/[?#]/.test(value)) {
-    fail('target_registry must not include query or hash text');
-  }
-  if (value.includes('\\') || value.startsWith('/') || value.endsWith('/') || value.includes('//')) {
-    fail('target_registry must be <registry-host[/namespace]>');
-  }
-
-  const parts = value.split('/');
-  const host = parseRegistryHostPort(parts[0], 'target_registry');
-  const hostName = host.toLowerCase();
-
-  if (isLocalRegistryHost(hostName)) {
-    fail('target_registry must not point at localhost, loopback, or host.docker.internal');
-  }
-  if (!isIpv4Address(hostName) && !DNS_HOST_RE.test(hostName)) {
-    fail('target_registry host must be a DNS name or IPv4 address');
-  }
-
-  for (const [index, component] of parts.slice(1).entries()) {
-    if (!TARGET_NAMESPACE_COMPONENT_RE.test(component)) {
-      fail(`target_registry namespace component ${index + 1} is invalid`);
-    }
-  }
-
-  return value;
-}
-
-function stripTag(imageWithoutDigest) {
-  const lastSlash = imageWithoutDigest.lastIndexOf('/');
-  const lastColon = imageWithoutDigest.lastIndexOf(':');
-  if (lastColon > lastSlash) {
-    return imageWithoutDigest.slice(0, lastColon);
-  }
-  return imageWithoutDigest;
-}
-
-function firstPathComponentLooksLikeRegistry(component) {
-  return (
-    component.includes('.') ||
-    component.includes(':') ||
-    component === 'localhost' ||
-    component === 'host.docker.internal'
-  );
-}
-
-function sourceRepositoryPath(imageWithoutDigest, label) {
-  const withoutTag = stripTag(imageWithoutDigest);
-  const parts = withoutTag.split('/');
-  if (parts.some((part) => part === '')) {
-    fail(`${label} must not contain empty repository path components`);
-  }
-  if (parts.length > 1 && firstPathComponentLooksLikeRegistry(parts[0])) {
-    return parts.slice(1).join('/');
-  }
-  return withoutTag;
-}
-
-function targetImageFor(sourceItem, targetRegistry) {
-  if (!targetRegistry) {
-    return sourceItem.source_image;
-  }
-
-  const repositoryPath = sourceRepositoryPath(
-    sourceItem.image_without_digest,
-    `image ${sourceItem.id}`
-  );
-  return `${targetRegistry}/${repositoryPath}@${sourceItem.source_digest}`;
-}
-
 function buildReport({
   contract,
   releaseContractInputDigest,
@@ -692,16 +538,26 @@ async function main() {
   const inventory = buildInventory(contract);
   assertReleaseContractRequiredImageIds(contract, inventory);
 
-  await writeReport(
-    args.outputDir,
-    buildReport({
-      contract,
-      releaseContractInputDigest: releaseContractInput.inputDigest,
-      targetProfile,
-      targetRegistry,
-      inventory
-    })
-  );
+  const report = buildReport({
+    contract,
+    releaseContractInputDigest: releaseContractInput.inputDigest,
+    targetProfile,
+    targetRegistry,
+    inventory
+  });
+  validateImageMapEvidence({
+    imageMap: report,
+    release: {
+      ...contract,
+      release_contract_digest: releaseContractInput.inputDigest
+    },
+    expectedTargetProfile: targetProfile,
+    expectedTargetRegistry: targetRegistry,
+    requireMirror: Boolean(targetRegistry),
+    requireReleaseContractBinding: true
+  });
+
+  await writeReport(args.outputDir, report);
 
   console.log('PASS: image map accepted release contract image inventory');
 }

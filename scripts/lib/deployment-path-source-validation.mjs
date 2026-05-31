@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+import { validateImageMapEvidence } from './image-map-validation.mjs';
+
 export const ONLINE_GATE_SCHEMA = 'agentsmith.online-deployment-gate/v1';
 export const AIRGAP_GATE_SCHEMA = 'agentsmith.airgap-deployment-gate/v1';
 export const AIRGAP_BUNDLE_CHECK_SCHEMA = 'agentsmith.airgap-bundle-check-report/v1';
@@ -1200,12 +1202,14 @@ export function validateAirgapImageMapEvidence({
   }
 
   const imageMap = requireObject(imageMapReport, 'airgap image map');
-  requireSchema(imageMap, IMAGE_MAP_SCHEMA, 'airgap image map');
-  requireScope(imageMap, IMAGE_MAP_SCOPE, 'airgap image map');
-  requireReadinessFalse(imageMap, 'airgap image map');
-  requireStatusPass(imageMap, 'airgap image map');
-  requireCommonReleaseFields(imageMap, release, 'airgap image map');
-  requireTargetProfile(imageMap.target_profile, expectedTargetProfile, 'airgap_image_map.target_profile');
+  validateImageMapEvidence({
+    imageMap,
+    release,
+    expectedTargetProfile,
+    label: 'airgap image map',
+    requireMirror: true,
+    requireReleaseContractBinding: true
+  });
 }
 
 export function validateMaterializedDeploymentPathSourceEvidence({

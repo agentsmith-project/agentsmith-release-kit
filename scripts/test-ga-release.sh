@@ -75,6 +75,22 @@ function digestPinnedImage(image) {
   return `${imageRepository(image.image)}@${image.digest}`;
 }
 
+function sourceRepositoryPath(image) {
+  const withoutDigest = image.image.split('@sha256:')[0];
+  const lastSlash = withoutDigest.lastIndexOf('/');
+  const lastColon = withoutDigest.lastIndexOf(':');
+  const withoutTag = lastColon > lastSlash ? withoutDigest.slice(0, lastColon) : withoutDigest;
+  const parts = withoutTag.split('/');
+  if (parts.length > 1 && (parts[0].includes('.') || parts[0].includes(':') || parts[0] === 'localhost')) {
+    return parts.slice(1).join('/');
+  }
+  return withoutTag;
+}
+
+function targetImage(image) {
+  return `registry.example.test/agentsmith/${sourceRepositoryPath(image)}@${image.digest}`;
+}
+
 const appImage = inventoryImage('agentsmith_app');
 const sidecarDigest = `sha256:${'f'.repeat(64)}`;
 const renderCheckImageRef =
@@ -413,8 +429,17 @@ function onlineGate(dir, profile) {
 
 function airgapBundle(dir, profile) {
   const imageMapPath = 'components/image-map.json';
+  const mappings = contract.deploy_image_inventory.map((image) => ({
+    id: image.id,
+    source: image.source,
+    source_image: image.image,
+    source_digest: image.digest,
+    target_image: targetImage(image),
+    target_digest: image.digest,
+    action: 'mirror_required'
+  }));
   fs.mkdirSync(path.join(dir, 'components'), { recursive: true });
-  writeJson(path.join(dir, imageMapPath), {
+  const imageMap = {
     schema: 'agentsmith.image-map/v1',
     scope: 'image_map_only',
     readiness: false,
@@ -424,17 +449,25 @@ function airgapBundle(dir, profile) {
     target_profile: targetProfile(profile),
     mirror_required: true,
     target_registry: 'registry.example.test/agentsmith',
-    image_count: 1,
-    mappings: [
-      {
-        id: 'agentsmith_app',
-        source_image: digestPinnedImage(appImage),
-        source_digest: appImage.digest,
-        target_image: `registry.example.test/agentsmith/agentsmith-app@${appImage.digest}`,
-        target_digest: appImage.digest
-      }
-    ]
-  });
+    release_contract: {
+      input_sha256: contractDigest,
+      deploy_image_inventory_count: contract.deploy_image_inventory.length
+    },
+    image_count: mappings.length,
+    mappings
+  };
+  if (mutation === 'airgap-image-map-mirror-required-false') {
+    imageMap.mirror_required = false;
+    imageMap.mappings = imageMap.mappings.map((mapping) => ({
+      ...mapping,
+      action: 'use_source'
+    }));
+  }
+  if (mutation === 'airgap-image-map-empty-mappings') {
+    imageMap.image_count = 0;
+    imageMap.mappings = [];
+  }
+  writeJson(path.join(dir, imageMapPath), imageMap);
   const imageMapDigest = digest(fs.readFileSync(path.join(dir, imageMapPath)));
   const manifest = {
     schema_version: 'agentsmith.airgap-bundle-manifest/v1',
@@ -1007,6 +1040,129 @@ drift_render_check_image_digest_with_digest_refresh() {
   mutate_source_evidence_file_with_digest_refresh "$1" render-check render-check-image-digest-legal-drift
 }
 
+mutate_airgap_image_map_source_evidence_with_digest_refresh() {
+  local report_dir="$1"
+  local mutation="$2"
+
+  "$NODE_BIN" --input-type=module - "$report_dir" "$mutation" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [reportDir, mutation] = process.argv.slice(2);
+const reportFile = path.join(reportDir, 'deployment-path-report.json');
+const manifestFile = path.join(reportDir, 'deployment-path-finalizer-manifest.json');
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+
+function digest(file) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+}
+
+function writeJson(file, value) {
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function manifestEntry(kind, step) {
+  const entry = manifest.source_evidence_files.find(
+    (item) => item.kind === kind && (step === undefined || item.step === step)
+  );
+  if (!entry) {
+    throw new Error(`missing source evidence entry: ${kind}${step ? `/${step}` : ''}`);
+  }
+  return entry;
+}
+
+function materialFor(entry) {
+  const file = path.join(reportDir, entry.path);
+  return {
+    file,
+    value: JSON.parse(fs.readFileSync(file, 'utf8'))
+  };
+}
+
+function updateStepDigest(stepName, materialDigest) {
+  const pathStep = report.steps.find((step) => step.name === stepName);
+  const ledgerStep = report.source_evidence.finalized_steps.find((step) => step.name === stepName);
+  if (!pathStep || !ledgerStep) {
+    throw new Error(`missing deployment path step for ${stepName}`);
+  }
+  pathStep.report_digest = materialDigest;
+  ledgerStep.report_digest = materialDigest;
+}
+
+function refreshMaterial(entry, value) {
+  const file = path.join(reportDir, entry.path);
+  writeJson(file, value);
+  entry.sha256 = digest(file);
+  return entry.sha256;
+}
+
+const imageMapEntry = manifestEntry('airgap_image_map');
+const imageMapMaterial = materialFor(imageMapEntry);
+if (mutation === 'empty-mappings') {
+  imageMapMaterial.value.image_count = 0;
+  imageMapMaterial.value.mappings = [];
+} else if (mutation === 'mirror-required-false') {
+  imageMapMaterial.value.mirror_required = false;
+  imageMapMaterial.value.mappings = imageMapMaterial.value.mappings.map((mapping) => ({
+    ...mapping,
+    action: 'use_source'
+  }));
+} else {
+  throw new Error(`unknown airgap image-map source evidence mutation: ${mutation}`);
+}
+const imageMapDigest = refreshMaterial(imageMapEntry, imageMapMaterial.value);
+report.source_evidence.airgap.image_map_input_sha256 = imageMapDigest;
+
+const bundleManifestEntry = manifestEntry('airgap_bundle_manifest');
+const bundleManifestMaterial = materialFor(bundleManifestEntry);
+if (bundleManifestMaterial.value.bindings?.image_map_sha256 !== undefined) {
+  bundleManifestMaterial.value.bindings.image_map_sha256 = imageMapDigest;
+}
+const imageMapComponent = bundleManifestMaterial.value.components.find(
+  (component) => component.kind === 'image_map'
+);
+if (!imageMapComponent) {
+  throw new Error('missing image_map component in airgap bundle manifest material');
+}
+imageMapComponent.sha256 = imageMapDigest;
+const bundleManifestDigest = refreshMaterial(bundleManifestEntry, bundleManifestMaterial.value);
+report.source_evidence.airgap.bundle_manifest_digest = bundleManifestDigest;
+report.airgap_offline.bundle_manifest_digest = bundleManifestDigest;
+
+const bundleCheckEntry = manifestEntry('finalized_step_report', 'bundle-check');
+const bundleCheckMaterial = materialFor(bundleCheckEntry);
+bundleCheckMaterial.value.artifacts.image_map.input_sha256 = imageMapDigest;
+bundleCheckMaterial.value.artifacts.bundle_manifest.input_sha256 = bundleManifestDigest;
+const bundleCheckDigest = refreshMaterial(bundleCheckEntry, bundleCheckMaterial.value);
+updateStepDigest('bundle-check', bundleCheckDigest);
+report.source_evidence.airgap.bundle_check_report_digest = bundleCheckDigest;
+
+const imageLoadEntry = manifestEntry('finalized_step_report', 'image-load');
+const imageLoadMaterial = materialFor(imageLoadEntry);
+imageLoadMaterial.value.digest_summary.image_map_input_sha256 = imageMapDigest;
+imageLoadMaterial.value.digest_summary.bundle_manifest_input_sha256 = bundleManifestDigest;
+imageLoadMaterial.value.digest_summary.airgap_bundle_check_report_input_sha256 = bundleCheckDigest;
+const imageLoadDigest = refreshMaterial(imageLoadEntry, imageLoadMaterial.value);
+updateStepDigest('image-load', imageLoadDigest);
+report.airgap_offline.image_load_report_digest = imageLoadDigest;
+
+const offlineRenderEntry = manifestEntry('finalized_step_report', 'offline-render-check');
+const offlineRenderMaterial = materialFor(offlineRenderEntry);
+offlineRenderMaterial.value.digest_summary.image_map_input_sha256 = imageMapDigest;
+offlineRenderMaterial.value.digest_summary.bundle_manifest_input_sha256 = bundleManifestDigest;
+offlineRenderMaterial.value.digest_summary.airgap_bundle_check_report_input_sha256 = bundleCheckDigest;
+const offlineRenderDigest = refreshMaterial(offlineRenderEntry, offlineRenderMaterial.value);
+updateStepDigest('offline-render-check', offlineRenderDigest);
+report.airgap_offline.offline_render_report_digest = offlineRenderDigest;
+
+writeJson(reportFile, report);
+manifest.path_report_sha256 = digest(reportFile);
+writeJson(manifestFile, manifest);
+NODE
+}
+
 VALID_DIR="$TMP_DIR/valid"
 PATH_DIR="$TMP_DIR/path-reports"
 write_fixture_set "$VALID_DIR" valid
@@ -1258,6 +1414,22 @@ grep -Fq "render-check step report.images[0].digest must match release contract 
   fail "source render-check image closure failure message did not explain blocker"
 pass "GA aggregate rejects digest-refreshed source image closure drift"
 
+AIRGAP_IMAGE_MAP_SOURCE_DIR="$TMP_DIR/source-airgap-image-map-empty-mappings"
+write_fixture_set "$AIRGAP_IMAGE_MAP_SOURCE_DIR" valid
+generate_path_bundles "$AIRGAP_IMAGE_MAP_SOURCE_DIR" "$TMP_DIR/path-source-airgap-image-map-empty"
+mutate_airgap_image_map_source_evidence_with_digest_refresh \
+  "$TMP_DIR/path-source-airgap-image-map-empty/airgap-use-existing" \
+  empty-mappings
+if run_ga_release "$AIRGAP_IMAGE_MAP_SOURCE_DIR" "$TMP_DIR/path-source-airgap-image-map-empty" "$TMP_DIR/out-source-airgap-image-map-empty" >"$TMP_DIR/ga-release-source-airgap-image-map-empty.out" 2>&1; then
+  fail "digest-refreshed airgap source image-map with empty mappings should fail semantic revalidation"
+fi
+grep -Fq "airgap image map.mappings must not be empty" "$TMP_DIR/ga-release-source-airgap-image-map-empty.out" || \
+  { cat "$TMP_DIR/ga-release-source-airgap-image-map-empty.out" >&2; fail "airgap source image-map semantic failure message did not explain blocker"; }
+if grep -Fq "sha256 must match" "$TMP_DIR/ga-release-source-airgap-image-map-empty.out"; then
+  fail "airgap source image-map negative hit digest mismatch instead of semantic validation"
+fi
+pass "GA aggregate revalidates digest-refreshed airgap source image-map semantics"
+
 LEDGER_DIGEST_MISMATCH_DIR="$TMP_DIR/source-ledger-step-digest-mismatch"
 write_fixture_set "$LEDGER_DIGEST_MISMATCH_DIR" valid
 generate_path_bundles "$LEDGER_DIGEST_MISMATCH_DIR" "$TMP_DIR/path-ledger-digest"
@@ -1271,8 +1443,7 @@ pass "GA aggregate rejects source ledger step digest drift"
 
 MUTABLE_DIR="$TMP_DIR/mutable"
 write_fixture_set "$MUTABLE_DIR" mutable-image
-generate_path_bundles "$MUTABLE_DIR" "$TMP_DIR/path-mutable"
-if run_ga_release "$MUTABLE_DIR" "$TMP_DIR/path-mutable" "$TMP_DIR/out-mutable" >"$TMP_DIR/ga-release-mutable.out" 2>&1; then
+if run_ga_release "$MUTABLE_DIR" "$PATH_DIR" "$TMP_DIR/out-mutable" >"$TMP_DIR/ga-release-mutable.out" 2>&1; then
   fail "mutable image should fail"
 fi
 grep -Fq "image must include its digest" "$TMP_DIR/ga-release-mutable.out" || \
