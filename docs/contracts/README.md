@@ -21,6 +21,23 @@ matches. The release kit consumes the dynamic image closure from the AgentSmith
 release contract; current fixtures/examples include `managed_runner`, a
 digest-bound inventory image supplied by the release contract.
 
+Current post-push contract index:
+
+- `agentsmith.deployment-path-report/v1`: internal finalized deployment path
+  evidence for one supported operator path. It binds release/template digests,
+  target profile, producer step report digests, and source evidence ledger, but
+  keeps `readiness: false` and does not issue `formal_verdict`.
+- `agentsmith.deployment-path-finalizer-manifest/v1` plus
+  `agentsmith.deployment-path-source-evidence/v1`: sibling finalizer manifest
+  and source evidence materiality ledger. Manifest entries list copied source
+  reports by relative `source-evidence/` path, schema/scope, step, and sha256;
+  material files keep their original producer schemas and are scanned for local
+  paths or secret-like content before acceptance.
+- `agentsmith.ga-release-report/v1`: repo-local GA aggregate report. It
+  consumes exactly the four finalized deployment path reports plus required
+  AgentSmith product-side reports and is the only repo-local output here that
+  may issue `formal_verdict: issued`.
+
 The current `--template-package` validator is a focused materialized archive
 intake diagnostic only. It confirms that the deploy template package descriptor
 matches the release contract and that the `.tgz` archive matches the declared
@@ -67,12 +84,17 @@ agentsmith.image-map/v1`, `readiness: false`, and `scope: image_map_only`.
 The report is a plan for source/target digest references only; it must not
 claim registry presence, deploy readiness, package readiness, release
 readiness, product-flow evidence, or registry credential handling.
-The operator-facing kit path is `kit_provided`: it validates kit-supplied
-substrate pack/truth inputs only. `install_substrates` remains planned until a
-separate installer producer and explicit installer confirmation flag exist.
-Internal `installed_by: agentsmith-release-kit` values stay as kit-provided
-pack/truth identity and provenance markers; `installed_by` stays a provenance
-marker, not installer proof.
+The operator-facing kit-installed paths validate kit-supplied substrate
+pack/truth inputs. For the two install-substrates evidence paths
+(`online/install_substrates`, `airgap/install_substrates`), the finalizer and
+GA aggregate now accept explicit installer confirmation evidence. The release
+kit can validate that installer evidence and its output substrate truth
+binding to target-preflight truth. The operator facade still does not install
+substrates automatically: the real installer producer remains an
+independent/follow-up capability. Internal
+`installed_by: agentsmith-release-kit` values stay as kit-provided pack/truth
+identity and provenance markers; `installed_by` stays a provenance marker, not
+facade installer proof.
 If `managed_runner` is present in the dynamic closure, this validator maps it
 through the same source/target digest mechanism as every other id; it is not a
 dedicated runner runtime or backend-real gate.

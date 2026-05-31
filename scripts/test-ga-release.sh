@@ -737,16 +737,17 @@ fs.writeFileSync(
 NODE
 }
 
-poison_source_evidence_file_with_digest_refresh() {
+mutate_source_evidence_file_with_digest_refresh() {
   local report_dir="$1"
   local step_name="$2"
+  local mutation="$3"
 
-  "$NODE_BIN" --input-type=module - "$report_dir" "$step_name" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_dir" "$step_name" "$mutation" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [reportDir, stepName] = process.argv.slice(2);
+const [reportDir, stepName, mutation] = process.argv.slice(2);
 const reportFile = path.join(reportDir, 'deployment-path-report.json');
 const manifestFile = path.join(reportDir, 'deployment-path-finalizer-manifest.json');
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
@@ -769,9 +770,16 @@ if (!entry) {
 
 const materialFile = path.join(reportDir, entry.path);
 const material = JSON.parse(fs.readFileSync(materialFile, 'utf8'));
-material.operator_note = {
-  diagnostic_path: '/home/example/.kube/config'
-};
+if (mutation === 'forbidden-local-material') {
+  material.operator_note = {
+    kubeconfig_path: '/etc/kubernetes/admin.conf'
+  };
+} else if (mutation === 'schema-shaped-render-check') {
+  material.images = [{}];
+  material.manifests = [{}];
+} else {
+  throw new Error(`unknown source evidence mutation: ${mutation}`);
+}
 writeJson(materialFile, material);
 const materialDigest = digest(materialFile);
 
@@ -788,6 +796,14 @@ writeJson(reportFile, report);
 manifest.path_report_sha256 = digest(reportFile);
 writeJson(manifestFile, manifest);
 NODE
+}
+
+poison_source_evidence_file_with_digest_refresh() {
+  mutate_source_evidence_file_with_digest_refresh "$1" "$2" forbidden-local-material
+}
+
+fake_render_check_source_evidence_with_digest_refresh() {
+  mutate_source_evidence_file_with_digest_refresh "$1" render-check schema-shaped-render-check
 }
 
 VALID_DIR="$TMP_DIR/valid"
@@ -885,6 +901,17 @@ fi
 grep -Fq "source evidence file source-evidence/route-smoke-report.json contains forbidden local path or secret-like text" "$TMP_DIR/ga-release-source-forbidden.out" || \
   fail "source evidence forbidden material failure message did not explain blocker"
 pass "GA aggregate scans materialized source evidence before acceptance"
+
+SOURCE_SEMANTIC_DIR="$TMP_DIR/source-semantic-render-check"
+write_fixture_set "$SOURCE_SEMANTIC_DIR" valid
+generate_path_bundles "$SOURCE_SEMANTIC_DIR" "$TMP_DIR/path-source-semantic-render-check"
+fake_render_check_source_evidence_with_digest_refresh "$TMP_DIR/path-source-semantic-render-check/online-use-existing"
+if run_ga_release "$SOURCE_SEMANTIC_DIR" "$TMP_DIR/path-source-semantic-render-check" "$TMP_DIR/out-source-semantic-render-check" >"$TMP_DIR/ga-release-source-semantic-render.out" 2>&1; then
+  fail "schema-shaped source render-check evidence should fail semantic revalidation"
+fi
+grep -Fq "render-check step report.images[0].image is required" "$TMP_DIR/ga-release-source-semantic-render.out" || \
+  fail "source render-check semantic failure message did not explain blocker"
+pass "GA aggregate revalidates materialized render-check source semantics"
 
 LEDGER_DIGEST_MISMATCH_DIR="$TMP_DIR/source-ledger-step-digest-mismatch"
 write_fixture_set "$LEDGER_DIGEST_MISMATCH_DIR" valid

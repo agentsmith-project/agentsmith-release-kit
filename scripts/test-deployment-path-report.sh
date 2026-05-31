@@ -351,6 +351,13 @@ function step(baseDir, name, relativePath, profile, bindings = {}) {
   if (mutation === 'step-formal-verdict' && name === 'smoke') {
     report.formal_verdict = 'issued';
   }
+  if (mutation === 'source-report-forbidden-material' && name === 'smoke') {
+    report.operator_note = {
+      accessToken: {
+        redacted: true
+      }
+    };
+  }
   if (mutation === 'schema-shaped-render-check' && name === 'render-check') {
     report.images = [{}];
     report.manifests = [{}];
@@ -810,8 +817,75 @@ if (airgap.steps[0]?.name !== 'target-preflight' || airgap.steps[1]?.name !== 'b
 NODE
 pass "valid deployment path reports finalize focused producer evidence with materiality manifest"
 
+"$NODE_BIN" --input-type=module - "$ROOT_DIR" <<'NODE'
+import { pathToFileURL } from 'node:url';
+
+const [rootDir] = process.argv.slice(2);
+const scannerUrl = pathToFileURL(`${rootDir}/scripts/lib/report-forbidden-scan.mjs`).href;
+const { scanReportForForbiddenContent } = await import(scannerUrl);
+
+function assertForbidden(label, input) {
+  try {
+    scanReportForForbiddenContent({ label, ...input });
+  } catch {
+    return;
+  }
+  throw new Error(`${label} should be forbidden`);
+}
+
+function assertAllowed(label, value) {
+  scanReportForForbiddenContent({ label, value });
+}
+
+assertForbidden('camel accessToken key', {
+  value: { operator_note: { accessToken: { redacted: true } } }
+});
+assertForbidden('camel privateKey key', {
+  value: { operator_note: { privateKey: { redacted: true } } }
+});
+assertForbidden('raw AWS secret access key', {
+  value: {},
+  buffer: Buffer.from('awsSecretAccessKey=abc123')
+});
+assertForbidden('kubeconfig admin.conf path', {
+  value: { operator_note: { kubeconfig_path: '/etc/kubernetes/admin.conf' } }
+});
+assertAllowed('ordinary business key', {
+  inventory: {
+    key: 'customer-routing',
+    key_id: 'non-sensitive-id'
+  }
+});
+NODE
+pass "shared forbidden scanner rejects explicit credential/path forms without banning ordinary key fields"
+
 run_ga_release "$VALID_DIR" "$PATH_DIR" "$TMP_DIR/out-ga"
 pass "finalized deployment path reports feed GA aggregate"
+
+SOURCE_FORBIDDEN_DIR="$TMP_DIR/source-report-forbidden-material"
+STALE_OUTPUT_DIR="$TMP_DIR/out-stale-cleanup"
+write_fixture_set "$SOURCE_FORBIDDEN_DIR" source-report-forbidden-material
+run_online_path \
+  "$VALID_DIR" \
+  "online/use_existing" \
+  "$VALID_DIR/online-use-existing" \
+  "$STALE_OUTPUT_DIR"
+[[ -f "$STALE_OUTPUT_DIR/deployment-path-report.json" ]] || fail "stale cleanup setup did not write path report"
+[[ -f "$STALE_OUTPUT_DIR/deployment-path-finalizer-manifest.json" ]] || fail "stale cleanup setup did not write finalizer manifest"
+[[ -d "$STALE_OUTPUT_DIR/source-evidence" ]] || fail "stale cleanup setup did not write source evidence"
+if run_online_path \
+  "$SOURCE_FORBIDDEN_DIR" \
+  "online/use_existing" \
+  "$SOURCE_FORBIDDEN_DIR/online-use-existing" \
+  "$STALE_OUTPUT_DIR" >"$TMP_DIR/deployment-path-source-forbidden.out" 2>&1; then
+  fail "source report with forbidden secret material should fail"
+fi
+grep -Fq "source evidence material finalized_step_report route-smoke" "$TMP_DIR/deployment-path-source-forbidden.out" || \
+  fail "source report forbidden secret material failure message did not explain blocker"
+[[ ! -e "$STALE_OUTPUT_DIR/deployment-path-report.json" ]] || fail "failed finalizer left stale deployment path report"
+[[ ! -e "$STALE_OUTPUT_DIR/deployment-path-finalizer-manifest.json" ]] || fail "failed finalizer left stale finalizer manifest"
+[[ ! -e "$STALE_OUTPUT_DIR/source-evidence" ]] || fail "failed finalizer left stale source evidence"
+pass "finalizer scans source evidence before copy and rejects forbidden secret keys"
 
 MISSING_SMOKE_DIR="$TMP_DIR/missing-smoke"
 write_fixture_set "$MISSING_SMOKE_DIR" missing-smoke

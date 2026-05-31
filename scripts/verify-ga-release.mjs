@@ -2,6 +2,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import * as sourceValidation from './lib/deployment-path-source-validation.mjs';
+import { scanReportForForbiddenContent } from './lib/report-forbidden-scan.mjs';
 
 const REPORT_FILE = 'ga-release-report.json';
 const SUMMARY_FILE = 'ga-release-summary.md';
@@ -20,21 +22,11 @@ const PRODUCT_READY_SCHEMA = 'agentsmith.product-readiness-report/v1';
 const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke/v1';
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
-const ONLINE_GATE_SCHEMA = 'agentsmith.online-deployment-gate/v1';
-const AIRGAP_GATE_SCHEMA = 'agentsmith.airgap-deployment-gate/v1';
-const AIRGAP_BUNDLE_CHECK_SCHEMA = 'agentsmith.airgap-bundle-check-report/v1';
-const AIRGAP_BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
-const IMAGE_MAP_SCHEMA = 'agentsmith.image-map/v1';
-const IMAGE_MAP_SCOPE = 'image_map_only';
-const SUBSTRATE_INSTALL_SCHEMA = 'agentsmith.substrate-install-report/v1';
-const SUBSTRATE_INSTALL_SCOPE = 'substrate_install_only';
-const TARGET_PREFLIGHT_SCHEMA = 'agentsmith.target-preflight-report/v1';
-const RENDER_CHECK_SCHEMA = 'agentsmith.render-check-report/v1';
-const APPLY_SCHEMA = 'agentsmith.kubernetes-apply-report/v1';
-const ROLLOUT_SCHEMA = 'agentsmith.kubernetes-rollout-report/v1';
-const ROUTE_SMOKE_SCHEMA = 'agentsmith.route-smoke-report/v1';
-const AIRGAP_IMAGE_LOAD_SCHEMA = 'agentsmith.airgap-image-load-report/v1';
-const AIRGAP_BUNDLE_RENDER_CHECK_SCHEMA = 'agentsmith.airgap-bundle-render-check-report/v1';
+const AIRGAP_BUNDLE_MANIFEST_SCHEMA = sourceValidation.AIRGAP_BUNDLE_MANIFEST_SCHEMA;
+const IMAGE_MAP_SCHEMA = sourceValidation.IMAGE_MAP_SCHEMA;
+const IMAGE_MAP_SCOPE = sourceValidation.IMAGE_MAP_SCOPE;
+const SUBSTRATE_INSTALL_SCHEMA = sourceValidation.SUBSTRATE_INSTALL_SCHEMA;
+const SUBSTRATE_INSTALL_SCOPE = sourceValidation.SUBSTRATE_INSTALL_SCOPE;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const AGENTSMITH_REPO = 'github.com/agentsmith-project/agentsmith';
@@ -47,83 +39,10 @@ const REQUIRED_ARGS = [
   'outputDir'
 ];
 
-const REQUIRED_OPERATOR_PATHS = new Map([
-  ['online/use_existing', {
-    targetProfile: 'existing_kubernetes/external_declared/online',
-    steps: ['target-preflight', 'render-check', 'apply', 'rollout', 'route-smoke']
-  }],
-  ['online/install_substrates', {
-    targetProfile: 'existing_kubernetes/kit_installed/online',
-    steps: ['substrate-install', 'target-preflight', 'render-check', 'apply', 'rollout', 'route-smoke']
-  }],
-  ['airgap/use_existing', {
-    targetProfile: 'existing_kubernetes/external_declared/airgap',
-    steps: ['target-preflight', 'bundle-check', 'image-load', 'offline-render-check', 'apply', 'rollout', 'route-smoke']
-  }],
-  ['airgap/install_substrates', {
-    targetProfile: 'existing_kubernetes/kit_installed/airgap',
-    steps: ['target-preflight', 'bundle-check', 'image-load', 'substrate-install', 'offline-render-check', 'apply', 'rollout', 'route-smoke']
-  }]
-]);
+const DEPLOYMENT_PATHS = sourceValidation.DEPLOYMENT_PATHS;
 
-const SOURCE_STEP_REPORTS = new Map([
-  ['target-preflight', {
-    source_step: 'target-preflight',
-    source_schema: TARGET_PREFLIGHT_SCHEMA,
-    source_scope: 'target_preflight_prerequisite_only'
-  }],
-  ['render-check', {
-    source_step: 'render-check',
-    source_schema: RENDER_CHECK_SCHEMA,
-    source_scope: 'render_check_image_inventory_only'
-  }],
-  ['apply', {
-    source_step: 'apply',
-    source_schema: APPLY_SCHEMA,
-    source_scope: 'kubernetes_apply_only'
-  }],
-  ['rollout', {
-    source_step: 'rollout',
-    source_schema: ROLLOUT_SCHEMA,
-    source_scope: 'kubernetes_rollout_imageid_only'
-  }],
-  ['route-smoke', {
-    source_step: 'smoke',
-    source_schema: ROUTE_SMOKE_SCHEMA,
-    source_scope: 'route_smoke_only'
-  }],
-  ['bundle-check', {
-    source_step: 'airgap-bundle-check',
-    source_schema: AIRGAP_BUNDLE_CHECK_SCHEMA,
-    source_scope: 'airgap_bundle_manifest_check_only'
-  }],
-  ['image-load', {
-    source_step: 'airgap-image-load',
-    source_schema: AIRGAP_IMAGE_LOAD_SCHEMA,
-    source_scope: 'airgap_image_load_only'
-  }],
-  ['offline-render-check', {
-    source_step: 'airgap-bundle-render-check',
-    source_schema: AIRGAP_BUNDLE_RENDER_CHECK_SCHEMA,
-    source_scope: 'airgap_bundle_render_check_only'
-  }],
-  ['substrate-install', {
-    source_step: 'substrate-install',
-    source_schema: SUBSTRATE_INSTALL_SCHEMA,
-    source_scope: SUBSTRATE_INSTALL_SCOPE
-  }]
-]);
-
-const DEPLOYMENT_GATE_BY_SOURCE = new Map([
-  ['online', {
-    schema: ONLINE_GATE_SCHEMA,
-    scope: 'online_deployment_gate_only'
-  }],
-  ['airgap', {
-    schema: AIRGAP_GATE_SCHEMA,
-    scope: 'airgap_deployment_gate_only'
-  }]
-]);
+const SOURCE_STEP_REPORTS = sourceValidation.FINALIZED_STEP_SOURCE_REPORTS;
+const DEPLOYMENT_GATE_BY_SOURCE = sourceValidation.DEPLOYMENT_GATE_BY_SOURCE;
 
 const REQUIRED_PRODUCT_SMOKE_FLOWS = [
   'auth_profile',
@@ -135,19 +54,6 @@ const REQUIRED_PRODUCT_SMOKE_FLOWS = [
 ];
 
 const REQUIRED_IMAGE_IDS = ['agentsmith_app', 'managed_runner', 'llmup', 'afscp', 'asbcp'];
-const FORBIDDEN_REPORT_KEYS = new Set([
-  'kubeconfig',
-  'secret',
-  'secrets',
-  'token',
-  'password',
-  'raw_env',
-  'operator_identity',
-  'signature_uri'
-]);
-const FORBIDDEN_REPORT_TEXT_RE =
-  /(?:^|["'\s])(?:\/home\/|\/tmp\/|\/var\/|\/private\/|[A-Za-z]:[\\/]|file:\/\/)|Bearer\s+[A-Za-z0-9._~+/=-]+|password\s*[:=]|token\s*[:=]|kubeconfig/i;
-
 class CliError extends Error {
   constructor(message) {
     super(message);
@@ -247,8 +153,8 @@ function parseArgs(argv) {
       cliFail(`missing required argument: --${toKebab(key)}`);
     }
   }
-  if (parsed.deploymentPathReports.length !== REQUIRED_OPERATOR_PATHS.size) {
-    cliFail(`expected exactly ${REQUIRED_OPERATOR_PATHS.size} --deployment-path-report inputs`);
+  if (parsed.deploymentPathReports.length !== DEPLOYMENT_PATHS.size) {
+    cliFail(`expected exactly ${DEPLOYMENT_PATHS.size} --deployment-path-report inputs`);
   }
   return parsed;
 }
@@ -288,6 +194,7 @@ async function readJson(file, label) {
   try {
     return {
       file,
+      buffer,
       value: JSON.parse(buffer.toString('utf8')),
       digest: digestBuffer(buffer)
     };
@@ -428,25 +335,6 @@ function reportStepsByName(report, label) {
   return byName;
 }
 
-function scanForForbiddenReportContent(value, label, pathParts = []) {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => scanForForbiddenReportContent(item, label, [...pathParts, String(index)]));
-    return;
-  }
-  if (value && typeof value === 'object') {
-    for (const [key, nested] of Object.entries(value)) {
-      if (FORBIDDEN_REPORT_KEYS.has(key)) {
-        fail(`${label} must not contain secret/local field: ${[...pathParts, key].join('.')}`);
-      }
-      scanForForbiddenReportContent(nested, label, [...pathParts, key]);
-    }
-    return;
-  }
-  if (typeof value === 'string' && FORBIDDEN_REPORT_TEXT_RE.test(value)) {
-    fail(`${label} contains forbidden local path or secret-like text at ${pathParts.join('.') || '<root>'}`);
-  }
-}
-
 function validateImageRef(entry, label) {
   const value = requireObject(entry, label);
   const id = requireString(value.id, `${label}.id`);
@@ -560,7 +448,7 @@ function requireEquals(actual, expected, label) {
   }
 }
 
-function validateSourceEvidenceLedger(report, requirement, steps, operatorPath) {
+function validateSourceEvidenceLedger(report, requirement, requiredSteps, steps, operatorPath) {
   const ledger = requireObject(report.source_evidence, 'deployment_path_report.source_evidence');
   requireSchema(ledger, SOURCE_EVIDENCE_SCHEMA, 'deployment_path_report.source_evidence');
   requireEquals(
@@ -594,8 +482,7 @@ function validateSourceEvidenceLedger(report, requirement, steps, operatorPath) 
     'deployment_path_report.source_evidence.finalizer.mode'
   );
 
-  const source = operatorPath.startsWith('airgap/') ? 'airgap' : 'online';
-  const expectedGate = DEPLOYMENT_GATE_BY_SOURCE.get(source);
+  const expectedGate = DEPLOYMENT_GATE_BY_SOURCE.get(requirement.source);
   const gate = requireObject(
     ledger.source_deployment_gate_report,
     'deployment_path_report.source_evidence.source_deployment_gate_report'
@@ -635,7 +522,7 @@ function validateSourceEvidenceLedger(report, requirement, steps, operatorPath) 
     ledgerStepsByName.set(name, step);
   }
 
-  for (const stepName of requirement.steps) {
+  for (const stepName of requiredSteps) {
     const reportStep = steps.get(stepName);
     const ledgerStep = ledgerStepsByName.get(stepName);
     if (!ledgerStep) {
@@ -667,7 +554,7 @@ function validateSourceEvidenceLedger(report, requirement, steps, operatorPath) 
     }
   }
 
-  if (operatorPath.startsWith('airgap/')) {
+  if (requirement.source === 'airgap') {
     const offline = requireObject(report.airgap_offline, 'deployment_path_report.airgap_offline');
     const airgap = requireObject(ledger.airgap, 'deployment_path_report.source_evidence.airgap');
     if (
@@ -694,7 +581,7 @@ function validateSourceEvidenceLedger(report, requirement, steps, operatorPath) 
     fail('deployment_path_report.source_evidence.airgap is only accepted for airgap paths');
   }
 
-  if (operatorPath.includes('install_substrates')) {
+  if (requirement.installSubstrates) {
     const install = requireObject(
       ledger.substrate_install,
       'deployment_path_report.source_evidence.substrate_install'
@@ -810,7 +697,7 @@ function sourceEvidenceKey(kind, step) {
   return `${kind}:${step ?? ''}`;
 }
 
-function expectedSourceEvidenceFiles({ ledger, operatorPath }) {
+function expectedSourceEvidenceFiles({ ledger, requirement }) {
   const gate = requireObject(
     ledger.source_deployment_gate_report,
     'deployment_path_report.source_evidence.source_deployment_gate_report'
@@ -834,7 +721,7 @@ function expectedSourceEvidenceFiles({ ledger, operatorPath }) {
     });
   }
 
-  if (operatorPath.startsWith('airgap/')) {
+  if (requirement.source === 'airgap') {
     const airgap = requireObject(ledger.airgap, 'deployment_path_report.source_evidence.airgap');
     expected.push({
       kind: 'airgap_bundle_manifest',
@@ -896,13 +783,18 @@ async function validateSourceEvidenceMaterialFile({ reportDir, entry, expected }
     fail(`source evidence file ${relative} sha256 must match finalizer manifest`);
   }
   const materialReport = requireObject(materialInput.value, `source evidence file ${relative}`);
-  scanForForbiddenReportContent(materialReport, `source evidence file ${relative}`);
+  scanReportForForbiddenContent({
+    value: materialReport,
+    buffer: materialInput.buffer,
+    label: `source evidence file ${relative}`
+  });
   if (reportSchema(materialReport) !== expected.schema) {
     fail(`source evidence file ${relative} schema must match finalizer manifest`);
   }
   if (expected.scope !== null && materialReport.scope !== expected.scope) {
     fail(`source evidence file ${relative} scope must match finalizer manifest`);
   }
+  return materialInput;
 }
 
 async function validateFinalizerManifest({
@@ -910,6 +802,7 @@ async function validateFinalizerManifest({
   report,
   ledger,
   operatorPath,
+  requirement,
   release,
   deployTemplate
 }) {
@@ -960,7 +853,7 @@ async function validateFinalizerManifest({
   );
   const manifestPaths = sourceEvidenceManifestPathSet(actualEntries);
   await validateSourceEvidenceDirectoryClosure(reportDir, manifestPaths);
-  const expectedEntries = expectedSourceEvidenceFiles({ ledger, operatorPath });
+  const expectedEntries = expectedSourceEvidenceFiles({ ledger, requirement });
   if (actualEntries.length !== expectedEntries.length) {
     fail('finalizer_manifest.source_evidence_files must exactly cover path report source evidence');
   }
@@ -979,14 +872,29 @@ async function validateFinalizerManifest({
     actualByKey.set(key, entry);
   }
 
+  const materializedSourceEvidence = {
+    sourceInputsByStep: new Map()
+  };
+
   for (const expected of expectedEntries) {
     const key = sourceEvidenceKey(expected.kind, expected.step);
     const entry = actualByKey.get(key);
     if (!entry) {
       fail(`finalizer_manifest.source_evidence_files missing entry: ${key}`);
     }
-    await validateSourceEvidenceMaterialFile({ reportDir, entry, expected });
+    const materialInput = await validateSourceEvidenceMaterialFile({ reportDir, entry, expected });
+    if (expected.kind === 'source_deployment_gate') {
+      materializedSourceEvidence.sourceDeploymentGateInput = materialInput;
+    } else if (expected.kind === 'finalized_step_report') {
+      materializedSourceEvidence.sourceInputsByStep.set(expected.step, materialInput);
+    } else if (expected.kind === 'airgap_bundle_manifest') {
+      materializedSourceEvidence.airgapBundleManifestInput = materialInput;
+    } else if (expected.kind === 'airgap_image_map') {
+      materializedSourceEvidence.airgapImageMapInput = materialInput;
+    }
   }
+
+  return materializedSourceEvidence;
 }
 
 async function validateDeploymentPathReport(pathInput, release, deployTemplate) {
@@ -1009,23 +917,24 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
   }
 
   const operatorPath = requireString(report.operator_path, 'deployment_path_report.operator_path');
-  const requirement = REQUIRED_OPERATOR_PATHS.get(operatorPath);
+  const requirement = DEPLOYMENT_PATHS.get(operatorPath);
   if (!requirement) {
     fail(`unexpected deployment operator path: ${operatorPath}`);
   }
   requireTargetProfile(report.target_profile, requirement.targetProfile, 'deployment_path_report.target_profile');
 
   const steps = reportStepsByName(report, `deployment path ${operatorPath}`);
-  for (const step of requirement.steps) {
+  const requiredSteps = sourceValidation.deploymentPathReportStepNames(requirement);
+  for (const step of requiredSteps) {
     if (!steps.has(step)) {
       fail(`deployment path ${operatorPath} missing required step: ${step}`);
     }
   }
-  if (steps.size !== requirement.steps.length) {
+  if (steps.size !== requiredSteps.length) {
     fail(`deployment path ${operatorPath} steps must exactly match required steps`);
   }
 
-  if (operatorPath.includes('install_substrates')) {
+  if (requirement.installSubstrates) {
     const confirmation = requireObject(report.install_substrates_confirmation, 'deployment_path_report.install_substrates_confirmation');
     if (confirmation.confirmed !== true) {
       fail(`deployment path ${operatorPath} requires explicit install_substrates confirmation`);
@@ -1041,7 +950,7 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
     }
   }
 
-  if (operatorPath.startsWith('airgap/')) {
+  if (requirement.source === 'airgap') {
     const offline = requireObject(report.airgap_offline, 'deployment_path_report.airgap_offline');
     if (offline.public_internet_downloads !== false) {
       fail(`deployment path ${operatorPath} must prove no public internet downloads`);
@@ -1065,14 +974,24 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
     }
   }
 
-  const ledger = validateSourceEvidenceLedger(report, requirement, steps, operatorPath);
-  await validateFinalizerManifest({
+  const ledger = validateSourceEvidenceLedger(report, requirement, requiredSteps, steps, operatorPath);
+  const materializedSourceEvidence = await validateFinalizerManifest({
     pathInput,
     report,
     ledger,
     operatorPath,
+    requirement,
     release,
     deployTemplate
+  });
+  sourceValidation.validateMaterializedDeploymentPathSourceEvidence({
+    operatorPath,
+    release: {
+      ...release,
+      deploy_template_package_digest: deployTemplate.deploy_template_package_digest
+    },
+    ...materializedSourceEvidence,
+    installOperatorRunId: report.install_substrates_confirmation?.operator_run_id
   });
 
   return {
@@ -1125,7 +1044,11 @@ async function main() {
   }
 
   for (const input of [productReady, productSmoke, ...pathReports]) {
-    scanForForbiddenReportContent(input.value, 'input report');
+    scanReportForForbiddenContent({
+      value: input.value,
+      buffer: input.buffer,
+      label: 'input report'
+    });
   }
 
   const release = validateReleaseContract(contract.value, contract.digest);
@@ -1144,7 +1067,7 @@ async function main() {
     }
     seenPaths.add(entry.operator_path);
   }
-  for (const pathName of REQUIRED_OPERATOR_PATHS.keys()) {
+  for (const pathName of DEPLOYMENT_PATHS.keys()) {
     if (!seenPaths.has(pathName)) {
       fail(`missing deployment path report: ${pathName}`);
     }
