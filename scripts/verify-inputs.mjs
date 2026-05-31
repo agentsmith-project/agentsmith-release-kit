@@ -29,6 +29,9 @@ const IMAGE_ARRAY_SOURCES = [
 ];
 const IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
 const IMAGE_SOURCES = [...IMAGE_ARRAY_SOURCES, ...IMAGE_SINGLETON_SOURCES];
+const MANAGED_RUNNER_IMAGE_SOURCE = 'managed_runner_image';
+const DECLARED_MANAGED_RUNNER_IMAGE_ID = 'agentsmith-runner';
+const DEPLOY_MANAGED_RUNNER_IMAGE_ID = 'managed_runner';
 const REQUIRED_ARGS = [
   'releaseContract',
   'deployTemplatePackage',
@@ -300,12 +303,27 @@ function normalizeInventoryItem(item, index) {
   return normalizeImageItem(object, source, label);
 }
 
-function imageSortKey(item) {
+function deployInventoryItemForDeclared(item) {
+  if (item.source !== MANAGED_RUNNER_IMAGE_SOURCE) {
+    return item;
+  }
+  if (item.id !== DECLARED_MANAGED_RUNNER_IMAGE_ID) {
+    fail(`release_contract.${MANAGED_RUNNER_IMAGE_SOURCE}.id must be ${DECLARED_MANAGED_RUNNER_IMAGE_ID}`);
+  }
+  return {
+    ...item,
+    id: DEPLOY_MANAGED_RUNNER_IMAGE_ID
+  };
+}
+
+function imageInventoryKey(item) {
   return `${item.source}\u0000${item.id}\u0000${item.image}\u0000${item.digest}`;
 }
 
 function sortedImages(images) {
-  return [...images].sort((left, right) => imageSortKey(left).localeCompare(imageSortKey(right)));
+  return [...images].sort((left, right) =>
+    imageInventoryKey(left).localeCompare(imageInventoryKey(right))
+  );
 }
 
 function assertUniqueImageIds(images, label) {
@@ -339,7 +357,7 @@ function assertSameStringSet(
   actual,
   expected,
   label,
-  expectedLabel = 'release_contract.required_image_ids'
+  expectedLabel = 'release_contract.deploy_template_package.required_image_ids'
 ) {
   const actualSet = new Set(actual);
   const expectedSet = new Set(expected);
@@ -354,9 +372,13 @@ function assertSameStringSet(
 }
 
 function assertRequiredImageIds(contract, deployTemplatePackage, images) {
+  const contractDeployTemplatePackage = requireObject(
+    contract.deploy_template_package,
+    'release_contract.deploy_template_package'
+  );
   const contractRequiredImageIds = normalizeRequiredImageIds(
-    contract.required_image_ids,
-    'release_contract.required_image_ids'
+    contractDeployTemplatePackage.required_image_ids,
+    'release_contract.deploy_template_package.required_image_ids'
   );
   const packageRequiredImageIds = normalizeRequiredImageIds(
     deployTemplatePackage.required_image_ids,
@@ -371,7 +393,7 @@ function assertRequiredImageIds(contract, deployTemplatePackage, images) {
   assertSameStringSet(
     contractRequiredImageIds,
     inventoryIds,
-    'release_contract.required_image_ids',
+    'release_contract.deploy_template_package.required_image_ids',
     'release_contract.deploy_image_inventory ids'
   );
   assertSameStringSet(
@@ -399,7 +421,9 @@ function assertImageInventory(contract) {
       source
     )
   );
-  const expected = [...expectedArrayItems, ...expectedSingletonItems];
+  const expected = [...expectedArrayItems, ...expectedSingletonItems].map(
+    deployInventoryItemForDeclared
+  );
   const actual = requireArray(
     contract.deploy_image_inventory,
     'release_contract.deploy_image_inventory'
@@ -414,7 +438,7 @@ function assertImageInventory(contract) {
     'release_contract.deploy_image_inventory'
   );
 
-  return expected;
+  return actual;
 }
 
 function assertProductFlowShape(contract) {

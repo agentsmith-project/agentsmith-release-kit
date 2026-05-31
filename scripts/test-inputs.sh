@@ -77,7 +77,9 @@ const [input, output, label, rootDir] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(input, 'utf8'));
 const digestE = `sha256:${'e'.repeat(64)}`;
 const digestUpperA = `sha256:${'A'.repeat(64)}`;
-const staleSixImageIds = contract.required_image_ids.filter((id) => id !== 'managed_runner');
+const staleSixImageIds = contract.deploy_template_package.required_image_ids.filter(
+  (id) => id !== 'managed_runner'
+);
 
 function stableJson(value) {
   if (Array.isArray(value)) {
@@ -110,6 +112,22 @@ function refreshContractSubjectDigest() {
 
 function refreshContractArtifactDigest() {
   contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
+}
+
+function replaceContractRequiredImageId(oldId, newId) {
+  contract.deploy_template_package.required_image_ids =
+    contract.deploy_template_package.required_image_ids.map((id) =>
+      id === oldId ? newId : id
+    );
+}
+
+function driftInventoryId(oldId, newId) {
+  const item = contract.deploy_image_inventory.find((entry) => entry.id === oldId);
+  if (!item) {
+    throw new Error(`missing inventory item: ${oldId}`);
+  }
+  item.id = newId;
+  replaceContractRequiredImageId(oldId, newId);
 }
 
   switch (label) {
@@ -326,14 +344,23 @@ function refreshContractArtifactDigest() {
     contract.adopted_provider_images[0].id = contract.product_images[0].id;
     contract.deploy_image_inventory[1].id = contract.deploy_image_inventory[0].id;
     break;
+  case 'product-image-inventory-id-drift':
+    driftInventoryId('agentsmith_app', 'agentsmith_app_drift');
+    break;
+  case 'managed-runner-inventory-id-drift':
+    driftInventoryId('managed_runner', 'agentsmith-runner');
+    break;
+  case 'managed-runner-declared-id-drift':
+    contract.managed_runner_image.id = 'managed-runner-drift';
+    break;
   case 'missing-release-required-image-ids':
-    delete contract.required_image_ids;
+    delete contract.deploy_template_package.required_image_ids;
     break;
   case 'required-image-ids-mismatch':
-    contract.required_image_ids = contract.required_image_ids.slice(0, -1);
+    contract.deploy_template_package.required_image_ids =
+      contract.deploy_template_package.required_image_ids.slice(0, -1);
     break;
   case 'stale-six-image-required-image-ids':
-    contract.required_image_ids = staleSixImageIds;
     contract.deploy_template_package.required_image_ids = staleSixImageIds;
     break;
   case 'missing-deploy-package-required-image-ids':
@@ -352,8 +379,10 @@ function refreshContractArtifactDigest() {
     ];
     break;
   case 'required-image-id-missing-in-inventory':
-    contract.required_image_ids = [...contract.required_image_ids, 'missing_component'];
-    contract.deploy_template_package.required_image_ids = [...contract.required_image_ids];
+    contract.deploy_template_package.required_image_ids = [
+      ...contract.deploy_template_package.required_image_ids,
+      'missing_component'
+    ];
     break;
   case 'required-current-image-id-absent-from-inventory':
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
@@ -684,6 +713,12 @@ const staleSixImageIds = deployTemplatePackage.required_image_ids.filter(
   (id) => id !== 'managed_runner'
 );
 
+function replaceRequiredImageId(oldId, newId) {
+  deployTemplatePackage.required_image_ids = deployTemplatePackage.required_image_ids.map((id) =>
+    id === oldId ? newId : id
+  );
+}
+
 switch (label) {
   case 'deploy-package-bad-subject-sha256':
     deployTemplatePackage.artifact_provenance.subject_sha256 = `sha256:${'e'.repeat(64)}`;
@@ -712,6 +747,12 @@ switch (label) {
     break;
   case 'stale-six-image-required-image-ids':
     deployTemplatePackage.required_image_ids = staleSixImageIds;
+    break;
+  case 'product-image-inventory-id-drift':
+    replaceRequiredImageId('agentsmith_app', 'agentsmith_app_drift');
+    break;
+  case 'managed-runner-inventory-id-drift':
+    replaceRequiredImageId('managed_runner', 'agentsmith-runner');
     break;
   case 'missing-deploy-package-required-image-ids':
     delete deployTemplatePackage.required_image_ids;
@@ -1114,6 +1155,9 @@ for label in \
   ref-pull-secret-ref \
   colon-only-secretref-pull-secret-ref \
   duplicate-image-id \
+  product-image-inventory-id-drift \
+  managed-runner-inventory-id-drift \
+  managed-runner-declared-id-drift \
   missing-release-required-image-ids \
   required-image-ids-mismatch \
   stale-six-image-required-image-ids \
@@ -1141,7 +1185,7 @@ do
   mutate_contract "$label" "$mutated"
 
   case "$label" in
-    bad-provenance-kind|deploy-package-bad-subject-sha256|missing-attestation|deploy-package-missing-attestation|bad-artifact-provenance-schema|deploy-package-bad-artifact-provenance-schema|non-agentsmith-repo-provenance|package-provenance-artifact-drift|stale-six-image-required-image-ids|missing-deploy-package-required-image-ids|empty-deploy-package-required-image-ids|non-array-deploy-package-required-image-ids|duplicate-deploy-package-required-image-id|required-image-id-missing-in-inventory)
+    bad-provenance-kind|deploy-package-bad-subject-sha256|missing-attestation|deploy-package-missing-attestation|bad-artifact-provenance-schema|deploy-package-bad-artifact-provenance-schema|non-agentsmith-repo-provenance|package-provenance-artifact-drift|product-image-inventory-id-drift|managed-runner-inventory-id-drift|stale-six-image-required-image-ids|missing-deploy-package-required-image-ids|empty-deploy-package-required-image-ids|non-array-deploy-package-required-image-ids|duplicate-deploy-package-required-image-id|required-image-id-missing-in-inventory)
       deploy_template_package="$TMP_DIR/$label.deploy-template-package.json"
       mutate_deploy_template_package "$label" "$deploy_template_package"
       ;;

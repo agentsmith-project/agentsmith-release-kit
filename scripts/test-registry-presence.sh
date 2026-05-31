@@ -157,11 +157,43 @@ const [validContract, imageMapInput, contractOutput, imageMapOutput, mutation] =
 const contract = JSON.parse(fs.readFileSync(validContract, 'utf8'));
 const imageMap = JSON.parse(fs.readFileSync(imageMapInput, 'utf8'));
 
+function replaceRequiredImageId(oldId, newId) {
+  contract.deploy_template_package.required_image_ids =
+    contract.deploy_template_package.required_image_ids.map((id) =>
+      id === oldId ? newId : id
+    );
+}
+
+function replaceImageMapMappingId(oldId, newId) {
+  const mapping = imageMap.mappings.find((entry) => entry.id === oldId);
+  if (!mapping) {
+    throw new Error(`missing image map mapping: ${oldId}`);
+  }
+  mapping.id = newId;
+}
+
+function driftInventoryId(oldId, newId) {
+  const item = contract.deploy_image_inventory.find((entry) => entry.id === oldId);
+  if (!item) {
+    throw new Error(`missing inventory item: ${oldId}`);
+  }
+  item.id = newId;
+  replaceRequiredImageId(oldId, newId);
+  replaceImageMapMappingId(oldId, newId);
+}
+
 switch (mutation) {
   case 'stale_six_image_required_image_ids':
-    contract.required_image_ids = contract.required_image_ids.filter(
-      (id) => id !== 'managed_runner'
-    );
+    contract.deploy_template_package.required_image_ids =
+      contract.deploy_template_package.required_image_ids.filter(
+        (id) => id !== 'managed_runner'
+      );
+    break;
+  case 'product_image_inventory_id_drift':
+    driftInventoryId('agentsmith_app', 'agentsmith_app_drift');
+    break;
+  case 'managed_runner_inventory_id_drift':
+    driftInventoryId('managed_runner', 'agentsmith-runner');
     break;
   case 'required_current_id_absent_from_inventory':
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
@@ -422,7 +454,7 @@ expect_fail \
   "$stale_image_map" \
   "$TARGET_PROFILE" \
   "$pass_probe" \
-  "release_contract.required_image_ids must match release_contract.deploy_image_inventory ids"
+  "release_contract.deploy_template_package.required_image_ids must match release_contract.deploy_image_inventory ids"
 
 missing_inventory_contract="$TMP_DIR/contract-missing-inventory.json"
 missing_inventory_image_map="$TMP_DIR/image-map-missing-inventory.json"
@@ -435,6 +467,36 @@ expect_fail \
   required-current-id-absent-from-inventory \
   "$missing_inventory_contract" \
   "$missing_inventory_image_map" \
+  "$TARGET_PROFILE" \
+  "$pass_probe" \
+  "release_contract.deploy_image_inventory must match declared image sources"
+
+product_id_drift_contract="$TMP_DIR/contract-product-id-drift.json"
+product_id_drift_image_map="$TMP_DIR/image-map-product-id-drift.json"
+write_contract_and_bound_image_map \
+  "$product_id_drift_contract" \
+  "$valid_image_map" \
+  "$product_id_drift_image_map" \
+  product_image_inventory_id_drift
+expect_fail \
+  product-image-inventory-id-drift \
+  "$product_id_drift_contract" \
+  "$product_id_drift_image_map" \
+  "$TARGET_PROFILE" \
+  "$pass_probe" \
+  "release_contract.deploy_image_inventory must match declared image sources"
+
+managed_runner_id_drift_contract="$TMP_DIR/contract-managed-runner-id-drift.json"
+managed_runner_id_drift_image_map="$TMP_DIR/image-map-managed-runner-id-drift.json"
+write_contract_and_bound_image_map \
+  "$managed_runner_id_drift_contract" \
+  "$valid_image_map" \
+  "$managed_runner_id_drift_image_map" \
+  managed_runner_inventory_id_drift
+expect_fail \
+  managed-runner-inventory-id-drift \
+  "$managed_runner_id_drift_contract" \
+  "$managed_runner_id_drift_image_map" \
   "$TARGET_PROFILE" \
   "$pass_probe" \
   "release_contract.deploy_image_inventory must match declared image sources"

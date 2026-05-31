@@ -17,12 +17,16 @@ const IMAGE_ARRAY_SOURCES = [
 ];
 const IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
 const IMAGE_SOURCES = [...IMAGE_ARRAY_SOURCES, ...IMAGE_SINGLETON_SOURCES];
+const MANAGED_RUNNER_IMAGE_SOURCE = 'managed_runner_image';
+const DECLARED_MANAGED_RUNNER_IMAGE_ID = 'agentsmith-runner';
+const DEPLOY_MANAGED_RUNNER_IMAGE_ID = 'managed_runner';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const LOCAL_URI_RE = /\b(?:file|local|source|git\+file):\/\//i;
 const LOCALHOST_URI_RE = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?)(?::\d+)?(?:[/?#]|$)/i;
 const RELATIVE_URI_RE = /(^|[\s"'(=])\.\.?\//;
 const ABSOLUTE_LOCAL_PATH_RE = /(^|[\s"'(=])(?:~\/|\/(?:Users|home|tmp|var|private|workspace|workspaces|mnt|opt|etc)\/|[A-Za-z]:[\\/])/;
+const ARCHIVE_CONTENT_ABSOLUTE_LOCAL_PATH_RE = /(^|[\s"'(=])(?:~\/|\/(?:Users|home|tmp|var|private|workspace|workspaces|mnt|opt)\/|[A-Za-z]:[\\/])/;
 const SOURCE_LIKE_LABEL_RE = /(?:^|\.)(?:source_uri|source_path|artifact_uri|package_uri|local_path|path|file|dir|kubeconfig)$/;
 const WORKSPACE_SOURCE_RE = /\/home\/[^/]+\/works\/[^/]+\/agent(?:smith)?(?:\/|$)/i;
 const SECRET_KEY_RE = /(^|[_-])(password|passwd|pwd|token|secret|client_secret|private_key|kubeconfig|access_key|api_key)([_-]|$)/i;
@@ -38,7 +42,7 @@ const SECRET_VALUE_RE = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/i,
   /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
   /\b(?:postgres|mongodb|redis):\/\/[^:\s]+:[^@\s]+@/i,
-  /\b(?:password|token|secret|client_secret)\s*[:=]\s*["']?[^"'\s]{8,}/i
+  /\b(?:password|token|secret|client_secret)[ \t]*[:=][ \t]*["']?[^"'\s]{8,}/i
 ];
 
 class CliError extends Error {
@@ -236,11 +240,13 @@ function isPackageManifestPathLabel(label) {
   return label.startsWith('archive.manifest_json.') && SOURCE_LIKE_LABEL_RE.test(label);
 }
 
-function scanUnsafeString(value, label, issues) {
+function scanUnsafeString(value, label, issues, options = {}) {
+  const absoluteLocalPathRe =
+    options.absoluteLocalPathRe || ABSOLUTE_LOCAL_PATH_RE;
   if (
     LOCAL_URI_RE.test(value) ||
     LOCALHOST_URI_RE.test(value) ||
-    ABSOLUTE_LOCAL_PATH_RE.test(value) ||
+    absoluteLocalPathRe.test(value) ||
     RELATIVE_URI_RE.test(value) ||
     (!isPackageManifestPathLabel(label) && isRelativeSourcePath(value, label)) ||
     WORKSPACE_SOURCE_RE.test(value)
@@ -354,7 +360,9 @@ function scanArchiveFileContent(content, entryPath) {
     return;
   }
   const issues = [];
-  scanUnsafeString(content.toString('utf8'), `archive.${entryPath}`, issues);
+  scanUnsafeString(content.toString('utf8'), `archive.${entryPath}`, issues, {
+    absoluteLocalPathRe: ARCHIVE_CONTENT_ABSOLUTE_LOCAL_PATH_RE
+  });
   if (issues.length > 0) {
     fail(issues[0]);
   }
@@ -497,7 +505,7 @@ function assertSameStringSet(
   actual,
   expected,
   label,
-  expectedLabel = 'release_contract.required_image_ids'
+  expectedLabel = 'release_contract.deploy_template_package.required_image_ids'
 ) {
   const actualSet = new Set(actual);
   const expectedSet = new Set(expected);
@@ -552,6 +560,19 @@ function declaredImageInventory(contract) {
   ];
 }
 
+function deployInventoryItemForDeclared(item) {
+  if (item.source !== MANAGED_RUNNER_IMAGE_SOURCE) {
+    return item;
+  }
+  if (item.id !== DECLARED_MANAGED_RUNNER_IMAGE_ID) {
+    fail(`release_contract.${MANAGED_RUNNER_IMAGE_SOURCE}.id must be ${DECLARED_MANAGED_RUNNER_IMAGE_ID}`);
+  }
+  return {
+    ...item,
+    id: DEPLOY_MANAGED_RUNNER_IMAGE_ID
+  };
+}
+
 function buildDeployImageInventory(contract) {
   const inventory = requireArray(
     contract.deploy_image_inventory,
@@ -578,7 +599,7 @@ function buildDeployImageInventory(contract) {
     byId.set(normalized.id, normalized);
   }
 
-  const expected = declaredImageInventory(contract);
+  const expected = declaredImageInventory(contract).map(deployInventoryItemForDeclared);
   if (expected.length !== byId.size) {
     fail('release_contract.deploy_image_inventory must match declared image sources');
   }
@@ -598,9 +619,13 @@ function buildDeployImageInventory(contract) {
 }
 
 function assertRequiredImageIds(contract, deployTemplatePackage) {
+  const contractDeployTemplatePackage = requireObject(
+    contract.deploy_template_package,
+    'release_contract.deploy_template_package'
+  );
   const contractRequiredImageIds = normalizeRequiredImageIds(
-    contract.required_image_ids,
-    'release_contract.required_image_ids'
+    contractDeployTemplatePackage.required_image_ids,
+    'release_contract.deploy_template_package.required_image_ids'
   );
   const packageRequiredImageIds = normalizeRequiredImageIds(
     deployTemplatePackage.required_image_ids,
@@ -615,7 +640,7 @@ function assertRequiredImageIds(contract, deployTemplatePackage) {
   assertSameStringSet(
     contractRequiredImageIds,
     inventoryIds,
-    'release_contract.required_image_ids',
+    'release_contract.deploy_template_package.required_image_ids',
     'release_contract.deploy_image_inventory ids'
   );
   assertSameStringSet(

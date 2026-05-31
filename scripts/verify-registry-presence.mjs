@@ -28,6 +28,9 @@ const IMAGE_ARRAY_SOURCES = [
 ];
 const IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
 const IMAGE_SOURCES = [...IMAGE_ARRAY_SOURCES, ...IMAGE_SINGLETON_SOURCES];
+const MANAGED_RUNNER_IMAGE_SOURCE = 'managed_runner_image';
+const DECLARED_MANAGED_RUNNER_IMAGE_ID = 'agentsmith-runner';
+const DEPLOY_MANAGED_RUNNER_IMAGE_ID = 'managed_runner';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -337,17 +340,21 @@ function normalizeRequiredImageIds(value, label) {
 }
 
 function assertReleaseContractRequiredImageIds(contract, inventory) {
+  const contractDeployTemplatePackage = requireObject(
+    contract.deploy_template_package,
+    'release_contract.deploy_template_package'
+  );
   const requiredImageIds = normalizeRequiredImageIds(
-    contract.required_image_ids,
-    'release_contract.required_image_ids'
+    contractDeployTemplatePackage.required_image_ids,
+    'release_contract.deploy_template_package.required_image_ids'
   );
   const inventoryIds = new Set(inventory.map((item) => item.id));
   if (requiredImageIds.length !== inventoryIds.size) {
-    fail('release_contract.required_image_ids must match release_contract.deploy_image_inventory ids');
+    fail('release_contract.deploy_template_package.required_image_ids must match release_contract.deploy_image_inventory ids');
   }
   for (const id of requiredImageIds) {
     if (!inventoryIds.has(id)) {
-      fail('release_contract.required_image_ids must match release_contract.deploy_image_inventory ids');
+      fail('release_contract.deploy_template_package.required_image_ids must match release_contract.deploy_image_inventory ids');
     }
   }
 }
@@ -385,6 +392,23 @@ function declaredInventory(contract) {
       normalizeDeclaredImageItem(contract[source], source, `release_contract.${source}`)
     )
   ];
+}
+
+function deployInventoryItemForDeclared(item) {
+  if (item.source !== MANAGED_RUNNER_IMAGE_SOURCE) {
+    return item;
+  }
+  if (item.id !== DECLARED_MANAGED_RUNNER_IMAGE_ID) {
+    fail(`release_contract.${MANAGED_RUNNER_IMAGE_SOURCE}.id must be ${DECLARED_MANAGED_RUNNER_IMAGE_ID}`);
+  }
+  return {
+    ...item,
+    id: DEPLOY_MANAGED_RUNNER_IMAGE_ID
+  };
+}
+
+function deployInventoryKey(item) {
+  return `${item.source}\u0000${item.id}\u0000${item.image}\u0000${item.digest}`;
 }
 
 function buildInventory(contract) {
@@ -428,14 +452,13 @@ function buildInventory(contract) {
     };
   });
 
-  const expected = declaredInventory(contract);
+  const expected = declaredInventory(contract).map(deployInventoryItemForDeclared);
   if (expected.length !== normalized.length) {
     fail('release_contract.deploy_image_inventory must match declared image sources');
   }
-  const key = (item) => `${item.source}\u0000${item.id}\u0000${item.image}\u0000${item.digest}`;
-  const actualSet = new Set(normalized.map(key));
+  const actualSet = new Set(normalized.map(deployInventoryKey));
   for (const expectedItem of expected) {
-    if (!actualSet.has(key(expectedItem))) {
+    if (!actualSet.has(deployInventoryKey(expectedItem))) {
       fail('release_contract.deploy_image_inventory must match declared image sources');
     }
   }

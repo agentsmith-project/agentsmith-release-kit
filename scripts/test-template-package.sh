@@ -44,6 +44,18 @@ metadata:
   name: agentsmith-web
 spec:
   replicas: 1
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+          env:
+            - name: AGENTSMITH_CONFIG_PATH
+              value: /etc/agentsmith/config.yaml
+          volumes:
+            - name: webhook-cert
+              secret:
+                secretName: agentsmith-webhook-cert
 YAML
   cat >"$package_dir/manifest.json" <<'JSON'
 {
@@ -334,19 +346,46 @@ const [contractInput, packageInput, contractOutput, packageOutput, mutation] =
   process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const deployTemplatePackage = JSON.parse(fs.readFileSync(packageInput, 'utf8'));
-const staleSixImageIds = contract.required_image_ids.filter((id) => id !== 'managed_runner');
+const staleSixImageIds = contract.deploy_template_package.required_image_ids.filter(
+  (id) => id !== 'managed_runner'
+);
+
+function replaceRequiredImageId(oldId, newId) {
+  contract.deploy_template_package.required_image_ids =
+    contract.deploy_template_package.required_image_ids.map((id) =>
+      id === oldId ? newId : id
+    );
+  deployTemplatePackage.required_image_ids = deployTemplatePackage.required_image_ids.map((id) =>
+    id === oldId ? newId : id
+  );
+}
+
+function driftInventoryId(oldId, newId) {
+  const item = contract.deploy_image_inventory.find((entry) => entry.id === oldId);
+  if (!item) {
+    throw new Error(`missing inventory item: ${oldId}`);
+  }
+  item.id = newId;
+  replaceRequiredImageId(oldId, newId);
+}
 
 switch (mutation) {
   case 'missing-release-required-image-ids':
-    delete contract.required_image_ids;
+    delete contract.deploy_template_package.required_image_ids;
     break;
   case 'required-image-ids-mismatch':
-    contract.required_image_ids = contract.required_image_ids.slice(0, -1);
+    contract.deploy_template_package.required_image_ids =
+      contract.deploy_template_package.required_image_ids.slice(0, -1);
     break;
   case 'stale-six-image-required-image-ids':
-    contract.required_image_ids = staleSixImageIds;
     contract.deploy_template_package.required_image_ids = staleSixImageIds;
     deployTemplatePackage.required_image_ids = staleSixImageIds;
+    break;
+  case 'adopted-provider-image-inventory-id-drift':
+    driftInventoryId('llmup', 'llmup_drift');
+    break;
+  case 'managed-runner-inventory-id-drift':
+    driftInventoryId('managed_runner', 'agentsmith-runner');
     break;
   case 'missing-deploy-package-required-image-ids':
     delete contract.deploy_template_package.required_image_ids;
@@ -361,9 +400,13 @@ switch (mutation) {
     deployTemplatePackage.required_image_ids = 'agentsmith_app';
     break;
   case 'required-image-id-missing-in-inventory':
-    contract.required_image_ids = [...contract.required_image_ids, 'missing_component'];
-    contract.deploy_template_package.required_image_ids = [...contract.required_image_ids];
-    deployTemplatePackage.required_image_ids = [...contract.required_image_ids];
+    contract.deploy_template_package.required_image_ids = [
+      ...contract.deploy_template_package.required_image_ids,
+      'missing_component'
+    ];
+    deployTemplatePackage.required_image_ids = [
+      ...contract.deploy_template_package.required_image_ids
+    ];
     break;
   case 'required-current-image-id-absent-from-inventory':
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
@@ -493,7 +536,10 @@ for mutation in \
     "$VALID_ARCHIVE"
 done
 
-for mutation in required-current-image-id-absent-from-inventory; do
+for mutation in \
+  required-current-image-id-absent-from-inventory \
+  adopted-provider-image-inventory-id-drift \
+  managed-runner-inventory-id-drift; do
   REQUIRED_IDS_CONTRACT="$TMP_DIR/release-contract.$mutation.json"
   REQUIRED_IDS_PACKAGE="$TMP_DIR/deploy-template-package.$mutation.json"
   mutate_required_image_ids \

@@ -124,7 +124,7 @@ selection, target-profile coverage, release-kit version policy, provenance, and
 digest-bound image inventory only.
 
 Release contract inventory closure is exact-set:
-`release_contract.required_image_ids`,
+`release_contract.deploy_template_package.required_image_ids`,
 `deploy_template_package.required_image_ids`, and
 `release_contract.deploy_image_inventory` ids must be non-empty exact-set
 matches. The release kit consumes the dynamic image closure from the AgentSmith
@@ -301,9 +301,10 @@ axes fail fast. The selected target profile must exist in the release
 contract. Every inventory item must have unique `id`, `image`, and `digest`
 values; each image must be digest-pinned and its `@sha256` suffix must match
 the `digest` field.
-Standalone image-map enforces the release contract's dynamic
-`required_image_ids` exact-set closure against `deploy_image_inventory` ids;
-this remains a focused `readiness: false` diagnostic, not release readiness.
+Standalone image-map enforces the release contract's embedded deploy template
+package `required_image_ids` exact-set closure against `deploy_image_inventory`
+ids; this remains a focused `readiness: false` diagnostic, not release
+readiness.
 
 For online targets without `--target-registry`, target image refs equal source
 image refs and mappings use `action: use_source`. Airgap targets require
@@ -354,9 +355,9 @@ have schema `agentsmith.image-map/v1`, scope `image_map_only`,
 `target_registry`, matching release identity, matching release contract raw
 sha256, and one-to-one
 mappings for `release_contract.deploy_image_inventory`. The release contract
-must keep `required_image_ids` as an exact-set match for
-`deploy_image_inventory` ids. Target images must equal the deterministic mirror ref
-computed from the release contract source image plus
+embedded deploy template package must keep `required_image_ids` as an exact-set
+match for `deploy_image_inventory` ids. Target images must equal the
+deterministic mirror ref computed from the release contract source image plus
 `image_map.target_registry`, and every target digest must equal the source
 digest.
 

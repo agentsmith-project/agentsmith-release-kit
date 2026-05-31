@@ -87,7 +87,7 @@ Its `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` outputs must keep `readiness: false`;
 they prove contract/input digest readiness only and are not deploy, package, or
 release readiness proof. Release contract inventory closure requires
-`release_contract.required_image_ids`,
+`release_contract.deploy_template_package.required_image_ids`,
 `deploy_template_package.required_image_ids`, and the
 `deploy_image_inventory` id set to be non-empty exact-set matches. The release
 kit consumes the AgentSmith release contract's dynamic image closure; current
@@ -124,7 +124,8 @@ render values, and operator-provided substrate truth. It renders only
 `<output-dir>/rendered-manifests` and writes `manifest-render-report.json` with
 `readiness: false` and `scope: manifest_render_only`.
 Direct render enforces the dynamic `required_image_ids` exact-set closure
-across the release contract, deploy template package, and inventory ids.
+across the release contract's embedded deploy template package, deploy template
+package input, and inventory ids.
 Optional `--image-map <json>` is accepted only as image reference adoption: it
 must be a passing `agentsmith.image-map/v1` report bound to the same release
 contract digest and target profile, and render uses `mapping.target_image` for
@@ -166,8 +167,9 @@ profile, release target, or user deployment prerequisite, and it is out of
 scope for image-map CLI. `release_contract.target_profiles` is limited to the
 four existing-Kubernetes operator release profiles plus this rehearsal-only
 accepted input; non-canonical pre-GA names and synonym axes fail fast.
-Standalone image-map enforces the release contract's dynamic
-`required_image_ids` exact-set closure against `deploy_image_inventory` ids.
+Standalone image-map enforces the release contract's embedded deploy template
+package `required_image_ids` exact-set closure against `deploy_image_inventory`
+ids.
 If that closure includes `managed_runner`, it flows through image-map, render
 image placeholder adoption, and airgap image-artifact declarations as an
 ordinary digest-bound inventory image. It does not enable a runner runtime,

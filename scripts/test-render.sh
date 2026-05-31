@@ -175,6 +175,12 @@ spec:
           env:
             - name: POSTGRES_HOST
               value: ${{ substrate.services.postgresql.host }}
+            - name: AGENTSMITH_CONFIG_PATH
+              value: /etc/agentsmith/config.yaml
+          volumes:
+            - name: webhook-cert
+              secret:
+                secretName: agentsmith-webhook-cert
 ---
 apiVersion: batch/v1
 kind: Job
@@ -422,13 +428,39 @@ const [
 ] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const deployTemplatePackage = JSON.parse(fs.readFileSync(deployTemplatePackageInput, 'utf8'));
-const staleSixImageIds = contract.required_image_ids.filter((id) => id !== 'managed_runner');
+const staleSixImageIds = contract.deploy_template_package.required_image_ids.filter(
+  (id) => id !== 'managed_runner'
+);
+
+function replaceRequiredImageId(oldId, newId) {
+  contract.deploy_template_package.required_image_ids =
+    contract.deploy_template_package.required_image_ids.map((id) =>
+      id === oldId ? newId : id
+    );
+  deployTemplatePackage.required_image_ids = deployTemplatePackage.required_image_ids.map((id) =>
+    id === oldId ? newId : id
+  );
+}
+
+function driftInventoryId(oldId, newId) {
+  const item = contract.deploy_image_inventory.find((entry) => entry.id === oldId);
+  if (!item) {
+    throw new Error(`missing inventory item: ${oldId}`);
+  }
+  item.id = newId;
+  replaceRequiredImageId(oldId, newId);
+}
 
 switch (mutation) {
   case 'stale-six-image-required-image-ids':
-    contract.required_image_ids = staleSixImageIds;
     contract.deploy_template_package.required_image_ids = staleSixImageIds;
     deployTemplatePackage.required_image_ids = staleSixImageIds;
+    break;
+  case 'adopted-provider-image-inventory-id-drift':
+    driftInventoryId('llmup', 'llmup_drift');
+    break;
+  case 'managed-runner-inventory-id-drift':
+    driftInventoryId('managed_runner', 'agentsmith-runner');
     break;
   case 'required-current-id-absent-from-inventory':
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
@@ -850,7 +882,7 @@ expect_fail_case \
   "$TARGET_PROFILE" \
   "" \
   "" \
-  "release_contract.required_image_ids must match release_contract.deploy_image_inventory ids"
+  "release_contract.deploy_template_package.required_image_ids must match release_contract.deploy_image_inventory ids"
 
 MISSING_REQUIRED_ID_CONTRACT="$TMP_DIR/release-contract.required-current-id-absent-from-inventory.json"
 MISSING_REQUIRED_ID_PACKAGE="$TMP_DIR/deploy-template-package.required-current-id-absent-from-inventory.json"
@@ -864,6 +896,46 @@ expect_fail_case \
   required-current-id-absent-from-inventory \
   "$MISSING_REQUIRED_ID_CONTRACT" \
   "$MISSING_REQUIRED_ID_PACKAGE" \
+  "$VALID_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "release_contract.deploy_image_inventory must match declared image sources"
+
+ADOPTED_ID_DRIFT_CONTRACT="$TMP_DIR/release-contract.adopted-provider-image-inventory-id-drift.json"
+ADOPTED_ID_DRIFT_PACKAGE="$TMP_DIR/deploy-template-package.adopted-provider-image-inventory-id-drift.json"
+mutate_required_image_ids \
+  adopted-provider-image-inventory-id-drift \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$ADOPTED_ID_DRIFT_CONTRACT" \
+  "$ADOPTED_ID_DRIFT_PACKAGE"
+expect_fail_case \
+  adopted-provider-image-inventory-id-drift \
+  "$ADOPTED_ID_DRIFT_CONTRACT" \
+  "$ADOPTED_ID_DRIFT_PACKAGE" \
+  "$VALID_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "release_contract.deploy_image_inventory must match declared image sources"
+
+MANAGED_RUNNER_ID_DRIFT_CONTRACT="$TMP_DIR/release-contract.managed-runner-inventory-id-drift.json"
+MANAGED_RUNNER_ID_DRIFT_PACKAGE="$TMP_DIR/deploy-template-package.managed-runner-inventory-id-drift.json"
+mutate_required_image_ids \
+  managed-runner-inventory-id-drift \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$MANAGED_RUNNER_ID_DRIFT_CONTRACT" \
+  "$MANAGED_RUNNER_ID_DRIFT_PACKAGE"
+expect_fail_case \
+  managed-runner-inventory-id-drift \
+  "$MANAGED_RUNNER_ID_DRIFT_CONTRACT" \
+  "$MANAGED_RUNNER_ID_DRIFT_PACKAGE" \
   "$VALID_ARCHIVE" \
   "$VALID_VALUES" \
   "$VALID_TRUTH" \

@@ -36,6 +36,9 @@ const IMAGE_ARRAY_SOURCES = [
 ];
 const IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
 const IMAGE_SOURCES = [...IMAGE_ARRAY_SOURCES, ...IMAGE_SINGLETON_SOURCES];
+const MANAGED_RUNNER_IMAGE_SOURCE = 'managed_runner_image';
+const DECLARED_MANAGED_RUNNER_IMAGE_ID = 'agentsmith-runner';
+const DEPLOY_MANAGED_RUNNER_IMAGE_ID = 'managed_runner';
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_PACKAGE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const IMAGE_MAP_SCHEMA = 'agentsmith.image-map/v1';
@@ -505,10 +508,22 @@ function buildDeployImageInventory(contract) {
       };
     })
   ];
-  if (expectedItems.length !== byId.size) {
+  const expectedDeployItems = expectedItems.map((item) => {
+    if (item.source !== MANAGED_RUNNER_IMAGE_SOURCE) {
+      return item;
+    }
+    if (item.id !== DECLARED_MANAGED_RUNNER_IMAGE_ID) {
+      fail(`release_contract.${MANAGED_RUNNER_IMAGE_SOURCE}.id must be ${DECLARED_MANAGED_RUNNER_IMAGE_ID}`);
+    }
+    return {
+      ...item,
+      id: DEPLOY_MANAGED_RUNNER_IMAGE_ID
+    };
+  });
+  if (expectedDeployItems.length !== byId.size) {
     fail('release_contract.deploy_image_inventory must match declared image sources');
   }
-  for (const expected of expectedItems) {
+  for (const expected of expectedDeployItems) {
     const actual = byId.get(expected.id);
     if (
       !actual ||
@@ -544,7 +559,7 @@ function assertSameStringSet(
   actual,
   expected,
   label,
-  expectedLabel = 'release_contract.required_image_ids'
+  expectedLabel = 'release_contract.deploy_template_package.required_image_ids'
 ) {
   const actualSet = new Set(actual);
   const expectedSet = new Set(expected);
@@ -559,9 +574,13 @@ function assertSameStringSet(
 }
 
 function assertRequiredImageIds(contract, deployTemplatePackage, deployImageInventoryById) {
+  const contractDeployTemplatePackage = requireObject(
+    contract.deploy_template_package,
+    'release_contract.deploy_template_package'
+  );
   const contractRequiredImageIds = normalizeRequiredImageIds(
-    contract.required_image_ids,
-    'release_contract.required_image_ids'
+    contractDeployTemplatePackage.required_image_ids,
+    'release_contract.deploy_template_package.required_image_ids'
   );
   const packageRequiredImageIds = normalizeRequiredImageIds(
     deployTemplatePackage.required_image_ids,
@@ -576,7 +595,7 @@ function assertRequiredImageIds(contract, deployTemplatePackage, deployImageInve
   assertSameStringSet(
     contractRequiredImageIds,
     inventoryIds,
-    'release_contract.required_image_ids',
+    'release_contract.deploy_template_package.required_image_ids',
     'release_contract.deploy_image_inventory ids'
   );
   assertSameStringSet(

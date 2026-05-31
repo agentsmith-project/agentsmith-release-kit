@@ -170,7 +170,8 @@ bash scripts/test-inputs.sh
 
 `--inputs` validates only the release contract, deploy template package, target
 profile, provenance, release-kit version policy, and digest-bound image
-inventory. During release contract intake, `release_contract.required_image_ids`,
+inventory. During release contract intake,
+`release_contract.deploy_template_package.required_image_ids`,
 `deploy_template_package.required_image_ids`, and the
 `deploy_image_inventory` id set must be non-empty exact-set matches. The
 release kit consumes the dynamic image closure from the AgentSmith release
@@ -227,7 +228,8 @@ target profile, explicit render values, and
 `<output-dir>/rendered-manifests`, and `manifest-render-report.json` is written
 with `readiness: false`, `scope: manifest_render_only`, and `status: pass`.
 Direct render enforces the dynamic `required_image_ids` exact-set closure
-across the release contract, deploy template package, and inventory ids.
+across the release contract's embedded deploy template package, deploy template
+package input, and inventory ids.
 When `--image-map <json>` is supplied, render first validates that it is a
 passing `agentsmith.image-map/v1` report bound to the same release contract
 digest and target profile, then uses `mapping.target_image` for
@@ -294,8 +296,9 @@ derived by stripping the source registry and tag, keeping the repository path,
 and appending the original sha256 digest under the target registry. Registry
 namespace components must be lowercase and must start and end with
 alphanumeric characters.
-Standalone image-map enforces the release contract's dynamic
-`required_image_ids` exact-set closure against `deploy_image_inventory` ids.
+Standalone image-map enforces the release contract's embedded deploy template
+package `required_image_ids` exact-set closure against `deploy_image_inventory`
+ids.
 When the closure includes `managed_runner`, image-map treats it like any other
 digest-bound inventory image. Render then adopts it through normal
 `${{ images.<id>.image }}` and `${{ images.<id>.digest }}` placeholders when

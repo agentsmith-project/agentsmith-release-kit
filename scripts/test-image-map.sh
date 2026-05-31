@@ -49,7 +49,25 @@ import fs from 'node:fs';
 const [validContract, output, mutation] = process.argv.slice(2);
 const contract = JSON.parse(fs.readFileSync(validContract, 'utf8'));
 const digest = (char) => `sha256:${char.repeat(64)}`;
-const staleSixImageIds = contract.required_image_ids.filter((id) => id !== 'managed_runner');
+const staleSixImageIds = contract.deploy_template_package.required_image_ids.filter(
+  (id) => id !== 'managed_runner'
+);
+
+function replaceRequiredImageId(oldId, newId) {
+  contract.deploy_template_package.required_image_ids =
+    contract.deploy_template_package.required_image_ids.map((id) =>
+      id === oldId ? newId : id
+    );
+}
+
+function driftInventoryId(oldId, newId) {
+  const item = contract.deploy_image_inventory.find((entry) => entry.id === oldId);
+  if (!item) {
+    throw new Error(`missing inventory item: ${oldId}`);
+  }
+  item.id = newId;
+  replaceRequiredImageId(oldId, newId);
+}
 
 switch (mutation) {
   case 'valid':
@@ -81,7 +99,13 @@ switch (mutation) {
     contract.deploy_image_inventory = [];
     break;
   case 'stale_six_image_required_image_ids':
-    contract.required_image_ids = staleSixImageIds;
+    contract.deploy_template_package.required_image_ids = staleSixImageIds;
+    break;
+  case 'prerequisite_image_inventory_id_drift':
+    driftInventoryId('ingress_nginx_controller', 'ingress_nginx_controller_drift');
+    break;
+  case 'managed_runner_inventory_id_drift':
+    driftInventoryId('managed_runner', 'agentsmith-runner');
     break;
   case 'required_current_id_absent_from_inventory':
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
@@ -329,10 +353,18 @@ expect_contract_fail empty-inventory empty_inventory
 expect_contract_fail \
   stale-six-image-required-image-ids \
   stale_six_image_required_image_ids \
-  "release_contract.required_image_ids must match release_contract.deploy_image_inventory ids"
+  "release_contract.deploy_template_package.required_image_ids must match release_contract.deploy_image_inventory ids"
 expect_contract_fail \
   required-current-id-absent-from-inventory \
   required_current_id_absent_from_inventory \
+  "release_contract.deploy_image_inventory must match declared image sources"
+expect_contract_fail \
+  prerequisite-image-inventory-id-drift \
+  prerequisite_image_inventory_id_drift \
+  "release_contract.deploy_image_inventory must match declared image sources"
+expect_contract_fail \
+  managed-runner-inventory-id-drift \
+  managed_runner_inventory_id_drift \
   "release_contract.deploy_image_inventory must match declared image sources"
 
 pass "image-map focused diagnostic tests completed"

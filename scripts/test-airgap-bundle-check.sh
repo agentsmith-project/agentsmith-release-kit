@@ -119,7 +119,7 @@ const deployTemplatePackage = JSON.parse(
   fs.readFileSync(fixtureDeployTemplatePackagePath, 'utf8')
 );
 const fixtureContract = JSON.parse(fs.readFileSync(fixtureContractPath, 'utf8'));
-const staleSixImageIds = fixtureContract.required_image_ids.filter(
+const staleSixImageIds = fixtureContract.deploy_template_package.required_image_ids.filter(
   (id) => id !== 'managed_runner'
 );
 deployTemplatePackage.package_sha256 = archiveSha256;
@@ -128,6 +128,26 @@ if (
   typeof deployTemplatePackage.artifact_provenance === 'object'
 ) {
   deployTemplatePackage.artifact_provenance.artifact_sha256 = archiveSha256;
+}
+const contractDeployTemplatePackage = JSON.parse(JSON.stringify(deployTemplatePackage));
+
+function replaceRequiredImageId(oldId, newId) {
+  contract.deploy_template_package.required_image_ids =
+    contract.deploy_template_package.required_image_ids.map((id) =>
+      id === oldId ? newId : id
+    );
+  deployTemplatePackage.required_image_ids = deployTemplatePackage.required_image_ids.map((id) =>
+    id === oldId ? newId : id
+  );
+}
+
+function driftInventoryId(oldId, newId) {
+  const item = contract.deploy_image_inventory.find((entry) => entry.id === oldId);
+  if (!item) {
+    throw new Error(`missing inventory item: ${oldId}`);
+  }
+  item.id = newId;
+  replaceRequiredImageId(oldId, newId);
 }
 
 switch (mutation) {
@@ -171,14 +191,16 @@ switch (mutation) {
   case 'stale_six_image_required_image_ids':
   case 'required_image_id_missing_in_inventory':
   case 'required_current_image_id_absent_from_inventory':
+  case 'prerequisite_image_inventory_id_drift':
+  case 'managed_runner_inventory_id_drift':
     break;
   default:
     throw new Error(`unknown material mutation: ${mutation}`);
 }
 
 const contract = fixtureContract;
-contract.deploy_template_package = deployTemplatePackage;
-contract.deploy_template_digest = deployTemplatePackage.manifest_sha256;
+contract.deploy_template_package = contractDeployTemplatePackage;
+contract.deploy_template_digest = contractDeployTemplatePackage.manifest_sha256;
 
 switch (mutation) {
   case 'target_profiles_not_array':
@@ -211,25 +233,35 @@ switch (mutation) {
     contract.target_profiles.push({ ...contract.target_profiles[1] });
     break;
   case 'missing_release_required_image_ids':
-    delete contract.required_image_ids;
+    delete contract.deploy_template_package.required_image_ids;
     break;
   case 'required_image_ids_mismatch':
-    contract.required_image_ids = contract.required_image_ids.slice(0, -1);
+    contract.deploy_template_package.required_image_ids =
+      contract.deploy_template_package.required_image_ids.slice(0, -1);
     break;
   case 'stale_six_image_required_image_ids':
-    contract.required_image_ids = staleSixImageIds;
     contract.deploy_template_package.required_image_ids = staleSixImageIds;
     deployTemplatePackage.required_image_ids = staleSixImageIds;
     break;
   case 'required_image_id_missing_in_inventory':
-    contract.required_image_ids = [...contract.required_image_ids, 'missing_component'];
-    contract.deploy_template_package.required_image_ids = [...contract.required_image_ids];
-    deployTemplatePackage.required_image_ids = [...contract.required_image_ids];
+    contract.deploy_template_package.required_image_ids = [
+      ...contract.deploy_template_package.required_image_ids,
+      'missing_component'
+    ];
+    deployTemplatePackage.required_image_ids = [
+      ...contract.deploy_template_package.required_image_ids
+    ];
     break;
   case 'required_current_image_id_absent_from_inventory':
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
       (item) => item.id !== 'asbcp'
     );
+    break;
+  case 'prerequisite_image_inventory_id_drift':
+    driftInventoryId('ingress_nginx_controller', 'ingress_nginx_controller_drift');
+    break;
+  case 'managed_runner_inventory_id_drift':
+    driftInventoryId('managed_runner', 'agentsmith-runner');
     break;
   default:
     break;
@@ -1438,6 +1470,14 @@ expect_contract_fail required-image-id-missing-in-inventory required_image_id_mi
 expect_contract_fail \
   required-current-image-id-absent-from-inventory \
   required_current_image_id_absent_from_inventory \
+  "release_contract.deploy_image_inventory must match declared image sources"
+expect_contract_fail \
+  prerequisite-image-inventory-id-drift \
+  prerequisite_image_inventory_id_drift \
+  "release_contract.deploy_image_inventory must match declared image sources"
+expect_contract_fail \
+  managed-runner-inventory-id-drift \
+  managed_runner_inventory_id_drift \
   "release_contract.deploy_image_inventory must match declared image sources"
 
 expect_profile_fail online "$ONLINE_PROFILE"

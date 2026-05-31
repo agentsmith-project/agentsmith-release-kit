@@ -12,8 +12,9 @@ infer product truth from source paths.
 The current `--inputs` validator is a focused contract intake diagnostic only.
 Its reports keep `readiness: false` and prove contract/input digest readiness,
 not deploy, package, or release readiness.
-It enforces release contract `required_image_ids` exact-set closure:
-`release_contract.required_image_ids`,
+It enforces release contract template package `required_image_ids` exact-set
+closure:
+`release_contract.deploy_template_package.required_image_ids`,
 `deploy_template_package.required_image_ids`, and
 `release_contract.deploy_image_inventory` ids must be non-empty exact-set
 matches. The release kit consumes the dynamic image closure from the AgentSmith

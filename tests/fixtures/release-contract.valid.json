@@ -40,7 +40,7 @@
     }
   ],
   "managed_runner_image": {
-    "id": "managed_runner",
+    "id": "agentsmith-runner",
     "image": "ghcr.io/agentsmith-project/agentsmith-managed-runner:2026.05.23-p0@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   },
@@ -217,26 +217,17 @@
     "normalized_remote": "github.com/agentsmith-project/agentsmith",
     "commit_sha": "0123456789abcdef0123456789abcdef01234567",
     "subject_name": "agentsmith-release-contract",
-    "subject_sha256": "sha256:9d2e314fe0b68636f378585802770e2f036356a5168cd148ff0986621c6bea6c",
+    "subject_sha256": "sha256:50c852ed0c860239483415286b57aa3867ab6641a99e3a0cb1acd80014fa337e",
     "subject_uri": "release-contract.json",
     "workflow_name": "release-contract",
     "run_id": "10001",
     "run_attempt": "1",
     "job": "generate-release-contract",
     "artifact_uri": "gh-artifact://agentsmith/release-contract/10001/release-contract.json",
-    "artifact_sha256": "sha256:79b7f7692072186a38e009fbae016eb3fea892d84daac1587a7f958660ff9eef",
+    "artifact_sha256": "sha256:f2c0b236d0bff9d3a6d10e8548baa27bae70b73d96fda0e6130373af1afad878",
     "generated_at": "2026-05-23T12:00:00.000Z",
     "generator_command": "npm run contracts:check-release-boundary",
     "generator_version": "p0",
     "attestation": "none"
-  },
-  "required_image_ids": [
-    "agentsmith_app",
-    "llmup",
-    "afscp",
-    "asbcp",
-    "ingress_nginx_controller",
-    "ingress_nginx_certgen",
-    "managed_runner"
-  ]
+  }
 }
