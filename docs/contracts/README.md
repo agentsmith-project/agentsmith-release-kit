@@ -57,9 +57,9 @@ existing Kubernetes canonical profiles as CLI targets:
 `existing_kubernetes/kit_installed/airgap`.
 `kind_rehearsal/kit_installed/online` is rehearsal-only accepted input and out
 of scope for image-map CLI. Only accepted pre-GA profile tuples are accepted in
-`release_contract.target_profiles`; the kind tuple is not a formal operator
-release target, and non-canonical pre-GA target names and synonym axes fail
-fast. It requires airgap runs to provide
+`release_contract.target_profiles`; the kind tuple is not an operator choice,
+and non-canonical pre-GA target names and synonym axes fail fast. It requires
+airgap runs to provide
 `--target-registry <registry-host[/namespace]>`. Every inventory image must be
 digest-pinned with a matching `digest` field, and duplicate ids, images, or
 digests fail fast. It writes `image-map.json` with `schema:
@@ -272,8 +272,9 @@ three managed evidence-root files: `evidence.json`, `evidence-subject.json`, and
 readiness, product-flow evidence, rollback, image mirroring, airgap packaging,
 or registry credential handling.
 
-The current `--operator-signoff-intake` validator is a focused intake/binding
-diagnostic only. Its input schema is
+The current `--operator-signoff-intake` validator is a maintainer-only focused
+intake/binding diagnostic for explicit GA or compliance trigger work. Its
+input schema is
 `agentsmith.operator-signoff-intake/v1` with `scope:
 operator_signoff_intake_only`; its output report schema is
 `agentsmith.operator-signoff-intake-report/v1` with the same scope,

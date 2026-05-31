@@ -44,7 +44,7 @@ require_file() {
 require_text() {
   local file="$1"
   local text="$2"
-  grep -Fqi "$text" "$file" || fail "missing required text in $file: $text"
+  grep -Fqi -- "$text" "$file" || fail "missing required text in $file: $text"
 }
 
 reject_ecosystem_bootstrap_files() {
@@ -128,6 +128,31 @@ pass "required bootstrap files"
 require_text OWNERS.md "AgentSmith release-kit team"
 pass "owner metadata"
 
+doc_policy_paths=(
+  README.md
+  DEVELOPMENT.md
+  docs/RELEASE_GATES.md
+  docs/contracts/README.md
+  docs/runbooks/README.md
+  scripts/verify-release.sh
+  scripts/verify-release-engineering-gate-intake.mjs
+)
+
+reject_scan \
+  "formal operator release taxonomy wording found" \
+  'formal operator release quadrants?|Formal Operator Quadrants|formal operator release profiles|operator-facing release quadrants?|operator release quadrants?|formal release quadrants?' \
+  "${doc_policy_paths[@]}"
+
+reject_scan \
+  "formal-gate candidate wording found" \
+  'formal[- ]gate candidate|repo-local formal[- ]gate|the only repo-local formal[- ]gate candidate boundary' \
+  "${doc_policy_paths[@]}"
+
+reject_scan \
+  "operator release choice wording found" \
+  'operator release choices?' \
+  "${doc_policy_paths[@]}"
+
 require_text README.md "$EXPECTED_IDENTITY"
 require_text README.md "AgentSmith release contract"
 require_text README.md "deploy template package"
@@ -141,7 +166,7 @@ require_text README.md "backend-real"
 require_text README.md "product flow"
 require_text README.md "Cloud resource provisioning"
 require_text README.md "release management UI"
-require_text README.md "The formal operator release quadrants are"
+require_text README.md "operator choice matrix"
 require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
 require_text README.md '`airgap/use_existing`'
@@ -149,18 +174,17 @@ require_text README.md '`airgap/install_substrates`'
 require_text README.md '`kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input'
 require_text README.md "is not a release profile, user deployment prerequisite, operator release"
 require_text README.md "target, or replacement for real Kubernetes evidence"
-require_text docs/runbooks/README.md "## Formal Operator Quadrants"
+require_text docs/runbooks/README.md "## Operator Choice Matrix"
 require_text docs/runbooks/README.md "Airgap bundle packaging commands are packaging-side helpers"
-require_text docs/runbooks/README.md "not formal release quadrants"
+require_text docs/runbooks/README.md "not standalone operator choices"
 require_text docs/runbooks/README.md 'use `airgap/install_substrates` for the consume/deployment-focused path'
-require_text docs/RELEASE_GATES.md "Only the four existing-Kubernetes"
-require_text docs/RELEASE_GATES.md "tuples are formal operator release profiles"
+require_text docs/RELEASE_GATES.md "map to the operator choice surface"
 require_text docs/RELEASE_GATES.md "rehearsal-only accepted input"
 require_text docs/contracts/README.md "Only accepted pre-GA profile tuples are accepted"
-require_text docs/contracts/README.md "not a formal operator"
+require_text docs/contracts/README.md "not an operator choice"
 require_text DEVELOPMENT.md "There is intentionally no"
 require_text DEVELOPMENT.md "package.json"
-require_text DEVELOPMENT.md "four existing-Kubernetes operator release profiles"
+require_text DEVELOPMENT.md "four existing-Kubernetes operator choice mappings"
 require_text DEVELOPMENT.md '`kind_rehearsal/kit_installed/online` remains'
 require_text DEVELOPMENT.md "rehearsal-only accepted input"
 require_text DEVELOPMENT.md "profile, release target, or user deployment prerequisite"
@@ -171,19 +195,13 @@ require_text docs/RELEASE_GATES.md "The quick gate is not release readiness"
 require_text docs/RELEASE_GATES.md "The full release gate is the future repo-local authority"
 require_text docs/RELEASE_GATES.md "not implemented during bootstrap"
 require_text scripts/verify-release.sh "full release gate is not implemented in bootstrap"
+require_text scripts/verify-release.sh "--operator-signoff-intake is maintainer-only for explicit GA or compliance trigger work"
 if bash scripts/verify-release.sh >/dev/null 2>&1; then
   fail "full release mode must fail during bootstrap"
 fi
 pass "release gate bootstrap boundary"
 
 mapfile -d '' scan_paths < <(find . -path ./.git -prune -o -type f -print0)
-doc_policy_paths=(
-  README.md
-  DEVELOPMENT.md
-  docs/RELEASE_GATES.md
-  docs/contracts/README.md
-  docs/runbooks/README.md
-)
 
 afscp_mount_plan_contract="afscp-mount-plan"
 afscp_mount_plan_contract+="-contract"

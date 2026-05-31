@@ -58,10 +58,11 @@ confirmed-apply airgap operator surface summaries for `use_existing` or
 writes a digest-only `airgap-adoption-report.json` with `readiness: false`.
 `--release-engineering-gate-intake` consumes only existing focused online and
 airgap adoption reports, requires the four online/airgap use-existing/install
-quadrants, and writes `release-engineering-gate-intake-report.json` with
-`readiness: false`, `status: pass`, and `formal_verdict: not_issued`. It lists
-formal operator verdict plus offline/package/release readiness as blocking gaps;
-it is not release readiness.
+operator choices, and writes `release-engineering-gate-intake-report.json`
+with `readiness: false`, `status: pass`, and `formal_verdict: not_issued`.
+This maintainer-only path is for explicit GA or compliance trigger work; it
+lists future formal operator verdict plus offline/package/release readiness as
+blocking gaps and is not release readiness.
 
 ## Development Principles
 
@@ -166,12 +167,13 @@ an output directory, and an optional
 `--target-registry <registry-host[/namespace]>`. It reads only
 `release_contract.deploy_image_inventory`, requires every inventory image to
 be digest-pinned with a matching `digest` field, rejects duplicate ids, images,
-and digests, and accepts only the four existing-Kubernetes operator release
-profiles as CLI targets. `kind_rehearsal/kit_installed/online` remains
+and digests, and accepts only the four existing-Kubernetes machine profiles
+that back the operator choice surface as CLI targets.
+`kind_rehearsal/kit_installed/online` remains
 rehearsal-only accepted input for focused intake/coverage. It is not a release
 profile, release target, or user deployment prerequisite, and it is out of
 scope for image-map CLI. `release_contract.target_profiles` is limited to the
-four existing-Kubernetes operator release profiles plus this rehearsal-only
+four existing-Kubernetes operator choice mappings plus this rehearsal-only
 accepted input; non-canonical pre-GA names and synonym axes fail fast.
 Standalone image-map enforces the release contract's embedded deploy template
 package `required_image_ids` exact-set closure against `deploy_image_inventory`
@@ -193,8 +195,8 @@ package, or release readiness.
 During pre-GA, stale six-image required-id inputs, obsolete
 `${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale
 runner-name aliases such as `agent-task-runner` or `agentsmith-codex-runner`
-are not formal success or compatibility paths. They may appear only as
-fail-fast cases or negative diagnostics, and can be deleted once the formal
+are not supported success or compatibility paths. They may appear only as
+fail-fast cases or negative diagnostics, and can be deleted once the current
 fixtures and runbooks stabilize.
 
 The current `--registry-presence` path is a focused online target-registry
@@ -523,8 +525,9 @@ render, and in confirmed apply rollout run strict live ref checks for those
 digest-adopted target refs only. Ordinary source-registry rollout remains
 digest-only. It is not mirror execution or registry readiness.
 
-The current `--operator-signoff-intake` path is a focused intake/binding
-diagnostic only. It consumes a release contract, a generated
+The current `--operator-signoff-intake` path is a maintainer-only focused
+intake/binding diagnostic for explicit GA or compliance trigger work. It
+consumes a release contract, a generated
 `online-deployment-gate-report.json`, an
 `agentsmith.operator-signoff-intake/v1` JSON file, and the explicit
 `existing_kubernetes/external_declared/online` target profile. The intake JSON

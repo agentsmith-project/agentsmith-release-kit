@@ -60,11 +60,11 @@ AgentSmith Release Kit does not own:
 
 ## Deployment Model
 
-The formal operator release quadrants are the current operator-facing choices:
+The operator choice matrix is the current operator-facing surface:
 `online/use_existing`, `online/install_substrates`, `airgap/use_existing`, and
 `airgap/install_substrates`. This names the supported operator surface only; it
 is not a formal release verdict, package readiness, operator readiness, or GA
-signoff. They map to the four existing-Kubernetes machine profiles:
+signoff. These choices map to the four existing-Kubernetes machine profiles:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`, and
@@ -108,7 +108,7 @@ bash scripts/verify-release.sh --airgap-adoption \
   --output-dir <dir>
 ```
 
-The online and airgap commands are the four operator-facing release quadrants;
+The online and airgap commands are the four operator-facing choices;
 airgap-bundle commands are packaging-side helpers for those airgap paths. All
 of them map to existing producer diagnostics and write
 `operator-release-surface-report.json` with `readiness: false`. The repo-local
@@ -144,16 +144,18 @@ bash scripts/verify-release.sh --release-engineering-gate-intake \
   --output-dir <dir>
 ```
 
-This is the only repo-local formal-gate candidate boundary before a future
-formal gate. It consumes existing focused adoption outputs only, requires the
-four quadrants (`online/use_existing`, `online/install_substrates`,
+This is a maintainer-only candidate intake boundary for explicit GA or
+compliance trigger work. It consumes existing focused adoption outputs only,
+requires the four operator choices (`online/use_existing`,
+`online/install_substrates`,
 `airgap/use_existing`, `airgap/install_substrates`), binds release identity and
 release contract digest/provenance, and writes
 `release-engineering-gate-intake-report.json` with `readiness: false`,
 `scope: release_engineering_gate_candidate_intake_only`, `status: pass`, and
-`formal_verdict: not_issued`. The report lists blocking gaps for formal
-operator verdict plus offline/package/release readiness; it is not an evidence
-envelope output, operator verdict, package readiness, or release readiness.
+`formal_verdict: not_issued`. The report lists blocking gaps for a future
+formal operator verdict plus offline/package/release readiness; it is not an
+evidence envelope output, operator verdict, package readiness, or release
+readiness.
 `verify-release.sh` remains the producer catalog and maintainer/focused
 diagnostic entry.
 
@@ -185,7 +187,7 @@ include `managed_runner`, a digest-bound inventory image supplied by the
 release contract. Every declared `target_profiles` entry must carry
 `required: boolean`; `support_level` is rejected, duplicate three-axis tuples
 are rejected, and every entry must use an accepted pre-GA tuple. Only the four
-existing-Kubernetes tuples are operator-facing release profiles. Existing
+existing-Kubernetes tuples map to the operator choice surface. Existing
 Kubernetes profiles can be declared for both `external_declared` and
 `kit_installed` substrate choices across online and airgap distributions;
 `kind_rehearsal/kit_installed/online` remains local/CI rehearsal-only input.
@@ -315,7 +317,7 @@ Pre-GA stale six-image required-id inputs, obsolete
 `${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale
 runner-name aliases such as `agent-task-runner` or `agentsmith-codex-runner`
 are not success or compatibility paths. Keep them only as fail-fast/negative
-diagnostic evidence, and remove those cases once the formal fixtures and
+diagnostic evidence, and remove those cases once the current fixtures and
 runbooks stabilize.
 
 This diagnostic does not log in to a registry, pull, push, mirror, build an
@@ -855,8 +857,9 @@ Release engineering gate intake focused diagnostic:
 bash scripts/test-release-engineering-gate-intake.sh
 ```
 
-`--release-engineering-gate-intake` consumes only the focused online adoption
-report and the two focused airgap adoption reports. It rejects focused producer
+`--release-engineering-gate-intake` is maintainer-only for explicit GA or
+compliance trigger work. It consumes only the focused online adoption report
+and the two focused airgap adoption reports. It rejects focused producer
 reports such as `online-deployment-gate-report.json`,
 `operator-release-surface-report.json`, and
 `airgap-deployment-gate-report.json`, and it fails closed on readiness/verdict
@@ -945,10 +948,11 @@ Operator signoff intake focused diagnostic:
 bash scripts/test-operator-signoff-intake.sh
 ```
 
-`--operator-signoff-intake` validates only one
-`agentsmith.operator-signoff-intake/v1` JSON file against a generated
-`online-deployment-gate-report.json` from confirmed apply mode. It accepts
-only `existing_kubernetes/external_declared/online`, requires `decision:
+`--operator-signoff-intake` is maintainer-only for explicit GA or compliance
+trigger work. It validates only one `agentsmith.operator-signoff-intake/v1`
+JSON file against a generated `online-deployment-gate-report.json` from
+confirmed apply mode. It accepts only
+`existing_kubernetes/external_declared/online`, requires `decision:
 signed_off`, binds `operator_run_id`, release id, git sha, the release contract
 raw sha256, target profile, and `subject.sha256` to the raw online gate report
 file. The online gate report must be `schema:

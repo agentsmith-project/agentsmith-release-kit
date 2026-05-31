@@ -6,9 +6,9 @@ Use this page to choose the target path before running repo-local checks. The
 scripts here produce focused evidence with `readiness: false`; they do not
 sign off deploy, package, offline install, or release readiness.
 
-## Formal Operator Quadrants
+## Operator Choice Matrix
 
-This table is the operator-facing quadrant index for online/airgap by
+This table is the operator-facing choice matrix for online/airgap by
 use-existing/install-substrates. It is not a formal release verdict, package
 readiness, operator readiness, or GA signoff.
 
@@ -20,7 +20,7 @@ readiness, operator readiness, or GA signoff.
 | `airgap/install_substrates` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap install_substrates ... --bundle-root ... --render-values ... --substrate-truth ... --target-prerequisites ...` | Consumes an already assembled kit-installed bundle through the focused chain: substrate-pack-check, image load, bundle render-check, apply, rollout, and optional smoke when confirmed apply is requested. It does not install substrates and is not full readiness or an operator verdict. |
 
 Airgap bundle packaging commands are packaging-side helpers for the airgap
-quadrants, not formal release quadrants.
+operator choices, not standalone operator choices.
 
 | Packaging surface | Machine profile mapping | Operator command entry | Current result |
 | --- | --- | --- | --- |
@@ -116,32 +116,33 @@ matching sha256 digest. The resulting `registry-presence-report.json` has
 evidence-envelope input, and does not prove deploy/package/release readiness.
 Neither path performs registry login, pull, push, or mirror.
 
-After a confirmed online focused chain run, operators may run
+After a confirmed online focused chain run, maintainers may run
 `--operator-signoff-intake` with `operator-signoff-intake.json` and the
-generated `online-deployment-gate-report.json`. This is machine intake and
-binding only: it checks the signoff JSON allowlist, release identity, release
-contract digest, target profile, operator run id, raw report sha256, and the
-canonical source-registry or target-registry confirmed-apply producer order. It
-writes `operator-signoff-intake-report.json` with `readiness=false`, does not
-verify signatures or identity, is not registry presence proof, is not accepted
-by the evidence envelope validator, and is not deploy/package/release
-readiness.
+generated `online-deployment-gate-report.json` only for explicit GA or
+compliance trigger work. This is machine intake and binding only: it checks
+the signoff JSON allowlist, release identity, release contract digest, target
+profile, operator run id, raw report sha256, and the canonical source-registry
+or target-registry confirmed-apply producer order. It writes
+`operator-signoff-intake-report.json` with `readiness=false`, does not verify
+signatures or identity, is not registry presence proof, is not accepted by the
+evidence envelope validator, and is not deploy/package/release readiness.
 
-For repo-local formal-gate candidate intake, run
+For maintainer-only repo-local candidate intake, run
 `--release-engineering-gate-intake` with the generated online adoption report
 and both airgap adoption reports. The command only verifies the candidate
-boundary: all four quadrants are present, release identity/digest/provenance
-bindings agree with the release contract, focused producer reports are not used
-as adoption inputs, and no input already contains readiness or verdict fields.
-It writes `release-engineering-gate-intake-report.json` with
-`readiness=false` and `formal_verdict=not_issued`, and lists formal operator
-verdict plus offline/package/release readiness as blocking gaps. It is not
-accepted by evidence intake and is not deploy/package/release readiness.
+boundary for explicit GA or compliance trigger work: all four operator choices
+are present, release identity/digest/provenance bindings agree with the
+release contract, focused producer reports are not used as adoption inputs, and
+no input already contains readiness or verdict fields. It writes
+`release-engineering-gate-intake-report.json` with `readiness=false` and
+`formal_verdict=not_issued`, and lists future formal operator verdict plus
+offline/package/release readiness as blocking gaps. It is not accepted by
+evidence intake and is not deploy/package/release readiness.
 
 ## Current Notes
 
 Pre-GA release contracts may declare the four existing-Kubernetes operator
-release profiles plus `kind_rehearsal/kit_installed/online` only as
+choice mappings plus `kind_rehearsal/kit_installed/online` only as
 rehearsal-only input, but none may be marked required. Keep every
 `target_profiles[].required` value `false`; `required: true` fails fast because
 release-kit does not yet have full deploy/package evidence for every path.

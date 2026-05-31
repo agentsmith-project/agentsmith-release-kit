@@ -106,7 +106,7 @@ function usage() {
     --airgap-adoption-report <airgap install_substrates airgap-adoption-report.json> \\
     --output-dir <dir>
 
-This is the repo-local release engineering gate candidate intake boundary only.
+This maintainer-only intake is for explicit GA or compliance trigger work.
 It consumes existing focused adoption outputs, writes ${REPORT_FILE} with
 readiness=false and formal_verdict=not_issued, and does not issue deploy,
 offline/package, operator, or release readiness.`;

@@ -160,10 +160,10 @@ must use an accepted pre-GA profile tuple:
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`,
 `existing_kubernetes/kit_installed/airgap`, or
-`kind_rehearsal/kit_installed/online`. Only the four existing-Kubernetes
-tuples are formal operator release profiles in the operator-facing taxonomy;
-this is not a formal verdict/readiness claim. The kind tuple is
-rehearsal-only accepted input. During pre-GA every entry must use
+`kind_rehearsal/kit_installed/online`. Only the four existing-Kubernetes tuples
+map to the operator choice surface; this is not a formal verdict/readiness
+claim. The kind tuple is rehearsal-only accepted input. During pre-GA every
+entry must use
 `required: false`; any `required: true` target fails fast.
 
 The generated `intake-report.json`, `image-digest-plan.json`, and
@@ -348,8 +348,8 @@ cover AgentSmith runner runtime, backend-real validation, or release readiness.
 During pre-GA, stale six-image required-id inputs, obsolete
 `${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale
 runner-name aliases such as `agent-task-runner` or `agentsmith-codex-runner`
-are not formal success or compatibility paths; they are limited to fail-fast
-checks or negative diagnostics, and can be deleted once the formal fixtures and
+are not supported success or compatibility paths; they are limited to fail-fast
+checks or negative diagnostics, and can be deleted once the current fixtures and
 runbooks stabilize.
 
 ## Registry Presence Focused Diagnostic
@@ -988,7 +988,7 @@ release contract digest/subject binding, coverage counts, and
 digest/provenance summaries for the two online paths. It must not include raw
 local paths, kubeconfig content, secrets, product-flow details, operator
 verdicts, release verdicts, deploy/package fields, or release readiness
-claims. This is repo-local focused verdict preparation only, not a deploy
+claims. This is repo-local focused candidate preparation only, not a deploy
 capability, provider matrix, cloud provisioning flow, operator signoff, full
 release gate, or AgentSmith `release:ready` input.
 
@@ -1001,13 +1001,13 @@ bash scripts/test-release-engineering-gate-intake.sh
 ```
 
 This focused guard exercises `bash scripts/verify-release.sh
---release-engineering-gate-intake`. It is the repo-local formal-gate candidate
-boundary only. It consumes the existing focused `online-adoption-report.json`
-plus two existing focused `airgap-adoption-report.json` files for
-`airgap/use_existing` and `airgap/install_substrates`; it does not consume
-producer reports directly.
+--release-engineering-gate-intake`. It is a maintainer-only repo-local
+candidate intake boundary for explicit GA or compliance trigger work. It
+consumes the existing focused `online-adoption-report.json` plus two existing
+focused `airgap-adoption-report.json` files for `airgap/use_existing` and
+`airgap/install_substrates`; it does not consume producer reports directly.
 
-The intake requires all four quadrants:
+The intake requires all four operator choices:
 `online/use_existing`, `online/install_substrates`, `airgap/use_existing`, and
 `airgap/install_substrates`. Release id, git sha, release contract raw digest,
 release contract subject/provenance, online adoption provenance summaries, and
@@ -1018,8 +1018,8 @@ Inputs containing `readiness: true`, `release_verdict`, `operator_verdict`,
 The generated `release-engineering-gate-intake-report.json` uses `schema:
 agentsmith.release-engineering-gate-intake/v1`, `scope:
 release_engineering_gate_candidate_intake_only`, `readiness: false`, `status:
-pass`, and `formal_verdict: not_issued`. It lists blocking gaps for formal
-operator verdict plus offline/package/release readiness. It is not an
+pass`, and `formal_verdict: not_issued`. It lists blocking gaps for a future
+formal operator verdict plus offline/package/release readiness. It is not an
 operator verdict, evidence-envelope output, offline package readiness, deploy
 readiness, release readiness, registry mirror action, rollback flow, cloud
 provisioning flow, product flow, backend-real check, or AgentSmith handoff.
@@ -1034,7 +1034,8 @@ bash scripts/test-operator-signoff-intake.sh
 
 This focused guard exercises `bash scripts/verify-release.sh
 --operator-signoff-intake`. It validates only an operator signoff intake JSON
-against an already generated online deployment gate apply report. It is not a
+against an already generated online deployment gate apply report, and is
+maintainer-only for explicit GA or compliance trigger work. It is not a
 signature verifier, identity system, registry presence proof, full online
 adoption check, deploy readiness check, package readiness check, or release
 readiness check.
