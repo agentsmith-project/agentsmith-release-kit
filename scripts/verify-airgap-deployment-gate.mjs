@@ -933,6 +933,8 @@ async function main(argv) {
       args.substrateTruth,
       '--target-prerequisites',
       args.targetPrerequisites,
+      '--release-contract',
+      args.releaseContract,
       '--expected-namespace',
       args.namespace,
       '--output-dir',

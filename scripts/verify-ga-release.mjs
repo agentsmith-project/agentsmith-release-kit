@@ -5,12 +5,36 @@ import path from 'node:path';
 
 const REPORT_FILE = 'ga-release-report.json';
 const SUMMARY_FILE = 'ga-release-summary.md';
+const FINALIZER_MANIFEST_FILE = 'deployment-path-finalizer-manifest.json';
+const SOURCE_EVIDENCE_DIR = 'source-evidence';
 const REPORT_SCHEMA = 'agentsmith.ga-release-report/v1';
 const PATH_REPORT_SCHEMA = 'agentsmith.deployment-path-report/v1';
+const PATH_REPORT_SCOPE = 'deployment_path_ga_evidence';
+const FINALIZER_MANIFEST_SCHEMA = 'agentsmith.deployment-path-finalizer-manifest/v1';
+const SOURCE_EVIDENCE_SCHEMA = 'agentsmith.deployment-path-source-evidence/v1';
+const FINALIZER_SCHEMA = 'agentsmith.deployment-path-report-finalizer/v1';
+const FINALIZER_TOOL = 'verify-deployment-path-report.mjs';
+const FINALIZER_MANIFEST_TOOL = 'verify-deployment-path-report';
+const FINALIZER_MODE = 'deployment_path_source_evidence_finalization';
 const PRODUCT_READY_SCHEMA = 'agentsmith.product-readiness-report/v1';
 const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke/v1';
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
+const ONLINE_GATE_SCHEMA = 'agentsmith.online-deployment-gate/v1';
+const AIRGAP_GATE_SCHEMA = 'agentsmith.airgap-deployment-gate/v1';
+const AIRGAP_BUNDLE_CHECK_SCHEMA = 'agentsmith.airgap-bundle-check-report/v1';
+const AIRGAP_BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
+const IMAGE_MAP_SCHEMA = 'agentsmith.image-map/v1';
+const IMAGE_MAP_SCOPE = 'image_map_only';
+const SUBSTRATE_INSTALL_SCHEMA = 'agentsmith.substrate-install-report/v1';
+const SUBSTRATE_INSTALL_SCOPE = 'substrate_install_only';
+const TARGET_PREFLIGHT_SCHEMA = 'agentsmith.target-preflight-report/v1';
+const RENDER_CHECK_SCHEMA = 'agentsmith.render-check-report/v1';
+const APPLY_SCHEMA = 'agentsmith.kubernetes-apply-report/v1';
+const ROLLOUT_SCHEMA = 'agentsmith.kubernetes-rollout-report/v1';
+const ROUTE_SMOKE_SCHEMA = 'agentsmith.route-smoke-report/v1';
+const AIRGAP_IMAGE_LOAD_SCHEMA = 'agentsmith.airgap-image-load-report/v1';
+const AIRGAP_BUNDLE_RENDER_CHECK_SCHEMA = 'agentsmith.airgap-bundle-render-check-report/v1';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const AGENTSMITH_REPO = 'github.com/agentsmith-project/agentsmith';
@@ -34,11 +58,70 @@ const REQUIRED_OPERATOR_PATHS = new Map([
   }],
   ['airgap/use_existing', {
     targetProfile: 'existing_kubernetes/external_declared/airgap',
-    steps: ['bundle-check', 'image-load', 'offline-render-check', 'apply', 'rollout', 'route-smoke']
+    steps: ['target-preflight', 'bundle-check', 'image-load', 'offline-render-check', 'apply', 'rollout', 'route-smoke']
   }],
   ['airgap/install_substrates', {
     targetProfile: 'existing_kubernetes/kit_installed/airgap',
-    steps: ['bundle-check', 'image-load', 'substrate-install', 'offline-render-check', 'apply', 'rollout', 'route-smoke']
+    steps: ['target-preflight', 'bundle-check', 'image-load', 'substrate-install', 'offline-render-check', 'apply', 'rollout', 'route-smoke']
+  }]
+]);
+
+const SOURCE_STEP_REPORTS = new Map([
+  ['target-preflight', {
+    source_step: 'target-preflight',
+    source_schema: TARGET_PREFLIGHT_SCHEMA,
+    source_scope: 'target_preflight_prerequisite_only'
+  }],
+  ['render-check', {
+    source_step: 'render-check',
+    source_schema: RENDER_CHECK_SCHEMA,
+    source_scope: 'render_check_image_inventory_only'
+  }],
+  ['apply', {
+    source_step: 'apply',
+    source_schema: APPLY_SCHEMA,
+    source_scope: 'kubernetes_apply_only'
+  }],
+  ['rollout', {
+    source_step: 'rollout',
+    source_schema: ROLLOUT_SCHEMA,
+    source_scope: 'kubernetes_rollout_imageid_only'
+  }],
+  ['route-smoke', {
+    source_step: 'smoke',
+    source_schema: ROUTE_SMOKE_SCHEMA,
+    source_scope: 'route_smoke_only'
+  }],
+  ['bundle-check', {
+    source_step: 'airgap-bundle-check',
+    source_schema: AIRGAP_BUNDLE_CHECK_SCHEMA,
+    source_scope: 'airgap_bundle_manifest_check_only'
+  }],
+  ['image-load', {
+    source_step: 'airgap-image-load',
+    source_schema: AIRGAP_IMAGE_LOAD_SCHEMA,
+    source_scope: 'airgap_image_load_only'
+  }],
+  ['offline-render-check', {
+    source_step: 'airgap-bundle-render-check',
+    source_schema: AIRGAP_BUNDLE_RENDER_CHECK_SCHEMA,
+    source_scope: 'airgap_bundle_render_check_only'
+  }],
+  ['substrate-install', {
+    source_step: 'substrate-install',
+    source_schema: SUBSTRATE_INSTALL_SCHEMA,
+    source_scope: SUBSTRATE_INSTALL_SCOPE
+  }]
+]);
+
+const DEPLOYMENT_GATE_BY_SOURCE = new Map([
+  ['online', {
+    schema: ONLINE_GATE_SCHEMA,
+    scope: 'online_deployment_gate_only'
+  }],
+  ['airgap', {
+    schema: AIRGAP_GATE_SCHEMA,
+    scope: 'airgap_deployment_gate_only'
   }]
 ]);
 
@@ -204,6 +287,7 @@ async function readJson(file, label) {
   const buffer = await readBuffer(file, label);
   try {
     return {
+      file,
       value: JSON.parse(buffer.toString('utf8')),
       digest: digestBuffer(buffer)
     };
@@ -229,6 +313,13 @@ function requireArray(value, label) {
 function requireString(value, label) {
   if (typeof value !== 'string' || value.trim() === '') {
     fail(`${label} is required`);
+  }
+  return value;
+}
+
+function requireInteger(value, label) {
+  if (!Number.isInteger(value) || value < 0) {
+    fail(`${label} must be a non-negative integer`);
   }
   return value;
 }
@@ -266,6 +357,10 @@ function requireSchema(report, schema, label) {
   if (report.schema !== schema && report.schema_version !== schema) {
     fail(`${label} schema must be ${schema}`);
   }
+}
+
+function reportSchema(report) {
+  return report.schema ?? report.schema_version;
 }
 
 function requireNoFormalVerdict(report, label) {
@@ -459,8 +554,451 @@ function validateProductSmoke(report, reportDigest, release) {
   return { report_digest: reportDigest, covered_flows: [...flows].sort() };
 }
 
-function validateDeploymentPathReport(report, reportDigest, release, deployTemplate) {
+function requireEquals(actual, expected, label) {
+  if (actual !== expected) {
+    fail(`${label} must be ${expected}`);
+  }
+}
+
+function validateSourceEvidenceLedger(report, requirement, steps, operatorPath) {
+  const ledger = requireObject(report.source_evidence, 'deployment_path_report.source_evidence');
+  requireSchema(ledger, SOURCE_EVIDENCE_SCHEMA, 'deployment_path_report.source_evidence');
+  requireEquals(
+    requireString(ledger.operator_path, 'deployment_path_report.source_evidence.operator_path'),
+    operatorPath,
+    'deployment_path_report.source_evidence.operator_path'
+  );
+  requireTargetProfile(
+    ledger.target_profile,
+    requirement.targetProfile,
+    'deployment_path_report.source_evidence.target_profile'
+  );
+
+  const finalizer = requireObject(
+    ledger.finalizer,
+    'deployment_path_report.source_evidence.finalizer'
+  );
+  requireEquals(
+    requireString(finalizer.schema, 'deployment_path_report.source_evidence.finalizer.schema'),
+    FINALIZER_SCHEMA,
+    'deployment_path_report.source_evidence.finalizer.schema'
+  );
+  requireEquals(
+    requireString(finalizer.tool, 'deployment_path_report.source_evidence.finalizer.tool'),
+    FINALIZER_TOOL,
+    'deployment_path_report.source_evidence.finalizer.tool'
+  );
+  requireEquals(
+    requireString(finalizer.mode, 'deployment_path_report.source_evidence.finalizer.mode'),
+    FINALIZER_MODE,
+    'deployment_path_report.source_evidence.finalizer.mode'
+  );
+
+  const source = operatorPath.startsWith('airgap/') ? 'airgap' : 'online';
+  const expectedGate = DEPLOYMENT_GATE_BY_SOURCE.get(source);
+  const gate = requireObject(
+    ledger.source_deployment_gate_report,
+    'deployment_path_report.source_evidence.source_deployment_gate_report'
+  );
+  requireEquals(
+    requireString(gate.schema, 'deployment_path_report.source_evidence.source_deployment_gate_report.schema'),
+    expectedGate.schema,
+    'deployment_path_report.source_evidence.source_deployment_gate_report.schema'
+  );
+  requireEquals(
+    requireString(gate.scope, 'deployment_path_report.source_evidence.source_deployment_gate_report.scope'),
+    expectedGate.scope,
+    'deployment_path_report.source_evidence.source_deployment_gate_report.scope'
+  );
+  requireDigest(gate.digest, 'deployment_path_report.source_evidence.source_deployment_gate_report.digest');
+
+  const ledgerSteps = requireArray(
+    ledger.finalized_steps,
+    'deployment_path_report.source_evidence.finalized_steps'
+  );
+  if (ledgerSteps.length !== steps.size) {
+    fail('deployment_path_report.source_evidence.finalized_steps must match steps[] length');
+  }
+  const ledgerStepsByName = new Map();
+  for (const [index, rawStep] of ledgerSteps.entries()) {
+    const step = requireObject(
+      rawStep,
+      `deployment_path_report.source_evidence.finalized_steps[${index}]`
+    );
+    const name = requireString(
+      step.name,
+      `deployment_path_report.source_evidence.finalized_steps[${index}].name`
+    );
+    if (ledgerStepsByName.has(name)) {
+      fail(`deployment_path_report.source_evidence.finalized_steps contains duplicate step: ${name}`);
+    }
+    ledgerStepsByName.set(name, step);
+  }
+
+  for (const stepName of requirement.steps) {
+    const reportStep = steps.get(stepName);
+    const ledgerStep = ledgerStepsByName.get(stepName);
+    if (!ledgerStep) {
+      fail(`deployment_path_report.source_evidence missing finalized step: ${stepName}`);
+    }
+    const expected = SOURCE_STEP_REPORTS.get(stepName);
+    requireEquals(
+      requireString(ledgerStep.source_step, `deployment_path_report.source_evidence.finalized_steps.${stepName}.source_step`),
+      expected.source_step,
+      `deployment_path_report.source_evidence.finalized_steps.${stepName}.source_step`
+    );
+    requireEquals(
+      requireString(ledgerStep.source_schema, `deployment_path_report.source_evidence.finalized_steps.${stepName}.source_schema`),
+      expected.source_schema,
+      `deployment_path_report.source_evidence.finalized_steps.${stepName}.source_schema`
+    );
+    requireEquals(
+      requireString(ledgerStep.source_scope, `deployment_path_report.source_evidence.finalized_steps.${stepName}.source_scope`),
+      expected.source_scope,
+      `deployment_path_report.source_evidence.finalized_steps.${stepName}.source_scope`
+    );
+    if (
+      requireDigest(
+        ledgerStep.report_digest,
+        `deployment_path_report.source_evidence.finalized_steps.${stepName}.report_digest`
+      ) !== reportStep.report_digest
+    ) {
+      fail(`deployment_path_report.source_evidence.finalized_steps ${stepName} report_digest must match steps[]`);
+    }
+  }
+
+  if (operatorPath.startsWith('airgap/')) {
+    const offline = requireObject(report.airgap_offline, 'deployment_path_report.airgap_offline');
+    const airgap = requireObject(ledger.airgap, 'deployment_path_report.source_evidence.airgap');
+    if (
+      requireDigest(
+        airgap.bundle_manifest_digest,
+        'deployment_path_report.source_evidence.airgap.bundle_manifest_digest'
+      ) !== offline.bundle_manifest_digest
+    ) {
+      fail('deployment_path_report.source_evidence.airgap.bundle_manifest_digest must match airgap_offline');
+    }
+    if (
+      requireDigest(
+        airgap.bundle_check_report_digest,
+        'deployment_path_report.source_evidence.airgap.bundle_check_report_digest'
+      ) !== steps.get('bundle-check').report_digest
+    ) {
+      fail('deployment_path_report.source_evidence.airgap.bundle_check_report_digest must match bundle-check step');
+    }
+    requireDigest(
+      airgap.image_map_input_sha256,
+      'deployment_path_report.source_evidence.airgap.image_map_input_sha256'
+    );
+  } else if (Object.prototype.hasOwnProperty.call(ledger, 'airgap')) {
+    fail('deployment_path_report.source_evidence.airgap is only accepted for airgap paths');
+  }
+
+  if (operatorPath.includes('install_substrates')) {
+    const install = requireObject(
+      ledger.substrate_install,
+      'deployment_path_report.source_evidence.substrate_install'
+    );
+    if (
+      requireDigest(
+        install.report_digest,
+        'deployment_path_report.source_evidence.substrate_install.report_digest'
+      ) !== steps.get('substrate-install').report_digest
+    ) {
+      fail('deployment_path_report.source_evidence.substrate_install.report_digest must match substrate-install step');
+    }
+    requireEquals(
+      requireString(install.schema, 'deployment_path_report.source_evidence.substrate_install.schema'),
+      SUBSTRATE_INSTALL_SCHEMA,
+      'deployment_path_report.source_evidence.substrate_install.schema'
+    );
+    requireEquals(
+      requireString(install.scope, 'deployment_path_report.source_evidence.substrate_install.scope'),
+      SUBSTRATE_INSTALL_SCOPE,
+      'deployment_path_report.source_evidence.substrate_install.scope'
+    );
+    requireDigest(
+      install.output_substrate_truth_digest,
+      'deployment_path_report.source_evidence.substrate_install.output_substrate_truth_digest'
+    );
+    const serviceCount = requireInteger(
+      install.service_count,
+      'deployment_path_report.source_evidence.substrate_install.service_count'
+    );
+    if (serviceCount === 0) {
+      fail('deployment_path_report.source_evidence.substrate_install.service_count must be greater than zero');
+    }
+  } else if (Object.prototype.hasOwnProperty.call(ledger, 'substrate_install')) {
+    fail('deployment_path_report.source_evidence.substrate_install is only accepted for install_substrates paths');
+  }
+
+  return ledger;
+}
+
+function safeSourceEvidencePath(value, label) {
+  const relative = requireString(value, label);
+  if (relative.includes('\\') || path.isAbsolute(relative)) {
+    fail(`${label} must be a portable relative path`);
+  }
+  const parts = relative.split('/');
+  if (parts.some((part) => part === '' || part === '.' || part === '..')) {
+    fail(`${label} must not contain empty, current, or parent segments`);
+  }
+  if (parts[0] !== SOURCE_EVIDENCE_DIR) {
+    fail(`${label} must be under ${SOURCE_EVIDENCE_DIR}/`);
+  }
+  return relative;
+}
+
+function sourceEvidenceManifestPathSet(entries) {
+  const paths = new Set();
+  for (const [index, entry] of entries.entries()) {
+    const relative = safeSourceEvidencePath(
+      entry.path,
+      `finalizer_manifest.source_evidence_files[${index}].path`
+    );
+    if (paths.has(relative)) {
+      fail(`finalizer_manifest.source_evidence_files contains duplicate path: ${relative}`);
+    }
+    paths.add(relative);
+  }
+  return paths;
+}
+
+async function listSourceEvidenceJsonFiles(sourceDir, currentDir = sourceDir) {
+  let entries;
+  try {
+    entries = await fs.readdir(currentDir, { withFileTypes: true });
+  } catch (error) {
+    fail(`cannot read source evidence directory: ${error.message}`);
+  }
+
+  const files = [];
+  for (const entry of entries) {
+    const fullPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listSourceEvidenceJsonFiles(sourceDir, fullPath));
+      continue;
+    }
+    if (entry.isFile() && entry.name.endsWith('.json')) {
+      files.push(
+        `${SOURCE_EVIDENCE_DIR}/${path.relative(sourceDir, fullPath).split(path.sep).join('/')}`
+      );
+    }
+  }
+  return files;
+}
+
+async function validateSourceEvidenceDirectoryClosure(reportDir, manifestPaths) {
+  const actualJsonFiles = await listSourceEvidenceJsonFiles(
+    path.join(reportDir, SOURCE_EVIDENCE_DIR)
+  );
+  const actualJsonSet = new Set(actualJsonFiles);
+  for (const relative of actualJsonFiles) {
+    if (!manifestPaths.has(relative)) {
+      fail(`source evidence directory contains unlisted JSON file: ${relative}`);
+    }
+  }
+  for (const relative of manifestPaths) {
+    if (relative.endsWith('.json') && !actualJsonSet.has(relative)) {
+      fail(`source evidence directory is missing manifest-listed JSON file: ${relative}`);
+    }
+  }
+}
+
+function sourceEvidenceKey(kind, step) {
+  return `${kind}:${step ?? ''}`;
+}
+
+function expectedSourceEvidenceFiles({ ledger, operatorPath }) {
+  const gate = requireObject(
+    ledger.source_deployment_gate_report,
+    'deployment_path_report.source_evidence.source_deployment_gate_report'
+  );
+  const expected = [
+    {
+      kind: 'source_deployment_gate',
+      sha256: gate.digest,
+      schema: gate.schema,
+      scope: gate.scope
+    }
+  ];
+
+  for (const step of ledger.finalized_steps) {
+    expected.push({
+      kind: 'finalized_step_report',
+      step: step.name,
+      sha256: step.report_digest,
+      schema: step.source_schema,
+      scope: step.source_scope
+    });
+  }
+
+  if (operatorPath.startsWith('airgap/')) {
+    const airgap = requireObject(ledger.airgap, 'deployment_path_report.source_evidence.airgap');
+    expected.push({
+      kind: 'airgap_bundle_manifest',
+      sha256: airgap.bundle_manifest_digest,
+      schema: AIRGAP_BUNDLE_MANIFEST_SCHEMA,
+      scope: null
+    });
+    expected.push({
+      kind: 'airgap_image_map',
+      sha256: airgap.image_map_input_sha256,
+      schema: IMAGE_MAP_SCHEMA,
+      scope: IMAGE_MAP_SCOPE
+    });
+  }
+
+  return expected;
+}
+
+async function validateSourceEvidenceMaterialFile({ reportDir, entry, expected }) {
+  if (requireString(entry.kind, 'finalizer_manifest.source_evidence_files[].kind') !== expected.kind) {
+    fail('finalizer_manifest.source_evidence_files entry type must match path report source evidence');
+  }
+  if (expected.step !== undefined) {
+    if (
+      requireString(entry.step, `finalizer_manifest.source_evidence_files.${expected.kind}.step`) !==
+      expected.step
+    ) {
+      fail('finalizer_manifest.source_evidence_files finalized step must match path report source evidence');
+    }
+  } else if (Object.prototype.hasOwnProperty.call(entry, 'step')) {
+    fail(`finalizer_manifest.source_evidence_files ${expected.kind} must not include step`);
+  }
+
+  const relative = safeSourceEvidencePath(
+    entry.path,
+    `finalizer_manifest.source_evidence_files.${expected.kind}.path`
+  );
+  if (
+    requireDigest(entry.sha256, `finalizer_manifest.source_evidence_files.${expected.kind}.sha256`) !==
+    expected.sha256
+  ) {
+    fail(`finalizer_manifest.source_evidence_files ${expected.kind} sha256 must match path report source evidence`);
+  }
+  if (
+    requireString(entry.schema, `finalizer_manifest.source_evidence_files.${expected.kind}.schema`) !==
+    expected.schema
+  ) {
+    fail(`finalizer_manifest.source_evidence_files ${expected.kind} schema must match path report source evidence`);
+  }
+  if (entry.scope !== expected.scope) {
+    fail(`finalizer_manifest.source_evidence_files ${expected.kind} scope must match path report source evidence`);
+  }
+
+  const materialInput = await readJson(
+    path.join(reportDir, relative),
+    `source evidence file ${relative}`
+  );
+  if (materialInput.digest !== expected.sha256) {
+    fail(`source evidence file ${relative} sha256 must match finalizer manifest`);
+  }
+  const materialReport = requireObject(materialInput.value, `source evidence file ${relative}`);
+  scanForForbiddenReportContent(materialReport, `source evidence file ${relative}`);
+  if (reportSchema(materialReport) !== expected.schema) {
+    fail(`source evidence file ${relative} schema must match finalizer manifest`);
+  }
+  if (expected.scope !== null && materialReport.scope !== expected.scope) {
+    fail(`source evidence file ${relative} scope must match finalizer manifest`);
+  }
+}
+
+async function validateFinalizerManifest({
+  pathInput,
+  report,
+  ledger,
+  operatorPath,
+  release,
+  deployTemplate
+}) {
+  const reportDir = path.dirname(pathInput.file);
+  const manifestInput = await readJson(
+    path.join(reportDir, FINALIZER_MANIFEST_FILE),
+    'deployment path finalizer manifest'
+  );
+  const manifest = requireObject(manifestInput.value, 'deployment path finalizer manifest');
+  requireSchema(manifest, FINALIZER_MANIFEST_SCHEMA, 'deployment path finalizer manifest');
+  if (
+    requireString(manifest.tool, 'finalizer_manifest.tool') !== FINALIZER_MANIFEST_TOOL
+  ) {
+    fail(`finalizer_manifest.tool must be ${FINALIZER_MANIFEST_TOOL}`);
+  }
+  if (requireString(manifest.operator_path, 'finalizer_manifest.operator_path') !== operatorPath) {
+    fail('finalizer_manifest.operator_path must match deployment path report');
+  }
+  if (
+    requireString(manifest.deployment_profile, 'finalizer_manifest.deployment_profile') !==
+    report.target_profile.value
+  ) {
+    fail('finalizer_manifest.deployment_profile must match deployment path report');
+  }
+  if (
+    requireDigest(manifest.release_contract_digest, 'finalizer_manifest.release_contract_digest') !==
+    release.release_contract_digest
+  ) {
+    fail('finalizer_manifest.release_contract_digest must match release contract digest');
+  }
+  if (
+    requireDigest(manifest.template_digest, 'finalizer_manifest.template_digest') !==
+    deployTemplate.deploy_template_package_digest
+  ) {
+    fail('finalizer_manifest.template_digest must match deploy template package digest');
+  }
+  if (
+    requireDigest(manifest.path_report_sha256, 'finalizer_manifest.path_report_sha256') !==
+    pathInput.digest
+  ) {
+    fail('finalizer_manifest.path_report_sha256 must match deployment path report bytes');
+  }
+  requireString(manifest.created_at, 'finalizer_manifest.created_at');
+
+  const actualEntries = requireArray(
+    manifest.source_evidence_files,
+    'finalizer_manifest.source_evidence_files'
+  );
+  const manifestPaths = sourceEvidenceManifestPathSet(actualEntries);
+  await validateSourceEvidenceDirectoryClosure(reportDir, manifestPaths);
+  const expectedEntries = expectedSourceEvidenceFiles({ ledger, operatorPath });
+  if (actualEntries.length !== expectedEntries.length) {
+    fail('finalizer_manifest.source_evidence_files must exactly cover path report source evidence');
+  }
+
+  const actualByKey = new Map();
+  for (const [index, rawEntry] of actualEntries.entries()) {
+    const entry = requireObject(rawEntry, `finalizer_manifest.source_evidence_files[${index}]`);
+    const kind = requireString(entry.kind, `finalizer_manifest.source_evidence_files[${index}].kind`);
+    const step = kind === 'finalized_step_report'
+      ? requireString(entry.step, `finalizer_manifest.source_evidence_files[${index}].step`)
+      : undefined;
+    const key = sourceEvidenceKey(kind, step);
+    if (actualByKey.has(key)) {
+      fail(`finalizer_manifest.source_evidence_files contains duplicate entry: ${key}`);
+    }
+    actualByKey.set(key, entry);
+  }
+
+  for (const expected of expectedEntries) {
+    const key = sourceEvidenceKey(expected.kind, expected.step);
+    const entry = actualByKey.get(key);
+    if (!entry) {
+      fail(`finalizer_manifest.source_evidence_files missing entry: ${key}`);
+    }
+    await validateSourceEvidenceMaterialFile({ reportDir, entry, expected });
+  }
+}
+
+async function validateDeploymentPathReport(pathInput, release, deployTemplate) {
+  const report = pathInput.value;
+  const reportDigest = pathInput.digest;
   requireSchema(report, PATH_REPORT_SCHEMA, 'deployment path report');
+  if (requireString(report.scope, 'deployment_path_report.scope') !== PATH_REPORT_SCOPE) {
+    fail(`deployment_path_report.scope must be ${PATH_REPORT_SCOPE}`);
+  }
+  if (report.readiness !== false) {
+    fail('deployment path report readiness must be false');
+  }
   requireNoFormalVerdict(report, 'deployment path report');
   commonReportChecks(report, 'deployment path report', release);
   if (
@@ -483,6 +1021,9 @@ function validateDeploymentPathReport(report, reportDigest, release, deployTempl
       fail(`deployment path ${operatorPath} missing required step: ${step}`);
     }
   }
+  if (steps.size !== requirement.steps.length) {
+    fail(`deployment path ${operatorPath} steps must exactly match required steps`);
+  }
 
   if (operatorPath.includes('install_substrates')) {
     const confirmation = requireObject(report.install_substrates_confirmation, 'deployment_path_report.install_substrates_confirmation');
@@ -490,7 +1031,14 @@ function validateDeploymentPathReport(report, reportDigest, release, deployTempl
       fail(`deployment path ${operatorPath} requires explicit install_substrates confirmation`);
     }
     requireString(confirmation.operator_run_id, 'deployment_path_report.install_substrates_confirmation.operator_run_id');
-    requireDigest(confirmation.substrate_install_report_digest, 'deployment_path_report.install_substrates_confirmation.substrate_install_report_digest');
+    if (
+      requireDigest(
+        confirmation.substrate_install_report_digest,
+        'deployment_path_report.install_substrates_confirmation.substrate_install_report_digest'
+      ) !== steps.get('substrate-install').report_digest
+    ) {
+      fail('deployment_path_report.install_substrates_confirmation.substrate_install_report_digest must match substrate-install step');
+    }
   }
 
   if (operatorPath.startsWith('airgap/')) {
@@ -499,9 +1047,33 @@ function validateDeploymentPathReport(report, reportDigest, release, deployTempl
       fail(`deployment path ${operatorPath} must prove no public internet downloads`);
     }
     requireDigest(offline.bundle_manifest_digest, 'deployment_path_report.airgap_offline.bundle_manifest_digest');
-    requireDigest(offline.image_load_report_digest, 'deployment_path_report.airgap_offline.image_load_report_digest');
-    requireDigest(offline.offline_render_report_digest, 'deployment_path_report.airgap_offline.offline_render_report_digest');
+    if (
+      requireDigest(
+        offline.image_load_report_digest,
+        'deployment_path_report.airgap_offline.image_load_report_digest'
+      ) !== steps.get('image-load').report_digest
+    ) {
+      fail('deployment_path_report.airgap_offline.image_load_report_digest must match image-load step');
+    }
+    if (
+      requireDigest(
+        offline.offline_render_report_digest,
+        'deployment_path_report.airgap_offline.offline_render_report_digest'
+      ) !== steps.get('offline-render-check').report_digest
+    ) {
+      fail('deployment_path_report.airgap_offline.offline_render_report_digest must match offline-render-check step');
+    }
   }
+
+  const ledger = validateSourceEvidenceLedger(report, requirement, steps, operatorPath);
+  await validateFinalizerManifest({
+    pathInput,
+    report,
+    ledger,
+    operatorPath,
+    release,
+    deployTemplate
+  });
 
   return {
     operator_path: operatorPath,
@@ -561,9 +1133,10 @@ async function main() {
   const productReadinessSummary = validateProductReadiness(productReady.value, productReady.digest, release);
   const productSmokeSummary = validateProductSmoke(productSmoke.value, productSmoke.digest, release);
 
-  const deploymentPaths = pathReports.map((entry) =>
-    validateDeploymentPathReport(entry.value, entry.digest, release, deployTemplateSummary)
-  );
+  const deploymentPaths = [];
+  for (const entry of pathReports) {
+    deploymentPaths.push(await validateDeploymentPathReport(entry, release, deployTemplateSummary));
+  }
   const seenPaths = new Set();
   for (const entry of deploymentPaths) {
     if (seenPaths.has(entry.operator_path)) {

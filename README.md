@@ -1007,7 +1007,8 @@ PV policy, and the substrate secret refs declared by substrate truth.
 The target prerequisites `registry` object is fail-fast allowlisted to
 `pull_secret_ref` only; pseudo-proof or secret fields such as `preloaded`,
 `mirror_done`, `verdict`, or `token` are rejected.
-`target-preflight-report.json` is written with `readiness: false`,
+`target-preflight-report.json` is written with `schema:
+agentsmith.target-preflight-report/v1`, `readiness: false`,
 `scope: target_preflight_prerequisite_only`, and `status: pass`; it is not
 Kubernetes connectivity evidence, render/check evidence, apply evidence, smoke
 evidence, package readiness, deploy readiness, or release readiness.
@@ -1017,6 +1018,12 @@ consumes finalized deployment path reports, AgentSmith product readiness, and
 post-deploy product smoke reports through `bash scripts/verify-release.sh
 --ga-release`. It writes `ga-release-report.json` with
 `formal_verdict=issued` only on pass and does not rerun producers.
+Deployment path report finalization is internal evidence plumbing for
+maintainers/CI; it writes a sibling finalizer manifest plus copied
+`source-evidence/` JSON files for GA materiality checks and is not a new
+operator command or runbook step. `install_substrates` still depends on a
+future repo-owned installer producer; the operator facade does not install
+substrates today.
 
 ## Handoff
 

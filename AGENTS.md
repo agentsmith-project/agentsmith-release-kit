@@ -18,8 +18,8 @@ Current status is bootstrap-focused, not release-ready. The repository has
 identity and boundary docs plus focused diagnostics for inputs,
 template-package, render, render-check, image-map, registry presence, airgap
 bundle manifest checking, apply, rollout, smoke, online focused chain
-orchestration, airgap consume rehearsal, airgap adoption aggregation, evidence,
-and target-preflight.
+orchestration, airgap consume rehearsal, airgap adoption aggregation,
+deployment path report finalization, evidence, and target-preflight.
 
 These diagnostics produce `readiness: false` evidence. The repository still
 does not have full deploy readiness, package readiness, registry mirror
@@ -87,3 +87,7 @@ deployment path reports plus AgentSmith product-side reports and issues
 `formal_verdict=issued` only when all required reports pass. Producer
 diagnostics remain non-verdict inputs unless they are wrapped by a finalized
 deployment path report.
+
+Deployment path report finalization is internal input preparation for
+`--ga-release`; do not document it as an operator-facing command or separate
+release verdict.

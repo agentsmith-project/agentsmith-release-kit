@@ -1346,11 +1346,46 @@ such as `preloaded`, `mirror_done`, `verdict`, or `token` are rejected. Plaintex
 connection strings, kubeconfig payloads, file or source URIs, localhost,
 `host.docker.internal`, and hosts or URLs with userinfo are rejected.
 
-The generated `target-preflight-report.json` must keep `readiness: false`,
-`scope: target_preflight_prerequisite_only`, and `status: pass`. It must not contain
+The generated `target-preflight-report.json` must keep `schema:
+agentsmith.target-preflight-report/v1`, `readiness: false`, `scope:
+target_preflight_prerequisite_only`, and `status: pass`. It must not contain
 `verdict` or `release_verdict`. It is not release readiness, package readiness,
 Kubernetes connectivity evidence, render/check evidence, apply evidence,
 rollout evidence, smoke evidence, or operator signoff.
+
+## Deployment Path Report Finalization Focused Diagnostic
+
+Run:
+
+```bash
+bash scripts/test-deployment-path-report.sh
+```
+
+This focused guard exercises `bash scripts/verify-release.sh
+--deployment-path`. It consumes already passed online or airgap focused
+producer reports, validates the release contract and deploy template package
+digests, schema-checks each required source step report, resolves those source
+reports to digests, and writes one `deployment-path-report.json` with
+`readiness: false` for the final GA aggregate. The report also carries a
+minimal `source_evidence` ledger for maintainer/internal finalization: the
+finalizer schema/tool/mode, source deployment gate schema/scope/digest,
+per-step source schema/scope/digests, and the airgap or future installer
+digest bindings required by `--ga-release`. The finalizer also writes sibling
+`deployment-path-finalizer-manifest.json` and `source-evidence/` JSON copies so
+GA can bind the report bytes to materialized source files.
+
+The finalizer does not rerun producers, does not call Kubernetes, does not
+create packages, and does not issue readiness or `formal_verdict`. It is
+internal evidence plumbing for maintainers/CI. Operator runbooks must continue
+to expose only `operator-inputs`, `scripts/operator-release.sh`, and the final
+`ga-release-report.json`.
+
+Install-substrate paths fail fast unless a real substrate install report and
+matching explicit confirmation id are provided. Existing kit-provided
+substrate pack checks, routability checks, and `installed_by` provenance
+markers are not treated as installer proof. The accepted install report shape
+is reserved for a future repo-owned installer producer; `operator-release.sh`
+does not implement substrate installation today.
 
 ## GA Release Aggregate Gate
 
@@ -1377,7 +1412,10 @@ AgentSmith product readiness, and post-deploy product smoke reports. It writes
 on pass. It also writes a derived `ga-release-summary.md`; the JSON report is
 the gate evidence.
 
-The gate does not rerun producers. `operator-release-surface-report.json`,
+The gate does not rerun producers. It requires each finalized deployment path
+report to have the sibling finalizer manifest and `source-evidence/` files
+that bind the maintainer/internal `source_evidence` ledger; a hand-written
+single report JSON is not accepted. `operator-release-surface-report.json`,
 adoption reports, candidate intake reports, runbook acceptance reports, and
 other producer outputs remain internal evidence unless wrapped by a finalized
 `deployment-path-report.json`.

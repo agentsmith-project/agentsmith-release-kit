@@ -542,6 +542,9 @@ import fs from 'node:fs';
 
 const [reportFile, expectedProfile] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+if (report.schema !== 'agentsmith.target-preflight-report/v1') {
+  throw new Error(`unexpected schema: ${report.schema}`);
+}
 if (report.scope !== 'target_preflight_prerequisite_only') {
   throw new Error(`unexpected scope: ${report.scope}`);
 }
@@ -556,6 +559,9 @@ if (report.target_profile?.value !== expectedProfile) {
 }
 if (report.target_prerequisites?.schema_version !== 'agentsmith.target-prerequisites.truth/v1') {
   throw new Error('target preflight report must summarize target prerequisites truth');
+}
+if (report.target_prerequisites?.target_profile !== expectedProfile) {
+  throw new Error(`unexpected prerequisites target profile: ${report.target_prerequisites?.target_profile}`);
 }
 if (report.target_prerequisites?.namespace !== 'agentsmith') {
   throw new Error(`unexpected prerequisites namespace: ${report.target_prerequisites?.namespace}`);

@@ -13,6 +13,9 @@ import {
 } from './lib/substrate-truth-validation.mjs';
 
 const REQUIRED_ARGS = ['targetProfile', 'substrateTruth', 'targetPrerequisites', 'outputDir'];
+const REPORT_SCHEMA = 'agentsmith.target-preflight-report/v1';
+const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
+const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 
 class CliError extends Error {
   constructor(message) {
@@ -34,7 +37,8 @@ function usage() {
     --target-profile <target_cluster>/<substrate_source>/<distribution> \\
     --substrate-truth <json> \\
     --target-prerequisites <json> \\
-    --output-dir <dir>`;
+    --output-dir <dir> \\
+    [--release-contract <json>]`;
 }
 
 function cliFail(message) {
@@ -72,6 +76,9 @@ function parseArgs(argv) {
         break;
       case '--target-prerequisites':
         parsed.targetPrerequisites = nextValue();
+        break;
+      case '--release-contract':
+        parsed.releaseContract = nextValue();
         break;
       case '--expected-namespace':
         parsed.expectedNamespace = nextValue();
@@ -126,13 +133,15 @@ async function readJson(file, label) {
 
 function buildReport({
   targetProfile,
+  releaseIdentity,
   truthProfile,
   substrateInputDigest,
   prerequisitesInputDigest,
   serviceSummary,
   prerequisitesSummary
 }) {
-  return {
+  const report = {
+    schema: REPORT_SCHEMA,
     scope: 'target_preflight_prerequisite_only',
     readiness: false,
     target_profile: targetProfile,
@@ -162,6 +171,48 @@ function buildReport({
     },
     status: 'pass'
   };
+
+  if (releaseIdentity) {
+    report.release_id = releaseIdentity.release_id;
+    report.git_sha = releaseIdentity.git_sha;
+    report.release_contract = {
+      input_sha256: releaseIdentity.input_sha256
+    };
+  }
+
+  return report;
+}
+
+function requireString(value, label) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    fail(`${label} is required`);
+  }
+  return value;
+}
+
+function requireGitSha(value, label) {
+  const gitSha = requireString(value, label);
+  if (!GIT_SHA_RE.test(gitSha)) {
+    fail(`${label} must be a 40-character git sha`);
+  }
+  return gitSha;
+}
+
+async function readReleaseIdentity(file) {
+  if (!file) {
+    return undefined;
+  }
+  const input = await readJson(file, 'release contract');
+  const contract = input.value;
+  const schema = contract.schema ?? contract.schema_version;
+  if (schema !== RELEASE_CONTRACT_SCHEMA) {
+    fail(`release_contract schema must be ${RELEASE_CONTRACT_SCHEMA}`);
+  }
+  return {
+    release_id: requireString(contract.release_id, 'release_contract.release_id'),
+    git_sha: requireGitSha(contract.git_sha, 'release_contract.git_sha'),
+    input_sha256: input.inputDigest
+  };
 }
 
 async function writeReport(outputDir, report) {
@@ -180,6 +231,7 @@ async function main() {
   }
 
   const targetProfile = parseTargetProfile(args.targetProfile);
+  const releaseIdentity = await readReleaseIdentity(args.releaseContract);
   const substrateTruthInput = await readJson(args.substrateTruth, 'substrate truth');
   const targetPrerequisitesInput = await readJson(
     args.targetPrerequisites,
@@ -214,6 +266,7 @@ async function main() {
     args.outputDir,
     buildReport({
       targetProfile,
+      releaseIdentity,
       truthProfile,
       substrateInputDigest: substrateTruthInput.inputDigest,
       prerequisitesInputDigest: targetPrerequisitesInput.inputDigest,

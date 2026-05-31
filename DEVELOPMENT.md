@@ -30,6 +30,7 @@ bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
 bash scripts/test-online-deployment-gate.sh
+bash scripts/test-deployment-path-report.sh
 bash scripts/test-ga-release.sh
 bash scripts/test-online-adoption.sh
 bash scripts/test-release-engineering-gate-intake.sh
@@ -629,8 +630,9 @@ truth plus target prerequisites truth intake. It consumes an explicit target
 profile, an operator-provided `agentsmith.substrate-connection.truth/v1`
 document, and an operator-provided
 `agentsmith.target-prerequisites.truth/v1` document. Its
-`target-preflight-report.json` must keep `readiness: false` and
-`scope: target_preflight_prerequisite_only`; it does not connect to
+`target-preflight-report.json` must keep `schema:
+agentsmith.target-preflight-report/v1`, `readiness: false`, and `scope:
+target_preflight_prerequisite_only`; it does not connect to
 Kubernetes, render manifests, apply resources, smoke a cluster, package
 artifacts, or claim deploy or release readiness. The prerequisites document is
 the only place for namespace, RBAC policy/proof, ingress host and TLS secret
@@ -679,3 +681,6 @@ inside the target network, but release-kit code must not create cloud resources.
 6. Claim final GA release readiness only from `--ga-release` after it consumes
    finalized deployment path reports plus AgentSmith product-side reports and
    writes `ga-release-report.json` with `formal_verdict=issued`.
+   Deployment path finalization is an internal input-preparation step that
+   writes the path report, sibling finalizer manifest, and `source-evidence/`
+   JSON copies; it is not an operator-facing path or separate release verdict.

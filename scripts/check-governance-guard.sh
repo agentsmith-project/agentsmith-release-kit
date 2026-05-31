@@ -118,7 +118,9 @@ required_files=(
   .github/workflows/ci.yml
   scripts/verify-release.sh
   scripts/verify-ga-release.mjs
+  scripts/verify-deployment-path-report.mjs
   scripts/test-ga-release.sh
+  scripts/test-deployment-path-report.sh
   scripts/check-governance-guard.sh
 )
 
@@ -219,6 +221,7 @@ require_text AGENTS.md "Quick gate success is never release readiness"
 pass "scope and non-goals"
 
 require_text docs/RELEASE_GATES.md "The quick gate is not release readiness"
+require_text docs/RELEASE_GATES.md "Deployment Path Report Finalization Focused Diagnostic"
 require_text docs/RELEASE_GATES.md "The GA release aggregate gate is the repo-local final verdict authority"
 require_text docs/RELEASE_GATES.md "consumes finalized deployment path reports"
 require_text scripts/verify-release.sh "--ga-release is the release-kit final GA aggregate"

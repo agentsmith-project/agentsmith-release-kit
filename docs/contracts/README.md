@@ -368,8 +368,9 @@ prerequisites intake diagnostic only. It accepts
 `agentsmith.target-prerequisites.truth/v1`, rejects Docker substrate truth and
 non-canonical pre-GA target names, and binds both documents to the supplied
 `target_cluster/substrate_source/distribution` tuple. It writes
-`target-preflight-report.json` with `readiness: false` and
-`scope: target_preflight_prerequisite_only`. It validates declarations for
+`target-preflight-report.json` with `schema:
+agentsmith.target-preflight-report/v1`, `readiness: false`, and `scope:
+target_preflight_prerequisite_only`. It validates declarations for
 required substrate services, canonical endpoints (`host` for
 PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and `bucket` for
 object storage, and `issuer_url` for OIDC), secret refs or redacted

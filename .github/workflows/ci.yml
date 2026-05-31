@@ -27,6 +27,8 @@ jobs:
         run: bash scripts/test-render-check.sh
       - name: Operator release surface focused guard
         run: bash scripts/test-operator-release-surface.sh
+      - name: Deployment path report finalization focused guard
+        run: bash scripts/test-deployment-path-report.sh
       - name: GA release aggregate focused guard
         run: bash scripts/test-ga-release.sh
 

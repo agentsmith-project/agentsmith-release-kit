@@ -43,10 +43,13 @@ Usage:
   bash scripts/verify-release.sh --online-deployment-gate --release-contract <json> --deploy-template-package <json> --archive <tgz> --target-profile existing_kubernetes/kit_installed/online --render-values <json> --substrate-truth <json> --target-prerequisites <json> --substrate-pack-manifest <json> --routability-probe <executable> --namespace <name> --output-dir <dir> [--mode server-dry-run|apply] [--kubeconfig <path>] [--context <name>] [--kubectl <path>] [--confirm-apply existing_kubernetes/kit_installed/online] [--operator-run-id <id>] [--timeout <duration>] [--smoke-url <https-url>] [--expected-status <code>] [--timeout-ms <ms>] [--allow-http] [--allow-localhost] [--evidence-root <dir> --evidence-provenance <json>] [--forbidden-source-root <dir>]
   bash scripts/verify-release.sh --online-adoption --release-contract <json> --use-existing-report <online-deployment-gate-report.json> --use-existing-evidence-root <dir> --kit-provided-report <online-deployment-gate-report.json> --kit-provided-evidence-root <dir> --output-dir <dir>
   bash scripts/verify-release.sh --release-engineering-gate-intake --release-contract <json> --online-adoption-report <online-adoption-report.json> --airgap-adoption-report <airgap/use_existing airgap-adoption-report.json> --airgap-adoption-report <airgap/kit_provided airgap-adoption-report.json> --output-dir <dir>
+  # Maintainer/internal only, not an operator runbook step:
+  bash scripts/verify-release.sh --deployment-path --operator-path <online/use_existing|online/install_substrates> --release-contract <json> --deploy-template-package <json> --online-deployment-gate-report <json> --output-dir <dir> [--substrate-install-report <json> --confirm-install-substrates <operator-run-id>]
+  bash scripts/verify-release.sh --deployment-path --operator-path <airgap/use_existing|airgap/install_substrates> --release-contract <json> --deploy-template-package <json> --airgap-deployment-gate-report <json> --airgap-bundle-check-report <json> --airgap-bundle-manifest <json> --output-dir <dir> [--substrate-install-report <json> --confirm-install-substrates <operator-run-id>]
   bash scripts/verify-release.sh --ga-release --release-contract <json> --deploy-template-package <json> --deployment-path-report <online/use_existing deployment-path-report.json> --deployment-path-report <online/install_substrates deployment-path-report.json> --deployment-path-report <airgap/use_existing deployment-path-report.json> --deployment-path-report <airgap/install_substrates deployment-path-report.json> --product-readiness-report <json> --post-deploy-product-smoke-report <json> --output-dir <dir>
   bash scripts/verify-release.sh --operator-signoff-intake --release-contract <json> --online-deployment-gate-report <json> --operator-signoff-intake <json> --target-profile existing_kubernetes/external_declared/online --output-dir <dir>
   bash scripts/verify-release.sh --evidence --release-contract <json> --evidence-root <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
-  bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --target-prerequisites <json> --output-dir <dir> [--expected-namespace <name>]
+  bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --target-prerequisites <json> --output-dir <dir> [--expected-namespace <name>] [--release-contract <json>]
   bash scripts/verify-release.sh --help
 
 Bootstrap status:
@@ -75,6 +78,7 @@ Bootstrap status:
   --online-deployment-gate evidence args are accepted only with --mode apply.
   --online-adoption aggregates already generated confirmed-apply online/use_existing and online/kit_provided focused reports/evidence roots for repo-local adoption preparation only; it is not deploy, package, operator signoff, full release gate, or release readiness.
   --release-engineering-gate-intake is maintainer-only for explicit GA or compliance trigger work; it consumes the focused online adoption report plus focused airgap/use_existing and airgap/kit_provided adoption reports, writes readiness=false and formal_verdict=not_issued only, and is not deploy, package, offline, operator verdict, or release readiness.
+  --deployment-path is a maintainer/internal only finalizer for --ga-release input preparation; it consumes already passed focused producer reports, writes deployment-path-report.json plus a sibling finalizer manifest/source-evidence files, does not rerun producers, and is not operator-facing or release readiness.
   --ga-release is the release-kit final GA aggregate; it consumes finalized deployment path reports and AgentSmith product-side reports, writes ga-release-report.json with formal_verdict=issued on pass, and does not rerun producers.
   --operator-signoff-intake is maintainer-only for explicit GA or compliance trigger work; it checks an operator signoff intake JSON against a generated online deployment gate apply report only, and is not signature, identity, registry, deploy, package, or release readiness.
   --evidence checks release-kit evidence envelope intake only; it is not release readiness.
@@ -207,6 +211,11 @@ case "${1:-}" in
     shift
     "$NODE_BIN" "$ROOT_DIR/scripts/verify-release-engineering-gate-intake.mjs" "$@"
     echo "release engineering gate intake mode is not release readiness; readiness=false; formal_verdict=not_issued"
+    ;;
+  --deployment-path)
+    shift
+    "$NODE_BIN" "$ROOT_DIR/scripts/verify-deployment-path-report.mjs" "$@"
+    echo "deployment path finalization mode is not release readiness; readiness=false"
     ;;
   --ga-release)
     shift
