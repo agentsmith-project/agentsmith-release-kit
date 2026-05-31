@@ -1720,11 +1720,11 @@ expect_fail subject-file-bare-host-docker-internal ci_artifact subject_file_bare
 expect_fail evidence-json-secret-payload ci_artifact evidence_json_secret_payload
 
 if bash "$ROOT_DIR/scripts/verify-release.sh" >"$TMP_DIR/full-gate.out" 2>"$TMP_DIR/full-gate.err"; then
-  fail "full release gate must remain unavailable"
+  fail "verify-release.sh without mode must remain fail-closed"
 fi
-if ! grep -q 'full release gate is not implemented' "$TMP_DIR/full-gate.out"; then
+if ! grep -q 'missing release verification mode' "$TMP_DIR/full-gate.out"; then
   cat "$TMP_DIR/full-gate.out" >&2
   cat "$TMP_DIR/full-gate.err" >&2
-  fail "full release gate failure must remain explicit"
+  fail "default verify-release.sh failure must remain explicit"
 fi
 pass "evidence diagnostic is not release readiness"

@@ -607,11 +607,11 @@ write_materials "$HARDLINK_MANIFEST_SHA" "$HARDLINK_ARCHIVE_SHA" "$HARDLINK_CONT
 expect_fail hardlink "$HARDLINK_CONTRACT" "$HARDLINK_PACKAGE" "$HARDLINK_ARCHIVE"
 
 if bash "$ROOT_DIR/scripts/verify-release.sh" >"$TMP_DIR/full-gate.out" 2>"$TMP_DIR/full-gate.err"; then
-  fail "full release gate must remain unavailable"
+  fail "verify-release.sh without mode must remain fail-closed"
 fi
-if ! grep -q 'full release gate is not implemented' "$TMP_DIR/full-gate.out"; then
+if ! grep -q 'missing release verification mode' "$TMP_DIR/full-gate.out"; then
   cat "$TMP_DIR/full-gate.out" >&2
   cat "$TMP_DIR/full-gate.err" >&2
-  fail "full release gate failure must remain explicit"
+  fail "default verify-release.sh failure must remain explicit"
 fi
 pass "template package diagnostic is not release readiness"

@@ -117,6 +117,8 @@ required_files=(
   .github/pull_request_template.md
   .github/workflows/ci.yml
   scripts/verify-release.sh
+  scripts/verify-ga-release.mjs
+  scripts/test-ga-release.sh
   scripts/check-governance-guard.sh
 )
 
@@ -217,14 +219,16 @@ require_text AGENTS.md "Quick gate success is never release readiness"
 pass "scope and non-goals"
 
 require_text docs/RELEASE_GATES.md "The quick gate is not release readiness"
-require_text docs/RELEASE_GATES.md "The full release gate is the future repo-local authority"
-require_text docs/RELEASE_GATES.md "not implemented during bootstrap"
-require_text scripts/verify-release.sh "full release gate is not implemented in bootstrap"
+require_text docs/RELEASE_GATES.md "The GA release aggregate gate is the repo-local final verdict authority"
+require_text docs/RELEASE_GATES.md "consumes finalized deployment path reports"
+require_text scripts/verify-release.sh "--ga-release is the release-kit final GA aggregate"
+require_text scripts/verify-release.sh "formal_verdict=issued"
+require_text scripts/verify-release.sh "does not rerun producers"
 require_text scripts/verify-release.sh "--operator-signoff-intake is maintainer-only for explicit GA or compliance trigger work"
 if bash scripts/verify-release.sh >/dev/null 2>&1; then
-  fail "full release mode must fail during bootstrap"
+  fail "verify-release.sh without an explicit mode must fail"
 fi
-pass "release gate bootstrap boundary"
+pass "release gate authority boundary"
 
 mapfile -d '' scan_paths < <(find . -path ./.git -prune -o -type f -print0)
 

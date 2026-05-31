@@ -724,11 +724,11 @@ expect_kit_fail short-release-kit-version short_release_kit_version
 expect_kit_fail leading-zero-release-kit-version leading_zero_release_kit_version
 
 if bash "$ROOT_DIR/scripts/verify-release.sh" >"$TMP_DIR/full-gate.out" 2>"$TMP_DIR/full-gate.err"; then
-  fail "full release gate must remain unavailable"
+  fail "verify-release.sh without mode must remain fail-closed"
 fi
-if ! grep -q 'full release gate is not implemented' "$TMP_DIR/full-gate.out"; then
+if ! grep -q 'missing release verification mode' "$TMP_DIR/full-gate.out"; then
   cat "$TMP_DIR/full-gate.out" >&2
   cat "$TMP_DIR/full-gate.err" >&2
-  fail "full release gate failure must remain explicit"
+  fail "default verify-release.sh failure must remain explicit"
 fi
 pass "target preflight diagnostic is not release readiness"

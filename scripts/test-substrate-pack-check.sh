@@ -451,11 +451,11 @@ expect_fail truth-source-path valid source_path
 expect_evidence_reject
 
 if bash "$ROOT_DIR/scripts/verify-release.sh" >"$TMP_DIR/full-gate.out" 2>"$TMP_DIR/full-gate.err"; then
-  fail "full release gate must remain unavailable"
+  fail "verify-release.sh without mode must remain fail-closed"
 fi
-if ! grep -q 'full release gate is not implemented' "$TMP_DIR/full-gate.out"; then
+if ! grep -q 'missing release verification mode' "$TMP_DIR/full-gate.out"; then
   cat "$TMP_DIR/full-gate.out" >&2
   cat "$TMP_DIR/full-gate.err" >&2
-  fail "full release gate failure must remain explicit"
+  fail "default verify-release.sh failure must remain explicit"
 fi
 pass "substrate pack check diagnostic is not release readiness"

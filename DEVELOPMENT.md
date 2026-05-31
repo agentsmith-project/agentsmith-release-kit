@@ -1,6 +1,6 @@
 # Development Guide
 
-Status: bootstrap-only.
+Status: bootstrap + GA aggregate gate.
 
 ## Local Setup
 
@@ -30,6 +30,7 @@ bash scripts/test-apply.sh
 bash scripts/test-rollout.sh
 bash scripts/test-smoke.sh
 bash scripts/test-online-deployment-gate.sh
+bash scripts/test-ga-release.sh
 bash scripts/test-online-adoption.sh
 bash scripts/test-release-engineering-gate-intake.sh
 bash scripts/test-operator-release-surface.sh
@@ -675,5 +676,6 @@ inside the target network, but release-kit code must not create cloud resources.
 3. Add focused checks before expanding behavior.
 4. Run the matching focused check for the changed slice.
 5. Run the quick gate for bootstrap boundary changes.
-6. Do not claim release readiness until a future full release gate exists and
-   passes.
+6. Claim final GA release readiness only from `--ga-release` after it consumes
+   finalized deployment path reports plus AgentSmith product-side reports and
+   writes `ga-release-report.json` with `formal_verdict=issued`.

@@ -1,6 +1,6 @@
 # Release Gates
 
-Status: bootstrap-only.
+Status: bootstrap-focused producers plus GA aggregate gate.
 
 ## Quick Gate
 
@@ -1352,19 +1352,40 @@ The generated `target-preflight-report.json` must keep `readiness: false`,
 Kubernetes connectivity evidence, render/check evidence, apply evidence,
 rollout evidence, smoke evidence, or operator signoff.
 
-## Full Release Gate
+## GA Release Aggregate Gate
 
-The full release gate is the future repo-local authority for online deploy,
-airgap package/deploy, operator runbooks, and deployment/package evidence.
+Run:
 
-It is not implemented during bootstrap. Running `bash scripts/verify-release.sh`
-without `--quick` must fail fast until the full gate is designed and
-implemented in this repository.
+```bash
+bash scripts/verify-release.sh --ga-release \
+  --release-contract <agentsmith-release-contract.json> \
+  --deploy-template-package <agentsmith-deploy-template-package.json> \
+  --deployment-path-report <online/use_existing/deployment-path-report.json> \
+  --deployment-path-report <online/install_substrates/deployment-path-report.json> \
+  --deployment-path-report <airgap/use_existing/deployment-path-report.json> \
+  --deployment-path-report <airgap/install_substrates/deployment-path-report.json> \
+  --product-readiness-report <agentsmith/product-readiness-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \
+  --output-dir <dir>
+```
 
-The future full release gate must not delegate release readiness to AgentSmith
-product gates, AFSCP gates, ASBCP gates, or kind rehearsal alone. AgentSmith
-product flows remain AgentSmith evidence; this repository owns only
-deployment, distribution, package, and operator evidence.
+The GA release aggregate gate is the repo-local final verdict authority for
+online deploy, airgap package/deploy, operator runbooks, and
+deployment/package evidence. It consumes finalized deployment path reports,
+AgentSmith product readiness, and post-deploy product smoke reports. It writes
+`ga-release-report.json` with `status: pass` and `formal_verdict: issued` only
+on pass. It also writes a derived `ga-release-summary.md`; the JSON report is
+the gate evidence.
+
+The gate does not rerun producers. `operator-release-surface-report.json`,
+adoption reports, candidate intake reports, runbook acceptance reports, and
+other producer outputs remain internal evidence unless wrapped by a finalized
+`deployment-path-report.json`.
+
+The GA aggregate must not delegate release readiness to AgentSmith product
+gates, AFSCP gates, ASBCP gates, or kind rehearsal alone. AgentSmith product
+flows remain AgentSmith evidence; this repository owns only deployment,
+distribution, package, and operator evidence.
 
 Airgap release-kit work must use tools, templates, artifacts, and images already
 available inside the target network. Operator-declared substrate endpoints may

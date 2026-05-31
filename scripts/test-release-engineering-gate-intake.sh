@@ -875,8 +875,8 @@ assert_no_stale_report "$STALE_CLI_OUTPUT/$REPORT_FILE"
 
 expect_fail default-verify-release-fail-closed \
   bash "$ROOT_DIR/scripts/verify-release.sh"
-grep -q 'full release gate is not implemented' "$TMP_DIR/default-verify-release-fail-closed.out" ||
-  grep -q 'full release gate is not implemented' "$TMP_DIR/default-verify-release-fail-closed.err" ||
+grep -q 'missing release verification mode' "$TMP_DIR/default-verify-release-fail-closed.out" ||
+  grep -q 'missing release verification mode' "$TMP_DIR/default-verify-release-fail-closed.err" ||
   fail "default verify-release.sh must remain fail-closed"
 
 pass "release engineering gate intake focused tests completed"

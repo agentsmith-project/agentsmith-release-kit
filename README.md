@@ -1,6 +1,6 @@
 # AgentSmith Release Kit
 
-Status: bootstrap-only, focused deploy/package diagnostics.
+Status: bootstrap-focused producers plus GA aggregate gate.
 
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
@@ -1012,8 +1012,11 @@ The target prerequisites `registry` object is fail-fast allowlisted to
 Kubernetes connectivity evidence, render/check evidence, apply evidence, smoke
 evidence, package readiness, deploy readiness, or release readiness.
 
-The full release gate is a future repo-local authority. It is intentionally not
-implemented during bootstrap.
+The GA release aggregate gate is the repo-local final verdict authority. It
+consumes finalized deployment path reports, AgentSmith product readiness, and
+post-deploy product smoke reports through `bash scripts/verify-release.sh
+--ga-release`. It writes `ga-release-report.json` with
+`formal_verdict=issued` only on pass and does not rerun producers.
 
 ## Handoff
 

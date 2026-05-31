@@ -76,6 +76,14 @@ Bootstrap verification:
 bash scripts/verify-release.sh --quick
 ```
 
-The full release gate is intentionally unavailable during bootstrap. If a task
-needs release readiness, stop and define the future repo-local release gate
-before claiming readiness.
+GA aggregate verification:
+
+```bash
+bash scripts/test-ga-release.sh
+```
+
+`--ga-release` is the repo-local final GA aggregate. It consumes finalized
+deployment path reports plus AgentSmith product-side reports and issues
+`formal_verdict=issued` only when all required reports pass. Producer
+diagnostics remain non-verdict inputs unless they are wrapped by a finalized
+deployment path report.
