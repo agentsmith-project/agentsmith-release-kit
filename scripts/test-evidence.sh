@@ -1247,7 +1247,7 @@ switch (mutation) {
     break;
   case 'subject_file_source_payload':
     onlineDeploymentGateReport.source_path =
-      '/home/percy/works/mbos-v1/' + 'agent' + 'smith/' + 'sr' + 'c/' + 'ap' + 'p/page.tsx';
+      '/home/example/works/mbos-v1/' + 'agent' + 'smith/' + 'sr' + 'c/' + 'ap' + 'p/page.tsx';
     break;
   case 'subject_file_host_docker_internal':
     onlineDeploymentGateReport.endpoint = 'https://host.docker.internal:20000/status';

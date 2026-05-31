@@ -373,6 +373,24 @@ function sameArraySet(left, right) {
   return [...leftSet].every((item) => rightSet.has(item));
 }
 
+function validateDeployImageInventory(value) {
+  const entries = requireNonEmptyArray(value, 'release_contract.deploy_image_inventory');
+  const seenIds = new Set();
+  return entries.map((entry, index) => {
+    const image = requireObject(entry, `release_contract.deploy_image_inventory[${index}]`);
+    const id = requireString(image.id, `release_contract.deploy_image_inventory[${index}].id`);
+    if (seenIds.has(id)) {
+      fail(`release_contract.deploy_image_inventory contains duplicate image id: ${id}`);
+    }
+    seenIds.add(id);
+    return {
+      id,
+      image: requireString(image.image, `release_contract.deploy_image_inventory[${index}].image`),
+      digest: requireDigest(image.digest, `release_contract.deploy_image_inventory[${index}].digest`)
+    };
+  });
+}
+
 function validateReleaseInputs(contractInput, deployTemplateInput) {
   const contract = requireObject(contractInput.value, 'release contract');
   const deployTemplate = requireObject(deployTemplateInput.value, 'deploy template package');
@@ -405,13 +423,8 @@ function validateReleaseInputs(contractInput, deployTemplateInput) {
     contractTemplate.required_image_ids,
     'release_contract.deploy_template_package.required_image_ids'
   );
-  const contractInventoryImageIds = requireNonEmptyArray(
-    contract.deploy_image_inventory,
-    'release_contract.deploy_image_inventory'
-  ).map((entry, index) => requireString(
-    requireObject(entry, `release_contract.deploy_image_inventory[${index}]`).id,
-    `release_contract.deploy_image_inventory[${index}].id`
-  ));
+  const deployImageInventory = validateDeployImageInventory(contract.deploy_image_inventory);
+  const contractInventoryImageIds = deployImageInventory.map((entry) => entry.id);
   if (!sameArraySet(contractRequiredImageIds, contractInventoryImageIds)) {
     fail('release_contract.deploy_template_package.required_image_ids must exactly match release_contract.deploy_image_inventory ids');
   }
@@ -423,7 +436,8 @@ function validateReleaseInputs(contractInput, deployTemplateInput) {
     release_id: releaseId,
     git_sha: gitSha,
     release_contract_digest: contractInput.digest,
-    deploy_template_package_digest: deployTemplateInput.digest
+    deploy_template_package_digest: deployTemplateInput.digest,
+    deploy_image_inventory: deployImageInventory
   };
 }
 

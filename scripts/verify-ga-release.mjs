@@ -3,7 +3,10 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import * as sourceValidation from './lib/deployment-path-source-validation.mjs';
-import { scanReportForForbiddenContent } from './lib/report-forbidden-scan.mjs';
+import {
+  assertReportUriHasNoForbiddenContent,
+  scanReportForForbiddenContent
+} from './lib/report-forbidden-scan.mjs';
 
 const REPORT_FILE = 'ga-release-report.json';
 const SUMMARY_FILE = 'ga-release-summary.md';
@@ -22,6 +25,8 @@ const PRODUCT_READY_SCHEMA = 'agentsmith.product-readiness-report/v1';
 const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke/v1';
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
+const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
+const ARTIFACT_PROVENANCE_KIND = 'ci_artifact';
 const AIRGAP_BUNDLE_MANIFEST_SCHEMA = sourceValidation.AIRGAP_BUNDLE_MANIFEST_SCHEMA;
 const IMAGE_MAP_SCHEMA = sourceValidation.IMAGE_MAP_SCHEMA;
 const IMAGE_MAP_SCOPE = sourceValidation.IMAGE_MAP_SCOPE;
@@ -29,6 +34,7 @@ const SUBSTRATE_INSTALL_SCHEMA = sourceValidation.SUBSTRATE_INSTALL_SCHEMA;
 const SUBSTRATE_INSTALL_SCOPE = sourceValidation.SUBSTRATE_INSTALL_SCOPE;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
+const ARTIFACT_URI_RE = /^[a-z][a-z0-9+.-]*:\/\/[^\s]+$/i;
 const AGENTSMITH_REPO = 'github.com/agentsmith-project/agentsmith';
 
 const REQUIRED_ARGS = [
@@ -332,6 +338,27 @@ function requireNoFormalVerdict(report, label) {
   }
 }
 
+function normalizeRepoIdentity(value, label) {
+  let remote = requireString(value, label).trim();
+  if (remote.startsWith('git@github.com:')) {
+    remote = `github.com/${remote.slice('git@github.com:'.length)}`;
+  } else if (remote.startsWith('ssh://git@github.com/')) {
+    remote = `github.com/${remote.slice('ssh://git@github.com/'.length)}`;
+  } else {
+    remote = remote.replace(/^https?:\/\//, '');
+  }
+  return remote.replace(/\.git$/, '').replace(/\/+$/, '').toLowerCase();
+}
+
+function requireArtifactUri(value, label) {
+  const uri = requireString(value, label);
+  if (!ARTIFACT_URI_RE.test(uri) || uri.toLowerCase().startsWith('file://')) {
+    fail(`${label} must be an artifact URI`);
+  }
+  assertReportUriHasNoForbiddenContent(uri, label);
+  return uri;
+}
+
 function requireProvenance(provenance, label) {
   const value = requireObject(provenance, label);
   const normalizedRemote = requireString(value.normalized_remote ?? value.producer_repo, `${label}.normalized_remote`);
@@ -355,6 +382,55 @@ function requireProvenance(provenance, label) {
     subject_name: optionalString(value.subject_name, `${label}.subject_name`),
     subject_sha256: subjectSha,
     artifact_sha256: artifactSha
+  };
+}
+
+function requireProductArtifactProvenance(provenance, label, release, reportLabel) {
+  const value = requireObject(provenance, label);
+  const schema = requireString(value.schema_version ?? value.schema, `${label}.schema_version`);
+  if (schema !== ARTIFACT_PROVENANCE_SCHEMA) {
+    fail(`${label}.schema_version must be ${ARTIFACT_PROVENANCE_SCHEMA}`);
+  }
+  const kind = requireString(value.provenance_kind ?? value.kind, `${label}.provenance_kind`);
+  if (kind !== ARTIFACT_PROVENANCE_KIND) {
+    fail(`${label}.provenance_kind must be ${ARTIFACT_PROVENANCE_KIND}`);
+  }
+
+  const producerRepo = requireString(value.producer_repo, `${label}.producer_repo`);
+  const normalizedRemote = requireString(value.normalized_remote, `${label}.normalized_remote`);
+  if (
+    normalizeRepoIdentity(producerRepo, `${label}.producer_repo`) !==
+    normalizeRepoIdentity(normalizedRemote, `${label}.normalized_remote`)
+  ) {
+    fail(`${label}.producer_repo must match ${label}.normalized_remote`);
+  }
+
+  const provenanceSummary = requireProvenance(value, label);
+  if (
+    normalizeRepoIdentity(provenanceSummary.normalized_remote, `${label}.normalized_remote`) !== AGENTSMITH_REPO ||
+    provenanceSummary.commit_sha !== release.git_sha
+  ) {
+    fail(`${reportLabel} provenance must match AgentSmith repo and git sha`);
+  }
+
+  const artifactUri = value.artifact_uri === undefined
+    ? undefined
+    : requireArtifactUri(value.artifact_uri, `${label}.artifact_uri`);
+  if (
+    provenanceSummary.subject_sha256 === undefined &&
+    provenanceSummary.artifact_sha256 === undefined &&
+    artifactUri === undefined
+  ) {
+    fail(`${label} must include subject_sha256, artifact_sha256, or artifact_uri`);
+  }
+  const generatedAt = requireIsoTimestamp(value.generated_at, `${label}.generated_at`);
+
+  return {
+    ...provenanceSummary,
+    schema_version: schema,
+    provenance_kind: kind,
+    artifact_uri: artifactUri,
+    generated_at: generatedAt
   };
 }
 
@@ -434,7 +510,8 @@ function validateReleaseContract(contract, contractDigest) {
       runner: byId.get('managed_runner'),
       dependencies: ['llmup', 'afscp', 'asbcp'].map((id) => byId.get(id)),
       inventory
-    }
+    },
+    deploy_image_inventory: inventory
   };
 }
 
@@ -495,20 +572,24 @@ function commonReportChecks(report, label, release) {
 function validateProductReadiness(report, reportDigest, release) {
   requireSchema(report, PRODUCT_READY_SCHEMA, 'product readiness report');
   commonReportChecks(report, 'product readiness report', release);
-  const provenance = requireProvenance(report.artifact_provenance, 'product_readiness_report.artifact_provenance');
-  if (provenance.normalized_remote !== AGENTSMITH_REPO || provenance.commit_sha !== release.git_sha) {
-    fail('product readiness provenance must match AgentSmith repo and git sha');
-  }
+  const provenance = requireProductArtifactProvenance(
+    report.artifact_provenance,
+    'product_readiness_report.artifact_provenance',
+    release,
+    'product readiness'
+  );
   return { report_digest: reportDigest, provenance };
 }
 
 function validateProductSmoke(report, reportDigest, release) {
   requireSchema(report, PRODUCT_SMOKE_SCHEMA, 'post-deploy product smoke report');
   commonReportChecks(report, 'post-deploy product smoke report', release);
-  const provenance = requireProvenance(report.artifact_provenance, 'post_deploy_product_smoke.artifact_provenance');
-  if (provenance.normalized_remote !== AGENTSMITH_REPO || provenance.commit_sha !== release.git_sha) {
-    fail('post-deploy product smoke provenance must match AgentSmith repo and git sha');
-  }
+  const provenance = requireProductArtifactProvenance(
+    report.artifact_provenance,
+    'post_deploy_product_smoke.artifact_provenance',
+    release,
+    'post-deploy product smoke'
+  );
   const flows = new Set(requireArray(report.covered_flows, 'post_deploy_product_smoke.covered_flows'));
   for (const flow of REQUIRED_PRODUCT_SMOKE_FLOWS) {
     if (!flows.has(flow)) {
@@ -728,7 +809,7 @@ function sourceEvidenceManifestPathSet(entries) {
   return paths;
 }
 
-async function listSourceEvidenceJsonFiles(sourceDir, currentDir = sourceDir) {
+async function listSourceEvidenceFiles(sourceDir, currentDir = sourceDir) {
   let entries;
   try {
     entries = await fs.readdir(currentDir, { withFileTypes: true });
@@ -740,10 +821,10 @@ async function listSourceEvidenceJsonFiles(sourceDir, currentDir = sourceDir) {
   for (const entry of entries) {
     const fullPath = path.join(currentDir, entry.name);
     if (entry.isDirectory()) {
-      files.push(...await listSourceEvidenceJsonFiles(sourceDir, fullPath));
+      files.push(...await listSourceEvidenceFiles(sourceDir, fullPath));
       continue;
     }
-    if (entry.isFile() && entry.name.endsWith('.json')) {
+    if (entry.isFile()) {
       files.push(
         `${SOURCE_EVIDENCE_DIR}/${path.relative(sourceDir, fullPath).split(path.sep).join('/')}`
       );
@@ -753,18 +834,18 @@ async function listSourceEvidenceJsonFiles(sourceDir, currentDir = sourceDir) {
 }
 
 async function validateSourceEvidenceDirectoryClosure(reportDir, manifestPaths) {
-  const actualJsonFiles = await listSourceEvidenceJsonFiles(
+  const actualFiles = await listSourceEvidenceFiles(
     path.join(reportDir, SOURCE_EVIDENCE_DIR)
   );
-  const actualJsonSet = new Set(actualJsonFiles);
-  for (const relative of actualJsonFiles) {
+  const actualFileSet = new Set(actualFiles);
+  for (const relative of actualFiles) {
     if (!manifestPaths.has(relative)) {
-      fail(`source evidence directory contains unlisted JSON file: ${relative}`);
+      fail(`source evidence directory contains unlisted file: ${relative}`);
     }
   }
   for (const relative of manifestPaths) {
-    if (relative.endsWith('.json') && !actualJsonSet.has(relative)) {
-      fail(`source evidence directory is missing manifest-listed JSON file: ${relative}`);
+    if (!actualFileSet.has(relative)) {
+      fail(`source evidence directory is missing manifest-listed file: ${relative}`);
     }
   }
 }

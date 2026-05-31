@@ -56,6 +56,56 @@ function jsonDigest(value) {
 const contractDigest = jsonDigest(contract);
 const templateDigest = jsonDigest(template);
 
+function inventoryImage(id) {
+  const image = contract.deploy_image_inventory.find((entry) => entry.id === id);
+  if (!image) {
+    throw new Error(`missing deploy image inventory id: ${id}`);
+  }
+  return image;
+}
+
+function imageRepository(image) {
+  const withoutDigest = image.split('@sha256:')[0];
+  const lastSlash = withoutDigest.lastIndexOf('/');
+  const lastColon = withoutDigest.lastIndexOf(':');
+  return lastColon > lastSlash ? withoutDigest.slice(0, lastColon) : withoutDigest;
+}
+
+function digestPinnedImage(image) {
+  return `${imageRepository(image.image)}@${image.digest}`;
+}
+
+const appImage = inventoryImage('agentsmith_app');
+const sidecarDigest = `sha256:${'f'.repeat(64)}`;
+const renderCheckImageRef =
+  mutation === 'render-check-target-registry-mirror'
+    ? `registry.example.test/mirror/agentsmith-app@${appImage.digest}`
+    : digestPinnedImage(appImage);
+const renderCheckMatchedBy =
+  mutation === 'render-check-target-registry-mirror' ? 'digest' : 'exact_ref';
+
+function addObservedExtraDigest(summary) {
+  summary.status_entries_count += 1;
+  summary.image_id_count += 1;
+  summary.observed_digests = [...new Set([...summary.observed_digests, sidecarDigest])].sort();
+  summary.observed_digest_count = summary.observed_digests.length;
+}
+
+function driftRenderCheckDigest(report) {
+  const replacementDigest = `sha256:${'b'.repeat(64)}`;
+  const replacementImage = (image) => image.replace(/@sha256:[0-9a-f]{64}/, `@${replacementDigest}`);
+  for (const image of report.images || []) {
+    image.image = replacementImage(image.image);
+    image.digest = replacementDigest;
+  }
+  for (const manifest of report.manifests || []) {
+    for (const image of manifest.images || []) {
+      image.image = replacementImage(image.image);
+      image.digest = replacementDigest;
+    }
+  }
+}
+
 function targetProfile(value) {
   const [target_cluster, substrate_source, distribution] = value.split('/');
   return {
@@ -134,10 +184,10 @@ function stepReport(name, profile, bindings = {}) {
         },
         images: [
           {
-            image: 'ghcr.io/agentsmith-project/agentsmith-app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            image: renderCheckImageRef,
+            digest: appImage.digest,
             inventory_id: 'agentsmith_app',
-            matched_by: 'exact_ref'
+            matched_by: renderCheckMatchedBy
           }
         ],
         manifests: [
@@ -151,10 +201,10 @@ function stepReport(name, profile, bindings = {}) {
               {
                 field: 'containers',
                 container: 'app',
-                image: 'ghcr.io/agentsmith-project/agentsmith-app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-                digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                image: renderCheckImageRef,
+                digest: appImage.digest,
                 inventory_id: 'agentsmith_app',
-                matched_by: 'exact_ref'
+                matched_by: renderCheckMatchedBy
               }
             ]
           }
@@ -206,7 +256,7 @@ function stepReport(name, profile, bindings = {}) {
         ],
         expected_image_digests: [
           {
-            digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            digest: appImage.digest,
             inventory_ids: ['agentsmith_app'],
             images_count: 1
           }
@@ -218,8 +268,8 @@ function stepReport(name, profile, bindings = {}) {
           image_field_fallback_count: 0,
           missing_digest_count: 0,
           observed_digest_count: 1,
-          observed_digests: ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
-          matched_expected_digests: ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']
+          observed_digests: [appImage.digest],
+          matched_expected_digests: [appImage.digest]
         },
         workload_summaries: [
           {
@@ -233,7 +283,7 @@ function stepReport(name, profile, bindings = {}) {
             },
             expected_image_digests: [
               {
-                digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                digest: appImage.digest,
                 inventory_ids: ['agentsmith_app'],
                 images_count: 1
               }
@@ -245,8 +295,8 @@ function stepReport(name, profile, bindings = {}) {
               image_field_fallback_count: 0,
               missing_digest_count: 0,
               observed_digest_count: 1,
-              observed_digests: ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
-              matched_expected_digests: ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']
+              observed_digests: [appImage.digest],
+              matched_expected_digests: [appImage.digest]
             }
           }
         ]
@@ -322,6 +372,13 @@ function step(baseDir, name, relativePath, profile, bindings = {}) {
       fs.readFileSync(path.join(baseDir, 'rollout/rollout-report.json'))
     );
   }
+  if (mutation === 'render-check-image-digest-legal-drift' && name === 'render-check') {
+    driftRenderCheckDigest(report);
+  }
+  if (mutation === 'rollout-observed-extra-digest' && name === 'rollout') {
+    addObservedExtraDigest(report.observed_live_image_digest_summary);
+    addObservedExtraDigest(report.workload_summaries[0].observed_live_image_digest_summary);
+  }
   writeJson(path.join(baseDir, relativePath), report);
   return {
     name,
@@ -371,10 +428,10 @@ function airgapBundle(dir, profile) {
     mappings: [
       {
         id: 'agentsmith_app',
-        source_image: 'ghcr.io/agentsmith-project/agentsmith-app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        source_digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        target_image: 'registry.example.test/agentsmith/agentsmith-app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        target_digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        source_image: digestPinnedImage(appImage),
+        source_digest: appImage.digest,
+        target_image: `registry.example.test/agentsmith/agentsmith-app@${appImage.digest}`,
+        target_digest: appImage.digest
       }
     ]
   });
@@ -656,7 +713,7 @@ fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
-mutate_product_smoke_report() {
+mutate_product_report() {
   local report_file="$1"
   local mutation="$2"
 
@@ -668,17 +725,52 @@ const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 
 if (mutation === 'missing-provenance') {
   delete report.artifact_provenance;
+} else if (mutation === 'four-field-provenance') {
+  report.artifact_provenance = {
+    producer_repo: 'github.com/agentsmith-project/agentsmith',
+    commit_sha: report.git_sha,
+    run_id: '10001',
+    run_attempt: '1'
+  };
+} else if (mutation === 'missing-schema') {
+  delete report.artifact_provenance.schema_version;
+} else if (mutation === 'missing-kind') {
+  delete report.artifact_provenance.provenance_kind;
 } else if (mutation === 'wrong-repo') {
   report.artifact_provenance.producer_repo = 'github.com/example/not-agentsmith';
-  report.artifact_provenance.normalized_remote = 'github.com/example/not-agentsmith';
 } else if (mutation === 'wrong-sha') {
   report.artifact_provenance.commit_sha = `${'9'.repeat(40)}`;
+} else if (mutation === 'non-iso-generated-at') {
+  report.artifact_provenance.generated_at = 'not-an-iso-timestamp';
+} else if (mutation === 'missing-artifact-binding') {
+  delete report.artifact_provenance.subject_sha256;
+  delete report.artifact_provenance.artifact_sha256;
+  delete report.artifact_provenance.artifact_uri;
+} else if (mutation === 'artifact-uri-only') {
+  delete report.artifact_provenance.subject_sha256;
+  delete report.artifact_provenance.artifact_sha256;
+} else if (mutation === 'encoded-home-artifact-uri') {
+  report.artifact_provenance.artifact_uri =
+    'gh-artifact://agentsmith/product-readiness/10001/%2Fhome%2Fexample%2Freport.json';
+} else if (mutation === 'encoded-tmp-artifact-uri') {
+  report.artifact_provenance.artifact_uri =
+    'gh-artifact://agentsmith/product-readiness/10001/%2Ftmp%2Fagentsmith%2Freport.json';
+} else if (mutation === 'encoded-private-artifact-uri') {
+  report.artifact_provenance.artifact_uri =
+    'gh-artifact://agentsmith/product-readiness/10001/%2Fprivate%2Ftmp%2Freport.json';
+} else if (mutation === 'encoded-kubeconfig-artifact-uri') {
+  report.artifact_provenance.artifact_uri =
+    'artifact://agentsmith/product-readiness/10001/.kube%2Fconfig';
 } else {
-  throw new Error(`unknown product smoke mutation: ${mutation}`);
+  throw new Error(`unknown product report mutation: ${mutation}`);
 }
 
 fs.writeFileSync(reportFile, `${JSON.stringify(report, null, 2)}\n`);
 NODE
+}
+
+mutate_product_smoke_report() {
+  mutate_product_report "$@"
 }
 
 mutate_release_contract_image_closure() {
@@ -817,6 +909,18 @@ fs.writeFileSync(
 NODE
 }
 
+add_unlisted_source_evidence_note() {
+  local report_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$report_dir" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const reportDir = process.argv[2];
+fs.writeFileSync(path.join(reportDir, 'source-evidence', 'note.txt'), 'operator note\n');
+NODE
+}
+
 mutate_source_evidence_file_with_digest_refresh() {
   local report_dir="$1"
   local step_name="$2"
@@ -857,6 +961,19 @@ if (mutation === 'forbidden-local-material') {
 } else if (mutation === 'schema-shaped-render-check') {
   material.images = [{}];
   material.manifests = [{}];
+} else if (mutation === 'render-check-image-digest-legal-drift') {
+  const replacementDigest = `sha256:${'a'.repeat(64)}`;
+  const replacementImage = (image) => image.replace(/@sha256:[0-9a-f]{64}/, `@${replacementDigest}`);
+  for (const image of material.images || []) {
+    image.image = replacementImage(image.image);
+    image.digest = replacementDigest;
+  }
+  for (const manifest of material.manifests || []) {
+    for (const image of manifest.images || []) {
+      image.image = replacementImage(image.image);
+      image.digest = replacementDigest;
+    }
+  }
 } else {
   throw new Error(`unknown source evidence mutation: ${mutation}`);
 }
@@ -886,6 +1003,10 @@ fake_render_check_source_evidence_with_digest_refresh() {
   mutate_source_evidence_file_with_digest_refresh "$1" render-check schema-shaped-render-check
 }
 
+drift_render_check_image_digest_with_digest_refresh() {
+  mutate_source_evidence_file_with_digest_refresh "$1" render-check render-check-image-digest-legal-drift
+}
+
 VALID_DIR="$TMP_DIR/valid"
 PATH_DIR="$TMP_DIR/path-reports"
 write_fixture_set "$VALID_DIR" valid
@@ -909,22 +1030,84 @@ NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
 pass "valid GA aggregate consumes finalizer-generated path bundles"
 
-for mutation in missing-provenance wrong-repo wrong-sha; do
-  PRODUCT_SMOKE_DIR="$TMP_DIR/product-smoke-$mutation"
-  write_fixture_set "$PRODUCT_SMOKE_DIR" valid
-  mutate_product_smoke_report "$PRODUCT_SMOKE_DIR/post-deploy-product-smoke-report.json" "$mutation"
-  if run_ga_release "$PRODUCT_SMOKE_DIR" "$PATH_DIR" "$TMP_DIR/out-product-smoke-$mutation" >"$TMP_DIR/ga-release-product-smoke-$mutation.out" 2>&1; then
-    fail "product smoke $mutation should fail"
-  fi
-  if [[ "$mutation" == "missing-provenance" ]]; then
-    grep -Fq "post_deploy_product_smoke.artifact_provenance must be an object" "$TMP_DIR/ga-release-product-smoke-$mutation.out" || \
-      fail "product smoke missing provenance failure message did not explain blocker"
-  else
-    grep -Fq "post-deploy product smoke provenance must match AgentSmith repo and git sha" "$TMP_DIR/ga-release-product-smoke-$mutation.out" || \
-      fail "product smoke provenance drift failure message did not explain blocker"
-  fi
+MIRROR_RENDER_DIR="$TMP_DIR/render-check-target-registry-mirror"
+write_fixture_set "$MIRROR_RENDER_DIR" render-check-target-registry-mirror
+generate_path_bundles "$MIRROR_RENDER_DIR" "$TMP_DIR/path-render-check-target-registry-mirror"
+run_ga_release "$MIRROR_RENDER_DIR" "$TMP_DIR/path-render-check-target-registry-mirror" "$TMP_DIR/out-render-check-target-registry-mirror"
+pass "GA aggregate accepts render-check same inventory digest from target registry mirror"
+
+ROLLOUT_EXTRA_DIGEST_DIR="$TMP_DIR/rollout-observed-extra-digest"
+write_fixture_set "$ROLLOUT_EXTRA_DIGEST_DIR" rollout-observed-extra-digest
+generate_path_bundles "$ROLLOUT_EXTRA_DIGEST_DIR" "$TMP_DIR/path-rollout-observed-extra-digest"
+run_ga_release "$ROLLOUT_EXTRA_DIGEST_DIR" "$TMP_DIR/path-rollout-observed-extra-digest" "$TMP_DIR/out-rollout-observed-extra-digest"
+pass "GA aggregate allows rollout observed sidecar digest extras"
+
+product_report_cases=(
+  "product-readiness-report.json|product_readiness_report.artifact_provenance|product readiness"
+  "post-deploy-product-smoke-report.json|post_deploy_product_smoke.artifact_provenance|post-deploy product smoke"
+)
+product_provenance_mutations=(
+  missing-provenance
+  four-field-provenance
+  missing-schema
+  missing-kind
+  wrong-repo
+  wrong-sha
+  non-iso-generated-at
+  missing-artifact-binding
+  encoded-home-artifact-uri
+  encoded-tmp-artifact-uri
+  encoded-private-artifact-uri
+  encoded-kubeconfig-artifact-uri
+)
+for report_case in "${product_report_cases[@]}"; do
+  IFS='|' read -r report_file provenance_label report_label <<< "$report_case"
+  PRODUCT_URI_ONLY_DIR="$TMP_DIR/${report_file%.json}-artifact-uri-only"
+  write_fixture_set "$PRODUCT_URI_ONLY_DIR" valid
+  mutate_product_report "$PRODUCT_URI_ONLY_DIR/$report_file" artifact-uri-only
+  run_ga_release "$PRODUCT_URI_ONLY_DIR" "$PATH_DIR" "$TMP_DIR/out-${report_file%.json}-artifact-uri-only"
+  for mutation in "${product_provenance_mutations[@]}"; do
+    PRODUCT_PROVENANCE_DIR="$TMP_DIR/${report_file%.json}-$mutation"
+    write_fixture_set "$PRODUCT_PROVENANCE_DIR" valid
+    mutate_product_report "$PRODUCT_PROVENANCE_DIR/$report_file" "$mutation"
+    if run_ga_release "$PRODUCT_PROVENANCE_DIR" "$PATH_DIR" "$TMP_DIR/out-${report_file%.json}-$mutation" >"$TMP_DIR/ga-release-${report_file%.json}-$mutation.out" 2>&1; then
+      fail "$report_label $mutation should fail"
+    fi
+    case "$mutation" in
+      missing-provenance)
+        expected_message="$provenance_label must be an object"
+        ;;
+      four-field-provenance|missing-schema)
+        expected_message="$provenance_label.schema_version is required"
+        ;;
+      missing-kind)
+        expected_message="$provenance_label.provenance_kind is required"
+        ;;
+      wrong-repo)
+        expected_message="$provenance_label.producer_repo must match $provenance_label.normalized_remote"
+        ;;
+      wrong-sha)
+        expected_message="$report_label provenance must match AgentSmith repo and git sha"
+        ;;
+      non-iso-generated-at)
+        expected_message="$provenance_label.generated_at must be an ISO timestamp"
+        ;;
+      missing-artifact-binding)
+        expected_message="$provenance_label must include subject_sha256, artifact_sha256, or artifact_uri"
+        ;;
+      encoded-home-artifact-uri|encoded-tmp-artifact-uri|encoded-private-artifact-uri|encoded-kubeconfig-artifact-uri)
+        expected_message="input report contains forbidden local path or secret-like text"
+        ;;
+      *)
+        fail "missing expected message for product provenance mutation: $mutation"
+        ;;
+    esac
+    grep -Fq "$expected_message" "$TMP_DIR/ga-release-${report_file%.json}-$mutation.out" || \
+      fail "$report_label $mutation failure message did not explain blocker"
+  done
 done
-pass "GA aggregate requires post-deploy product smoke AgentSmith provenance"
+pass "GA aggregate requires full product readiness and product smoke provenance shape"
+pass "GA aggregate accepts product artifact_uri as the sole artifact binding"
 
 IMAGE_CLOSURE_DIR="$TMP_DIR/release-contract-image-closure"
 write_fixture_set "$IMAGE_CLOSURE_DIR" valid
@@ -1027,9 +1210,20 @@ add_unlisted_source_evidence_json "$TMP_DIR/path-source-extra-material/online-us
 if run_ga_release "$SOURCE_EXTRA_DIR" "$TMP_DIR/path-source-extra-material" "$TMP_DIR/out-source-extra-material" >"$TMP_DIR/ga-release-source-extra.out" 2>&1; then
   fail "unlisted source evidence JSON should fail"
 fi
-grep -Fq "source evidence directory contains unlisted JSON file: source-evidence/unlisted-source-material.json" "$TMP_DIR/ga-release-source-extra.out" || \
+grep -Fq "source evidence directory contains unlisted file: source-evidence/unlisted-source-material.json" "$TMP_DIR/ga-release-source-extra.out" || \
   fail "unlisted source evidence failure message did not explain blocker"
 pass "GA aggregate rejects unlisted source evidence JSON material"
+
+SOURCE_EXTRA_NOTE_DIR="$TMP_DIR/source-extra-note"
+write_fixture_set "$SOURCE_EXTRA_NOTE_DIR" valid
+generate_path_bundles "$SOURCE_EXTRA_NOTE_DIR" "$TMP_DIR/path-source-extra-note"
+add_unlisted_source_evidence_note "$TMP_DIR/path-source-extra-note/online-use-existing"
+if run_ga_release "$SOURCE_EXTRA_NOTE_DIR" "$TMP_DIR/path-source-extra-note" "$TMP_DIR/out-source-extra-note" >"$TMP_DIR/ga-release-source-extra-note.out" 2>&1; then
+  fail "unlisted source evidence note should fail"
+fi
+grep -Fq "source evidence directory contains unlisted file: source-evidence/note.txt" "$TMP_DIR/ga-release-source-extra-note.out" || \
+  fail "unlisted source evidence note failure message did not explain blocker"
+pass "GA aggregate rejects unlisted non-JSON source evidence material"
 
 SOURCE_FORBIDDEN_DIR="$TMP_DIR/source-forbidden-material"
 write_fixture_set "$SOURCE_FORBIDDEN_DIR" valid
@@ -1052,6 +1246,17 @@ fi
 grep -Fq "render-check step report.images[0].image is required" "$TMP_DIR/ga-release-source-semantic-render.out" || \
   fail "source render-check semantic failure message did not explain blocker"
 pass "GA aggregate revalidates materialized render-check source semantics"
+
+SOURCE_IMAGE_CLOSURE_DIR="$TMP_DIR/source-image-closure-digest-refresh"
+write_fixture_set "$SOURCE_IMAGE_CLOSURE_DIR" valid
+generate_path_bundles "$SOURCE_IMAGE_CLOSURE_DIR" "$TMP_DIR/path-source-image-closure"
+drift_render_check_image_digest_with_digest_refresh "$TMP_DIR/path-source-image-closure/online-use-existing"
+if run_ga_release "$SOURCE_IMAGE_CLOSURE_DIR" "$TMP_DIR/path-source-image-closure" "$TMP_DIR/out-source-image-closure" >"$TMP_DIR/ga-release-source-image-closure.out" 2>&1; then
+  fail "source render-check image digest closure drift should fail"
+fi
+grep -Fq "render-check step report.images[0].digest must match release contract deploy_image_inventory digest for inventory_id agentsmith_app" "$TMP_DIR/ga-release-source-image-closure.out" || \
+  fail "source render-check image closure failure message did not explain blocker"
+pass "GA aggregate rejects digest-refreshed source image closure drift"
 
 LEDGER_DIGEST_MISMATCH_DIR="$TMP_DIR/source-ledger-step-digest-mismatch"
 write_fixture_set "$LEDGER_DIGEST_MISMATCH_DIR" valid

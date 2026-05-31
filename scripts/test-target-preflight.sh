@@ -244,7 +244,7 @@ switch (mutation) {
     break;
   case 'source_path':
     truth.operator_note =
-      '/home/percy/works/mbos-v1/' + 'agent' + 'smith/' + 'sr' + 'c/ap' + 'p/page.tsx';
+      '/home/example/works/mbos-v1/' + 'agent' + 'smith/' + 'sr' + 'c/ap' + 'p/page.tsx';
     break;
   case 'bare_host_docker_internal':
     truth.operator_note = 'declared by host.docker.internal';

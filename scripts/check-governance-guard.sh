@@ -270,12 +270,12 @@ old_llmup_image+="up"
 
 reject_scan \
   "AgentSmith product source import or relative source path found" \
-  '(^|[^[:alnum:]_])\.\./agentsmith(/|$)|/home/percy/works/mbos-v1/agentsmith(/|$)|from[[:space:]]+["'\''][^"'\'']*agentsmith|require\(["'\''][^"'\'']*agentsmith|packages/(api-entry-node|agent-task-runner|agent-runner|web|app)|src/(app)/|e2e/(stories)/|check-product-flows\.ts' \
+  '(^|[^[:alnum:]_])\.\./agentsmith(/|$)|/home/[^/[:space:]]+/works/[^/[:space:]]+/agentsmith(/|$)|from[[:space:]]+["'\''][^"'\'']*agentsmith|require\(["'\''][^"'\'']*agentsmith|packages/(api-entry-node|agent-task-runner|agent-runner|web|app)|src/(app)/|e2e/(stories)/|check-product-flows\.ts' \
   "${scan_paths[@]}"
 
 reject_scan \
   "AFSCP or ASBCP source, contract, or gate dependency found" \
-  "(^|[^[:alnum:]_])\\.\\./(agentsmith-fs-control-plane|mbos-sandbox-v1)(/|$)|/home/percy/works/mbos-v1/(agentsmith-fs-control-plane|mbos-sandbox-v1)(/|$)|agentsmith-fs-control-plane/(src|cmd|internal|pkg|deploy|migrations|scripts|docs)|mbos-sandbox-v1/(manager-service|k8s|scripts|docs)|verify-ga-release\\.sh|${afscp_mount_plan_contract}" \
+  "(^|[^[:alnum:]_])\\.\\./(agentsmith-fs-control-plane|mbos-sandbox-v1)(/|$)|/home/[^/[:space:]]+/works/[^/[:space:]]+/(agentsmith-fs-control-plane|mbos-sandbox-v1)(/|$)|agentsmith-fs-control-plane/(src|cmd|internal|pkg|deploy|migrations|scripts|docs)|mbos-sandbox-v1/(manager-service|k8s|scripts|docs)|verify-ga-release\\.sh|${afscp_mount_plan_contract}" \
   "${scan_paths[@]}"
 
 reject_scan \

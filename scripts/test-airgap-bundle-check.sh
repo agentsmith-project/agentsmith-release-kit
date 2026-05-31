@@ -886,7 +886,7 @@ switch (mutation) {
     break;
   case 'source_path':
     manifest.templates.postgresql =
-      '/home/percy/works/mbos-v1/' + 'agent' + 'smith/' + 'src/' + 'app/page.tsx';
+      '/home/example/works/mbos-v1/' + 'agent' + 'smith/' + 'src/' + 'app/page.tsx';
     break;
   case 'non_digest_image':
     manifest.images.redis = 'ghcr.io/agentsmith-project/substrates/redis:7.2';

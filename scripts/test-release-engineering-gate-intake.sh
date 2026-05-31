@@ -318,23 +318,23 @@ switch (mutation) {
     }
     break;
   case 'unsafe_release_contract_artifact_uri':
-    data.artifact_provenance.artifact_uri = '/home/percy/.kube/config';
+    data.artifact_provenance.artifact_uri = '/home/example/.kube/config';
     break;
   case 'encoded_home_release_contract_artifact_uri':
     data.artifact_provenance.artifact_uri =
-      'gh-artifact://agentsmith/release-contract/10001/%2Fhome%2Fpercy%2F.kube%2Fconfig';
+      'gh-artifact://agentsmith/release-contract/10001/%2Fhome%2Fexample%2F.kube%2Fconfig';
     break;
   case 'fragment_home_release_contract_artifact_uri':
     data.artifact_provenance.artifact_uri =
-      'gh-artifact://agentsmith/release-contract/10001/release-contract.json#%2Fhome%2Fpercy%2F.kube%2Fconfig';
+      'gh-artifact://agentsmith/release-contract/10001/release-contract.json#%2Fhome%2Fexample%2F.kube%2Fconfig';
     break;
   case 'double_encoded_home_release_contract_artifact_uri':
     data.artifact_provenance.artifact_uri =
-      'gh-artifact://agentsmith/release-contract/10001/%252Fhome%252Fpercy%252F.kube%252Fconfig';
+      'gh-artifact://agentsmith/release-contract/10001/%252Fhome%252Fexample%252F.kube%252Fconfig';
     break;
   case 'deep_fragment_home_release_contract_artifact_uri':
     data.artifact_provenance.artifact_uri =
-      `gh-artifact://agentsmith/release-contract/10001/release-contract.json#${encodePercentLayers('/home/percy/.kube/config', 7)}`;
+      `gh-artifact://agentsmith/release-contract/10001/release-contract.json#${encodePercentLayers('/home/example/.kube/config', 7)}`;
     break;
   case 'malformed_percent_release_contract_artifact_uri':
     data.artifact_provenance.artifact_uri =
@@ -358,15 +358,15 @@ switch (mutation) {
     break;
   case 'fragment_home_online_report_uri':
     data.report_uri =
-      'gh-artifact://agentsmith/online-adoption/10001/report.json#%2Fhome%2Fpercy%2F.kube%2Fconfig';
+      'gh-artifact://agentsmith/online-adoption/10001/report.json#%2Fhome%2Fexample%2F.kube%2Fconfig';
     break;
   case 'encoded_home_online_provenance_artifact_uri':
     data.online_paths.use_existing.provenance.artifact_uri =
-      'signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/%2Fhome%2Fpercy%2F.kube%2Fconfig';
+      'signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/%2Fhome%2Fexample%2F.kube%2Fconfig';
     break;
   case 'deep_home_online_provenance_artifact_uri':
     data.online_paths.use_existing.provenance.artifact_uri =
-      `signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/${encodePercentLayers('/home/percy/.kube/config', 7)}`;
+      `signed-operator-run://agentsmith-release-kit/evidence/operator-online-use-existing/${encodePercentLayers('/home/example/.kube/config', 7)}`;
     break;
   case 'encoded_token_online_provenance_artifact_uri':
     data.online_paths.use_existing.provenance.artifact_uri =
@@ -374,11 +374,11 @@ switch (mutation) {
     break;
   case 'fragment_home_airgap_summary_uri':
     data.summary_uri =
-      'gh-artifact://agentsmith/airgap-adoption/10001/summary.json#%2Fhome%2Fpercy%2F.kube%2Fconfig';
+      'gh-artifact://agentsmith/airgap-adoption/10001/summary.json#%2Fhome%2Fexample%2F.kube%2Fconfig';
     break;
   case 'deep_fragment_home_airgap_summary_uri':
     data.summary_uri =
-      `gh-artifact://agentsmith/airgap-adoption/10001/summary.json#${encodePercentLayers('/home/percy/.kube/config', 7)}`;
+      `gh-artifact://agentsmith/airgap-adoption/10001/summary.json#${encodePercentLayers('/home/example/.kube/config', 7)}`;
     break;
   default:
     throw new Error(`unknown mutation: ${mutation}`);

@@ -262,7 +262,7 @@ switch (mutation) {
     break;
   case 'source_path':
     truth.operator_note =
-      '/home/percy/works/mbos-v1/' + 'agent' + 'smith/' + 'src/' + 'app/page.tsx';
+      '/home/example/works/mbos-v1/' + 'agent' + 'smith/' + 'src/' + 'app/page.tsx';
     break;
   default:
     throw new Error(`unknown truth mutation: ${mutation}`);

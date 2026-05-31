@@ -65,6 +65,56 @@ function writeJson(file, value) {
 const contractDigest = jsonDigest(contract);
 const templateDigest = jsonDigest(templateOut);
 
+function inventoryImage(id) {
+  const image = contract.deploy_image_inventory.find((entry) => entry.id === id);
+  if (!image) {
+    throw new Error(`missing deploy image inventory id: ${id}`);
+  }
+  return image;
+}
+
+function imageRepository(image) {
+  const withoutDigest = image.split('@sha256:')[0];
+  const lastSlash = withoutDigest.lastIndexOf('/');
+  const lastColon = withoutDigest.lastIndexOf(':');
+  return lastColon > lastSlash ? withoutDigest.slice(0, lastColon) : withoutDigest;
+}
+
+function digestPinnedImage(image) {
+  return `${imageRepository(image.image)}@${image.digest}`;
+}
+
+const appImage = inventoryImage('agentsmith_app');
+const sidecarDigest = `sha256:${'f'.repeat(64)}`;
+const renderCheckImageRef =
+  mutation === 'render-check-target-registry-mirror'
+    ? `registry.example.test/mirror/agentsmith-app@${appImage.digest}`
+    : digestPinnedImage(appImage);
+const renderCheckMatchedBy =
+  mutation === 'render-check-target-registry-mirror' ? 'digest' : 'exact_ref';
+
+function addObservedExtraDigest(summary) {
+  summary.status_entries_count += 1;
+  summary.image_id_count += 1;
+  summary.observed_digests = [...new Set([...summary.observed_digests, sidecarDigest])].sort();
+  summary.observed_digest_count = summary.observed_digests.length;
+}
+
+function driftRenderCheckDigest(report) {
+  const replacementDigest = `sha256:${'b'.repeat(64)}`;
+  const replacementImage = (image) => image.replace(/@sha256:[0-9a-f]{64}/, `@${replacementDigest}`);
+  for (const image of report.images || []) {
+    image.image = replacementImage(image.image);
+    image.digest = replacementDigest;
+  }
+  for (const manifest of report.manifests || []) {
+    for (const image of manifest.images || []) {
+      image.image = replacementImage(image.image);
+      image.digest = replacementDigest;
+    }
+  }
+}
+
 function targetProfile(value) {
   const [target_cluster, substrate_source, distribution] = value.split('/');
   return {
@@ -143,10 +193,10 @@ function stepReport(name, profile, bindings = {}) {
         },
         images: [
           {
-            image: 'ghcr.io/agentsmith-project/agentsmith-app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-            digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            image: renderCheckImageRef,
+            digest: appImage.digest,
             inventory_id: 'agentsmith_app',
-            matched_by: 'exact_ref'
+            matched_by: renderCheckMatchedBy
           }
         ],
         manifests: [
@@ -160,10 +210,10 @@ function stepReport(name, profile, bindings = {}) {
               {
                 field: 'containers',
                 container: 'app',
-                image: 'ghcr.io/agentsmith-project/agentsmith-app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-                digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                image: renderCheckImageRef,
+                digest: appImage.digest,
                 inventory_id: 'agentsmith_app',
-                matched_by: 'exact_ref'
+                matched_by: renderCheckMatchedBy
               }
             ]
           }
@@ -215,7 +265,7 @@ function stepReport(name, profile, bindings = {}) {
         ],
         expected_image_digests: [
           {
-            digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            digest: appImage.digest,
             inventory_ids: ['agentsmith_app'],
             images_count: 1
           }
@@ -227,8 +277,8 @@ function stepReport(name, profile, bindings = {}) {
           image_field_fallback_count: 0,
           missing_digest_count: 0,
           observed_digest_count: 1,
-          observed_digests: ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
-          matched_expected_digests: ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']
+          observed_digests: [appImage.digest],
+          matched_expected_digests: [appImage.digest]
         },
         workload_summaries: [
           {
@@ -242,7 +292,7 @@ function stepReport(name, profile, bindings = {}) {
             },
             expected_image_digests: [
               {
-                digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                digest: appImage.digest,
                 inventory_ids: ['agentsmith_app'],
                 images_count: 1
               }
@@ -254,8 +304,8 @@ function stepReport(name, profile, bindings = {}) {
               image_field_fallback_count: 0,
               missing_digest_count: 0,
               observed_digest_count: 1,
-              observed_digests: ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'],
-              matched_expected_digests: ['sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']
+              observed_digests: [appImage.digest],
+              matched_expected_digests: [appImage.digest]
             }
           }
         ]
@@ -365,11 +415,18 @@ function step(baseDir, name, relativePath, profile, bindings = {}) {
     report.images = [{}];
     report.manifests = [{}];
   }
+  if (mutation === 'render-check-image-digest-legal-drift' && name === 'render-check') {
+    driftRenderCheckDigest(report);
+  }
   if (mutation === 'schema-shaped-apply' && name === 'apply') {
     report.resource_refs = [{}];
   }
   if (mutation === 'rollout-expected-digest-missing-digest' && name === 'rollout') {
     delete report.expected_image_digests[0].digest;
+  }
+  if (mutation === 'rollout-observed-extra-digest' && name === 'rollout') {
+    addObservedExtraDigest(report.observed_live_image_digest_summary);
+    addObservedExtraDigest(report.workload_summaries[0].observed_live_image_digest_summary);
   }
   writeJson(path.join(baseDir, relativePath), report);
   return {
@@ -457,10 +514,10 @@ function airgapBundle(dir, profile) {
     mappings: [
       {
         id: 'agentsmith_app',
-        source_image: 'ghcr.io/agentsmith-project/agentsmith-app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        source_digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        target_image: 'registry.example.test/agentsmith/agentsmith-app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-        target_digest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        source_image: digestPinnedImage(appImage),
+        source_digest: appImage.digest,
+        target_image: `registry.example.test/agentsmith/agentsmith-app@${appImage.digest}`,
+        target_digest: appImage.digest
       }
     ]
   });
@@ -854,6 +911,25 @@ assertForbidden('raw AWS secret access key', {
 assertForbidden('kubeconfig admin.conf path', {
   value: { operator_note: { kubeconfig_path: '/etc/kubernetes/admin.conf' } }
 });
+assertForbidden('encoded home artifact uri', {
+  value: {
+    artifact_provenance: {
+      artifact_uri: 'gh-artifact://agentsmith/report/10001/%2Fhome%2Fexample%2Freport.json'
+    }
+  }
+});
+assertForbidden('encoded kubeconfig artifact uri', {
+  value: {
+    artifact_provenance: {
+      artifact_uri: 'artifact://agentsmith/report/10001/.kube%2Fconfig'
+    }
+  }
+});
+assertAllowed('ordinary artifact uri', {
+  artifact_provenance: {
+    artifact_uri: 'https://artifacts.example.test/agentsmith/report/10001/report.json'
+  }
+});
 assertAllowed('ordinary business key', {
   inventory: {
     key: 'customer-routing',
@@ -865,6 +941,24 @@ pass "shared forbidden scanner rejects explicit credential/path forms without ba
 
 run_ga_release "$VALID_DIR" "$PATH_DIR" "$TMP_DIR/out-ga"
 pass "finalized deployment path reports feed GA aggregate"
+
+MIRROR_RENDER_DIR="$TMP_DIR/render-check-target-registry-mirror"
+write_fixture_set "$MIRROR_RENDER_DIR" render-check-target-registry-mirror
+run_online_path \
+  "$MIRROR_RENDER_DIR" \
+  "online/use_existing" \
+  "$MIRROR_RENDER_DIR/online-use-existing" \
+  "$TMP_DIR/out-render-check-target-registry-mirror"
+pass "render-check source validation accepts same inventory digest from target registry mirror"
+
+ROLLOUT_EXTRA_DIGEST_DIR="$TMP_DIR/rollout-observed-extra-digest"
+write_fixture_set "$ROLLOUT_EXTRA_DIGEST_DIR" rollout-observed-extra-digest
+run_online_path \
+  "$ROLLOUT_EXTRA_DIGEST_DIR" \
+  "online/use_existing" \
+  "$ROLLOUT_EXTRA_DIGEST_DIR/online-use-existing" \
+  "$TMP_DIR/out-rollout-observed-extra-digest"
+pass "rollout source validation allows extra observed sidecar digest"
 
 SOURCE_FORBIDDEN_DIR="$TMP_DIR/source-report-forbidden-material"
 STALE_OUTPUT_DIR="$TMP_DIR/out-stale-cleanup"
@@ -1044,6 +1138,19 @@ fi
 grep -Fq "render-check step report.images[0].image is required" "$TMP_DIR/deployment-path-schema-render.out" || \
   fail "schema-shaped render-check failure message did not explain blocker"
 pass "render-check source reports require manifest and image evidence"
+
+RENDER_WRONG_DIGEST_DIR="$TMP_DIR/render-check-image-digest-legal-drift"
+write_fixture_set "$RENDER_WRONG_DIGEST_DIR" render-check-image-digest-legal-drift
+if run_online_path \
+  "$RENDER_WRONG_DIGEST_DIR" \
+  "online/use_existing" \
+  "$RENDER_WRONG_DIGEST_DIR/online-use-existing" \
+  "$TMP_DIR/out-render-check-image-digest-legal-drift" >"$TMP_DIR/deployment-path-render-check-wrong-digest.out" 2>&1; then
+  fail "render-check same inventory_id with wrong digest should fail"
+fi
+grep -Fq "render-check step report.images[0].digest must match release contract deploy_image_inventory digest for inventory_id agentsmith_app" "$TMP_DIR/deployment-path-render-check-wrong-digest.out" || \
+  fail "render-check wrong digest failure message did not explain blocker"
+pass "render-check source validation rejects same inventory_id with wrong digest"
 
 SCHEMA_APPLY_DIR="$TMP_DIR/schema-shaped-apply"
 write_fixture_set "$SCHEMA_APPLY_DIR" schema-shaped-apply

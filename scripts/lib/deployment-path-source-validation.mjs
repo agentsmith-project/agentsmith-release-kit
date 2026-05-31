@@ -375,6 +375,90 @@ function sameArraySet(left, right) {
   return [...leftSet].every((item) => rightSet.has(item));
 }
 
+function releaseDeployImageInventory(release) {
+  const inventory = release.deploy_image_inventory ?? release.images?.inventory;
+  const entries = requireNonEmptyArray(inventory, 'release contract deploy_image_inventory');
+  const byId = new Map();
+  const digestSet = new Set();
+  for (const [index, entry] of entries.entries()) {
+    const image = requireObject(entry, `release contract deploy_image_inventory[${index}]`);
+    const id = requireString(image.id, `release contract deploy_image_inventory[${index}].id`);
+    if (byId.has(id)) {
+      fail(`release contract deploy_image_inventory contains duplicate image id: ${id}`);
+    }
+    const digest = requireDigest(image.digest, `release contract deploy_image_inventory[${index}].digest`);
+    byId.set(id, {
+      id,
+      image: requireString(image.image, `release contract deploy_image_inventory[${index}].image`),
+      digest
+    });
+    digestSet.add(digest);
+  }
+  return { byId, digestSet };
+}
+
+function requireInventoryIdDigestMatch({ imageInventory, inventoryId, digest, label }) {
+  const inventoryEntry = imageInventory.byId.get(inventoryId);
+  if (!inventoryEntry) {
+    fail(`${label}.inventory_id must exist in release contract deploy_image_inventory`);
+  }
+  if (digest !== inventoryEntry.digest) {
+    fail(`${label}.digest must match release contract deploy_image_inventory digest for inventory_id ${inventoryId}`);
+  }
+  return inventoryEntry;
+}
+
+function imageDigestSuffix(value, label) {
+  const image = requireString(value, label);
+  const marker = '@sha256:';
+  const index = image.lastIndexOf(marker);
+  if (index === -1) {
+    fail(`${label} must be digest-pinned with @sha256`);
+  }
+  const digest = `sha256:${image.slice(index + marker.length)}`;
+  if (!DIGEST_RE.test(digest)) {
+    fail(`${label} must include a sha256 digest`);
+  }
+  return digest;
+}
+
+function requireRenderImageInventoryClosure({ imageInventory, image, digest, inventoryId, matchedBy, label }) {
+  requireInventoryIdDigestMatch({ imageInventory, inventoryId, digest, label });
+  if (imageDigestSuffix(image, `${label}.image`) !== digest) {
+    fail(`${label}.image digest must match ${label}.digest`);
+  }
+  if (matchedBy !== undefined) {
+    const value = requireString(matchedBy, `${label}.matched_by`);
+    if (!new Set(['image', 'exact_ref', 'digest']).has(value)) {
+      fail(`${label}.matched_by must be image, exact_ref, or digest`);
+    }
+  }
+}
+
+function requireDigestSubsetOfInventory(digests, imageInventory, label) {
+  for (const [index, digest] of digests.entries()) {
+    if (!imageInventory.digestSet.has(digest)) {
+      fail(`${label}[${index}] must be included in release contract deploy_image_inventory digests`);
+    }
+  }
+}
+
+function requireDigestSubset(digests, allowed, label, allowedLabel) {
+  for (const [index, digest] of digests.entries()) {
+    if (!allowed.has(digest)) {
+      fail(`${label}[${index}] must be included in ${allowedLabel}`);
+    }
+  }
+}
+
+function requireDigestSetCovers(requiredDigests, actualDigests, actualLabel, requiredLabel) {
+  for (const digest of requiredDigests) {
+    if (!actualDigests.has(digest)) {
+      fail(`${actualLabel} must include ${requiredLabel} digest ${digest}`);
+    }
+  }
+}
+
 function requireCommonReleaseFields(report, release, label) {
   if (requireString(report.release_id, `${label}.release_id`) !== release.release_id) {
     fail(`${label}.release_id must match release contract`);
@@ -424,43 +508,58 @@ function validateDigestArray(value, label) {
   for (const [index, digest] of digests.entries()) {
     requireDigest(digest, `${label}[${index}]`);
   }
+  return digests;
 }
 
-function validateExpectedImageDigestEntry(value, label) {
+function validateExpectedImageDigestEntry(value, label, imageInventory) {
   const entry = requireObject(value, label);
-  requireDigest(entry.digest, `${label}.digest`);
-  requireNonEmptyStringArray(entry.inventory_ids, `${label}.inventory_ids`);
+  const digest = requireDigest(entry.digest, `${label}.digest`);
+  const inventoryIds = requireNonEmptyStringArray(entry.inventory_ids, `${label}.inventory_ids`);
   requirePositiveInteger(entry.images_count, `${label}.images_count`);
-}
-
-function validateExpectedImageDigestEntries(value, label) {
-  const entries = requireNonEmptyArray(value, label);
-  for (const [index, entry] of entries.entries()) {
-    validateExpectedImageDigestEntry(entry, `${label}[${index}]`);
+  for (const inventoryId of inventoryIds) {
+    requireInventoryIdDigestMatch({ imageInventory, inventoryId, digest, label });
   }
+  return digest;
 }
 
-function validateRenderImageEntry(value, label) {
+function validateExpectedImageDigestEntries(value, label, imageInventory) {
+  const entries = requireNonEmptyArray(value, label);
+  const digestSet = new Set();
+  for (const [index, entry] of entries.entries()) {
+    digestSet.add(validateExpectedImageDigestEntry(entry, `${label}[${index}]`, imageInventory));
+  }
+  return digestSet;
+}
+
+function validateRenderImageEntry(value, label, imageInventory) {
   const image = requireObject(value, label);
-  requireString(image.image, `${label}.image`);
-  requireDigest(image.digest, `${label}.digest`);
-  requireString(image.inventory_id, `${label}.inventory_id`);
+  const imageRef = requireString(image.image, `${label}.image`);
+  const digest = requireDigest(image.digest, `${label}.digest`);
+  const inventoryId = requireString(image.inventory_id, `${label}.inventory_id`);
+  requireRenderImageInventoryClosure({
+    imageInventory,
+    image: imageRef,
+    digest,
+    inventoryId,
+    matchedBy: image.matched_by,
+    label
+  });
 }
 
-function validateRenderImageEntries(value, label) {
+function validateRenderImageEntries(value, label, imageInventory) {
   const images = requireNonEmptyArray(value, label);
   for (const [index, image] of images.entries()) {
-    validateRenderImageEntry(image, `${label}[${index}]`);
+    validateRenderImageEntry(image, `${label}[${index}]`, imageInventory);
   }
 }
 
-function validateRenderManifestEntry(value, label) {
+function validateRenderManifestEntry(value, label, imageInventory) {
   const manifest = requireObject(value, label);
   requireString(manifest.path, `${label}.path`);
   requirePositiveInteger(manifest.document_index, `${label}.document_index`);
   requireString(manifest.kind, `${label}.kind`);
   requireDigest(manifest.sha256, `${label}.sha256`);
-  validateRenderImageEntries(manifest.images, `${label}.images`);
+  validateRenderImageEntries(manifest.images, `${label}.images`, imageInventory);
 }
 
 function validateResourceRef(value, label, options = {}) {
@@ -486,11 +585,38 @@ function validateResourceRefs(value, label, options = {}) {
   }
 }
 
-function validateLiveDigestSummary(value, label) {
+function validateLiveDigestSummary(value, label, imageInventory, expectedDigestSet) {
   const summary = requireObject(value, label);
   requirePositiveInteger(summary.observed_digest_count, `${label}.observed_digest_count`);
-  validateDigestArray(summary.observed_digests, `${label}.observed_digests`);
-  validateDigestArray(summary.matched_expected_digests, `${label}.matched_expected_digests`);
+  const observedDigests = validateDigestArray(summary.observed_digests, `${label}.observed_digests`);
+  const matchedExpectedDigests = validateDigestArray(
+    summary.matched_expected_digests,
+    `${label}.matched_expected_digests`
+  );
+  requireDigestSubsetOfInventory(
+    matchedExpectedDigests,
+    imageInventory,
+    `${label}.matched_expected_digests`
+  );
+  requireDigestSubset(
+    matchedExpectedDigests,
+    expectedDigestSet,
+    `${label}.matched_expected_digests`,
+    `${label.replace(/\.observed_live_image_digest_summary$/, '')}.expected_image_digests`
+  );
+  const expectedLabel = `${label.replace(/\.observed_live_image_digest_summary$/, '')}.expected_image_digests`;
+  requireDigestSetCovers(
+    expectedDigestSet,
+    new Set(observedDigests),
+    `${label}.observed_digests`,
+    expectedLabel
+  );
+  requireDigestSetCovers(
+    expectedDigestSet,
+    new Set(matchedExpectedDigests),
+    `${label}.matched_expected_digests`,
+    expectedLabel
+  );
 }
 
 export function stepMap(steps, label) {
@@ -569,7 +695,7 @@ export function validateSourceStepReport({
 
   if (sourceStep === 'render-check') {
     requireReleaseContractDigest(report, release, label);
-    validateRenderCheckStepReport(report);
+    validateRenderCheckStepReport(report, release);
   }
   if (sourceStep === 'apply') {
     requireReleaseContractDigest(report, release, label);
@@ -577,7 +703,7 @@ export function validateSourceStepReport({
   }
   if (sourceStep === 'rollout') {
     requireReleaseContractDigest(report, release, label);
-    validateRolloutStepReport(report);
+    validateRolloutStepReport(report, release);
   }
   if (sourceStep === 'smoke') {
     requireReleaseContractDigest(report, release, label);
@@ -666,7 +792,8 @@ function validateTargetPreflightStepReport(report, expectedTargetProfile) {
   }
 }
 
-function validateRenderCheckStepReport(report) {
+function validateRenderCheckStepReport(report, release) {
+  const imageInventory = releaseDeployImageInventory(release);
   const renderedManifests = requireObject(
     report.rendered_manifests,
     'render-check step report.rendered_manifests'
@@ -676,10 +803,14 @@ function validateRenderCheckStepReport(report) {
     renderedManifests.workload_count,
     'render-check step report.rendered_manifests.workload_count'
   );
-  validateRenderImageEntries(report.images, 'render-check step report.images');
+  validateRenderImageEntries(report.images, 'render-check step report.images', imageInventory);
   const manifests = requireNonEmptyArray(report.manifests, 'render-check step report.manifests');
   for (const [index, manifest] of manifests.entries()) {
-    validateRenderManifestEntry(manifest, `render-check step report.manifests[${index}]`);
+    validateRenderManifestEntry(
+      manifest,
+      `render-check step report.manifests[${index}]`,
+      imageInventory
+    );
   }
 }
 
@@ -690,35 +821,49 @@ function validateApplyStepReport(report) {
   validateRenderCheckSummary(report.render_check, 'apply step report.render_check');
 }
 
-function validateRolloutStepReport(report) {
+function validateRolloutStepReport(report, release) {
+  const imageInventory = releaseDeployImageInventory(release);
   validateResourceRefs(
     report.rollout_resource_refs,
     'rollout step report.rollout_resource_refs',
     { requireSelector: true }
   );
-  validateExpectedImageDigestEntries(
+  const expectedDigestSet = validateExpectedImageDigestEntries(
     report.expected_image_digests,
-    'rollout step report.expected_image_digests'
+    'rollout step report.expected_image_digests',
+    imageInventory
   );
   validateLiveDigestSummary(
     report.observed_live_image_digest_summary,
-    'rollout step report.observed_live_image_digest_summary'
+    'rollout step report.observed_live_image_digest_summary',
+    imageInventory,
+    expectedDigestSet
   );
   const workloads = requireNonEmptyArray(report.workload_summaries, 'rollout step report.workload_summaries');
   for (const [index, workload] of workloads.entries()) {
-    validateRolloutWorkloadSummary(workload, `rollout step report.workload_summaries[${index}]`);
+    validateRolloutWorkloadSummary(
+      workload,
+      `rollout step report.workload_summaries[${index}]`,
+      imageInventory
+    );
   }
 }
 
-function validateRolloutWorkloadSummary(value, label) {
+function validateRolloutWorkloadSummary(value, label, imageInventory) {
   const workload = requireObject(value, label);
   validateResourceRef(workload.resource_ref, `${label}.resource_ref`, {
     requireSelector: true
   });
-  validateExpectedImageDigestEntries(workload.expected_image_digests, `${label}.expected_image_digests`);
+  const expectedDigestSet = validateExpectedImageDigestEntries(
+    workload.expected_image_digests,
+    `${label}.expected_image_digests`,
+    imageInventory
+  );
   validateLiveDigestSummary(
     workload.observed_live_image_digest_summary,
-    `${label}.observed_live_image_digest_summary`
+    `${label}.observed_live_image_digest_summary`,
+    imageInventory,
+    expectedDigestSet
   );
 }
 
