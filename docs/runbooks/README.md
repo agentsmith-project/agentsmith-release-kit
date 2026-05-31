@@ -77,6 +77,16 @@ maintainer/focused diagnostic entry. Use it when changing release-kit internals
 or running a specific downstream check, not as the first operator-facing
 command.
 
+Default PR/push CI follows the quick/core path only:
+`verify-release.sh --quick`, `test-inputs.sh`, `test-template-package.sh`,
+`test-render.sh`, `test-render-check.sh`, and
+`test-operator-release-surface.sh`. Maintainer diagnostics such as adoption
+aggregation, operator signoff intake, airgap image load, substrate routability,
+and release-engineering intake are manual `workflow_dispatch` checks. They
+are useful while changing those producers, but they are not default operator
+quick-path evidence and still do not issue deploy, package, or release
+readiness.
+
 For a concrete real Kubernetes plus existing substrates online example, copy
 and edit `examples/online-existing-kubernetes/`. It demonstrates the
 server-dry-run command, confirmed apply command, optional route smoke, and
@@ -165,9 +175,11 @@ The image id set comes from the AgentSmith release contract's embedded deploy
 template package closure:
 `release_contract.deploy_template_package.required_image_ids`,
 `deploy_template_package.required_image_ids`, and `deploy_image_inventory` ids
-must be exact-set aligned. Current fixtures/examples include `managed_runner`,
-which is carried by ordinary image-map, render, and airgap archive mechanics
-rather than a runner-specific runtime gate.
+must be exact-set aligned. Non-product image declarations such as provider
+images, release-kit prerequisite images, or `managed_runner_image` are
+optional release-kit intake details. If the closure includes one, it is carried
+by ordinary image-map, render, and airgap archive mechanics rather than a
+runner-specific runtime gate.
 
 During pre-GA, stale six-image required-id inputs, obsolete
 `${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale

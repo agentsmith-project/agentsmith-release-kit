@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  quick-boundary:
+  core:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -25,6 +25,18 @@ jobs:
         run: bash scripts/test-render.sh
       - name: Render check focused guard
         run: bash scripts/test-render-check.sh
+      - name: Operator release surface focused guard
+        run: bash scripts/test-operator-release-surface.sh
+
+  maintainer-diagnostics:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Diagnostics boundary
+        run: |
+          echo "Manual maintainer diagnostics only."
+          echo "These checks are intentionally excluded from default PR/push CI."
       - name: Image map focused guard
         run: bash scripts/test-image-map.sh
       - name: Registry presence focused guard
@@ -63,8 +75,6 @@ jobs:
         run: bash scripts/test-online-adoption.sh
       - name: Release engineering gate intake focused guard
         run: bash scripts/test-release-engineering-gate-intake.sh
-      - name: Operator release surface focused guard
-        run: bash scripts/test-operator-release-surface.sh
       - name: Online operator example focused guard
         run: bash scripts/test-online-operator-examples.sh
       - name: Operator signoff intake focused guard

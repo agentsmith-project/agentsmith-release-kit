@@ -22,12 +22,14 @@ const AGENTSMITH_PRODUCT = AGENTSMITH_REPO.slice(AGENTSMITH_REPO.lastIndexOf('/'
 const CONTRACT_SUBJECT = 'agentsmith-release-contract';
 const DEPLOY_TEMPLATE_PACKAGE_SUBJECT = 'agentsmith-deploy-template-package';
 const PROVENANCE_KIND = 'ci_artifact';
-const IMAGE_ARRAY_SOURCES = [
-  'product_images',
+const REQUIRED_IMAGE_ARRAY_SOURCES = ['product_images'];
+const OPTIONAL_IMAGE_ARRAY_SOURCES = [
   'adopted_provider_images',
   'release_kit_prerequisite_images'
 ];
-const IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
+const IMAGE_ARRAY_SOURCES = [...REQUIRED_IMAGE_ARRAY_SOURCES, ...OPTIONAL_IMAGE_ARRAY_SOURCES];
+const OPTIONAL_IMAGE_SINGLETON_SOURCES = ['managed_runner_image'];
+const IMAGE_SINGLETON_SOURCES = [...OPTIONAL_IMAGE_SINGLETON_SOURCES];
 const IMAGE_SOURCES = [...IMAGE_ARRAY_SOURCES, ...IMAGE_SINGLETON_SOURCES];
 const MANAGED_RUNNER_IMAGE_SOURCE = 'managed_runner_image';
 const DECLARED_MANAGED_RUNNER_IMAGE_ID = 'agentsmith-runner';
@@ -320,12 +322,6 @@ function imageInventoryKey(item) {
   return `${item.source}\u0000${item.id}\u0000${item.image}\u0000${item.digest}`;
 }
 
-function sortedImages(images) {
-  return [...images].sort((left, right) =>
-    imageInventoryKey(left).localeCompare(imageInventoryKey(right))
-  );
-}
-
 function assertUniqueImageIds(images, label) {
   const ids = new Set();
   for (const image of images) {
@@ -333,6 +329,22 @@ function assertUniqueImageIds(images, label) {
       fail(`${label} contains duplicate image id: ${image.id}`);
     }
     ids.add(image.id);
+  }
+}
+
+function assertImageItemSetContains(images, expectedItem, label, expectedLabel) {
+  const expectedKey = imageInventoryKey(expectedItem);
+  if (!images.some((image) => imageInventoryKey(image) === expectedKey)) {
+    fail(`${label} must include ${expectedLabel}`);
+  }
+}
+
+function assertImageItemsMatchDeclaredSources(images, declaredImages, label) {
+  const declaredKeys = new Set(declaredImages.map(imageInventoryKey));
+  for (const image of images) {
+    if (!declaredKeys.has(imageInventoryKey(image))) {
+      fail(`${label} must match declared image sources`);
+    }
   }
 }
 
@@ -407,21 +419,37 @@ function assertRequiredImageIds(contract, deployTemplatePackage, images) {
 }
 
 function assertImageInventory(contract) {
-  const expectedArrayItems = IMAGE_ARRAY_SOURCES.flatMap((source) => {
+  const requiredArrayItems = REQUIRED_IMAGE_ARRAY_SOURCES.flatMap((source) => {
     const group = requireArray(contract[source], `release_contract.${source}`);
     if (group.length === 0) {
       fail(`release_contract.${source} must not be empty`);
     }
     return group.map((item, index) => normalizeImageItem(item, source, `${source}[${index}]`));
   });
-  const expectedSingletonItems = IMAGE_SINGLETON_SOURCES.map((source) =>
-    normalizeImageItem(
-      contract[source],
-      source,
-      source
-    )
-  );
-  const expected = [...expectedArrayItems, ...expectedSingletonItems].map(
+
+  const optionalArrayItems = OPTIONAL_IMAGE_ARRAY_SOURCES.flatMap((source) => {
+    if (!Object.prototype.hasOwnProperty.call(contract, source)) {
+      return [];
+    }
+    const group = requireArray(contract[source], `release_contract.${source}`);
+    return group.map((item, index) => normalizeImageItem(item, source, `${source}[${index}]`));
+  });
+
+  const optionalSingletonItems = OPTIONAL_IMAGE_SINGLETON_SOURCES.flatMap((source) => {
+    if (!Object.prototype.hasOwnProperty.call(contract, source)) {
+      return [];
+    }
+    return [
+      normalizeImageItem(
+        contract[source],
+        source,
+        source
+      )
+    ];
+  });
+
+  const declaredProductImages = requiredArrayItems.map(deployInventoryItemForDeclared);
+  const declaredImages = [...requiredArrayItems, ...optionalArrayItems, ...optionalSingletonItems].map(
     deployInventoryItemForDeclared
   );
   const actual = requireArray(
@@ -429,29 +457,29 @@ function assertImageInventory(contract) {
     'release_contract.deploy_image_inventory'
   ).map((item, index) => normalizeInventoryItem(item, index));
 
-  assertUniqueImageIds(expected, 'release_contract image inventory');
+  if (actual.length === 0) {
+    fail('release_contract.deploy_image_inventory must not be empty');
+  }
+
+  assertUniqueImageIds(declaredImages, 'release_contract declared image sources');
   assertUniqueImageIds(actual, 'release_contract.deploy_image_inventory');
 
-  assertSameJson(
-    sortedImages(actual),
-    sortedImages(expected),
+  for (const image of declaredProductImages) {
+    assertImageItemSetContains(
+      actual,
+      image,
+      'release_contract.deploy_image_inventory',
+      'release_contract.product_images'
+    );
+  }
+
+  assertImageItemsMatchDeclaredSources(
+    actual,
+    declaredImages,
     'release_contract.deploy_image_inventory'
   );
 
   return actual;
-}
-
-function assertProductFlowShape(contract) {
-  const flows = requireArray(
-    contract.required_product_flows,
-    'release_contract.required_product_flows'
-  );
-  if (flows.length === 0) {
-    fail('release_contract.required_product_flows must not be empty');
-  }
-  for (const [index, flow] of flows.entries()) {
-    requireString(flow, `release_contract.required_product_flows[${index}]`);
-  }
 }
 
 function parseTargetProfile(targetProfile) {
@@ -1025,8 +1053,6 @@ function assertReleaseIdentity(contract) {
     fail('release_contract.product must be agentsmith');
   }
   requireString(contract.release_id, 'release_contract.release_id');
-  requireDigest(contract.openapi_digest, 'release_contract.openapi_digest');
-  requireDigest(contract.asyncapi_digest, 'release_contract.asyncapi_digest');
   assertSchemaVersion(
     contract.substrate_connection_schema,
     SUBSTRATE_CONNECTION_SCHEMA,
@@ -1198,7 +1224,6 @@ async function main() {
   assertTemplate(contract, deployTemplatePackage);
   const images = assertImageInventory(contract);
   assertRequiredImageIds(contract, deployTemplatePackage, images);
-  assertProductFlowShape(contract);
   const targetProfiles = assertTargetProfiles(contract);
   const targetProfileCoverageReport = buildTargetProfileCoverageReport(targetProfiles);
   await writeTargetProfileCoverageReport(args.outputDir, targetProfileCoverageReport);

@@ -137,6 +137,10 @@ function driftInventoryId(oldId, newId) {
   case 'digest-mismatch':
     contract.product_images[0].digest = digestE;
     break;
+  case 'provider-tag-only-image':
+    contract.adopted_provider_images[0].image =
+      'ghcr.io/agentsmith-project/llm-universal-proxy:2026.05.23-p0';
+    break;
   case 'missing-provenance':
     delete contract.artifact_provenance;
     break;
@@ -245,20 +249,11 @@ function driftInventoryId(oldId, newId) {
   case 'non-agentsmith-product':
     contract.product = 'not-agentsmith';
     break;
-  case 'missing-openapi-digest':
-    delete contract.openapi_digest;
-    break;
-  case 'missing-asyncapi-digest':
-    delete contract.asyncapi_digest;
-    break;
   case 'missing-substrate-connection-schema':
     delete contract.substrate_connection_schema;
     break;
   case 'missing-min-release-kit-version':
     delete contract.min_release_kit_version;
-    break;
-  case 'bad-openapi-digest':
-    contract.openapi_digest = 'sha256:not-a-digest';
     break;
   case 'bad-substrate-connection-schema':
     contract.substrate_connection_schema = 'agentsmith.substrate-connection.truth/v0';
@@ -403,12 +398,6 @@ function driftInventoryId(oldId, newId) {
     contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
       (item) => item.source !== 'adopted_provider_images'
     );
-    break;
-  case 'empty-required-product-flows':
-    contract.required_product_flows = [];
-    break;
-  case 'bad-required-product-flow':
-    contract.required_product_flows = ['workspace_project', ''];
     break;
   case 'bearer-token':
     contract.operator_inputs = {
@@ -571,6 +560,86 @@ contract.artifact_provenance.subject_sha256 = subjectDigest(contract);
 contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
 
 fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
+write_minimal_handoff_inputs() {
+  local contract_output="$1"
+  local deploy_template_package_output="$2"
+  local optional_mode="${3:-omitted}"
+
+  "$NODE_BIN" --input-type=module - \
+    "$VALID_CONTRACT" \
+    "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+    "$contract_output" \
+    "$deploy_template_package_output" \
+    "$optional_mode" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [
+  contractInput,
+  deployTemplatePackageInput,
+  contractOutput,
+  deployTemplatePackageOutput,
+  optionalMode
+] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+const deployTemplatePackage = JSON.parse(fs.readFileSync(deployTemplatePackageInput, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function subjectDigest(value) {
+  const { artifact_provenance: _artifactProvenance, ...subject } = value;
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(subject))).digest('hex')}`;
+}
+
+function artifactProjectionDigest(value) {
+  const { artifact_sha256: _artifactSha256, ...artifactProvenance } = value.artifact_provenance;
+  const projection = { ...value, artifact_provenance: artifactProvenance };
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(projection))).digest('hex')}`;
+}
+
+delete contract.openapi_digest;
+delete contract.asyncapi_digest;
+delete contract.required_product_flows;
+delete contract.managed_runner_image;
+
+contract.deploy_image_inventory = contract.deploy_image_inventory.filter(
+  (item) => item.source === 'product_images'
+);
+const requiredImageIds = contract.deploy_image_inventory.map((item) => item.id);
+deployTemplatePackage.required_image_ids = requiredImageIds;
+deployTemplatePackage.artifact_provenance.subject_sha256 = subjectDigest(deployTemplatePackage);
+contract.deploy_template_package = deployTemplatePackage;
+
+if (optionalMode === 'omitted') {
+  delete contract.adopted_provider_images;
+  delete contract.release_kit_prerequisite_images;
+} else if (optionalMode === 'empty') {
+  contract.adopted_provider_images = [];
+  contract.release_kit_prerequisite_images = [];
+} else {
+  throw new Error(`unknown optional mode: ${optionalMode}`);
+}
+
+contract.artifact_provenance.subject_sha256 = subjectDigest(contract);
+contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
+
+fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
+fs.writeFileSync(deployTemplatePackageOutput, `${JSON.stringify(deployTemplatePackage, null, 2)}\n`);
 NODE
 }
 
@@ -1084,6 +1153,27 @@ assert_outputs "$SECRET_REF_OUT"
 assert_coverage_report "$SECRET_REF_OUT"
 pass "valid secretRef pull_secret_ref accepted"
 
+MINIMAL_CONTRACT="$TMP_DIR/valid-minimal-handoff.release-contract.json"
+MINIMAL_DEPLOY_TEMPLATE_PACKAGE="$TMP_DIR/valid-minimal-handoff.deploy-template-package.json"
+MINIMAL_OUT="$TMP_DIR/valid-minimal-handoff"
+write_minimal_handoff_inputs "$MINIMAL_CONTRACT" "$MINIMAL_DEPLOY_TEMPLATE_PACKAGE" omitted
+run_inputs "$MINIMAL_CONTRACT" "$MINIMAL_DEPLOY_TEMPLATE_PACKAGE" "$MINIMAL_OUT" >/dev/null
+assert_outputs "$MINIMAL_OUT" "$TARGET_PROFILE" false "$MINIMAL_CONTRACT"
+assert_coverage_report "$MINIMAL_OUT"
+pass "minimal release-kit handoff accepted without product readiness fields or optional non-product image groups"
+
+EMPTY_OPTIONAL_CONTRACT="$TMP_DIR/valid-empty-optional-groups.release-contract.json"
+EMPTY_OPTIONAL_DEPLOY_TEMPLATE_PACKAGE="$TMP_DIR/valid-empty-optional-groups.deploy-template-package.json"
+EMPTY_OPTIONAL_OUT="$TMP_DIR/valid-empty-optional-groups"
+write_minimal_handoff_inputs \
+  "$EMPTY_OPTIONAL_CONTRACT" \
+  "$EMPTY_OPTIONAL_DEPLOY_TEMPLATE_PACKAGE" \
+  empty
+run_inputs "$EMPTY_OPTIONAL_CONTRACT" "$EMPTY_OPTIONAL_DEPLOY_TEMPLATE_PACKAGE" "$EMPTY_OPTIONAL_OUT" >/dev/null
+assert_outputs "$EMPTY_OPTIONAL_OUT" "$TARGET_PROFILE" false "$EMPTY_OPTIONAL_CONTRACT"
+assert_coverage_report "$EMPTY_OPTIONAL_OUT"
+pass "empty optional non-product image groups do not make release-kit intake fail"
+
 expect_pre_ga_required_target_profile
 expect_kind_required_target_profile
 
@@ -1103,6 +1193,7 @@ expect_target_profile_fail "synonym-target-profile-distribution-cluster" \
 for label in \
   tag-only-image \
   digest-mismatch \
+  provider-tag-only-image \
   missing-provenance \
   missing-provenance-workflow-name \
   bad-subject-sha256 \
@@ -1129,11 +1220,8 @@ for label in \
   noncanonical-contract-profile-distribution-cluster \
   non-agentsmith-repo-provenance \
   non-agentsmith-product \
-  missing-openapi-digest \
-  missing-asyncapi-digest \
   missing-substrate-connection-schema \
   missing-min-release-kit-version \
-  bad-openapi-digest \
   bad-substrate-connection-schema \
   bad-min-release-kit-version \
   v-prefixed-min-release-kit-version \
@@ -1168,9 +1256,6 @@ for label in \
   required-image-id-missing-in-inventory \
   required-current-image-id-absent-from-inventory \
   uppercase-image-digest \
-  empty-provider-images \
-  empty-required-product-flows \
-  bad-required-product-flow \
   bearer-token \
   invalid-attestation-uri \
   retired-attestation-fields \

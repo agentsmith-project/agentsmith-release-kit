@@ -190,10 +190,14 @@ inventory. During release contract intake,
 `release_contract.deploy_template_package.required_image_ids`,
 `deploy_template_package.required_image_ids`, and the
 `deploy_image_inventory` id set must be non-empty exact-set matches. The
-release kit consumes the dynamic image closure from the AgentSmith release
-contract instead of a hardcoded six-image list. Current fixtures/examples
-include `managed_runner`, a digest-bound inventory image supplied by the
-release contract. Every declared `target_profiles` entry must carry
+release kit consumes the dynamic deploy image closure from the AgentSmith
+release contract instead of a hardcoded image list. Only `product_images` is a
+required release-contract image source for intake. `adopted_provider_images`,
+`release_kit_prerequisite_images`, and `managed_runner_image` are optional
+non-product declarations: when present, their structure and matching inventory
+entries are checked; when absent, intake does not fail. `--inputs` does not
+require OpenAPI/AsyncAPI digests or product-flow declarations. Every declared
+`target_profiles` entry must carry
 `required: boolean`; `support_level` is rejected, duplicate three-axis tuples
 are rejected, and every entry must use an accepted pre-GA tuple. Only the four
 existing-Kubernetes tuples map to the operator choice surface. Existing
@@ -315,7 +319,9 @@ alphanumeric characters.
 Standalone image-map enforces the release contract's embedded deploy template
 package `required_image_ids` exact-set closure against `deploy_image_inventory`
 ids.
-When the closure includes `managed_runner`, image-map treats it like any other
+Non-product image declarations such as provider images, release-kit
+prerequisite images, or `managed_runner_image` are optional release-kit intake
+details. When the closure includes one, image-map treats it like any other
 digest-bound inventory image. Render then adopts it through normal
 `${{ images.<id>.image }}` and `${{ images.<id>.digest }}` placeholders when
 templates reference it, and airgap archive flows carry it through the existing
