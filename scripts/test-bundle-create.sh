@@ -883,6 +883,32 @@ if ! grep -q 'managed evidence entry evidence.json must be a file or symlink' "$
 fi
 pass "bundle create rejects managed evidence directories without recursive cleanup"
 
+evidence_extra_root="$TMP_DIR/evidence-extra-entry"
+mkdir -p "$evidence_extra_root"
+printf '%s\n' 'operator handoff note' >"$evidence_extra_root/operator-notes.txt"
+write_stale_reports "$TMP_DIR/out-evidence-extra-entry"
+if run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-evidence-extra-entry" "$TMP_DIR/out-evidence-extra-entry" \
+  "${default_image_args[@]}" \
+  "${common_payload_args[@]}" \
+  --evidence-root "$evidence_extra_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/evidence-extra-entry.out" 2>"$TMP_DIR/evidence-extra-entry.err"; then
+  cat "$TMP_DIR/evidence-extra-entry.out" >&2
+  cat "$TMP_DIR/evidence-extra-entry.err" >&2
+  fail "expected bundle create to reject non-managed evidence entry"
+fi
+assert_no_create_report "$TMP_DIR/out-evidence-extra-entry"
+assert_no_self_check_report "$TMP_DIR/out-evidence-extra-entry"
+[[ ! -e "$TMP_DIR/bundle-evidence-extra-entry/airgap-bundle-manifest.json" ]] || \
+  fail "non-managed evidence entry failure must happen before bundle assembly"
+grep -q 'operator handoff note' "$evidence_extra_root/operator-notes.txt" || \
+  fail "non-managed evidence entry must not be deleted or modified"
+if ! grep -q 'evidence root contains non-managed entry operator-notes.txt' "$TMP_DIR/evidence-extra-entry.err"; then
+  cat "$TMP_DIR/evidence-extra-entry.out" >&2
+  cat "$TMP_DIR/evidence-extra-entry.err" >&2
+  fail "non-managed evidence entry failure must be explicit"
+fi
+pass "bundle create rejects non-managed evidence entries without cleanup"
+
 rerun_output_dir="$TMP_DIR/out-rerun-check"
 run_airgap_bundle_check "$valid_bundle_root" "$rerun_output_dir" >"$TMP_DIR/rerun-check.out"
 [[ -f "$rerun_output_dir/$CHECK_REPORT_FILE" ]] || fail "rerun airgap bundle check report missing"

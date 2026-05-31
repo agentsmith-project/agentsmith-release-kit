@@ -188,6 +188,9 @@ evidence root only after bundle self-check passes, then revalidates it through
 operator identity, formal verdict, package readiness, deploy readiness, or
 release readiness semantics. `airgap-bundle/install_substrates` does not accept
 this evidence root yet.
+The evidence root must be absent, empty, or contain only those managed evidence
+files from a previous run; any other direct entry fails fast and is left in
+place.
 For `airgap-bundle/install_substrates`, also provide
 `--substrate-pack-manifest <json>`; the generated bundle records it as
 `components/substrate-pack-manifest.json`,

@@ -53,6 +53,7 @@ const MANAGED_EVIDENCE_ENTRIES = [
   'evidence-subject.json',
   ...EVIDENCE_OUTPUT_FILES
 ];
+const MANAGED_EVIDENCE_ENTRY_SET = new Set(MANAGED_EVIDENCE_ENTRIES);
 const COMMON_PROVENANCE_INPUT_FIELDS = [
   'schema_version',
   'provenance_kind',
@@ -361,6 +362,17 @@ async function assertEvidenceRootPreflight(args) {
     }
     if (!rootStat.isDirectory()) {
       fail('evidence root must be absent or a directory');
+    }
+    let rootEntries;
+    try {
+      rootEntries = await fs.readdir(evidenceRoot);
+    } catch (error) {
+      fail(`cannot read evidence root: ${error.message}`);
+    }
+    for (const entry of rootEntries.sort()) {
+      if (!MANAGED_EVIDENCE_ENTRY_SET.has(entry)) {
+        fail(`evidence root contains non-managed entry ${entry}; remove it manually`);
+      }
     }
   }
 

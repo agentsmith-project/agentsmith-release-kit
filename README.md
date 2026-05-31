@@ -393,6 +393,9 @@ only; signed operator-run fields such as signature URI or operator identity are
 not produced. This remains `readiness: false` focused evidence, not package,
 operator signoff, deploy, or release readiness. Kit-installed airgap rejects
 evidence output for now.
+The evidence root must be absent, empty, or contain only those managed evidence
+files from a previous run; any other direct entry fails fast and is left in
+place.
 
 Airgap bundle manifest/digest focused diagnostic:
 

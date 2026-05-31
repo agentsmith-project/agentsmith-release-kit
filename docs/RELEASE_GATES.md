@@ -427,6 +427,9 @@ identity, signature URI, formal verdicts, and readiness claims are not emitted.
 `existing_kubernetes/kit_installed/airgap` rejects evidence output for now.
 This is scoped bundle evidence with `readiness: false`, not package readiness,
 operator signoff, deploy readiness, or release readiness.
+The evidence root must be absent, empty, or contain only those managed evidence
+files from a previous run; any other direct entry fails fast and is left in
+place.
 
 ## Airgap Bundle Manifest/Digest Focused Diagnostic
 
