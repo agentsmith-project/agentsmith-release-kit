@@ -2332,4 +2332,18 @@ expect_operator_fail unknown-strategy \
   bash "$ROOT_DIR/scripts/operator-release.sh" online external_declared \
     --output-dir "$TMP_DIR/out-unknown-strategy"
 
+example_readme="$ROOT_DIR/examples/online-existing-kubernetes/README.md"
+runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
+
+grep -q 'bash scripts/operator-release.sh online use_existing' "$example_readme" ||
+  fail "online existing Kubernetes example must use operator-release facade"
+grep -q -- '--confirm-apply online/use_existing' "$example_readme" ||
+  fail "online existing Kubernetes example must confirm with operator vocabulary"
+if grep -Eq 'TARGET_PROFILE=|--target-profile|verify-release\.sh --online-deployment-gate' "$example_readme"; then
+  fail "online existing Kubernetes example must not expose producer profile commands as the operator path"
+fi
+if grep -Eiq 'kit-installed' "$runbooks_readme"; then
+  fail "operator runbook prose must use kit-provided wording"
+fi
+
 pass "operator release surface v0 focused tests completed"

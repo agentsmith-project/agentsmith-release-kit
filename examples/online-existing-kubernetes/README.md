@@ -1,9 +1,8 @@
 # Online Existing Kubernetes Example
 
 This directory is a minimal operator input pack for
-`existing_kubernetes/external_declared/online`: use an existing Kubernetes
-cluster plus existing PostgreSQL, MongoDB, Redis, object storage, and OIDC
-endpoints.
+the `online/use_existing` operator choice: use an existing Kubernetes cluster
+plus existing PostgreSQL, MongoDB, Redis, object storage, and OIDC endpoints.
 
 The JSON files are examples to copy and edit. They intentionally contain only
 operator-declared endpoints, secret references, target prerequisites, render
@@ -25,21 +24,22 @@ validation, deploy readiness, or release readiness.
 Set these paths to the real release artifacts from the AgentSmith release:
 
 ```bash
-TARGET_PROFILE="existing_kubernetes/external_declared/online"
 RELEASE_CONTRACT="release-contract.json"
 DEPLOY_TEMPLATE_PACKAGE="deploy-template-package.json"
 DEPLOY_TEMPLATE_ARCHIVE="agentsmith-deploy-template-package.tgz"
 EXAMPLE_DIR="examples/online-existing-kubernetes"
 ```
 
+The raw machine profile `existing_kubernetes/external_declared/online` is an
+internal facade mapping, not an operator input.
+
 ## 1. Server Dry-Run
 
 ```bash
-bash scripts/verify-release.sh --online-deployment-gate \
+bash scripts/operator-release.sh online use_existing \
   --release-contract "$RELEASE_CONTRACT" \
   --deploy-template-package "$DEPLOY_TEMPLATE_PACKAGE" \
   --archive "$DEPLOY_TEMPLATE_ARCHIVE" \
-  --target-profile "$TARGET_PROFILE" \
   --render-values "$EXAMPLE_DIR/render-values.example.json" \
   --substrate-truth "$EXAMPLE_DIR/substrate-truth.example.json" \
   --target-prerequisites "$EXAMPLE_DIR/target-prerequisites.example.json" \
@@ -57,18 +57,17 @@ apply. It stops before rollout and smoke.
 OPERATOR_RUN_ID="operator-run-20260523-001"
 SMOKE_URL="https://agentsmith.ops.example.com/ok"
 
-bash scripts/verify-release.sh --online-deployment-gate \
+bash scripts/operator-release.sh online use_existing \
   --release-contract "$RELEASE_CONTRACT" \
   --deploy-template-package "$DEPLOY_TEMPLATE_PACKAGE" \
   --archive "$DEPLOY_TEMPLATE_ARCHIVE" \
-  --target-profile "$TARGET_PROFILE" \
   --render-values "$EXAMPLE_DIR/render-values.example.json" \
   --substrate-truth "$EXAMPLE_DIR/substrate-truth.example.json" \
   --target-prerequisites "$EXAMPLE_DIR/target-prerequisites.example.json" \
   --namespace agentsmith \
   --output-dir out/online-existing-kubernetes/apply \
   --mode apply \
-  --confirm-apply "$TARGET_PROFILE" \
+  --confirm-apply online/use_existing \
   --operator-run-id "$OPERATOR_RUN_ID" \
   --timeout 120s \
   --smoke-url "$SMOKE_URL"
@@ -80,18 +79,17 @@ operator run.
 ## Optional Evidence Root
 
 ```bash
-bash scripts/verify-release.sh --online-deployment-gate \
+bash scripts/operator-release.sh online use_existing \
   --release-contract "$RELEASE_CONTRACT" \
   --deploy-template-package "$DEPLOY_TEMPLATE_PACKAGE" \
   --archive "$DEPLOY_TEMPLATE_ARCHIVE" \
-  --target-profile "$TARGET_PROFILE" \
   --render-values "$EXAMPLE_DIR/render-values.example.json" \
   --substrate-truth "$EXAMPLE_DIR/substrate-truth.example.json" \
   --target-prerequisites "$EXAMPLE_DIR/target-prerequisites.example.json" \
   --namespace agentsmith \
   --output-dir out/online-existing-kubernetes/apply-with-evidence \
   --mode apply \
-  --confirm-apply "$TARGET_PROFILE" \
+  --confirm-apply online/use_existing \
   --operator-run-id "$OPERATOR_RUN_ID" \
   --timeout 120s \
   --smoke-url "$SMOKE_URL" \
