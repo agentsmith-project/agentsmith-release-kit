@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
+EXAMPLE_ONLINE_DIR="$ROOT_DIR/examples/online-existing-kubernetes"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -1101,6 +1102,24 @@ write_manifest "$direct_package" online/use_existing
   --stdout >"$TMP_DIR/direct-json-plan.out"
 assert_plan "$direct_package/.release-kit-internal/operator-inputs-plan.json" online/use_existing
 pass "resolve-operator-inputs accepts a direct JSON manifest"
+
+example_online_package="$TMP_DIR/example-online-existing-kubernetes"
+mkdir -p "$example_online_package"
+write_package_files "$example_online_package"
+cp "$EXAMPLE_ONLINE_DIR/operator-inputs.apply.example.json" \
+  "$example_online_package/operator-inputs.json"
+cp "$EXAMPLE_ONLINE_DIR/render-values.example.json" \
+  "$example_online_package/render-values.example.json"
+cp "$EXAMPLE_ONLINE_DIR/substrate-truth.example.json" \
+  "$example_online_package/substrate-truth.example.json"
+cp "$EXAMPLE_ONLINE_DIR/target-prerequisites.example.json" \
+  "$example_online_package/target-prerequisites.example.json"
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$example_online_package" >/dev/null
+assert_plan \
+  "$example_online_package/.release-kit-internal/operator-inputs-plan.json" \
+  online/use_existing
+pass "resolve-operator-inputs accepts online existing Kubernetes example package"
 
 base_online="$TMP_DIR/base-online"
 mkdir -p "$base_online"

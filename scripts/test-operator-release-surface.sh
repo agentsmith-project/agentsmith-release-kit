@@ -2357,13 +2357,27 @@ expect_operator_fail unknown-strategy \
   bash "$ROOT_DIR/scripts/operator-release.sh" online external_declared \
     --output-dir "$TMP_DIR/out-unknown-strategy"
 
+root_readme="$ROOT_DIR/README.md"
 example_readme="$ROOT_DIR/examples/online-existing-kubernetes/README.md"
 runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
 
-grep -q 'bash scripts/operator-release.sh online use_existing' "$example_readme" ||
-  fail "online existing Kubernetes example must use operator-release facade"
-grep -q -- '--confirm-apply online/use_existing' "$example_readme" ||
-  fail "online existing Kubernetes example must confirm with operator vocabulary"
+grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run' "$root_readme" ||
+  fail "root README must document package-driven --operator-inputs --run main path"
+grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run' "$runbooks_readme" ||
+  fail "runbook README must document package-driven --operator-inputs --run main path"
+grep -q -- '--operator-inputs' "$example_readme" ||
+  fail "online existing Kubernetes example must use package-driven --operator-inputs"
+grep -q 'deployment-path-report.json' "$example_readme" ||
+  fail "online existing Kubernetes example must document finalized deployment-path handoff"
+if grep -Eq 'bash scripts/operator-release[.]sh (online|airgap|airgap-bundle)\b' "$root_readme"; then
+  fail "root README must not present legacy positional operator-release commands"
+fi
+if grep -Eq 'bash scripts/operator-release[.]sh (online|airgap|airgap-bundle)\b' "$runbooks_readme"; then
+  fail "runbook README must not present legacy positional operator-release commands"
+fi
+if grep -REq 'bash scripts/operator-release[.]sh (online|airgap|airgap-bundle)\b' "$ROOT_DIR/examples"; then
+  fail "operator examples must not present legacy positional operator-release commands"
+fi
 if grep -Eq 'TARGET_PROFILE=|--target-profile|verify-release\.sh --online-deployment-gate' "$example_readme"; then
   fail "online existing Kubernetes example must not expose producer profile commands as the operator path"
 fi

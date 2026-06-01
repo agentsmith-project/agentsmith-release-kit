@@ -84,8 +84,10 @@ bash scripts/verify-release.sh --ga-release \
   --output-dir <ga-output-dir>
 ```
 
-`install_substrates` means namespace-scoped installer producer/finalizer
-evidence with explicit install confirmation. It is not cloud provisioning.
+`install_substrates` means namespace-scoped substrate manifest install
+producer/finalizer evidence with explicit install confirmation. It is not a
+cloud resource provisioner and does not create clusters, managed databases,
+buckets, IAM, networks, or OIDC realms.
 Kind remains rehearsal-only; it is not a user deployment prerequisite or a
 replacement for real Kubernetes evidence.
 
@@ -117,18 +119,51 @@ resources.
 | `airgap/use_existing` | Bundle-local release contract, deploy template package and archive, render values, substrate truth, and target prerequisites; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL for run-time route-smoke evidence. | Validates the already assembled bundle reference and writes the internal plan for the airgap consume/deployment producer path. With `--run` and `mode: apply`, runs airgap consume rehearsal, extracts its nested bundle-check and deployment-gate reports, then the deployment-path finalizer writes path-level evidence from bundle-local release contract/deploy package components. |
 | `airgap/install_substrates` | Bundle-local release contract, deploy template package and archive, render values, and target prerequisites; substrate pack manifest; substrate install inputs; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL; explicit install confirmation. No bundle/package `substrate_truth`. | Validates installer and bundle references and writes the internal plan for installer plus bundle-check and airgap deployment producer steps. With `--run` and `mode: apply`, runs substrate-install first, keeps generated substrate truth under `.release-kit-internal`, uses that truth for the airgap deployment gate, then finalizes path-level evidence. |
 
+The operator-facing substrate choices are only `use_existing` and
+`install_substrates`. Legacy `kit_provided` appears only in the
+maintainer/internal diagnostics below; do not read legacy `kit_provided`
+"not yet" notes as package-driven operator status.
+
+### Airgap Tool Contract
+
+For package-driven airgap apply packages, `archive_probe` and `image_loader`
+are package-relative executable refs. The resolver rejects PATH-only command
+names, URIs, Windows paths, symlinks, non-files, non-executable files, and
+paths that escape the package; the plan digest-binds the executable files.
+
+`archive_probe` is called once per image archive as
+`<archive_probe> <archive_path>` with `AGENTSMITH_IMAGE_ARCHIVE_PATH` and
+`AGENTSMITH_IMAGE_ID` in the environment. It must exit zero within 5 seconds,
+write no stderr, and print exactly one `sha256:<64-hex>` digest to stdout.
+The archive probe executable basename must not be `docker`, `skopeo`, `oras`,
+`kubectl`, `curl`, or `wget`.
+
+`image_loader` is called once per image as
+`<image_loader> <archive_path> <target_image> <target_digest>` with
+`AGENTSMITH_IMAGE_ARCHIVE_PATH`, `AGENTSMITH_IMAGE_ID`,
+`AGENTSMITH_TARGET_IMAGE`, and `AGENTSMITH_TARGET_DIGEST` in the environment.
+It must exit zero within 30 seconds, write no stderr, and print exactly one
+matching sha256 digest to stdout.
+
+These tools are the operator's package-local offline boundary. The release kit
+does not download from the public internet, and an airgap package should treat
+network access by these tools as out of contract; the current checks bind
+local executable refs and digest output, not network isolation proof.
+
 ## Maintainer/Internal Diagnostics
 
 Everything below is for maintainers changing release-kit internals or for CI
 diagnostic plumbing. It is not the operator main path.
 
 Airgap bundle packaging commands are packaging-side helpers for the airgap
-producer diagnostics, not standalone operator choices.
+producer diagnostics, not standalone operator choices. The table names their
+legacy diagnostic entries without copy-paste commands; operators should use
+the package-driven `--operator-inputs` flow above.
 
-| Packaging diagnostic | Machine profile mapping | Internal command entry | Current result |
+| Packaging diagnostic | Machine profile mapping | Internal entry | Current result |
 | --- | --- | --- | --- |
-| `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
-| `airgap-bundle/kit_provided` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle kit_provided ... --substrate-pack-manifest ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the packaging-side local bundle assembler and immediate self-check, binds the substrate pack manifest as a bundle component, then writes the operator surface summary. It does not consume/deploy the bundle or install substrates. |
+| `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | Legacy positional bundle packaging diagnostic, maintainer/internal only. | Runs the local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
+| `airgap-bundle/kit_provided` | `existing_kubernetes/kit_installed/airgap` | Legacy positional bundle packaging diagnostic, maintainer/internal only. | Runs the packaging-side local bundle assembler and immediate self-check, binds the substrate pack manifest as a bundle component, then writes the operator surface summary. It does not consume/deploy the bundle or install substrates. |
 
 ### Optional Rehearsal
 
@@ -142,7 +177,10 @@ operator-provided label-only metadata for the supplied Kubernetes endpoint. It
 does not change the target profile, create or manage kind, or prove the
 endpoint is kind.
 
-### Implemented Now / Not Yet
+### Legacy Diagnostic Status
+
+The following table is maintainer/internal compatibility status for focused
+diagnostics. It is not the operator-facing package matrix.
 
 | Path | Implemented now | Not yet |
 | --- | --- | --- |
@@ -191,8 +229,9 @@ not issue deploy, package, or release readiness.
 
 For a concrete real Kubernetes plus existing substrates online example, copy
 and edit `examples/online-existing-kubernetes/`. It demonstrates the
-server-dry-run command, confirmed apply command, optional route smoke, and
-optional evidence-root input without claiming deploy or release readiness.
+package-driven `--operator-inputs` intake, confirmed apply, optional route
+smoke, and finalized deployment-path evidence handoff without claiming GA
+readiness.
 
 For target-preflight and the online focused chain, keep substrate connection
 truth and target prerequisites as separate files. Substrate truth stays neutral;

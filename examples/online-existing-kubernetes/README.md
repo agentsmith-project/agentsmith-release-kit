@@ -1,102 +1,90 @@
 # Online Existing Kubernetes Example
 
-This directory is a minimal operator input pack for
-the `online/use_existing` operator choice: use an existing Kubernetes cluster
-plus existing PostgreSQL, MongoDB, Redis, object storage, and OIDC endpoints.
+This directory is a minimal operator input pack template for
+`online/use_existing`: deploy to an existing Kubernetes cluster and use
+operator-declared PostgreSQL, MongoDB, Redis, object storage, and OIDC
+endpoints.
 
-The JSON files are examples to copy and edit. They intentionally contain only
-operator-declared endpoints, secret references, target prerequisites, render
-values, and optional CI artifact provenance for an evidence-root run. They are
-not cloud provisioning, substrate installation, registry mirroring, rollback,
-operator identity verification, signature verification, product-flow
-validation, deploy readiness, or release readiness.
+The operator path is package-driven:
 
-## Inputs
+```bash
+bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir>
+bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir> --run
+```
 
+The positional `<surface> <substrate_strategy>` facade is maintainer/internal
+focused diagnostic plumbing. Do not use it as the operator example path.
+
+## Files
+
+- `operator-inputs.apply.example.json`: package manifest for
+  `online/use_existing` apply.
 - `render-values.example.json`: namespace and replica values consumed by the
   deploy template package.
 - `substrate-truth.example.json`: external substrate connection truth.
 - `target-prerequisites.example.json`: namespace, RBAC, ingress, registry pull
   secret, storage, and matching substrate secret refs.
-- `evidence-provenance.example.json`: optional remote CI artifact provenance
-  for `--evidence-root`; it does not claim operator signature or identity.
+- `evidence-provenance.example.json`: optional evidence-root provenance for a
+  maintainer/internal focused diagnostic. It does not prove operator identity
+  or signature, and it is not required by the operator-inputs main flow.
 
-Set these paths to the real release artifacts from the AgentSmith release:
+## Build The Package
+
+Set these paths to the real AgentSmith release artifacts, then stage one small
+operator package:
 
 ```bash
 RELEASE_CONTRACT="release-contract.json"
 DEPLOY_TEMPLATE_PACKAGE="deploy-template-package.json"
 DEPLOY_TEMPLATE_ARCHIVE="agentsmith-deploy-template-package.tgz"
 EXAMPLE_DIR="examples/online-existing-kubernetes"
+PKG="out/operator-inputs/online-existing-kubernetes"
+
+mkdir -p "$PKG"
+cp "$EXAMPLE_DIR/operator-inputs.apply.example.json" "$PKG/operator-inputs.json"
+cp "$EXAMPLE_DIR/render-values.example.json" "$PKG/render-values.example.json"
+cp "$EXAMPLE_DIR/substrate-truth.example.json" "$PKG/substrate-truth.example.json"
+cp "$EXAMPLE_DIR/target-prerequisites.example.json" "$PKG/target-prerequisites.example.json"
+cp "$RELEASE_CONTRACT" "$PKG/release-contract.json"
+cp "$DEPLOY_TEMPLATE_PACKAGE" "$PKG/deploy-template-package.json"
+cp "$DEPLOY_TEMPLATE_ARCHIVE" "$PKG/deploy-template-package.tgz"
 ```
 
-The raw machine profile `existing_kubernetes/external_declared/online` is an
-internal facade mapping, not an operator input.
+`operator-inputs.json` uses package-relative refs. Real release artifacts must
+be copied into the package, or the manifest refs must point to files inside the
+same package.
 
-## 1. Server Dry-Run
+Edit `"$PKG/operator-inputs.json"` before apply:
+
+- Keep `deployment_path` as `online/use_existing`.
+- Set `deploy_confirmation.operator_run_id` to the real operator run id.
+- Optional route smoke can add `smoke_url`, `expected_status`, `timeout`, and
+  `timeout_ms`; keep them omitted when route smoke is not in scope.
+
+## Plan
 
 ```bash
-bash scripts/operator-release.sh online use_existing \
-  --release-contract "$RELEASE_CONTRACT" \
-  --deploy-template-package "$DEPLOY_TEMPLATE_PACKAGE" \
-  --archive "$DEPLOY_TEMPLATE_ARCHIVE" \
-  --render-values "$EXAMPLE_DIR/render-values.example.json" \
-  --substrate-truth "$EXAMPLE_DIR/substrate-truth.example.json" \
-  --target-prerequisites "$EXAMPLE_DIR/target-prerequisites.example.json" \
-  --namespace agentsmith \
-  --output-dir out/online-existing-kubernetes/server-dry-run \
-  --mode server-dry-run
+bash scripts/operator-release.sh --operator-inputs "$PKG"
 ```
 
-This renders, checks image inventory, and runs Kubernetes server-side dry-run
-apply. It stops before rollout and smoke.
+This validates package intake and writes
+`$PKG/.release-kit-internal/operator-inputs-plan.json`. The plan is internal
+next-step data only. It is not runtime evidence and does not issue a GA
+verdict.
 
-## 2. Confirmed Apply
+## Apply
 
 ```bash
-OPERATOR_RUN_ID="operator-run-20260523-001"
-SMOKE_URL="https://agentsmith.ops.example.com/ok"
-
-bash scripts/operator-release.sh online use_existing \
-  --release-contract "$RELEASE_CONTRACT" \
-  --deploy-template-package "$DEPLOY_TEMPLATE_PACKAGE" \
-  --archive "$DEPLOY_TEMPLATE_ARCHIVE" \
-  --render-values "$EXAMPLE_DIR/render-values.example.json" \
-  --substrate-truth "$EXAMPLE_DIR/substrate-truth.example.json" \
-  --target-prerequisites "$EXAMPLE_DIR/target-prerequisites.example.json" \
-  --namespace agentsmith \
-  --output-dir out/online-existing-kubernetes/apply \
-  --mode apply \
-  --confirm-apply online/use_existing \
-  --operator-run-id "$OPERATOR_RUN_ID" \
-  --timeout 120s \
-  --smoke-url "$SMOKE_URL"
+bash scripts/operator-release.sh --operator-inputs "$PKG" --run
 ```
 
-Omit `--smoke-url "$SMOKE_URL"` when route smoke is not part of the focused
-operator run.
+For an apply manifest, the package run writes path-level evidence here:
 
-## Optional Evidence Root
+- `$PKG/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json`
+- `$PKG/.release-kit-internal/online-use-existing/deployment-path/deployment-path-finalizer-manifest.json`
+- `$PKG/.release-kit-internal/online-use-existing/deployment-path/source-evidence/`
 
-```bash
-bash scripts/operator-release.sh online use_existing \
-  --release-contract "$RELEASE_CONTRACT" \
-  --deploy-template-package "$DEPLOY_TEMPLATE_PACKAGE" \
-  --archive "$DEPLOY_TEMPLATE_ARCHIVE" \
-  --render-values "$EXAMPLE_DIR/render-values.example.json" \
-  --substrate-truth "$EXAMPLE_DIR/substrate-truth.example.json" \
-  --target-prerequisites "$EXAMPLE_DIR/target-prerequisites.example.json" \
-  --namespace agentsmith \
-  --output-dir out/online-existing-kubernetes/apply-with-evidence \
-  --mode apply \
-  --confirm-apply online/use_existing \
-  --operator-run-id "$OPERATOR_RUN_ID" \
-  --timeout 120s \
-  --smoke-url "$SMOKE_URL" \
-  --evidence-root out/online-existing-kubernetes/evidence \
-  --evidence-provenance "$EXAMPLE_DIR/evidence-provenance.example.json"
-```
-
-The generated `online-deployment-gate-report.json` and generated reports remain
-focused evidence with `readiness: false`; the optional evidence root does not
-claim readiness.
+These files are the deployment-path handoff for the later GA aggregate. A
+package run does not write `ga-release-report.json`, does not issue
+`formal_verdict`, and does not replace AgentSmith product readiness or
+post-deploy product smoke evidence.

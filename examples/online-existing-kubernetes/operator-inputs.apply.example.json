@@ -1,0 +1,17 @@
+{
+  "schema_version": "agentsmith.operator-inputs/v1",
+  "operator_inputs_version": 1,
+  "deployment_path": "online/use_existing",
+  "release_contract": "release-contract.json",
+  "deploy_template_package": "deploy-template-package.json",
+  "deploy_template_archive": "deploy-template-package.tgz",
+  "render_values": "render-values.example.json",
+  "substrate_truth": "substrate-truth.example.json",
+  "target_prerequisites": "target-prerequisites.example.json",
+  "namespace": "agentsmith",
+  "mode": "apply",
+  "deploy_confirmation": {
+    "confirmed": true,
+    "operator_run_id": "operator-run-20260523-001"
+  }
+}

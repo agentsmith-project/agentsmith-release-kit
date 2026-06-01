@@ -151,10 +151,12 @@ Those focused producer diagnostics use machine profile axes internally:
 - `substrate_source`: `external_declared` or `kit_installed`.
 - `distribution`: `online` or `airgap`.
 
-`kit_provided` means the kit validates a supplied substrate pack manifest,
+`kit_provided` is the legacy positional compatibility name for focused
+diagnostics. It means the kit validates a supplied substrate pack manifest,
 declared substrate connection truth, and related routability/materiality
 evidence. It does not install databases, buckets, OIDC realms, or other
-substrates. `install_substrates` requires an explicit report from the separate
+substrates. Operator-facing packages use `install_substrates`.
+`install_substrates` requires an explicit report from the separate
 `--substrate-install` producer only when maintainers run focused diagnostics
 directly. The package-driven `operator-release.sh --operator-inputs <pkg> --run`
 path creates that namespace-scoped installer report internally for
@@ -179,29 +181,35 @@ For `airgap`, operators must provide all required tools, templates, artifacts,
 and images from inside the target network. Airgap flow must not download from
 the public internet. An operator-declared substrate endpoint can be a target
 network prerequisite, but this repository does not create cloud resources.
+For airgap apply packages, see `docs/runbooks/README.md` "Airgap Tool
+Contract": `archive_probe` and `image_loader` are package-local executable
+refs with argv, timeout, and sha256 digest stdout checks. This is a local
+tool/digest contract, not proof of network isolation.
 
 ## Current Verification
 
-Maintainer/internal positional surface diagnostics:
+Operator package intake and run path:
 
 ```bash
-bash scripts/operator-release.sh online use_existing ...
-bash scripts/operator-release.sh online kit_provided ...
-bash scripts/operator-release.sh airgap use_existing ...
-bash scripts/operator-release.sh airgap kit_provided ...
-bash scripts/operator-release.sh airgap-bundle use_existing ...
-bash scripts/operator-release.sh airgap-bundle kit_provided ...
-bash scripts/verify-release.sh --airgap-adoption \
-  --release-contract <json> \
-  --bundle-surface-report <airgap-bundle/operator-release-surface-report.json> \
-  --consume-surface-report <airgap/operator-release-surface-report.json> \
-  --bundle-manifest <airgap-bundle-manifest.json> \
-  --output-dir <dir>
+bash scripts/operator-release.sh --operator-inputs <dir-or-json>
+bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 ```
 
-The online and airgap positional commands are compatibility diagnostics;
-airgap-bundle commands are packaging-side helpers for those airgap paths. All
-of them map to existing producer diagnostics and write
+This package-driven path writes finalized deployment-path handoff evidence
+under `.release-kit-internal/<deployment-path>/deployment-path/` when `--run`
+executes an apply manifest. It does not write `ga-release-report.json` or issue
+a formal GA verdict.
+
+Operator-facing handoff stops at `--operator-inputs --run` plus the finalized
+deployment-path reports for the later GA aggregate.
+
+### Maintainer/Internal Diagnostics
+
+Maintainer/internal focused diagnostics still exist for compatibility around
+the legacy positional surfaces `online use_existing`, `online kit_provided`,
+`airgap use_existing`, `airgap kit_provided`, `airgap-bundle use_existing`, and
+`airgap-bundle kit_provided`. They are not the operator copy-paste path. All of
+them map to existing producer diagnostics and write
 `operator-release-surface-report.json` with `readiness: false`. The repo-local
 focused surface supports airgap-bundle and airgap `use_existing` plus
 `kit_provided`: kit airgap bundle packaging requires
@@ -903,10 +911,10 @@ Online focused chain orchestration:
 bash scripts/test-online-deployment-gate.sh
 ```
 
-A copy-pasteable `existing_kubernetes/external_declared/online` operator input
-pack is available in `examples/online-existing-kubernetes/`. It is a minimal
-use-existing-substrates example for the existing online gate and keeps every
-generated report at `readiness: false`.
+A copy-pasteable package-driven `online/use_existing` operator input template
+is available in `examples/online-existing-kubernetes/`. It is a minimal
+use-existing-substrates example for `operator-release.sh --operator-inputs`
+and hands off finalized deployment-path evidence without claiming GA readiness.
 
 `--online-deployment-gate` is a KISS runner for the online focused chain on
 `existing_kubernetes/external_declared/online` and

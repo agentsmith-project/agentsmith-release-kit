@@ -1503,9 +1503,12 @@ Install-substrate paths fail fast unless a real substrate install report and
 matching explicit confirmation id are provided. Existing kit-provided
 substrate pack checks, routability checks, and `installed_by` provenance
 markers are not treated as installer proof. The accepted install report shape
-comes from the separate `--substrate-install` producer; `operator-release.sh`
-only plans install substrate execution through `--operator-inputs`, and the old
-positional/transitional facade does not execute substrate installation.
+comes from the separate `--substrate-install` producer. Package-driven
+`operator-release.sh --operator-inputs <pkg> --run` executes the
+namespace-scoped `substrate-install` producer for `install_substrates`, while
+the old positional/transitional facade does not execute substrate
+installation. The deployment-path finalizer still consumes only the resulting
+install report; it does not install substrates itself.
 
 ## GA Release Aggregate Gate
 
