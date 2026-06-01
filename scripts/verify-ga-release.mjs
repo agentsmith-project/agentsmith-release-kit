@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import * as sourceValidation from './lib/deployment-path-source-validation.mjs';
 import {
   assertReportUriHasNoForbiddenContent,
   scanReportForForbiddenContent
 } from './lib/report-forbidden-scan.mjs';
 
+const execFileAsync = promisify(execFile);
+const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 const REPORT_FILE = 'ga-release-report.json';
 const SUMMARY_FILE = 'ga-release-summary.md';
 const FINALIZER_MANIFEST_FILE = 'deployment-path-finalizer-manifest.json';
@@ -52,6 +58,11 @@ const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const ARTIFACT_URI_RE = /^[a-z][a-z0-9+.-]*:\/\/[^\s]+$/i;
 const KUBERNETES_NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const AGENTSMITH_REPO = 'github.com/agentsmith-project/agentsmith';
+const RELEASE_KIT_REPO = 'github.com/agentsmith-project/agentsmith-release-kit';
+const RUNNER_REPO = 'github.com/agentsmith-project/agentsmith-runner';
+const LLMUP_REPO = 'github.com/agentsmith-project/llm-universal-proxy';
+const AFSCP_REPO = 'github.com/agentsmith-project/agentsmith-fs-control-plane';
+const ASBCP_REPO = 'github.com/agentsmith-project/agentsmith-sandbox-control-plane';
 
 const REQUIRED_ARGS = [
   'releaseContract',
@@ -82,6 +93,32 @@ const CANONICAL_PRODUCT_SMOKE_SPECS = {
 const REQUIRED_PRODUCT_SMOKE_IDS = Object.keys(CANONICAL_PRODUCT_SMOKE_SPECS);
 
 const REQUIRED_IMAGE_IDS = ['agentsmith_app', 'managed_runner', 'llmup', 'afscp', 'asbcp'];
+const CANONICAL_REPO_SPECS = [
+  {
+    repo: AGENTSMITH_REPO,
+    image_ids: ['agentsmith_app']
+  },
+  {
+    repo: RELEASE_KIT_REPO,
+    finalizer: true
+  },
+  {
+    repo: RUNNER_REPO,
+    image_ids: ['managed_runner']
+  },
+  {
+    repo: LLMUP_REPO,
+    image_ids: ['llmup']
+  },
+  {
+    repo: AFSCP_REPO,
+    image_ids: ['afscp']
+  },
+  {
+    repo: ASBCP_REPO,
+    image_ids: ['asbcp']
+  }
+];
 const FINALIZER_MANIFEST_KEYS = new Set([
   'schema',
   'tool',
@@ -444,6 +481,67 @@ function requireProvenance(provenance, label) {
   };
 }
 
+function parseImageTag(image, label) {
+  const withoutDigest = image.split('@sha256:')[0];
+  const lastSlash = withoutDigest.lastIndexOf('/');
+  const lastColon = withoutDigest.lastIndexOf(':');
+  if (lastColon <= lastSlash) {
+    fail(`${label}.image must include an immutable tag before its digest`);
+  }
+  return withoutDigest.slice(lastColon + 1);
+}
+
+function validateCanonicalRepoIdentity({ producerRepo, normalizedRemote, expectedRepo, label }) {
+  const producer = normalizeRepoIdentity(producerRepo, `${label}.producer_repo`);
+  const normalized = normalizeRepoIdentity(normalizedRemote, `${label}.normalized_remote`);
+  if (producer !== normalized) {
+    fail(`${label}.producer_repo must match ${label}.normalized_remote`);
+  }
+  if (normalized !== expectedRepo) {
+    fail(`${label}.normalized_remote must be canonical repo ${expectedRepo}`);
+  }
+}
+
+function validateImageSourceProvenance(image, expectedRepo) {
+  const label = `release_contract.deploy_image_inventory.${image.id}.source_provenance`;
+  const provenance = requireProvenance(image.source_provenance, label);
+  validateCanonicalRepoIdentity({
+    producerRepo: provenance.producer_repo,
+    normalizedRemote: provenance.normalized_remote,
+    expectedRepo,
+    label
+  });
+  const imageTag = parseImageTag(image.image, `release_contract.deploy_image_inventory.${image.id}`);
+  const provenanceTag = requireString(image.source_provenance.tag, `${label}.tag`);
+  if (provenanceTag !== imageTag) {
+    fail(`${label}.tag must match release_contract.deploy_image_inventory.${image.id}.image tag`);
+  }
+  if (provenance.artifact_sha256 !== image.digest) {
+    fail(`${label}.artifact_sha256 must match release_contract.deploy_image_inventory.${image.id}.digest`);
+  }
+  return {
+    repo: expectedRepo,
+    commit_sha: provenance.commit_sha,
+    run_id: provenance.run_id,
+    run_attempt: provenance.run_attempt,
+    image_ids: [image.id],
+    image_tags: [imageTag],
+    image_digests: [image.digest],
+    freshness_key: [
+      expectedRepo,
+      provenance.commit_sha,
+      imageTag,
+      provenance.run_id,
+      provenance.run_attempt,
+      image.digest
+    ].join(':'),
+    provenance: {
+      ...provenance,
+      tag: provenanceTag
+    }
+  };
+}
+
 function requireProductArtifactProvenance(provenance, label, release, reportLabel) {
   const value = requireObject(provenance, label);
   const schema = requireString(value.schema_version ?? value.schema, `${label}.schema_version`);
@@ -538,7 +636,8 @@ function validateImageRef(entry, label) {
     id,
     image,
     digest,
-    source: typeof value.source === 'string' && value.source.trim() !== '' ? value.source : undefined
+    source: typeof value.source === 'string' && value.source.trim() !== '' ? value.source : undefined,
+    source_provenance: value.source_provenance
   };
 }
 
@@ -577,6 +676,128 @@ function validateReleaseContract(contract, contractDigest) {
     },
     deploy_image_inventory: inventory
   };
+}
+
+async function gitOutput(args, label) {
+  try {
+    const { stdout } = await execFileAsync('git', args, {
+      cwd: REPO_ROOT,
+      timeout: 5000,
+      maxBuffer: 1024 * 1024
+    });
+    return stdout.trim();
+  } catch (error) {
+    fail(`release-kit finalizer provenance requires ${label}: ${error.message}`);
+  }
+}
+
+async function releaseKitFinalizerProvenance() {
+  const envRepo = process.env.GITHUB_REPOSITORY
+    ? `github.com/${process.env.GITHUB_REPOSITORY}`
+    : undefined;
+  const repo = envRepo ?? await gitOutput(['remote', 'get-url', 'origin'], 'GITHUB_REPOSITORY or git origin remote');
+  const normalizedRepo = normalizeRepoIdentity(repo, 'release_kit_finalizer_provenance.normalized_remote');
+  if (normalizedRepo !== RELEASE_KIT_REPO) {
+    fail(`release_kit_finalizer_provenance.normalized_remote must be canonical repo ${RELEASE_KIT_REPO}`);
+  }
+
+  const commitSha = process.env.GITHUB_SHA
+    ? requireGitSha(process.env.GITHUB_SHA, 'release_kit_finalizer_provenance.commit_sha')
+    : requireGitSha(
+      await gitOutput(['rev-parse', 'HEAD'], 'GITHUB_SHA or git HEAD'),
+      'release_kit_finalizer_provenance.commit_sha'
+    );
+  const runId = process.env.GITHUB_RUN_ID && process.env.GITHUB_RUN_ID.trim() !== ''
+    ? process.env.GITHUB_RUN_ID
+    : 'local-git';
+  const runAttempt = process.env.GITHUB_RUN_ATTEMPT && process.env.GITHUB_RUN_ATTEMPT.trim() !== ''
+    ? process.env.GITHUB_RUN_ATTEMPT
+    : '0';
+
+  return {
+    repo: RELEASE_KIT_REPO,
+    commit_sha: commitSha,
+    run_id: runId,
+    run_attempt: runAttempt,
+    freshness_key: [
+      RELEASE_KIT_REPO,
+      commitSha,
+      runId,
+      runAttempt
+    ].join(':'),
+    provenance: {
+      producer_repo: RELEASE_KIT_REPO,
+      normalized_remote: RELEASE_KIT_REPO,
+      commit_sha: commitSha,
+      run_id: runId,
+      run_attempt: runAttempt,
+      source: process.env.GITHUB_SHA ? 'github_actions_env' : 'git_worktree'
+    }
+  };
+}
+
+async function buildCanonicalRepos(release) {
+  const imageById = new Map(release.deploy_image_inventory.map((image) => [image.id, image]));
+  const repos = [];
+
+  for (const spec of CANONICAL_REPO_SPECS) {
+    if (spec.finalizer) {
+      repos.push(await releaseKitFinalizerProvenance());
+      continue;
+    }
+
+    const imageSummaries = [];
+    for (const imageId of spec.image_ids) {
+      const image = imageById.get(imageId);
+      if (!image) {
+        fail(`release contract deploy_image_inventory missing required image id: ${imageId}`);
+      }
+      imageSummaries.push(validateImageSourceProvenance(image, spec.repo));
+    }
+
+    const [first] = imageSummaries;
+    for (const summary of imageSummaries.slice(1)) {
+      if (
+        summary.commit_sha !== first.commit_sha ||
+        summary.run_id !== first.run_id ||
+        summary.run_attempt !== first.run_attempt
+      ) {
+        fail(`canonical repo ${spec.repo} source provenance must use one commit/run across images`);
+      }
+    }
+
+    repos.push({
+      repo: spec.repo,
+      commit_sha: first.commit_sha,
+      run_id: first.run_id,
+      run_attempt: first.run_attempt,
+      image_ids: imageSummaries.flatMap((summary) => summary.image_ids).sort(),
+      image_tags: imageSummaries.flatMap((summary) => summary.image_tags).sort(),
+      image_digests: imageSummaries.flatMap((summary) => summary.image_digests).sort(),
+      freshness_key: [
+        spec.repo,
+        first.commit_sha,
+        first.run_id,
+        first.run_attempt,
+        ...imageSummaries.flatMap((summary) => summary.image_tags).sort(),
+        ...imageSummaries.flatMap((summary) => summary.image_digests).sort()
+      ].join(':'),
+      provenance: Object.fromEntries(
+        imageSummaries.map((summary) => [summary.image_ids[0], summary.provenance])
+      )
+    });
+  }
+
+  const expectedRepos = new Set(CANONICAL_REPO_SPECS.map((spec) => spec.repo));
+  const actualRepos = new Set(repos.map((entry) => entry.repo));
+  if (!sameSet(actualRepos, expectedRepos)) {
+    fail('ga release canonical_repos must exactly cover the six canonical repos');
+  }
+  if (actualRepos.size !== repos.length) {
+    fail('ga release canonical_repos must not contain duplicate repos');
+  }
+
+  return repos.sort((a, b) => a.repo.localeCompare(b.repo));
 }
 
 function validateDeployTemplatePackage(descriptor, contract, descriptorDigest) {
@@ -1598,6 +1819,7 @@ async function main() {
   }
 
   const release = validateReleaseContract(contract.value, contract.digest);
+  const canonicalRepos = await buildCanonicalRepos(release);
   const deployTemplateSummary = validateDeployTemplatePackage(deployTemplate.value, contract.value, deployTemplate.digest);
   const productReadinessSummary = validateProductReadiness(productReady.value, productReady.digest, release);
   const productSmokeSummary = validateProductSmoke(productSmoke.value, productSmoke.digest, release);
@@ -1641,14 +1863,7 @@ async function main() {
     deployment_paths: deploymentPaths.sort((a, b) => a.operator_path.localeCompare(b.operator_path)),
     product_readiness: productReadinessSummary,
     post_deploy_product_smoke: productSmokeSummary,
-    canonical_repos: [
-      {
-        repo: AGENTSMITH_REPO,
-        commit_sha: release.git_sha,
-        run_id: release.provenance.run_id,
-        run_attempt: release.provenance.run_attempt
-      }
-    ],
+    canonical_repos: canonicalRepos,
     artifact_index: {
       release_contract: {
         digest: release.release_contract_digest,

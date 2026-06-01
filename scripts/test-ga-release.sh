@@ -862,6 +862,39 @@ run_ga_release() {
     --output-dir "$output_dir"
 }
 
+run_ga_release_without_release_kit_provenance() {
+  local fixture_dir="$1"
+  local path_dir="$2"
+  local output_dir="$3"
+  local bash_bin
+  local dirname_bin
+  local node_bin
+
+  bash_bin="$(command -v bash)"
+  dirname_bin="$(command -v dirname)"
+  node_bin="$(command -v "$NODE_BIN")"
+  mkdir -p "$TMP_DIR/no-git-path"
+  ln -sf "$dirname_bin" "$TMP_DIR/no-git-path/dirname"
+
+  env \
+    -u GITHUB_REPOSITORY \
+    -u GITHUB_SHA \
+    -u GITHUB_RUN_ID \
+    -u GITHUB_RUN_ATTEMPT \
+    NODE="$node_bin" \
+    PATH="$TMP_DIR/no-git-path" \
+    "$bash_bin" "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
+      --release-contract "$fixture_dir/release-contract.json" \
+      --deploy-template-package "$fixture_dir/deploy-template-package.json" \
+      --deployment-path-report "$path_dir/online-use-existing/deployment-path-report.json" \
+      --deployment-path-report "$path_dir/online-install-substrates/deployment-path-report.json" \
+      --deployment-path-report "$path_dir/airgap-use-existing/deployment-path-report.json" \
+      --deployment-path-report "$path_dir/airgap-install-substrates/deployment-path-report.json" \
+      --product-readiness-report "$fixture_dir/product-readiness-report.json" \
+      --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-report.json" \
+      --output-dir "$output_dir"
+}
+
 refresh_manifest_path_digest() {
   local report_file="$1"
 
@@ -1070,6 +1103,46 @@ const contractFile = process.argv[2];
 const contract = JSON.parse(fs.readFileSync(contractFile, 'utf8'));
 contract.deploy_template_package.required_image_ids =
   contract.deploy_template_package.required_image_ids.slice(0, -1);
+fs.writeFileSync(contractFile, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
+mutate_release_contract_source_provenance() {
+  local contract_file="$1"
+  local mutation="$2"
+
+  "$NODE_BIN" --input-type=module - "$contract_file" "$mutation" <<'NODE'
+import fs from 'node:fs';
+
+const [contractFile, mutation] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractFile, 'utf8'));
+
+function inventory(id) {
+  const image = contract.deploy_image_inventory.find((entry) => entry.id === id);
+  if (!image) {
+    throw new Error(`missing inventory id: ${id}`);
+  }
+  return image;
+}
+
+if (mutation === 'missing-runner-source-provenance') {
+  delete inventory('managed_runner').source_provenance;
+} else if (mutation === 'missing-dependency-source-provenance') {
+  delete inventory('llmup').source_provenance;
+} else if (mutation === 'non-canonical-source-repo') {
+  const provenance = inventory('afscp').source_provenance;
+  provenance.producer_repo = 'github.com/example/agentsmith-fs-control-plane';
+  provenance.normalized_remote = 'github.com/example/agentsmith-fs-control-plane';
+} else if (mutation === 'missing-dependency-run-evidence') {
+  delete inventory('llmup').source_provenance.run_id;
+} else if (mutation === 'dependency-tag-mismatch') {
+  inventory('llmup').source_provenance.tag = 'not-the-release-tag';
+} else if (mutation === 'dependency-digest-mismatch') {
+  inventory('llmup').source_provenance.artifact_sha256 = `sha256:${'9'.repeat(64)}`;
+} else {
+  throw new Error(`unknown source provenance mutation: ${mutation}`);
+}
+
 fs.writeFileSync(contractFile, `${JSON.stringify(contract, null, 2)}\n`);
 NODE
 }
@@ -1515,6 +1588,38 @@ if (report.status !== 'pass' || report.formal_verdict !== 'issued') {
 if (!Array.isArray(report.deployment_paths) || report.deployment_paths.length !== 4) {
   throw new Error('expected four deployment paths');
 }
+const expectedCanonicalRepos = [
+  'github.com/agentsmith-project/agentsmith',
+  'github.com/agentsmith-project/agentsmith-fs-control-plane',
+  'github.com/agentsmith-project/agentsmith-release-kit',
+  'github.com/agentsmith-project/agentsmith-runner',
+  'github.com/agentsmith-project/agentsmith-sandbox-control-plane',
+  'github.com/agentsmith-project/llm-universal-proxy'
+];
+const canonicalRepos = report.canonical_repos || [];
+const actualCanonicalRepos = canonicalRepos.map((entry) => entry.repo).sort();
+if (JSON.stringify(actualCanonicalRepos) !== JSON.stringify(expectedCanonicalRepos)) {
+  throw new Error(`GA report canonical_repos must exactly cover six repos: ${actualCanonicalRepos.join(', ')}`);
+}
+for (const repo of canonicalRepos) {
+  if (!/^[0-9a-f]{40}$/.test(repo.commit_sha || '')) {
+    throw new Error(`canonical repo missing commit sha: ${repo.repo}`);
+  }
+  if (!repo.freshness_key || !repo.freshness_key.includes(repo.commit_sha)) {
+    throw new Error(`canonical repo missing freshness key: ${repo.repo}`);
+  }
+  if (repo.repo !== 'github.com/agentsmith-project/agentsmith-release-kit') {
+    if (!Array.isArray(repo.image_digests) || repo.image_digests.length === 0) {
+      throw new Error(`image-backed canonical repo missing image digest: ${repo.repo}`);
+    }
+    if (!Array.isArray(repo.image_tags) || repo.image_tags[0] !== releaseContract.release_id) {
+      throw new Error(`image-backed canonical repo missing image tag: ${repo.repo}`);
+    }
+    if (!repo.run_id || !repo.run_attempt) {
+      throw new Error(`image-backed canonical repo missing run evidence: ${repo.repo}`);
+    }
+  }
+}
 const smoke = report.post_deploy_product_smoke;
 const expectedSmokeIds = [
   'login_profile',
@@ -1572,6 +1677,13 @@ if (Object.hasOwn(report.summary || {}, 'product_smoke_flows')) {
 NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
 pass "valid GA aggregate consumes finalizer-generated path bundles"
+
+if run_ga_release_without_release_kit_provenance "$VALID_DIR" "$PATH_DIR" "$TMP_DIR/out-missing-release-kit-provenance" >"$TMP_DIR/ga-release-missing-release-kit-provenance.out" 2>&1; then
+  fail "missing release-kit finalizer provenance should fail"
+fi
+grep -Fq "release-kit finalizer provenance requires GITHUB_REPOSITORY or git origin remote" "$TMP_DIR/ga-release-missing-release-kit-provenance.out" || \
+  fail "missing release-kit finalizer provenance failure message did not explain blocker"
+pass "GA aggregate requires release-kit finalizer provenance from CI env or git"
 
 MIRROR_RENDER_DIR="$TMP_DIR/render-check-target-registry-mirror"
 write_fixture_set "$MIRROR_RENDER_DIR" render-check-target-registry-mirror
@@ -1762,6 +1874,27 @@ fi
 grep -Fq "release_contract.deploy_template_package.required_image_ids must exactly match release_contract.deploy_image_inventory ids" "$TMP_DIR/ga-release-image-closure.out" || \
   fail "release contract image closure failure message did not explain blocker"
 pass "GA aggregate rejects release contract required image closure drift"
+
+source_provenance_cases=(
+  "missing-runner-source-provenance|release_contract.deploy_image_inventory.managed_runner.source_provenance must be an object"
+  "missing-dependency-source-provenance|release_contract.deploy_image_inventory.llmup.source_provenance must be an object"
+  "non-canonical-source-repo|release_contract.deploy_image_inventory.afscp.source_provenance.normalized_remote must be canonical repo github.com/agentsmith-project/agentsmith-fs-control-plane"
+  "missing-dependency-run-evidence|release_contract.deploy_image_inventory.llmup.source_provenance.run_id is required"
+  "dependency-tag-mismatch|release_contract.deploy_image_inventory.llmup.source_provenance.tag must match release_contract.deploy_image_inventory.llmup.image tag"
+  "dependency-digest-mismatch|release_contract.deploy_image_inventory.llmup.source_provenance.artifact_sha256 must match release_contract.deploy_image_inventory.llmup.digest"
+)
+for source_case in "${source_provenance_cases[@]}"; do
+  IFS='|' read -r mutation expected_message <<< "$source_case"
+  SOURCE_PROVENANCE_DIR="$TMP_DIR/source-provenance-$mutation"
+  write_fixture_set "$SOURCE_PROVENANCE_DIR" valid
+  mutate_release_contract_source_provenance "$SOURCE_PROVENANCE_DIR/release-contract.json" "$mutation"
+  if run_ga_release "$SOURCE_PROVENANCE_DIR" "$PATH_DIR" "$TMP_DIR/out-source-provenance-$mutation" >"$TMP_DIR/ga-release-source-provenance-$mutation.out" 2>&1; then
+    fail "release contract source provenance $mutation should fail"
+  fi
+  grep -Fq "$expected_message" "$TMP_DIR/ga-release-source-provenance-$mutation.out" || \
+    fail "release contract source provenance $mutation failure message did not explain blocker"
+done
+pass "GA aggregate requires canonical runner and dependency source provenance"
 
 MISSING_DIR="$TMP_DIR/missing"
 write_fixture_set "$MISSING_DIR" valid
