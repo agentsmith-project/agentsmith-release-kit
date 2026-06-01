@@ -1010,7 +1010,12 @@ async function validateAirgapBundleComponentBindings({ refs, deploymentPath }) {
     components.set(kind, componentRef);
   }
 
-  for (const key of AIRGAP_BUNDLE_COMPONENT_REF_KEYS) {
+  const requiredComponentRefKeys = [...AIRGAP_BUNDLE_COMPONENT_REF_KEYS];
+  if (isAirgapInstallSubstratesPath(deploymentPath)) {
+    requiredComponentRefKeys.push('substrate_pack_manifest');
+  }
+
+  for (const key of requiredComponentRefKeys) {
     const componentRef = components.get(key);
     if (!componentRef) {
       fail(`airgap_bundle_manifest.components must include ${key}`);
@@ -1024,6 +1029,33 @@ async function validateAirgapBundleComponentBindings({ refs, deploymentPath }) {
   }
 
   return Object.fromEntries(components.entries());
+}
+
+function airgapRuntimeBundleInputKeys(deploymentPath) {
+  const keys = ['render_values', 'target_prerequisites'];
+  if (isAirgapUseExistingPath(deploymentPath)) {
+    keys.push('substrate_truth');
+  }
+  if (isAirgapInstallSubstratesPath(deploymentPath)) {
+    keys.push('substrate_install_inputs');
+  }
+  return keys;
+}
+
+function validateAirgapRuntimeInputRefs({ refs, deploymentPath }) {
+  if (!isAirgapPath(deploymentPath)) {
+    return;
+  }
+  const bundleRoot = refs.airgap_bundle?.absolute_path;
+  if (!bundleRoot) {
+    fail('airgap plan must include airgap_bundle directory ref');
+  }
+  for (const key of airgapRuntimeBundleInputKeys(deploymentPath)) {
+    const ref = refs[key];
+    if (ref && !isInsidePath(bundleRoot, ref.absolute_path)) {
+      fail(`plan.input_refs.${key}.absolute_path must resolve inside airgap_bundle for ${deploymentPath}`);
+    }
+  }
 }
 
 function validateManifestDeploymentPath(operatorManifest) {
@@ -1231,6 +1263,10 @@ async function validatePackageRefs(plan, operatorInputsRoot) {
     expectedRefs
   });
   const airgapBundleComponents = await validateAirgapBundleComponentBindings({
+    refs,
+    deploymentPath: manifestDeploymentPath
+  });
+  validateAirgapRuntimeInputRefs({
     refs,
     deploymentPath: manifestDeploymentPath
   });

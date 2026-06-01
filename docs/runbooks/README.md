@@ -30,6 +30,8 @@ Without `--run`, the facade performs package intake and writes the internal
 internal next-step plan: it is not runtime evidence, not a final one-command GA
 flow, and not deploy, package, or release readiness. Post-deploy smoke reports
 are produced after runtime checks and are not accepted as package inputs.
+For airgap packages, runtime inputs referenced by the airgap path must live
+inside the referenced `airgap_bundle`.
 
 With `--run`, the current slice executes `online/use_existing`,
 `online/install_substrates`, `airgap/use_existing`, and

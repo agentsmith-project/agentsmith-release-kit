@@ -544,8 +544,14 @@ switch (caseName) {
   case 'airgap_render_values_outside_bundle':
     manifest.render_values = 'render-values.json';
     break;
+  case 'airgap_target_prerequisites_outside_bundle':
+    manifest.target_prerequisites = 'target-prerequisites.json';
+    break;
   case 'airgap_substrate_truth_outside_bundle':
     manifest.substrate_truth = 'substrate-truth.json';
+    break;
+  case 'airgap_install_substrate_install_inputs_outside_bundle':
+    manifest.substrate_install_inputs = 'substrate-install-inputs.json';
     break;
   case 'airgap_bundle_manifest_existing_mismatch':
     writeAirgapBundleManifest('existing_kubernetes/kit_installed/airgap');
@@ -801,13 +807,17 @@ if (deploymentPath.startsWith('airgap/')) {
   if (!isInsidePath(bundleRef.absolute_path, manifestRef.absolute_path)) {
     throw new Error('airgap_bundle_manifest must be inside airgap_bundle');
   }
-  for (const key of ['release_contract', 'deploy_template_package', 'deploy_template_archive']) {
+  const componentBoundKeys = ['release_contract', 'deploy_template_package', 'deploy_template_archive'];
+  if (installsSubstrates) {
+    componentBoundKeys.push('substrate_pack_manifest');
+  }
+  for (const key of componentBoundKeys) {
     const ref = plan.input_refs?.[key];
     if (!isInsidePath(bundleRef.absolute_path, ref?.absolute_path || '')) {
       throw new Error(`${key} must match a bundle-local component`);
     }
   }
-  for (const key of ['render_values']) {
+  for (const key of ['render_values', 'target_prerequisites']) {
     const ref = plan.input_refs?.[key];
     if (!isInsidePath(bundleRef.absolute_path, ref?.absolute_path || '')) {
       throw new Error(`${key} must be inside airgap_bundle`);
@@ -864,6 +874,10 @@ if (deploymentPath.startsWith('airgap/')) {
     throw new Error('airgap producer argv must include bundle-local render inputs');
   }
   if (deploymentPath === 'airgap/install_substrates') {
+    const installInputsRef = plan.input_refs?.substrate_install_inputs;
+    if (!isInsidePath(bundleRef.absolute_path, installInputsRef?.absolute_path || '')) {
+      throw new Error('substrate_install_inputs must be inside airgap_bundle');
+    }
     if (!sawInstallerGeneratedSubstrateTruthArg) {
       throw new Error('airgap install producer argv must include installer-generated substrate truth');
     }
@@ -1313,6 +1327,12 @@ mutate_manifest "$outside_render_values_dir" airgap_render_values_outside_bundle
 expect_fail_matching airgap_render_values_outside_bundle 'render_values must resolve inside airgap_bundle' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$outside_render_values_dir"
 
+outside_target_prerequisites_dir="$TMP_DIR/invalid-airgap-target-prerequisites-outside-bundle"
+copy_valid_package "$base_airgap" "$outside_target_prerequisites_dir"
+mutate_manifest "$outside_target_prerequisites_dir" airgap_target_prerequisites_outside_bundle
+expect_fail_matching airgap_target_prerequisites_outside_bundle 'target_prerequisites must resolve inside airgap_bundle' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$outside_target_prerequisites_dir"
+
 outside_substrate_truth_dir="$TMP_DIR/invalid-airgap-substrate-truth-outside-bundle"
 copy_valid_package "$base_airgap" "$outside_substrate_truth_dir"
 mutate_manifest "$outside_substrate_truth_dir" airgap_substrate_truth_outside_bundle
@@ -1340,6 +1360,12 @@ copy_valid_package "$base_airgap_install" "$airgap_install_mismatch_dir"
 mutate_manifest "$airgap_install_mismatch_dir" airgap_bundle_manifest_install_mismatch
 expect_fail_matching airgap_bundle_manifest_install_mismatch 'airgap_bundle_manifest.target_profile.value must match deployment_path target_profile' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$airgap_install_mismatch_dir"
+
+outside_airgap_install_inputs_dir="$TMP_DIR/invalid-airgap-install-inputs-outside-bundle"
+copy_valid_package "$base_airgap_install" "$outside_airgap_install_inputs_dir"
+mutate_manifest "$outside_airgap_install_inputs_dir" airgap_install_substrate_install_inputs_outside_bundle
+expect_fail_matching airgap_install_substrate_install_inputs_outside_bundle 'substrate_install_inputs must resolve inside airgap_bundle' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$outside_airgap_install_inputs_dir"
 
 missing_airgap_install_kubectl_dir="$TMP_DIR/invalid-airgap-install-missing-kubectl"
 copy_valid_package "$base_airgap_install" "$missing_airgap_install_kubectl_dir"

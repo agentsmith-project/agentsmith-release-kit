@@ -2130,6 +2130,7 @@ tamper_plan_ref_to_copy() {
   local copy_path="$3"
   local manifest_mode="$4"
   local expected_message="$5"
+  local argv_flag="${6:-}"
 
   "$NODE_BIN" --input-type=module - \
     "$ROOT_DIR" \
@@ -2137,7 +2138,8 @@ tamper_plan_ref_to_copy() {
     "$ref_key" \
     "$copy_path" \
     "$manifest_mode" \
-    "$expected_message" <<'NODE'
+    "$expected_message" \
+    "$argv_flag" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -2149,7 +2151,8 @@ const [
   refKey,
   copyPath,
   manifestMode,
-  expectedMessage
+  expectedMessage,
+  argvFlag
 ] = process.argv.slice(2);
 const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
 const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
@@ -2203,6 +2206,29 @@ if (manifestMode === 'update-manifest') {
   plan.package.manifest_sha256 = digestFile(manifestPath);
 } else if (manifestMode !== 'keep-manifest') {
   throw new Error(`unknown manifest tamper mode: ${manifestMode}`);
+}
+
+if (argvFlag) {
+  let updatedArgv = false;
+  for (const step of plan.producer_argv || []) {
+    if (!Array.isArray(step.argv)) {
+      continue;
+    }
+    for (
+      let index = step.argv.indexOf(argvFlag);
+      index !== -1;
+      index = step.argv.indexOf(argvFlag, index + 2)
+    ) {
+      if (!step.argv[index + 1]) {
+        throw new Error(`fixture plan step must include value for ${argvFlag}`);
+      }
+      step.argv[index + 1] = canonicalCopyPath;
+      updatedArgv = true;
+    }
+  }
+  if (!updatedArgv) {
+    throw new Error(`fixture plan producer_argv must include ${argvFlag}`);
+  }
 }
 
 plan.plan_sha256 = null;
@@ -2867,6 +2893,46 @@ tamper_plan_ref_to_copy \
   'deploy_template_package must match airgap_bundle_manifest.components.deploy_template_package.path'
 assert_no_path_evidence "$tampered_airgap_deploy_template_ref" airgap-use-existing
 pass "operator-inputs runner rejects airgap deploy_template_package refs outside bundle components with unchanged digest"
+
+tampered_airgap_substrate_pack_manifest_ref="$TMP_DIR/tampered-airgap-substrate-pack-manifest-ref"
+prepare_airgap_install_package "$tampered_airgap_substrate_pack_manifest_ref" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_substrate_pack_manifest_ref" >/dev/null
+write_stale_finalizer "$tampered_airgap_substrate_pack_manifest_ref" airgap-install-substrates
+tamper_plan_ref_to_copy \
+  "$tampered_airgap_substrate_pack_manifest_ref" \
+  substrate_pack_manifest \
+  "$tampered_airgap_substrate_pack_manifest_ref/substrate-pack-manifest-copy.json" \
+  update-manifest \
+  'substrate_pack_manifest must match airgap_bundle_manifest.components.substrate_pack_manifest.path' \
+  --substrate-pack-manifest
+assert_no_path_evidence "$tampered_airgap_substrate_pack_manifest_ref" airgap-install-substrates
+pass "operator-inputs runner rejects airgap install substrate_pack_manifest refs outside bundle components with updated argv"
+
+tampered_airgap_target_prerequisites_ref="$TMP_DIR/tampered-airgap-target-prerequisites-ref"
+prepare_airgap_package "$tampered_airgap_target_prerequisites_ref" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_target_prerequisites_ref" >/dev/null
+write_stale_finalizer "$tampered_airgap_target_prerequisites_ref" airgap-use-existing
+tamper_plan_ref_to_copy \
+  "$tampered_airgap_target_prerequisites_ref" \
+  target_prerequisites \
+  "$tampered_airgap_target_prerequisites_ref/target-prerequisites-copy.json" \
+  update-manifest \
+  'plan.input_refs.target_prerequisites.absolute_path must resolve inside airgap_bundle'
+assert_no_path_evidence "$tampered_airgap_target_prerequisites_ref" airgap-use-existing
+pass "operator-inputs runner rejects airgap target_prerequisites refs outside bundle"
+
+tampered_airgap_install_inputs_ref="$TMP_DIR/tampered-airgap-install-inputs-ref"
+prepare_airgap_install_package "$tampered_airgap_install_inputs_ref" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_install_inputs_ref" >/dev/null
+write_stale_finalizer "$tampered_airgap_install_inputs_ref" airgap-install-substrates
+tamper_plan_ref_to_copy \
+  "$tampered_airgap_install_inputs_ref" \
+  substrate_install_inputs \
+  "$tampered_airgap_install_inputs_ref/substrate-install-inputs-copy.json" \
+  update-manifest \
+  'plan.input_refs.substrate_install_inputs.absolute_path must resolve inside airgap_bundle'
+assert_no_path_evidence "$tampered_airgap_install_inputs_ref" airgap-install-substrates
+pass "operator-inputs runner rejects airgap install substrate_install_inputs refs outside bundle"
 
 tampered_airgap_bundle_root_package="$TMP_DIR/tampered-airgap-bundle-root"
 prepare_airgap_package "$tampered_airgap_bundle_root_package" apply /ok

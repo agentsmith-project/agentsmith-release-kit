@@ -1138,11 +1138,22 @@ async function validateAirgapBundleComponents({
   return componentRefs;
 }
 
-function validateAirgapConsumerPathRefs({ refs, bundle }) {
-  for (const key of ['render_values', 'substrate_truth']) {
+function airgapRuntimeBundleInputKeys(deploymentPath) {
+  const keys = ['render_values', 'target_prerequisites'];
+  if (deploymentPath === 'airgap/use_existing') {
+    keys.push('substrate_truth');
+  }
+  if (deploymentPath === 'airgap/install_substrates') {
+    keys.push('substrate_install_inputs');
+  }
+  return keys;
+}
+
+function validateAirgapRuntimeInputRefs({ refs, bundle, deploymentPath }) {
+  for (const key of airgapRuntimeBundleInputKeys(deploymentPath)) {
     const ref = refs[key];
     if (ref && !isInsidePath(bundle.absolute_path, ref.absolute_path)) {
-      fail(`${key} must resolve inside airgap_bundle for airgap deployment_path`);
+      fail(`${key} must resolve inside airgap_bundle for ${deploymentPath}`);
     }
   }
 }
@@ -1169,7 +1180,11 @@ async function validateAirgapBundleRefs({ manifest, refs, config }) {
     bundleManifest: bundleManifestObject,
     expectedTargetProfile
   });
-  validateAirgapConsumerPathRefs({ refs, bundle });
+  validateAirgapRuntimeInputRefs({
+    refs,
+    bundle,
+    deploymentPath: manifest.deployment_path
+  });
   return validateAirgapBundleComponents({
     bundleRoot: bundle.absolute_path,
     bundleManifest: bundleManifestObject,
