@@ -8,15 +8,7 @@ REPORT_FILE="operator-release-surface-report.json"
 usage() {
   cat <<'USAGE'
 Usage:
-  bash scripts/operator-release.sh --operator-inputs <dir-or-json>
-
-Transitional focused diagnostics:
-  bash scripts/operator-release.sh online use_existing <producer args without --target-profile>
-  bash scripts/operator-release.sh online kit_provided <producer args without --target-profile>
-  bash scripts/operator-release.sh airgap use_existing <producer args without --target-profile>
-  bash scripts/operator-release.sh airgap kit_provided <producer args without --target-profile>
-  bash scripts/operator-release.sh airgap-bundle use_existing <producer args without --target-profile>
-  bash scripts/operator-release.sh airgap-bundle kit_provided <producer args without --target-profile>
+  bash scripts/operator-release.sh --operator-inputs <package-or-json>
 
 Operator-inputs intake:
   --operator-inputs validates one deployment-path input package and writes
@@ -25,23 +17,8 @@ Operator-inputs intake:
   path-specific focused producer flow. No GA verdict or release readiness is
   issued.
 
-Transitional operator surface:
-  online/use_existing maps internally to existing_kubernetes/external_declared/online.
-  online/kit_provided maps internally to existing_kubernetes/kit_installed/online.
-  airgap/use_existing maps internally to existing_kubernetes/external_declared/airgap.
-  airgap/kit_provided maps internally to existing_kubernetes/kit_installed/airgap.
-  airgap-bundle/use_existing maps internally to existing_kubernetes/external_declared/airgap.
-  airgap-bundle/kit_provided maps internally to existing_kubernetes/kit_installed/airgap.
-
-This facade forwards to existing producer diagnostics only:
-  online/* -> scripts/verify-release.sh --online-deployment-gate
-  airgap/* -> scripts/verify-release.sh --airgap-consume-rehearsal
-  airgap-bundle/* -> scripts/verify-release.sh --bundle-create
-
-Old positional/transitional installer surface:
-  install_substrates is not implemented by the old positional facade. Use
-  --operator-inputs for install_substrates intake; execution still closes
-  through the separate --substrate-install producer/finalizer evidence flow.
+Legacy positional flows are maintainer/internal diagnostics only; see
+docs/RELEASE_GATES.md.
 USAGE
 }
 

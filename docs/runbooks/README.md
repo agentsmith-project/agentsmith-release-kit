@@ -118,7 +118,7 @@ command.
 Default PR/push CI follows the quick/core path only:
 `verify-release.sh --quick`, `test-inputs.sh`, `test-template-package.sh`,
 `test-render.sh`, `test-render-check.sh`, and
-`test-operator-release-surface.sh`, `test-substrate-install.sh`,
+`test-operator-inputs.sh`, `test-operator-release-surface.sh`, `test-substrate-install.sh`,
 `test-deployment-path-report.sh`, and `test-ga-release.sh`.
 `test-substrate-install.sh` stays in this default path because it uses local
 fixtures and fake kubectl, including online plus low-cost airgap producer

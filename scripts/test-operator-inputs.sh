@@ -313,8 +313,44 @@ switch (caseName) {
   case 'path_escape':
     manifest.release_contract = '../release-contract.json';
     break;
-  case 'internal_word':
-    manifest.smoke_url = 'https://release.example/external_declared/ok';
+  case 'candidate_paths': {
+    const packageRoot = path.dirname(manifestPath);
+    fs.mkdirSync(path.join(packageRoot, 'candidate'), { recursive: true });
+    fs.copyFileSync(
+      path.join(packageRoot, 'release-contract.json'),
+      path.join(packageRoot, 'release-candidate-contract.json')
+    );
+    fs.copyFileSync(
+      path.join(packageRoot, 'render-values.json'),
+      path.join(packageRoot, 'candidate/render-values.json')
+    );
+    manifest.release_contract = 'release-candidate-contract.json';
+    manifest.render_values = 'candidate/render-values.json';
+    break;
+  }
+  case 'internal_operator_release_surface_report_field':
+    manifest.operator_release_surface_report = 'operator-release-surface-report.json';
+    break;
+  case 'internal_adoption_report_value':
+    fs.copyFileSync(
+      path.join(path.dirname(manifestPath), 'release-contract.json'),
+      path.join(path.dirname(manifestPath), 'adoption-report.json')
+    );
+    manifest.release_contract = 'adoption-report.json';
+    break;
+  case 'internal_operator_release_surface_report_value':
+    fs.copyFileSync(
+      path.join(path.dirname(manifestPath), 'release-contract.json'),
+      path.join(path.dirname(manifestPath), 'operator-release-surface-report.json')
+    );
+    manifest.release_contract = 'operator-release-surface-report.json';
+    break;
+  case 'internal_release_engineering_gate_intake_report_value':
+    fs.copyFileSync(
+      path.join(path.dirname(manifestPath), 'release-contract.json'),
+      path.join(path.dirname(manifestPath), 'release-engineering-gate-intake-report.json')
+    );
+    manifest.release_contract = 'release-engineering-gate-intake-report.json';
     break;
   case 'payload_case':
     manifest.smoke_url = 'https://release.example/ok?token=secretpayload123';
@@ -851,13 +887,33 @@ mkdir -p "$base_online"
 write_package_files "$base_online"
 write_manifest "$base_online" online/use_existing
 
+candidate_paths_dir="$TMP_DIR/valid-candidate-paths"
+copy_valid_package "$base_online" "$candidate_paths_dir"
+mutate_manifest "$candidate_paths_dir" candidate_paths
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$candidate_paths_dir" \
+  --output-dir "$TMP_DIR/candidate-path-plan" >/dev/null
+assert_plan "$TMP_DIR/candidate-path-plan/operator-inputs-plan.json" online/use_existing
+pass "resolve-operator-inputs accepts package path refs containing candidate"
+
+for case_name in \
+  internal_operator_release_surface_report_field \
+  internal_adoption_report_value \
+  internal_operator_release_surface_report_value \
+  internal_release_engineering_gate_intake_report_value; do
+  invalid_dir="$TMP_DIR/invalid-$case_name"
+  copy_valid_package "$base_online" "$invalid_dir"
+  mutate_manifest "$invalid_dir" "$case_name"
+  expect_fail_matching "$case_name" 'internal report reference' \
+    "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$invalid_dir"
+done
+
 for case_name in \
   missing_schema_version \
   missing_operator_inputs_version \
   bad_operator_inputs_version \
   unknown_field \
   path_escape \
-  internal_word \
   payload_case \
   smoke_url_access_token \
   feishu_webhook_url \

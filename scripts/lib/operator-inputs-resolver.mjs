@@ -191,7 +191,8 @@ const DEPLOYMENT_PATH_CONFIG = new Map([
   ]
 ]);
 
-const INTERNAL_WORD_RE = /\b(?:target_cluster|substrate_source|distribution|external_declared|kit_installed|surface|adoption|candidate)\b|deployment[-_ ]path[-_ ]report/i;
+const INTERNAL_REPORT_KEY_RE = /(^|[_-])(?:operator[_-]release[_-]surface[_-]report|adoption[_-]report|candidate[_-]intake|deployment[_-]path[_-]report|release[_-]engineering[_-]gate[_-]intake[_-]report)([_-]|$)/i;
+const INTERNAL_REPORT_BASENAME_RE = /(?:^|[-_. ])(?:operator[-_ ]release[-_ ]surface[-_ ]report|adoption[-_ ]report|candidate[-_ ]intake|deployment[-_ ]path[-_ ]report|release[-_ ]engineering[-_ ]gate[-_ ]intake[-_ ]report)(?:[-_. ]|$)/i;
 const FORBIDDEN_ROUTE_TEXT_RE = /(?:required_product_flows|product_flows|product_flow_results|deploy_readiness|release_verdict|\bverdict\b|\bkubeconfig\b)/i;
 const SECRET_KEY_RE = /(^|[_-])(access[_-]?key|api[_-]?key|client[_-]?secret|credential|kubeconfig|kube[_-]?config|password|private[_-]?key|refresh[_-]?token|secret|session[_-]?token|token)([_-]|$)/i;
 const SECRET_VALUE_RE = [
@@ -465,8 +466,8 @@ function scanManifestForForbiddenContent(value, label, pathParts = []) {
       if (SECRET_KEY_RE.test(key)) {
         fail(`${label} must not contain secret-like field: ${[...pathParts, key].join('.')}`);
       }
-      if (key !== 'deployment_path' && INTERNAL_WORD_RE.test(key)) {
-        fail(`${label} must not contain internal field vocabulary: ${[...pathParts, key].join('.')}`);
+      if (INTERNAL_REPORT_KEY_RE.test(key)) {
+        fail(`${label} must not contain internal report reference field: ${[...pathParts, key].join('.')}`);
       }
       scanManifestForForbiddenContent(nested, label, [...pathParts, key]);
     }
@@ -474,8 +475,9 @@ function scanManifestForForbiddenContent(value, label, pathParts = []) {
   }
   if (typeof value === 'string') {
     const currentPath = pathParts.join('.') || '<root>';
-    if (pathParts[pathParts.length - 1] !== 'deployment_path' && INTERNAL_WORD_RE.test(value)) {
-      fail(`${label} must not contain internal vocabulary at ${currentPath}`);
+    const basename = path.posix.basename(value.replace(/\\/g, '/'));
+    if (INTERNAL_REPORT_BASENAME_RE.test(basename)) {
+      fail(`${label} must not contain internal report reference at ${currentPath}`);
     }
     for (const pattern of SECRET_VALUE_RE) {
       if (pattern.test(value)) {
@@ -632,6 +634,9 @@ function validateTopLevelFields(manifest) {
     }
     if (key === 'product_readiness_report') {
       fail('product_readiness_report is not accepted by operator-inputs intake');
+    }
+    if (INTERNAL_REPORT_KEY_RE.test(key)) {
+      fail(`operator-inputs manifest must not contain internal report reference field: ${key}`);
     }
     if (!TOP_LEVEL_FIELDS.has(key)) {
       fail(`unknown operator-inputs field: ${key}`);

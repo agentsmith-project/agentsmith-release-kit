@@ -1265,6 +1265,17 @@ write_bundle_evidence_provenance "$KIT_AIRGAP_BUNDLE_PROVENANCE"
 start_server
 BASE_URL="http://127.0.0.1:$SERVER_PORT"
 
+help_output="$TMP_DIR/operator-release-help.out"
+bash "$ROOT_DIR/scripts/operator-release.sh" --help >"$help_output"
+grep -q -- '--operator-inputs <package-or-json>' "$help_output" ||
+  fail "operator-release help must foreground --operator-inputs"
+grep -q 'maintainer/internal diagnostics only; see' "$help_output" ||
+  fail "operator-release help must demote legacy positional diagnostics"
+if grep -Eq 'external_declared|kit_installed|existing_kubernetes|kind_rehearsal|operator-release[.]sh (online|airgap|airgap-bundle)' "$help_output"; then
+  fail "operator-release help must not expose machine profile mappings or positional examples"
+fi
+pass "operator-release help keeps operator-facing surface minimal"
+
 image_args=()
 for id in "${RELEASE_IMAGE_IDS[@]}"; do
   image_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
