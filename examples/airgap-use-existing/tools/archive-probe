@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+echo "replace tools/archive-probe with the operator-approved image archive probe" >&2
+exit 2
+

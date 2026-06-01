@@ -917,10 +917,19 @@ Online focused chain orchestration:
 bash scripts/test-online-deployment-gate.sh
 ```
 
-A copy-pasteable package-driven `online/use_existing` operator input template
-is available in `examples/online-existing-kubernetes/`. It is a minimal
-use-existing-substrates example for `operator-release.sh --operator-inputs`
-and hands off finalized deployment-path evidence without claiming GA readiness.
+Copy-pasteable package-driven operator input templates are available in
+`examples/`:
+
+- `examples/online-existing-kubernetes/`: `online/use_existing`
+- `examples/online-install-substrates/`: `online/install_substrates`
+- `examples/airgap-use-existing/`: `airgap/use_existing`
+- `examples/airgap-install-substrates/`: `airgap/install_substrates`
+
+They are minimal package skeletons for
+`operator-release.sh --operator-inputs`. Install-substrate examples include
+the `install_parameters_sha256` calculation command. Airgap examples keep
+release/material inputs bundle-local while package-local executables such as
+`kubectl`, `archive_probe`, and `image_loader` live outside the bundle.
 
 `--online-deployment-gate` is a KISS runner for the online focused chain on
 `existing_kubernetes/external_declared/online` and

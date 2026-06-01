@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 EXAMPLE_DIR="$ROOT_DIR/examples/online-existing-kubernetes"
+EXAMPLE_ONLINE_INSTALL_DIR="$ROOT_DIR/examples/online-install-substrates"
+EXAMPLE_AIRGAP_USE_EXISTING_DIR="$ROOT_DIR/examples/airgap-use-existing"
+EXAMPLE_AIRGAP_INSTALL_DIR="$ROOT_DIR/examples/airgap-install-substrates"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 VALID_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-package.valid.json"
 
@@ -157,6 +160,103 @@ contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract
 fs.writeFileSync(packageOutput, `${JSON.stringify(deployTemplatePackage, null, 2)}\n`);
 fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
 NODE
+}
+
+update_airgap_bundle_component_digests() {
+  local bundle_root="$1"
+
+  "$NODE_BIN" --input-type=module - "$bundle_root" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [bundleRoot] = process.argv.slice(2);
+const manifestPath = path.join(bundleRoot, 'airgap-bundle-manifest.json');
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const digestFile = (file) =>
+  `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+
+manifest.components = manifest.components.map((component) => ({
+  ...component,
+  sha256: digestFile(path.join(bundleRoot, component.path))
+}));
+
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+assert_operator_inputs_plan() {
+  local plan_file="$1"
+  local expected_path="$2"
+
+  "$NODE_BIN" --input-type=module - "$plan_file" "$expected_path" <<'NODE'
+import fs from 'node:fs';
+
+const [planFile, expectedPath] = process.argv.slice(2);
+const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
+
+if (plan.schema_version !== 'agentsmith.operator-inputs-plan/v1') {
+  throw new Error(`unexpected plan schema: ${plan.schema_version}`);
+}
+if (plan.scope !== 'operator_inputs_intake_only') {
+  throw new Error(`unexpected plan scope: ${plan.scope}`);
+}
+if (plan.status !== 'pass') {
+  throw new Error(`unexpected plan status: ${plan.status}`);
+}
+if (plan.deployment_path !== expectedPath) {
+  throw new Error(`unexpected deployment path: ${plan.deployment_path}`);
+}
+if ('formal_verdict' in plan || 'readiness' in plan) {
+  throw new Error('operator-inputs validation plan must not issue readiness or verdict');
+}
+NODE
+}
+
+stage_operator_example() {
+  local example_dir="$1"
+  local package_dir="$2"
+  local deployment_path="$3"
+
+  mkdir -p "$package_dir"
+  cp -R "$example_dir/." "$package_dir/"
+  cp "$package_dir/operator-inputs.apply.example.json" "$package_dir/operator-inputs.json"
+
+  case "$deployment_path" in
+    online/*)
+      cp "$CONTRACT_MATERIAL" "$package_dir/release-contract.json"
+      cp "$PACKAGE_MATERIAL" "$package_dir/deploy-template-package.json"
+      cp "$ARCHIVE" "$package_dir/deploy-template-package.tgz"
+      if [[ -d "$package_dir/tools" ]]; then
+        chmod +x "$package_dir"/tools/*
+      fi
+      ;;
+    airgap/*)
+      cp "$CONTRACT_MATERIAL" "$package_dir/airgap-bundle/components/release-contract.json"
+      cp "$PACKAGE_MATERIAL" "$package_dir/airgap-bundle/components/deploy-template-package.json"
+      cp "$ARCHIVE" "$package_dir/airgap-bundle/components/deploy-template-package.tgz"
+      chmod +x "$package_dir"/tools/*
+      update_airgap_bundle_component_digests "$package_dir/airgap-bundle"
+      ;;
+    *)
+      fail "unsupported example deployment path: $deployment_path"
+      ;;
+  esac
+}
+
+validate_operator_example_package() {
+  local example_dir="$1"
+  local package_dir="$2"
+  local deployment_path="$3"
+  local label="$4"
+
+  stage_operator_example "$example_dir" "$package_dir" "$deployment_path"
+  bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" \
+    >"$TMP_DIR/$label.operator-inputs.out"
+  assert_operator_inputs_plan \
+    "$package_dir/.release-kit-internal/operator-inputs-plan.json" \
+    "$deployment_path"
+  pass "operator-inputs validation accepts $label example package"
 }
 
 write_fake_kubectl() {
@@ -434,6 +534,28 @@ write_materials "$manifest_sha" "$archive_sha" "$CONTRACT_MATERIAL" "$PACKAGE_MA
 KUBECTL_LOG="$TMP_DIR/kubectl.log"
 FAKE_KUBECTL="$TMP_DIR/kubectl"
 write_fake_kubectl "$FAKE_KUBECTL"
+
+validate_operator_example_package \
+  "$EXAMPLE_DIR" \
+  "$TMP_DIR/example-online-existing-kubernetes" \
+  online/use_existing \
+  online-existing-kubernetes
+validate_operator_example_package \
+  "$EXAMPLE_ONLINE_INSTALL_DIR" \
+  "$TMP_DIR/example-online-install-substrates" \
+  online/install_substrates \
+  online-install-substrates
+validate_operator_example_package \
+  "$EXAMPLE_AIRGAP_USE_EXISTING_DIR" \
+  "$TMP_DIR/example-airgap-use-existing" \
+  airgap/use_existing \
+  airgap-use-existing
+validate_operator_example_package \
+  "$EXAMPLE_AIRGAP_INSTALL_DIR" \
+  "$TMP_DIR/example-airgap-install-substrates" \
+  airgap/install_substrates \
+  airgap-install-substrates
+
 start_server
 BASE_URL="http://127.0.0.1:$SERVER_PORT"
 

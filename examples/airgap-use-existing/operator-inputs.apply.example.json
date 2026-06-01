@@ -1,0 +1,28 @@
+{
+  "schema_version": "agentsmith.operator-inputs/v1",
+  "operator_inputs_version": 1,
+  "deployment_path": "airgap/use_existing",
+  "release_contract": "airgap-bundle/components/release-contract.json",
+  "deploy_template_package": "airgap-bundle/components/deploy-template-package.json",
+  "deploy_template_archive": "airgap-bundle/components/deploy-template-package.tgz",
+  "render_values": "airgap-bundle/operator-inputs/render-values.example.json",
+  "substrate_truth": "airgap-bundle/operator-inputs/substrate-truth.example.json",
+  "target_prerequisites": "airgap-bundle/operator-inputs/target-prerequisites.example.json",
+  "airgap_bundle": "airgap-bundle",
+  "airgap_bundle_manifest": "airgap-bundle/airgap-bundle-manifest.json",
+  "namespace": "agentsmith",
+  "mode": "apply",
+  "context": "agentsmith-airgap",
+  "kubectl": "tools/kubectl",
+  "archive_probe": "tools/archive-probe",
+  "image_loader": "tools/image-loader",
+  "smoke_url": "https://agentsmith.airgap.example.com/healthz",
+  "expected_status": 200,
+  "timeout": "120s",
+  "timeout_ms": 60000,
+  "deploy_confirmation": {
+    "confirmed": true,
+    "operator_run_id": "operator-airgap-deploy-20260523-001"
+  }
+}
+

@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+echo "replace tools/image-loader with the operator-approved local image loader" >&2
+exit 2
+

@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+echo "replace tools/routability-probe with the operator-approved substrate routability probe" >&2
+exit 2
+

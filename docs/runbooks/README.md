@@ -25,9 +25,11 @@ buckets, IAM, networks, or OIDC realms.
 
 Prepare one directory or JSON manifest containing `operator-inputs.json` for
 the selected deployment path. Keep secrets as references, not raw values. For
-airgap packages, every runtime file referenced by the path must live inside the
-referenced `airgap_bundle`. Post-deploy product smoke is produced after the
-runtime check; it is not an operator input package field.
+airgap packages, release/material inputs consumed from the bundle are
+bundle-local. Package-local executable tools such as `kubectl`,
+`archive_probe`, and `image_loader` can live outside the bundle while still
+being referenced by the operator package. Post-deploy product smoke is
+produced after the runtime check; it is not an operator input package field.
 
 ### 3. What do I run?
 
@@ -84,6 +86,20 @@ proof.
 | `online/install_substrates` | Release contract, deploy template package and archive, render values, target prerequisites, substrate pack manifest, substrate install inputs, required `kubectl` and `context`, package-local `routability_probe`, and explicit install confirmation. No package-local `substrate_truth`. | Validates installer inputs. With `--run` and `mode: apply`, runs substrate-install first, uses the installer output truth for the online gate, and writes path-level evidence for finalization. |
 | `airgap/use_existing` | Bundle-local release contract, deploy template package and archive, render values, substrate truth, and target prerequisites; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL for runtime route-smoke evidence. | Validates the bundle reference. With `--run` and `mode: apply`, runs airgap consume/deployment checks and writes path-level evidence for finalization. |
 | `airgap/install_substrates` | Bundle-local release contract, deploy template package and archive, render values, and target prerequisites; substrate pack manifest; substrate install inputs; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL; explicit install confirmation. No bundle/package `substrate_truth`. | Validates installer and bundle references. With `--run` and `mode: apply`, runs substrate-install first, uses the installer output truth for airgap deployment, and writes path-level evidence for finalization. |
+
+## Operator Examples
+
+Copy/pasteable package skeletons are available under `examples/`:
+
+- `examples/online-existing-kubernetes/`: `online/use_existing`
+- `examples/online-install-substrates/`: `online/install_substrates`
+- `examples/airgap-use-existing/`: `airgap/use_existing`
+- `examples/airgap-install-substrates/`: `airgap/install_substrates`
+
+Each example stages one package for `bash scripts/operator-release.sh
+--operator-inputs <pkg>`. Install-substrate examples include the
+`install_parameters_sha256` calculation command that matches
+`verify-substrate-install`.
 
 ### Airgap Tool Contract
 
@@ -225,10 +241,9 @@ are manual `workflow_dispatch` checks. They are useful while changing those
 producers, but they are not default operator quick-path evidence and still do
 not issue deploy, package, or release readiness.
 
-For a concrete real Kubernetes plus existing substrates online example, copy
-and edit `examples/online-existing-kubernetes/`. It demonstrates the
-package-driven `--operator-inputs` intake, confirmed apply, optional route
-smoke, and finalized deployment-path evidence handoff without claiming GA
+For concrete package skeletons covering all four GA operator paths, start with
+`examples/README.md`. The examples demonstrate package-driven
+`--operator-inputs` intake and path-level evidence handoff without claiming GA
 readiness.
 
 For target-preflight and the online focused chain, keep substrate connection

@@ -1,0 +1,40 @@
+{
+  "schema_version": "agentsmith.airgap-bundle-manifest/v1",
+  "target_profile": {
+    "value": "existing_kubernetes/kit_installed/airgap",
+    "target_cluster": "existing_kubernetes",
+    "substrate_source": "kit_installed",
+    "distribution": "airgap"
+  },
+  "substrate": {
+    "mode": "kit_installed",
+    "bundled": true
+  },
+  "components": [
+    {
+      "kind": "release_contract",
+      "path": "components/release-contract.json",
+      "sha256": "sha256:da8b1b13b1d5545056f7ff25a54e7718fd699475a3cebef965a7621eb654d73c"
+    },
+    {
+      "kind": "deploy_template_package",
+      "path": "components/deploy-template-package.json",
+      "sha256": "sha256:ad22f6e70489c755bc9c20e5d0fde90d2df6357ff29e56d5624036c6456f24a1"
+    },
+    {
+      "kind": "deploy_template_archive",
+      "path": "components/deploy-template-package.tgz",
+      "sha256": "sha256:01745693f1d187223fdd521c3af5d27b9e83f6325e935aeeaed85616562c5164"
+    },
+    {
+      "kind": "image_map",
+      "path": "components/image-map.json",
+      "sha256": "sha256:9d1283360bf9c4c6d73d4d8d5798996ed4d6dd8b3e1f9dc9815491232f746b98"
+    },
+    {
+      "kind": "substrate_pack_manifest",
+      "path": "components/substrate-pack-manifest.example.json",
+      "sha256": "sha256:3d678fa0dbbe135f2eaba04fd3728dc4a6a77410b244c8f8b40a38f9470f28a0"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": "agentsmith.substrate-pack-manifest/v1",
+  "release_kit_version": "0.1.0",
+  "installed_by": "agentsmith-release-kit",
+  "target_profile": "existing_kubernetes/kit_installed/airgap",
+  "images": {
+    "postgresql": "registry.airgap.example/agentsmith/substrates/postgresql:16.3@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "mongodb": "registry.airgap.example/agentsmith/substrates/mongodb:7.0@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "redis": "registry.airgap.example/agentsmith/substrates/redis:7.2@sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "object_storage": "registry.airgap.example/agentsmith/substrates/object-storage:2026.05@sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "oidc": "registry.airgap.example/agentsmith/substrates/keycloak:25.0@sha256:5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "payload": {
+    "install_plan": "payload/kit-provided.json"
+  },
+  "templates": {
+    "postgresql": "templates/postgresql.yaml",
+    "mongodb": "templates/mongodb.yaml",
+    "redis": "templates/redis.yaml",
+    "object_storage": "templates/object-storage.yaml",
+    "oidc": "templates/oidc.yaml"
+  },
+  "tools": {
+    "archive_probe": "tools/archive-probe",
+    "image_loader": "tools/image-loader"
+  },
+  "checksums": {
+    "manifest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+  }
+}
+

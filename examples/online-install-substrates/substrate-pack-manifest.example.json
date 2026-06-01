@@ -1,0 +1,30 @@
+{
+  "schema_version": "agentsmith.substrate-pack-manifest/v1",
+  "release_kit_version": "0.1.0",
+  "installed_by": "agentsmith-release-kit",
+  "target_profile": "existing_kubernetes/kit_installed/online",
+  "images": {
+    "postgresql": "ghcr.io/agentsmith-project/substrates/postgresql:16.3@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "mongodb": "ghcr.io/agentsmith-project/substrates/mongodb:7.0@sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "redis": "ghcr.io/agentsmith-project/substrates/redis:7.2@sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "object_storage": "ghcr.io/agentsmith-project/substrates/object-storage:2026.05@sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "oidc": "ghcr.io/agentsmith-project/substrates/keycloak:25.0@sha256:5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "payload": {
+    "install_plan": "payload/kit-provided.json"
+  },
+  "templates": {
+    "postgresql": "templates/postgresql.yaml",
+    "mongodb": "templates/mongodb.yaml",
+    "redis": "templates/redis.yaml",
+    "object_storage": "templates/object-storage.yaml",
+    "oidc": "templates/oidc.yaml"
+  },
+  "tools": {
+    "routability_probe": "tools/substrate-routability-probe"
+  },
+  "checksums": {
+    "manifest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+  }
+}
+
