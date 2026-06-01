@@ -1130,6 +1130,13 @@ consumes finalized deployment path reports, AgentSmith product readiness, and
 post-deploy product smoke reports through `bash scripts/verify-release.sh
 --ga-release`. It writes `ga-release-report.json` with
 `formal_verdict=issued` only on pass and does not rerun producers.
+The post-deploy product smoke input must be the AgentSmith canonical report:
+`schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
+agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,
+input_sha256, release_id, git_sha }`. Its `input_sha256`, `release_id`, and
+`git_sha` must match the same `--release-contract` raw digest, id, and git sha.
+Legacy surrogate top-level fields are rejected: `release_id`, `git_sha`,
+`release_contract_digest`, `covered_flows`, and `artifact_provenance`.
 Deployment path report finalization is internal evidence plumbing for
 maintainers/CI; it writes a sibling finalizer manifest plus copied
 `source-evidence/` JSON files for GA materiality checks and is not a new

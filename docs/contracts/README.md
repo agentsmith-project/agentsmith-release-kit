@@ -36,7 +36,15 @@ Current post-push contract index:
 - `agentsmith.ga-release-report/v1`: repo-local GA aggregate report. It
   consumes exactly the four finalized deployment path reports plus required
   AgentSmith product-side reports and is the only repo-local output here that
-  may issue `formal_verdict: issued`.
+  may issue `formal_verdict: issued`. The post-deploy product smoke input must
+  be the AgentSmith canonical report with `schema_version:
+  agentsmith.post-deploy-product-smoke-report/v1`, `producer:
+  agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,
+  input_sha256, release_id, git_sha }`; `input_sha256`, `release_id`, and
+  `git_sha` must match the same `--release-contract` raw digest, id, and git
+  sha. Legacy surrogate top-level fields are rejected: `release_id`,
+  `git_sha`, `release_contract_digest`, `covered_flows`, and
+  `artifact_provenance`.
 
 For package-driven operator runs, each
 `operator-release.sh --operator-inputs <pkg> --run` package still represents

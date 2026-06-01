@@ -84,6 +84,14 @@ bash scripts/verify-release.sh --ga-release \
   --output-dir <ga-output-dir>
 ```
 
+The post-deploy product smoke input must be the AgentSmith canonical report:
+`schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
+agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,
+input_sha256, release_id, git_sha }`. Its `input_sha256`, `release_id`, and
+`git_sha` must match the same `--release-contract` raw digest, id, and git sha.
+Legacy surrogate top-level fields are rejected: `release_id`, `git_sha`,
+`release_contract_digest`, `covered_flows`, and `artifact_provenance`.
+
 `install_substrates` means namespace-scoped substrate manifest install
 producer/finalizer evidence with explicit install confirmation. It is not a
 cloud resource provisioner and does not create clusters, managed databases,
