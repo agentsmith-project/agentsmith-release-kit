@@ -33,9 +33,10 @@ AgentSmith Release Kit consumes:
 
 - AgentSmith release contract.
 - AgentSmith deploy template package.
-- Operator inputs, including target cluster, registry, neutral substrate
-  connection truth, target prerequisites truth, namespace, ingress, TLS, and
-  secret references.
+- Operator inputs through `operator-inputs` packages that reference release
+  contract, deploy template, render values, substrate truth, target
+  prerequisites, bundle, installer, and probe/loader materials without
+  inlining business truth or secrets.
 
 AgentSmith Release Kit owns:
 
@@ -61,19 +62,50 @@ AgentSmith Release Kit does not own:
 
 ## Deployment Model
 
-The operator choice matrix is the current operator-facing surface:
-`online/use_existing`, `online/kit_provided`, `airgap/use_existing`, and
-`airgap/kit_provided`. This names the supported operator surface only; it
-is not a formal release verdict, package readiness, operator readiness, or GA
-signoff. These choices map to the four existing-Kubernetes machine profiles:
+The operator-facing path is a single package-driven flow:
+
+```bash
+bash scripts/operator-release.sh --operator-inputs <dir-or-json>
+```
+
+The package contains one `operator-inputs.json` for one selected deployment
+path. It is not a four-path manifest. The four accepted `deployment_path`
+values are:
+
+- `online/use_existing`
+- `online/install_substrates`
+- `airgap/use_existing`
+- `airgap/install_substrates`
+
+This first slice validates the package, rejects internal producer vocabulary,
+secret-looking payloads, missing path-specific inputs, and path escapes, then
+writes `.release-kit-internal/operator-inputs-plan.json`. The plan is internal
+only: it is not GA evidence, not release readiness, and does not write
+`formal_verdict`. Post-deploy smoke reports are runtime evidence and are not
+operator-inputs. GA rehearsal can cover the four paths by using four separate
+input packages. The final release-facing result is still the repo-local GA
+aggregate, which writes `ga-release-report.json` after finalized deployment
+path reports and required AgentSmith product-side reports are supplied.
+
+For `install_substrates`, the package can name namespace-scoped installer
+inputs plus an explicit install confirmation. That path is still a
+release-kit installer producer/finalizer evidence flow; it is not cloud
+provisioning for clusters, databases, buckets, IAM, networks, or OIDC realms.
+
+Maintainer/internal diagnostics still expose the old positional surface:
+`online use_existing`, `online kit_provided`, `airgap use_existing`, and
+`airgap kit_provided`. These commands are compatibility wrappers around
+focused producer diagnostics. They are not the operator main path, not a
+formal release verdict, not package readiness, not operator readiness, and not
+GA signoff. They map to existing-Kubernetes machine profiles:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`, and
 `existing_kubernetes/kit_installed/airgap`.
 
-Focused producer diagnostics still use machine profile axes:
+Those focused producer diagnostics use machine profile axes internally:
 
-- `target_cluster`: operator-facing release paths use `existing_kubernetes`;
+- `target_cluster`: package-driven release paths use `existing_kubernetes`;
   `kind_rehearsal` is accepted only where a local or CI rehearsal diagnostic
   explicitly supports it.
 - `substrate_source`: `external_declared` or `kit_installed`.
@@ -90,7 +122,7 @@ It is not installer proof and does not mean release-kit created databases,
 buckets, OIDC realms, or other substrate resources.
 
 `kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input. It
-is not a release profile, user deployment prerequisite, operator release
+is not a release profile, user deployment prerequisite, package-driven release
 target, or replacement for real Kubernetes evidence. Removed old input names
 and synonym axes such as `local-kind`, `existing-cluster`, `real-k8s`, `kind`,
 or `cluster` fail fast.
@@ -102,7 +134,7 @@ network prerequisite, but this repository does not create cloud resources.
 
 ## Current Verification
 
-Operator release surface v0:
+Maintainer/internal positional surface diagnostics:
 
 ```bash
 bash scripts/operator-release.sh online use_existing ...
@@ -119,7 +151,7 @@ bash scripts/verify-release.sh --airgap-adoption \
   --output-dir <dir>
 ```
 
-The online and airgap commands are the four operator-facing choices;
+The online and airgap positional commands are compatibility diagnostics;
 airgap-bundle commands are packaging-side helpers for those airgap paths. All
 of them map to existing producer diagnostics and write
 `operator-release-surface-report.json` with `readiness: false`. The repo-local
@@ -133,7 +165,7 @@ duplicate singleton/control facade arguments fail fast before producer side
 effects.
 Airgap-bundle evidence handoff in the surface summary is digest-only. Scoped
 operator runbook acceptance is a separate focused check that binds the
-operator choice, existing-Kubernetes airgap machine profile, surface report,
+legacy positional path, existing-Kubernetes airgap machine profile, surface report,
 evidence root, and safe runbook path/digest without adding identity,
 signature, verdict, or readiness semantics.
 `--airgap-adoption` aggregates matching generated airgap-bundle and
@@ -157,10 +189,9 @@ bash scripts/verify-release.sh --release-engineering-gate-intake \
 
 This is a maintainer-only candidate intake boundary for explicit GA or
 compliance trigger work. It consumes existing focused adoption outputs only,
-requires the four operator choices (`online/use_existing`,
-`online/kit_provided`,
-`airgap/use_existing`, `airgap/kit_provided`), binds release identity and
-release contract digest/provenance, and writes
+requires the four legacy positional diagnostics (`online/use_existing`,
+`online/kit_provided`, `airgap/use_existing`, `airgap/kit_provided`), binds
+release identity and release contract digest/provenance, and writes
 `release-engineering-gate-intake-report.json` with `readiness: false`,
 `scope: release_engineering_gate_candidate_intake_only`, `status: pass`, and
 `formal_verdict: not_issued`. The report lists blocking gaps for a future
@@ -202,7 +233,7 @@ require OpenAPI/AsyncAPI digests or product-flow declarations. Every declared
 `target_profiles` entry must carry
 `required: boolean`; `support_level` is rejected, duplicate three-axis tuples
 are rejected, and every entry must use an accepted pre-GA tuple. Only the four
-existing-Kubernetes tuples map to the operator choice surface. Existing
+existing-Kubernetes tuples map to package-driven deployment paths. Existing
 Kubernetes profiles can be declared for both `external_declared` and
 `kit_installed` substrate choices across online and airgap distributions;
 `kind_rehearsal/kit_installed/online` remains local/CI rehearsal-only input.

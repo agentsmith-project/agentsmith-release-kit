@@ -188,16 +188,19 @@ require_text README.md "backend-real"
 require_text README.md "product flow"
 require_text README.md "Cloud resource provisioning"
 require_text README.md "release management UI"
-require_text README.md "operator choice matrix"
+require_text README.md "operator-facing path is a single package-driven flow"
+require_text README.md 'bash scripts/operator-release.sh --operator-inputs <dir-or-json>'
 require_text README.md '`online/use_existing`'
+require_text README.md '`online/install_substrates`'
 require_text README.md '`online/kit_provided`'
 require_text README.md '`airgap/use_existing`'
+require_text README.md '`airgap/install_substrates`'
 require_text README.md '`airgap/kit_provided`'
 require_text README.md '`install_substrates` requires an explicit report from the separate'
 require_text README.md 'kit-provided pack/truth identity marker / provenance marker'
 require_text README.md 'not installer proof'
 require_text README.md '`kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input'
-require_text README.md "is not a release profile, user deployment prerequisite, operator release"
+require_text README.md "is not a release profile, user deployment prerequisite, package-driven release"
 require_text README.md "target, or replacement for real Kubernetes evidence"
 require_text docs/runbooks/README.md "## Operator Choice Matrix"
 require_text docs/runbooks/README.md "Airgap bundle packaging commands are packaging-side helpers"

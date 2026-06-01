@@ -2185,6 +2185,20 @@ expect_operator_fail_preserves_summary rejected-target-profile "$target_profile_
     --target-profile "$EXTERNAL_ONLINE_PROFILE" \
     --output-dir "$target_profile_output"
 
+for raw_internal_flag in \
+  --substrate-install-inputs \
+  --confirm-substrate-install \
+  --confirm-install-parameters \
+  --substrate-install-report \
+  --confirm-install-substrates \
+  --operator-path; do
+  raw_internal_output="$TMP_DIR/out-raw-internal-${raw_internal_flag//[^A-Za-z0-9]/-}"
+  expect_operator_fail_preserves_summary "raw-internal-${raw_internal_flag//[^A-Za-z0-9]/-}" "$raw_internal_output" \
+    bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+      "$raw_internal_flag" "$TMP_DIR/raw-internal-value.json" \
+      --output-dir "$raw_internal_output"
+done
+
 raw_confirm_output="$TMP_DIR/out-raw-confirm-apply"
 expect_operator_fail_preserves_summary raw-confirm-apply "$raw_confirm_output" \
   env FAKE_KUBECTL_LOG="$KUBECTL_LOG" \

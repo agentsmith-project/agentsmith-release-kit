@@ -28,6 +28,40 @@ Current quick checks:
 Passing the quick gate means repo-local workstreams can proceed. It does not
 approve deploy tooling, package output, evidence, publishing, or adoption.
 
+## Operator Inputs Intake Focused Guard
+
+Run:
+
+```bash
+bash scripts/test-operator-inputs.sh
+```
+
+This focused guard exercises the new single-package intake:
+
+```bash
+bash scripts/operator-release.sh --operator-inputs <dir-or-json>
+```
+
+The manifest names exactly one `deployment_path`:
+
+- `online/use_existing`
+- `online/install_substrates`
+- `airgap/use_existing`
+- `airgap/install_substrates`
+
+The resolver accepts a directory containing `operator-inputs.json` or a direct
+JSON manifest file. It writes only the internal
+`.release-kit-internal/operator-inputs-plan.json`, containing digest/path refs
+and next producer argv. The plan is not GA evidence, not release readiness, and
+does not write `readiness` or `formal_verdict`.
+
+The intake rejects unknown fields, path escapes, missing path-specific inputs,
+missing install confirmation, airgap paths without an airgap bundle, internal
+producer vocabulary, post-deploy smoke reports, kubeconfig/token/private-key
+payloads, and inline truth-like payloads. `install_substrates` is represented
+as namespace-scoped installer producer/finalizer evidence with explicit
+confirmation; it is not cloud provisioning. Kind remains rehearsal-only.
+
 ## Operator Release Surface v0 Focused Guard
 
 Run:
@@ -37,9 +71,10 @@ bash scripts/test-operator-release-surface.sh
 ```
 
 This focused guard exercises `bash scripts/operator-release.sh`. The facade
-accepts the four operator-facing choices plus packaging-side airgap-bundle
-commands, rejects producer vocabulary such as `--target-profile`, maps the
-choice internally, and calls the existing producer diagnostic:
+covers maintainer/internal diagnostics for the four legacy positional choices
+plus packaging-side airgap-bundle commands, rejects producer vocabulary such as
+`--target-profile`, maps the choice internally, and calls the existing producer
+diagnostic:
 
 - `online/use_existing` -> `--online-deployment-gate` with
   `existing_kubernetes/external_declared/online`.
@@ -57,9 +92,11 @@ choice internally, and calls the existing producer diagnostic:
 
 `kit_provided` validates kit-supplied substrate pack/truth inputs and related
 focused evidence only; it is not substrate installation. `install_substrates`
-is not implemented by the operator facade. Run `verify-release.sh
---substrate-install` as a separate producer, then provide its explicit report
-and confirmation to deployment-path finalization and GA.
+is not implemented by the old positional/transitional operator facade. Use
+`--operator-inputs` for install_substrates intake; execution still closes
+through `verify-release.sh --substrate-install` as a separate producer, then
+provides its explicit report and confirmation to deployment-path finalization
+and GA.
 `installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
 It is not installer proof and does not mean release-kit created databases,
 buckets, OIDC realms, or other substrate resources.
@@ -1016,7 +1053,7 @@ consumes the existing focused `online-adoption-report.json` plus two existing
 focused `airgap-adoption-report.json` files for `airgap/use_existing` and
 `airgap/kit_provided`; it does not consume producer reports directly.
 
-The intake requires all four operator choices:
+The intake requires all four maintainer/internal transitional deployment choices:
 `online/use_existing`, `online/kit_provided`, `airgap/use_existing`, and
 `airgap/kit_provided`. Release id, git sha, release contract raw digest,
 release contract subject/provenance, online adoption provenance summaries, and
@@ -1414,7 +1451,8 @@ matching explicit confirmation id are provided. Existing kit-provided
 substrate pack checks, routability checks, and `installed_by` provenance
 markers are not treated as installer proof. The accepted install report shape
 comes from the separate `--substrate-install` producer; `operator-release.sh`
-does not implement substrate installation today.
+only plans install substrate execution through `--operator-inputs`, and the old
+positional/transitional facade does not execute substrate installation.
 
 ## GA Release Aggregate Gate
 

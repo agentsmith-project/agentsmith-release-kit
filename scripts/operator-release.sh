@@ -8,6 +8,9 @@ REPORT_FILE="operator-release-surface-report.json"
 usage() {
   cat <<'USAGE'
 Usage:
+  bash scripts/operator-release.sh --operator-inputs <dir-or-json>
+
+Transitional focused diagnostics:
   bash scripts/operator-release.sh online use_existing <producer args without --target-profile>
   bash scripts/operator-release.sh online kit_provided <producer args without --target-profile>
   bash scripts/operator-release.sh airgap use_existing <producer args without --target-profile>
@@ -15,7 +18,14 @@ Usage:
   bash scripts/operator-release.sh airgap-bundle use_existing <producer args without --target-profile>
   bash scripts/operator-release.sh airgap-bundle kit_provided <producer args without --target-profile>
 
-Operator surface:
+Operator-inputs intake:
+  --operator-inputs validates one deployment-path input package and writes
+  .release-kit-internal/operator-inputs-plan.json. This slice performs intake
+  and planning only; full execution still closes through the existing
+  path-specific focused producer flow. No GA verdict or release readiness is
+  issued.
+
+Transitional operator surface:
   online/use_existing maps internally to existing_kubernetes/external_declared/online.
   online/kit_provided maps internally to existing_kubernetes/kit_installed/online.
   airgap/use_existing maps internally to existing_kubernetes/external_declared/airgap.
@@ -28,10 +38,10 @@ This facade forwards to existing producer diagnostics only:
   airgap/* -> scripts/verify-release.sh --airgap-consume-rehearsal
   airgap-bundle/* -> scripts/verify-release.sh --bundle-create
 
-Installer surface:
-  install_substrates is not implemented by this facade. Run the separate
-  --substrate-install producer and provide its report plus explicit
-  confirmation to deployment-path finalization.
+Old positional/transitional installer surface:
+  install_substrates is not implemented by the old positional facade. Use
+  --operator-inputs for install_substrates intake; execution still closes
+  through the separate --substrate-install producer/finalizer evidence flow.
 USAGE
 }
 
@@ -66,6 +76,7 @@ find_arg_value() {
 }
 
 OPERATOR_SINGLETON_FLAGS=(
+  --operator-inputs
   --bundle-root
   --bundle-manifest
   --output-dir
@@ -102,6 +113,15 @@ OPERATOR_SINGLETON_FLAGS=(
   --profile-values-schema
   --profile-values-example
   --operator-prerequisites
+)
+
+OPERATOR_RAW_INTERNAL_FLAGS=(
+  --substrate-install-inputs
+  --confirm-substrate-install
+  --confirm-install-parameters
+  --substrate-install-report
+  --confirm-install-substrates
+  --operator-path
 )
 
 assert_no_equals_singleton_args() {
@@ -174,6 +194,26 @@ reject_producer_vocabulary() {
     if is_machine_profile_vocabulary "$arg"; then
       fail "operator surface does not accept machine profile vocabulary parameter: $arg"
     fi
+  done
+}
+
+reject_raw_internal_flags() {
+  local arg
+  local flag
+
+  for arg in "$@"; do
+    for flag in "${OPERATOR_RAW_INTERNAL_FLAGS[@]}"; do
+      case "$arg" in
+        "$flag"|"$flag"=*)
+          fail "operator facade does not accept internal installer/finalizer argument: $flag"
+          ;;
+      esac
+    done
+    case "$arg" in
+      --operator-inputs|--operator-inputs=*)
+        fail "--operator-inputs must be the first and only operator facade argument"
+        ;;
+    esac
   done
 }
 
@@ -375,6 +415,18 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "--operator-inputs" ]]; then
+  if [[ "$#" -ne 2 ]]; then
+    fail "--operator-inputs accepts exactly one directory or JSON manifest"
+  fi
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$2"
+  exit 0
+fi
+
+if [[ "${1:-}" == --operator-inputs=* ]]; then
+  fail "operator facade accepts --operator-inputs as a separate argument only"
+fi
+
 if [[ "$#" -lt 2 ]]; then
   fail "missing operator surface and substrate strategy"
 fi
@@ -437,6 +489,7 @@ esac
 
 assert_no_equals_singleton_args "$@"
 assert_no_duplicate_singleton_args "$@"
+reject_raw_internal_flags "$@"
 reject_producer_vocabulary "$@"
 operator_confirm="$surface/$substrate_strategy"
 translated_args=()

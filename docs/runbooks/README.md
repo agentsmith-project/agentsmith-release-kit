@@ -1,43 +1,79 @@
 # Runbooks
 
-Status: operator decision index for the current bootstrap diagnostics.
+Status: operator main path plus maintainer/internal diagnostic index for the
+current bootstrap diagnostics.
 
-Use this page to choose the target path before running repo-local checks. The
-scripts here produce focused evidence with `readiness: false`; they do not
-sign off deploy, package, offline install, or release readiness.
+Use this page to prepare the operator intake package and understand which
+repo-local outputs are final versus internal. Focused diagnostic scripts here
+produce `readiness: false`; they do not sign off deploy, package, offline
+install, or release readiness.
+
+## Operator Main Path
+
+The current operator-facing entry is one input package and one facade command:
+
+```bash
+bash scripts/operator-release.sh --operator-inputs <dir-or-json>
+```
+
+`operator-inputs.json` describes exactly one selected deployment path. Use four
+packages for a full rehearsal across:
+
+- `online/use_existing`
+- `online/install_substrates`
+- `airgap/use_existing`
+- `airgap/install_substrates`
+
+The facade currently performs package intake and writes the internal
+`.release-kit-internal/operator-inputs-plan.json`. That plan is only the
+internal next-step plan: it is not runtime evidence, not a final one-command GA
+flow, and not deploy, package, or release readiness. Post-deploy smoke reports
+are produced after runtime checks and are not accepted as package inputs.
+
+Final release closure is the final `ga-release-report.json` after finalized
+deployment path reports and AgentSmith product-side reports exist. The current
+operator-inputs intake slice does not create that final report.
+
+`install_substrates` means namespace-scoped installer producer/finalizer
+evidence with explicit install confirmation. It is not cloud provisioning.
+Kind remains rehearsal-only; it is not a user deployment prerequisite or a
+replacement for real Kubernetes evidence.
 
 ## Operator Choice Matrix
 
-This table is the operator-facing choice matrix for online/airgap by
-use-existing/kit-provided. It is not a formal release verdict, package
-readiness, operator readiness, or GA signoff.
+This table is the operator-facing package matrix. It is not a formal release
+verdict, package readiness, operator readiness, or GA signoff.
 
-`kit_provided` is a validation path for kit-supplied substrate pack/truth
-inputs. It is not a substrate installer. `install_substrates` needs a separate
-`--substrate-install` producer report plus an explicit installer confirmation
-flag.
+`install_substrates` needs namespace-scoped installer producer/finalizer
+evidence plus an explicit installer confirmation. It is not a cloud substrate
+provisioner.
 `installed_by` stays a provenance marker, not installer proof; it does not mean
 release-kit created databases, buckets, OIDC realms, or other substrate
 resources.
 
-| Operator choice | Machine profile mapping | Operator command entry | Current result |
-| --- | --- | --- | --- |
-| `online/use_existing` | `existing_kubernetes/external_declared/online` | `bash scripts/operator-release.sh online use_existing ... --substrate-truth ... --target-prerequisites ... [--target-registry ... --registry-probe ...]` | Runs the existing online focused chain for declared substrate endpoints and explicit target prerequisites. Confirmed apply uses `--confirm-apply online/use_existing`; the facade maps it internally. Target-registry confirmed apply still binds registry presence through the operator probe before render/apply. |
-| `online/kit_provided` | `existing_kubernetes/kit_installed/online` | `bash scripts/operator-release.sh online kit_provided ... --substrate-truth ... --target-prerequisites ... --substrate-pack-manifest ... --routability-probe ...` | Runs the existing online focused chain for kit-provided substrate declarations: substrate pack materiality, Pod-network routability, render, render-check, apply, rollout, optional route smoke, and optional confirmed-apply evidence envelope. It is source-registry only, rejects `--target-registry` and `--registry-probe`, and is not a substrate installer or release readiness. |
-| `airgap/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap use_existing ... --bundle-root ... --render-values ... --substrate-truth ... --target-prerequisites ...` | Consumes an already assembled bundle through the existing airgap consume/deployment-focused chain: bundle check, preflight, render-check, apply, rollout, and optional smoke when confirmed apply is requested. It is not full readiness or an operator verdict. |
-| `airgap/kit_provided` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap kit_provided ... --bundle-root ... --render-values ... --substrate-truth ... --target-prerequisites ...` | Consumes an already assembled kit-provided bundle through the focused chain: substrate-pack-check, image load, bundle render-check, apply, rollout, and optional smoke when confirmed apply is requested. It does not install substrates and is not full readiness or an operator verdict. |
+| `deployment_path` | Package must include | Current intake result |
+| --- | --- | --- |
+| `online/use_existing` | Common release/template/render/substrate/prerequisite files, namespace, optional package-local `kubectl`. | Validates the package and writes the internal plan for the existing online focused producer path. |
+| `online/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, package-local `routability_probe`, and explicit install confirmation. | Validates installer inputs and writes the internal plan for installer plus online focused producer steps. |
+| `airgap/use_existing` | Common files plus `airgap_bundle` and explicit `airgap_bundle_manifest` inside that bundle. | Validates the already assembled bundle reference and writes the internal plan for the airgap consume/deployment producer path. |
+| `airgap/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, explicit install confirmation, `airgap_bundle`, and explicit `airgap_bundle_manifest` inside that bundle. | Validates installer and bundle references and writes the internal plan for installer plus airgap consume/deployment producer steps. |
+
+## Maintainer/Internal Diagnostics
+
+Everything below is for maintainers changing release-kit internals or for CI
+diagnostic plumbing. It is not the operator main path.
 
 Airgap bundle packaging commands are packaging-side helpers for the airgap
-operator choices, not standalone operator choices.
+producer diagnostics, not standalone operator choices.
 
-| Packaging surface | Machine profile mapping | Operator command entry | Current result |
+| Packaging diagnostic | Machine profile mapping | Internal command entry | Current result |
 | --- | --- | --- | --- |
-| `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the existing local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
+| `airgap-bundle/use_existing` | `existing_kubernetes/external_declared/airgap` | `bash scripts/operator-release.sh airgap-bundle use_existing ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the local bundle assembler and immediate self-check, then writes the operator surface summary. Follow-on consume diagnostics remain producer/focused commands. |
 | `airgap-bundle/kit_provided` | `existing_kubernetes/kit_installed/airgap` | `bash scripts/operator-release.sh airgap-bundle kit_provided ... --substrate-pack-manifest ... --target-registry ... --image-archive ... --bundle-root ...` | Runs the packaging-side local bundle assembler and immediate self-check, binds the substrate pack manifest as a bundle component, then writes the operator surface summary. It does not consume/deploy the bundle or install substrates. |
 
-## Optional Rehearsal
+### Optional Rehearsal
 
-| Path | Target profile | Operator command entry | Current result |
+| Path | Target profile | Internal diagnostic command entry | Current result |
 | --- | --- | --- | --- |
 | Kind rehearsal, kit-provided substrates, online | `kind_rehearsal/kit_installed/online` | `bash scripts/verify-release.sh --inputs ...` and `--target-preflight ... --substrate-truth ... --target-prerequisites ...` | Accepts rehearsal intake only. It is not a prerequisite for real Kubernetes. |
 
@@ -47,7 +83,7 @@ operator-provided label-only metadata for the supplied Kubernetes endpoint. It
 does not change the target profile, create or manage kind, or prove the
 endpoint is kind.
 
-## Implemented Now / Not Yet
+### Implemented Now / Not Yet
 
 | Path | Implemented now | Not yet |
 | --- | --- | --- |
@@ -58,17 +94,18 @@ endpoint is kind.
 | `airgap-bundle/use_existing` | Image-map mirror plan through the bundle-create producer, local bundle assembler plus self-check, and operator surface summary. Other airgap checks remain focused producer diagnostics. | Registry mirroring, offline install, deploy readiness, package readiness. |
 | `airgap-bundle/kit_provided` | Packaging-side bundle assembly, substrate pack manifest component/digest binding, bundle self-check, and operator surface summary. | Bundle consume/deploy execution by this command; use `airgap/kit_provided` for the consume/deployment-focused path. Still no substrate installer, full readiness, operator verdict, deploy readiness, package readiness, or release readiness. |
 
-## Command Roles
+### Command Roles
 
 `scripts/test-*.sh` files are maintainer self-tests for this repository. They
 exercise failure cases and fixture behavior while changing release-kit code.
 
-Operators should call `bash scripts/operator-release.sh <surface>
-<substrate_strategy> ...`. The facade rejects producer vocabulary such as
+The positional `bash scripts/operator-release.sh <surface>
+<substrate_strategy> ...` facade is a maintainer/internal focused diagnostic,
+not the operator main path. It rejects producer vocabulary such as
 `--target-profile`, maps the operator choice internally, calls the existing
-producer diagnostic, and writes `operator-release-surface-report.json` with a
-minimal `readiness=false` summary. That summary is not accepted by
-`--evidence`.
+producer diagnostic, and writes
+`operator-release-surface-report.json` with a minimal `readiness=false`
+summary. That summary is not accepted by `--evidence`.
 For confirmed apply, keep using the operator choice as the confirmation value,
 for example `--confirm-apply online/use_existing`; raw machine profiles are
 rejected at the facade.
@@ -160,7 +197,7 @@ no input already contains readiness or verdict fields. It writes
 offline/package/release readiness as blocking gaps. It is not accepted by
 evidence intake and is not deploy/package/release readiness.
 
-## Current Notes
+### Current Notes
 
 Pre-GA release contracts may declare the four existing-Kubernetes operator
 choice mappings plus `kind_rehearsal/kit_installed/online` only as
