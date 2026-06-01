@@ -239,8 +239,8 @@ if (deploymentPath.endsWith('/install_substrates')) {
   if (!deploymentPath.startsWith('airgap/')) {
     manifest.substrate_pack_manifest = 'substrate-pack-manifest.json';
     manifest.substrate_install_inputs = 'substrate-install-inputs.json';
+    manifest.routability_probe = 'tools/routability-probe';
   }
-  manifest.routability_probe = 'tools/routability-probe';
   manifest.install_confirmation = {
     confirmed: true,
     install_parameters_sha256: `sha256:${'a'.repeat(64)}`,
@@ -604,6 +604,7 @@ const existingArgPathFlags = new Set([
   '--release-contract',
   '--deploy-template-package',
   '--archive',
+  '--image-map',
   '--render-values',
   '--substrate-truth',
   '--target-prerequisites',
@@ -663,12 +664,19 @@ function assertArgvPaths(argv, label) {
     if (existingArgPathFlags.has(flag)) {
       if (
         flag === '--substrate-truth' &&
-        deploymentPath === 'online/install_substrates' &&
-        label === 'producer online-deployment-gate'
+        (
+          (deploymentPath === 'online/install_substrates' &&
+            label === 'producer online-deployment-gate') ||
+          (deploymentPath === 'airgap/install_substrates' &&
+            label === 'producer airgap-deployment-gate')
+        )
       ) {
         const generatedTruth = plan._internal?.expected?.generated_refs?.substrate_truth;
+        if (!generatedTruth || !path.isAbsolute(generatedTruth)) {
+          throw new Error('install producer plan must model generated installer substrate truth');
+        }
         if (value !== generatedTruth) {
-          throw new Error('online install producer argv must use generated installer substrate truth');
+          throw new Error('install producer argv must use generated installer substrate truth');
         }
         continue;
       }
@@ -788,6 +796,7 @@ if (deploymentPath.startsWith('airgap/')) {
   let sawBundleManifestArg = false;
   let sawBundleLocalRenderValuesArg = false;
   let sawBundleLocalSubstrateTruthArg = false;
+  let sawInstallerGeneratedSubstrateTruthArg = false;
   for (const step of plan.producer_argv || []) {
     const argv = step.argv || [];
     for (let index = 0; index < argv.length - 1; index += 1) {
@@ -804,9 +813,20 @@ if (deploymentPath.startsWith('airgap/')) {
         }
       }
       if (argv[index] === '--substrate-truth') {
-        sawBundleLocalSubstrateTruthArg = true;
-        if (argv[index + 1] !== plan.input_refs.substrate_truth.absolute_path) {
-          throw new Error('airgap producer argv must carry absolute bundle-local substrate truth');
+        if (deploymentPath === 'airgap/install_substrates' && step.name === 'airgap-deployment-gate') {
+          sawInstallerGeneratedSubstrateTruthArg = true;
+          const generatedTruth = plan._internal?.expected?.generated_refs?.substrate_truth;
+          if (argv[index + 1] !== generatedTruth) {
+            throw new Error('airgap install gate must use installer output substrate truth');
+          }
+          if (argv[index + 1] === plan.input_refs.substrate_truth.absolute_path) {
+            throw new Error('airgap install gate must not use bundle-local substrate truth');
+          }
+        } else {
+          sawBundleLocalSubstrateTruthArg = true;
+          if (argv[index + 1] !== plan.input_refs.substrate_truth.absolute_path) {
+            throw new Error('airgap producer argv must carry absolute bundle-local substrate truth');
+          }
         }
       }
     }
@@ -814,8 +834,15 @@ if (deploymentPath.startsWith('airgap/')) {
   if (!sawBundleManifestArg) {
     throw new Error('airgap producer argv must include --bundle-manifest');
   }
-  if (!sawBundleLocalRenderValuesArg || !sawBundleLocalSubstrateTruthArg) {
-    throw new Error('airgap producer argv must include bundle-local render and substrate inputs');
+  if (!sawBundleLocalRenderValuesArg) {
+    throw new Error('airgap producer argv must include bundle-local render inputs');
+  }
+  if (deploymentPath === 'airgap/install_substrates') {
+    if (!sawInstallerGeneratedSubstrateTruthArg) {
+      throw new Error('airgap install producer argv must include installer-generated substrate truth');
+    }
+  } else if (!sawBundleLocalSubstrateTruthArg) {
+    throw new Error('airgap producer argv must include bundle-local substrate inputs');
   }
   if (deploymentPath === 'airgap/use_existing') {
     const kubectlRef = plan.input_refs?.kubectl;
@@ -831,6 +858,38 @@ if (deploymentPath.startsWith('airgap/')) {
     }
     if (argValue(consumeStep.argv, '--context', 'airgap-consume-rehearsal') !== 'operator-inputs-context') {
       throw new Error('airgap consume plan must pass operator-inputs context');
+    }
+  }
+  if (deploymentPath === 'airgap/install_substrates') {
+    const generatedTruth = plan._internal?.expected?.generated_refs?.substrate_truth;
+    if (!generatedTruth || !path.isAbsolute(generatedTruth)) {
+      throw new Error('airgap install plan must model generated substrate truth as an absolute path');
+    }
+    if (generatedTruth !== path.join(
+      plan._internal.expected.output_dirs.substrate_install,
+      'substrate-truth.json'
+    )) {
+      throw new Error('airgap generated substrate truth must live under substrate-install output dir');
+    }
+    const gateStep = (plan.producer_argv || []).find((step) => step.name === 'airgap-deployment-gate');
+    if (!gateStep) {
+      throw new Error('airgap install plan must include airgap-deployment-gate step');
+    }
+    if (argValue(gateStep.argv, '--substrate-truth', 'airgap-deployment-gate') !== generatedTruth) {
+      throw new Error('airgap install gate must use installer output substrate truth');
+    }
+    if (!gateStep.argv.includes('--allow-installed-substrate-truth')) {
+      throw new Error('airgap install gate must opt into installer-generated substrate truth');
+    }
+    const generatedReport = path.join(
+      plan._internal.expected.output_dirs.substrate_install,
+      'substrate-install-report.json'
+    );
+    if (argValue(gateStep.argv, '--substrate-install-report', 'airgap-deployment-gate') !== generatedReport) {
+      throw new Error('airgap install gate must bind installer output substrate-install report');
+    }
+    if (!((plan.producer_argv || []).some((step) => step.name === 'airgap-bundle-check'))) {
+      throw new Error('airgap install plan must include airgap-bundle-check step');
     }
   }
 }

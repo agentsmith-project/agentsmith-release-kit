@@ -8,6 +8,7 @@ FIXTURE_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-packag
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 KIT_ONLINE_TARGET_PROFILE="existing_kubernetes/kit_installed/online"
 AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 mapfile -t RELEASE_IMAGE_IDS < <(
   "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
@@ -925,22 +926,29 @@ run_airgap_bundle_create() {
   local archive="$4"
   local bundle_root="$5"
   local output_dir="$6"
+  local target_profile="${7:-$AIRGAP_PROFILE}"
+  local substrate_pack_manifest="${8:-}"
   local payload_dir="$package_dir/payload"
   local image_archive_args=()
+  local substrate_pack_args=()
 
   for id in "${RELEASE_IMAGE_IDS[@]}"; do
     image_archive_args+=(--image-archive "$id=$package_dir/image-archives/$id.oci-layout.tar")
   done
+  if [[ -n "$substrate_pack_manifest" ]]; then
+    substrate_pack_args+=(--substrate-pack-manifest "$substrate_pack_manifest")
+  fi
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
     --release-contract "$release_contract" \
     --deploy-template-package "$deploy_template_package" \
     --archive "$archive" \
-    --target-profile "$AIRGAP_PROFILE" \
+    --target-profile "$target_profile" \
     --target-registry "$AIRGAP_REGISTRY" \
     --bundle-root "$bundle_root" \
     --output-dir "$output_dir" \
     "${image_archive_args[@]}" \
+    "${substrate_pack_args[@]}" \
     --runbook "$payload_dir/runbook.md" \
     --script "$payload_dir/install.sh" \
     --profile-values-schema "$payload_dir/profile-values.schema.json" \
@@ -950,11 +958,12 @@ run_airgap_bundle_create() {
 
 write_bundle_operator_inputs() {
   local bundle_root="$1"
+  local target_profile="${2:-$AIRGAP_PROFILE}"
 
   mkdir -p "$bundle_root/operator-inputs"
   write_render_values "$bundle_root/operator-inputs/render-values.json"
-  write_truth "$bundle_root/operator-inputs/substrate-truth.json" "$AIRGAP_PROFILE"
-  write_prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" "$AIRGAP_PROFILE"
+  write_truth "$bundle_root/operator-inputs/substrate-truth.json" "$target_profile"
+  write_prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" "$target_profile"
 }
 
 target_image_for_id() {
@@ -1044,6 +1053,10 @@ case "$command_name" in
     printf '%s\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
     ;;
   apply)
+    if [[ "$*" == *".substrate-install-resources."* ]]; then
+      printf '%s\n' "configmap/agentsmith-substrate-config"
+      exit 0
+    fi
     printf '%s\n' "deployment.apps/agentsmith-web"
     ;;
   rollout)
@@ -1064,6 +1077,11 @@ case "$command_name" in
 {"spec":{"selector":{"matchLabels":{"app.kubernetes.io/part":"web","app.kubernetes.io/name":"agentsmith-web"}}}}
 JSON
       exit 0
+    fi
+
+    if [[ "$get_target" == "configmaps" || "$get_target" == "configmap" ]]; then
+      echo "Error from server (NotFound): resource not found" >&2
+      exit 1
     fi
 
     if [[ "$get_target" == "pods" ]]; then
@@ -1135,6 +1153,67 @@ fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
+write_airgap_install_operator_inputs() {
+  local package_dir="$1"
+  local mode="$2"
+  local install_parameters_sha256="$3"
+  local smoke_path="${4:-/ok}"
+  local smoke_url="http://127.0.0.1:$SERVER_PORT$smoke_path"
+
+  "$NODE_BIN" --input-type=module - \
+    "$package_dir/operator-inputs.json" \
+    "$mode" \
+    "$smoke_url" \
+    "$install_parameters_sha256" <<'NODE'
+import fs from 'node:fs';
+
+const [output, mode, smokeUrl, installParametersSha256] = process.argv.slice(2);
+const manifest = {
+  schema_version: 'agentsmith.operator-inputs/v1',
+  operator_inputs_version: 1,
+  deployment_path: 'airgap/install_substrates',
+  release_contract: 'bundle/components/release-contract.json',
+  deploy_template_package: 'bundle/components/deploy-template-package.json',
+  deploy_template_archive: 'bundle/components/agentsmith-deploy-template-package.tgz',
+  render_values: 'bundle/operator-inputs/render-values.json',
+  substrate_truth: 'bundle/operator-inputs/substrate-truth.json',
+  target_prerequisites: 'bundle/operator-inputs/target-prerequisites.json',
+  substrate_pack_manifest: 'bundle/components/substrate-pack-manifest.json',
+  substrate_install_inputs: 'bundle/operator-inputs/substrate-install-inputs.json',
+  airgap_bundle: 'bundle',
+  airgap_bundle_manifest: 'bundle/airgap-bundle-manifest.json',
+  namespace: 'agentsmith',
+  mode,
+  kubectl: 'tools/kubectl',
+  context: 'operator-inputs-context',
+  install_confirmation: {
+    confirmed: true,
+    install_parameters_sha256: installParametersSha256,
+    operator_run_id: 'operator-inputs-install-1001'
+  }
+};
+
+if (mode === 'apply') {
+  Object.assign(manifest, {
+    archive_probe: 'tools/archive-probe',
+    image_loader: 'tools/image-loader',
+    deploy_confirmation: {
+      confirmed: true,
+      operator_run_id: 'operator-inputs-airgap-install-apply-1001'
+    },
+    smoke_url: smokeUrl,
+    expected_status: 200,
+    timeout: '60s',
+    timeout_ms: 5000,
+    allow_http: true,
+    allow_localhost: true
+  });
+}
+
+fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
 prepare_airgap_package() {
   local package_dir="$1"
   local mode="$2"
@@ -1164,6 +1243,50 @@ prepare_airgap_package() {
   write_fake_airgap_archive_probe "$package_dir/tools/archive-probe"
   write_fake_airgap_image_loader "$package_dir/tools/image-loader"
   write_airgap_operator_inputs "$package_dir" "$mode" "$smoke_path"
+}
+
+prepare_airgap_install_package() {
+  local package_dir="$1"
+  local mode="$2"
+  local smoke_path="${3:-/ok}"
+  local install_digest_mode="${4:-valid}"
+
+  mkdir -p "$package_dir/tools" "$package_dir/bundle"
+  local archive="$package_dir/deploy-template-package.tgz"
+  local manifest_sha
+  manifest_sha="$(create_archive "$(basename "$package_dir")" "$archive")"
+  local archive_sha
+  archive_sha="$(sha256_file "$archive")"
+  write_materials "$manifest_sha" "$archive_sha" \
+    "$package_dir/release-contract.json" \
+    "$package_dir/deploy-template-package.json"
+  create_airgap_payloads "$package_dir"
+  create_airgap_image_archives "$package_dir" "$package_dir/release-contract.json"
+  write_airgap_operator_prerequisites "$package_dir" "$package_dir/operator-prerequisites.json"
+  write_substrate_install_materials "$package_dir" "$KIT_AIRGAP_PROFILE"
+  run_airgap_bundle_create \
+    "$package_dir" \
+    "$package_dir/release-contract.json" \
+    "$package_dir/deploy-template-package.json" \
+    "$archive" \
+    "$package_dir/bundle" \
+    "$package_dir/bundle-create-output" \
+    "$KIT_AIRGAP_PROFILE" \
+    "$package_dir/substrate-pack-manifest.json" >"$package_dir/bundle-create.out"
+  write_bundle_operator_inputs "$package_dir/bundle" "$KIT_AIRGAP_PROFILE"
+  cp "$package_dir/substrate-install-inputs.json" \
+    "$package_dir/bundle/operator-inputs/substrate-install-inputs.json"
+  write_fake_airgap_kubectl "$package_dir/tools/kubectl"
+  write_fake_airgap_archive_probe "$package_dir/tools/archive-probe"
+  write_fake_airgap_image_loader "$package_dir/tools/image-loader"
+
+  local install_parameters_sha256
+  if [[ "$install_digest_mode" == "valid" ]]; then
+    install_parameters_sha256="$(install_parameters_digest "$package_dir/bundle/operator-inputs/substrate-install-inputs.json" agentsmith)"
+  else
+    install_parameters_sha256="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  fi
+  write_airgap_install_operator_inputs "$package_dir" "$mode" "$install_parameters_sha256" "$smoke_path"
 }
 
 write_minimal_airgap_install_package() {
@@ -1579,6 +1702,138 @@ NODE
   assert_no_ga_report "$package_dir"
 }
 
+assert_airgap_install_path_evidence() {
+  local package_dir="$1"
+  local output_base="$package_dir/.release-kit-internal/airgap-install-substrates"
+  local install_dir="$output_base/substrate-install"
+  local bundle_check_dir="$output_base/airgap-bundle-check"
+  local gate_dir="$output_base/airgap-deployment-gate"
+  local path_dir="$output_base/deployment-path"
+
+  for file in \
+    "$package_dir/.release-kit-internal/operator-inputs-plan.json" \
+    "$install_dir/substrate-install-report.json" \
+    "$install_dir/substrate-truth.json" \
+    "$bundle_check_dir/airgap-bundle-check-report.json" \
+    "$gate_dir/airgap-deployment-gate-report.json" \
+    "$gate_dir/target-preflight/target-preflight-report.json" \
+    "$gate_dir/substrate-pack-check/substrate-pack-check-report.json" \
+    "$gate_dir/airgap-image-load/airgap-image-load-report.json" \
+    "$gate_dir/airgap-bundle-render-check/airgap-bundle-render-check-report.json" \
+    "$path_dir/deployment-path-report.json" \
+    "$path_dir/deployment-path-finalizer-manifest.json" \
+    "$path_dir/source-evidence/deployment-gate-report.json" \
+    "$path_dir/source-evidence/bundle-check-report.json" \
+    "$path_dir/source-evidence/substrate-install-report.json" \
+    "$path_dir/source-evidence/target-preflight-report.json" \
+    "$path_dir/source-evidence/image-load-report.json" \
+    "$path_dir/source-evidence/offline-render-check-report.json" \
+    "$path_dir/source-evidence/apply-report.json" \
+    "$path_dir/source-evidence/rollout-report.json" \
+    "$path_dir/source-evidence/route-smoke-report.json" \
+    "$path_dir/source-evidence/airgap-bundle-manifest.json" \
+    "$path_dir/source-evidence/image-map.json"; do
+    [[ -f "$file" ]] || fail "missing expected airgap install path evidence file: $file"
+  done
+  [[ ! -e "$output_base/airgap-consume-rehearsal/airgap-consume-rehearsal-report.json" ]] ||
+    fail "airgap install path must not run airgap-consume-rehearsal"
+  [[ ! -e "$path_dir/source-evidence/stale-report.json" ]] ||
+    fail "stale source evidence remained after successful airgap install path run"
+
+  "$NODE_BIN" --input-type=module - \
+    "$package_dir/bundle/operator-inputs/substrate-truth.json" \
+    "$install_dir/substrate-truth.json" \
+    "$install_dir/substrate-install-report.json" \
+    "$gate_dir/target-preflight/target-preflight-report.json" \
+    "$gate_dir/airgap-bundle-render-check/airgap-bundle-render-check-report.json" \
+    "$path_dir/source-evidence/target-preflight-report.json" \
+    "$path_dir/deployment-path-report.json" \
+    "$path_dir/deployment-path-finalizer-manifest.json" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [
+  bundleTruthFile,
+  generatedTruthFile,
+  installReportFile,
+  gateTargetPreflightFile,
+  offlineRenderCheckFile,
+  finalizedTargetPreflightFile,
+  pathReportFile,
+  finalizerManifestFile
+] = process.argv.slice(2);
+
+const digestFile = (file) =>
+  `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+const bundleTruthDigest = digestFile(bundleTruthFile);
+const generatedTruthDigest = digestFile(generatedTruthFile);
+const installReport = JSON.parse(fs.readFileSync(installReportFile, 'utf8'));
+const gateTargetPreflight = JSON.parse(fs.readFileSync(gateTargetPreflightFile, 'utf8'));
+const offlineRenderCheck = JSON.parse(fs.readFileSync(offlineRenderCheckFile, 'utf8'));
+const finalizedTargetPreflight = JSON.parse(fs.readFileSync(finalizedTargetPreflightFile, 'utf8'));
+const pathReport = JSON.parse(fs.readFileSync(pathReportFile, 'utf8'));
+const finalizerManifest = JSON.parse(fs.readFileSync(finalizerManifestFile, 'utf8'));
+const stepNames = (pathReport.steps || []).map((step) => step.name).join(',');
+
+if (bundleTruthDigest === generatedTruthDigest) {
+  throw new Error('fixture must keep bundle-local substrate truth different from installer output truth');
+}
+if (installReport.output_substrate_truth_digest !== generatedTruthDigest) {
+  throw new Error('installer report must bind generated substrate truth digest');
+}
+if (gateTargetPreflight.substrate_truth?.input_sha256 !== generatedTruthDigest) {
+  throw new Error('airgap gate target-preflight must use installer output substrate truth digest');
+}
+if (offlineRenderCheck.digest_summary?.substrate_truth_input_sha256 !== generatedTruthDigest) {
+  throw new Error('airgap offline render-check must use installer output substrate truth digest');
+}
+if (finalizedTargetPreflight.substrate_truth?.input_sha256 !== generatedTruthDigest) {
+  throw new Error('finalized target-preflight evidence must use installer output substrate truth digest');
+}
+if (gateTargetPreflight.substrate_truth.input_sha256 === bundleTruthDigest) {
+  throw new Error('airgap gate target-preflight must not use bundle-local substrate truth');
+}
+if (pathReport.operator_path !== 'airgap/install_substrates') {
+  throw new Error(`unexpected operator_path: ${pathReport.operator_path}`);
+}
+if (stepNames !== 'target-preflight,bundle-check,image-load,substrate-install,offline-render-check,apply,rollout,route-smoke') {
+  throw new Error(`unexpected airgap install finalized steps: ${stepNames}`);
+}
+if (
+  pathReport.install_substrates_confirmation?.operator_run_id !==
+  'operator-inputs-install-1001'
+) {
+  throw new Error('deployment path report must bind install confirmation operator_run_id');
+}
+if (
+  pathReport.source_evidence?.substrate_install?.output_substrate_truth_digest !==
+  generatedTruthDigest
+) {
+  throw new Error('deployment path report source evidence must bind installer truth digest');
+}
+const sourceEvidencePaths = new Set((finalizerManifest.source_evidence_files || []).map((entry) => entry.path));
+for (const required of [
+  'source-evidence/substrate-install-report.json',
+  'source-evidence/bundle-check-report.json',
+  'source-evidence/deployment-gate-report.json',
+  'source-evidence/route-smoke-report.json',
+  'source-evidence/airgap-bundle-manifest.json',
+  'source-evidence/image-map.json'
+]) {
+  if (!sourceEvidencePaths.has(required)) {
+    throw new Error(`missing source evidence entry: ${required}`);
+  }
+}
+if (sourceEvidencePaths.has('source-evidence/airgap-consume-rehearsal-report.json')) {
+  throw new Error('airgap install finalizer must not ingest consume rehearsal evidence');
+}
+if ('formal_verdict' in pathReport) {
+  throw new Error('deployment path report must not issue formal_verdict');
+}
+NODE
+  assert_no_ga_report "$package_dir"
+}
+
 tamper_plan_swap_producers() {
   local package_dir="$1"
 
@@ -1810,6 +2065,65 @@ try {
   process.exit(0);
 }
 throw new Error(`tampered ${flag} should have failed`);
+NODE
+}
+
+tamper_airgap_install_gate_substrate_truth_to_bundle() {
+  local package_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$ROOT_DIR" "$package_dir" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, packageDir] = process.argv.slice(2);
+const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestPlan(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
+
+const step = plan.producer_argv.find((candidate) => candidate.name === 'airgap-deployment-gate');
+if (!step) {
+  throw new Error('fixture plan must include airgap-deployment-gate');
+}
+const index = step.argv.indexOf('--substrate-truth');
+if (index === -1 || !step.argv[index + 1]) {
+  throw new Error('fixture airgap gate must include --substrate-truth');
+}
+step.argv[index + 1] = plan.input_refs.substrate_truth.absolute_path;
+plan.plan_sha256 = null;
+plan.plan_sha256 = digestPlan({ ...plan, plan_sha256: null });
+fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+
+const runnerUrl = pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-runner.mjs')).href;
+const { runOperatorInputsPlan } = await import(runnerUrl);
+
+try {
+  await runOperatorInputsPlan({ planPath });
+} catch (error) {
+  if (!String(error.message).includes('airgap-deployment-gate --substrate-truth must match plan expected value')) {
+    throw error;
+  }
+  process.exit(0);
+}
+throw new Error('tampered airgap install gate substrate truth should have failed');
 NODE
 }
 
@@ -2102,7 +2416,7 @@ pass "operator-inputs airgap path requires explicit context before orchestration
 dry_run_package="$TMP_DIR/dry-run-online"
 prepare_online_package "$dry_run_package" server-dry-run /ok
 write_stale_finalizer "$dry_run_package"
-expect_fail_matching dry_run_run 'currently supports only online/use_existing, online/install_substrates, or airgap/use_existing with mode apply' \
+expect_fail_matching dry_run_run 'currently supports only online/use_existing, online/install_substrates, airgap/use_existing, or airgap/install_substrates with mode apply' \
   run_operator_inputs "$dry_run_package" dry-run
 assert_no_path_evidence "$dry_run_package"
 pass "operator-inputs --run rejects server-dry-run and clears stale path evidence"
@@ -2110,7 +2424,7 @@ pass "operator-inputs --run rejects server-dry-run and clears stale path evidenc
 dry_run_install_package="$TMP_DIR/dry-run-online-install"
 prepare_online_install_package "$dry_run_install_package" server-dry-run /ok
 write_stale_finalizer "$dry_run_install_package" online-install-substrates
-expect_fail_matching dry_run_install_run 'currently supports only online/use_existing, online/install_substrates, or airgap/use_existing with mode apply' \
+expect_fail_matching dry_run_install_run 'currently supports only online/use_existing, online/install_substrates, airgap/use_existing, or airgap/install_substrates with mode apply' \
   run_operator_inputs "$dry_run_install_package" dry-run-install
 assert_no_path_evidence "$dry_run_install_package" online-install-substrates
 pass "operator-inputs --run rejects online/install_substrates server-dry-run and clears stale path evidence"
@@ -2118,19 +2432,29 @@ pass "operator-inputs --run rejects online/install_substrates server-dry-run and
 dry_run_airgap_package="$TMP_DIR/dry-run-airgap"
 prepare_airgap_package "$dry_run_airgap_package" server-dry-run /ok
 write_stale_finalizer "$dry_run_airgap_package" airgap-use-existing
-expect_fail_matching dry_run_airgap_run 'currently supports only online/use_existing, online/install_substrates, or airgap/use_existing with mode apply' \
+expect_fail_matching dry_run_airgap_run 'currently supports only online/use_existing, online/install_substrates, airgap/use_existing, or airgap/install_substrates with mode apply' \
   run_airgap_operator_inputs "$dry_run_airgap_package" dry-run-airgap
 assert_no_path_evidence "$dry_run_airgap_package" airgap-use-existing
 pass "operator-inputs --run rejects airgap/use_existing server-dry-run and clears stale path evidence"
 
-airgap_install_package="$TMP_DIR/airgap-install"
-mkdir -p "$airgap_install_package"
-write_minimal_airgap_install_package "$airgap_install_package"
-write_stale_finalizer "$airgap_install_package" airgap-install-substrates
-expect_fail_matching airgap_install_run 'does not implement airgap/install_substrates path-level orchestration yet' \
-  bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$airgap_install_package" --run
-assert_no_path_evidence "$airgap_install_package" airgap-install-substrates
-pass "operator-inputs --run fail-fasts unsupported airgap/install_substrates and clears stale path evidence"
+dry_run_airgap_install_package="$TMP_DIR/dry-run-airgap-install"
+prepare_airgap_install_package "$dry_run_airgap_install_package" server-dry-run /ok
+write_stale_finalizer "$dry_run_airgap_install_package" airgap-install-substrates
+expect_fail_matching dry_run_airgap_install_run 'currently supports only online/use_existing, online/install_substrates, airgap/use_existing, or airgap/install_substrates with mode apply' \
+  run_airgap_operator_inputs "$dry_run_airgap_install_package" dry-run-airgap-install
+assert_no_path_evidence "$dry_run_airgap_install_package" airgap-install-substrates
+pass "operator-inputs --run rejects airgap/install_substrates server-dry-run and clears stale path evidence"
+
+positive_airgap_install_package="$TMP_DIR/positive-airgap-install"
+prepare_airgap_install_package "$positive_airgap_install_package" apply /ok
+write_stale_finalizer "$positive_airgap_install_package" airgap-install-substrates
+if ! run_airgap_operator_inputs "$positive_airgap_install_package" positive-airgap-install >"$TMP_DIR/positive-airgap-install.out" 2>"$TMP_DIR/positive-airgap-install.err"; then
+  cat "$TMP_DIR/positive-airgap-install.out" >&2
+  cat "$TMP_DIR/positive-airgap-install.err" >&2
+  fail "airgap/install_substrates positive run failed"
+fi
+assert_airgap_install_path_evidence "$positive_airgap_install_package"
+pass "operator-inputs --run executes airgap/install_substrates apply and finalizes path evidence"
 
 missing_smoke_airgap_package="$TMP_DIR/missing-smoke-airgap"
 prepare_airgap_package "$missing_smoke_airgap_package" apply /ok
@@ -2160,6 +2484,15 @@ expect_fail_matching wrong_install_digest 'confirm-install-parameters must match
   fail "wrong install confirmation digest must stop before online gate"
 assert_no_path_evidence "$wrong_install_digest_package" online-install-substrates
 pass "operator-inputs --run stops before gate/finalizer on wrong install confirmation digest"
+
+wrong_airgap_install_digest_package="$TMP_DIR/wrong-airgap-install-digest"
+prepare_airgap_install_package "$wrong_airgap_install_digest_package" apply /ok wrong
+expect_fail_matching wrong_airgap_install_digest 'confirm-install-parameters must match the substrate install parameters sha256' \
+  run_airgap_operator_inputs "$wrong_airgap_install_digest_package" wrong-airgap-install-digest
+[[ ! -e "$wrong_airgap_install_digest_package/.release-kit-internal/airgap-install-substrates/airgap-deployment-gate/airgap-deployment-gate-report.json" ]] ||
+  fail "wrong airgap install confirmation digest must stop before airgap gate"
+assert_no_path_evidence "$wrong_airgap_install_digest_package" airgap-install-substrates
+pass "operator-inputs --run stops before airgap gate/finalizer on wrong install confirmation digest"
 
 plan_bypass_package="$TMP_DIR/plan-bypass-online"
 prepare_online_package "$plan_bypass_package" apply /ok
@@ -2229,6 +2562,13 @@ FAKE_KUBECTL_LOG="$TMP_DIR/tampered-plan-kubectl.log" \
   tamper_plan_swap_producers "$tampered_plan_package"
 assert_no_path_evidence "$tampered_plan_package" online-install-substrates
 pass "operator-inputs runner rejects tampered install producer order through direct library invocation"
+
+tampered_airgap_truth_package="$TMP_DIR/tampered-airgap-install-truth"
+prepare_airgap_install_package "$tampered_airgap_truth_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_truth_package" >/dev/null
+tamper_airgap_install_gate_substrate_truth_to_bundle "$tampered_airgap_truth_package"
+assert_no_path_evidence "$tampered_airgap_truth_package" airgap-install-substrates
+pass "operator-inputs runner rejects airgap install gate bound to bundle-local substrate truth"
 
 direct_plan_digest_mismatch_package="$TMP_DIR/direct-plan-digest-mismatch"
 prepare_online_package "$direct_plan_digest_mismatch_package" apply /ok

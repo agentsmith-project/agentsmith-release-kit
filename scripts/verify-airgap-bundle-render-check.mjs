@@ -5,6 +5,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { validateInstalledSubstrateTruthProof } from './lib/substrate-install-proof.mjs';
+
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SCRIPT_DIR, '..');
 const REQUIRED_ARGS = [
@@ -90,7 +92,8 @@ function usage() {
     --bundle-manifest <bundle-local-json> \\
     --render-values <bundle-local-json> \\
     --substrate-truth <bundle-local-json> \\
-    --output-dir <dir>`;
+    --output-dir <dir> \\
+    [--allow-installed-substrate-truth --substrate-install-report <json>]`;
 }
 
 function cliFail(message) {
@@ -114,7 +117,9 @@ function readArgValue(argv, index, arg) {
 }
 
 function parseArgs(argv) {
-  const parsed = {};
+  const parsed = {
+    allowInstalledSubstrateTruth: false
+  };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -152,8 +157,14 @@ function parseArgs(argv) {
       case '--substrate-truth':
         parsed.substrateTruth = nextValue();
         break;
+      case '--substrate-install-report':
+        parsed.substrateInstallReport = nextValue();
+        break;
       case '--output-dir':
         parsed.outputDir = nextValue();
+        break;
+      case '--allow-installed-substrate-truth':
+        parsed.allowInstalledSubstrateTruth = true;
         break;
       case '--help':
       case '-h':
@@ -172,6 +183,12 @@ function parseArgs(argv) {
     if (!parsed[key]) {
       cliFail(`missing required argument: --${toKebab(key)}`);
     }
+  }
+  if (parsed.allowInstalledSubstrateTruth && !parsed.substrateInstallReport) {
+    cliFail('--allow-installed-substrate-truth requires --substrate-install-report <json>');
+  }
+  if (parsed.substrateInstallReport && !parsed.allowInstalledSubstrateTruth) {
+    cliFail('--substrate-install-report requires --allow-installed-substrate-truth');
   }
 
   return parsed;
@@ -441,6 +458,31 @@ async function bundleLocalFile(input, label, bundleRoot) {
     fail(`${label} must resolve inside bundle root`);
   }
   return realPath;
+}
+
+async function localFile(input, label) {
+  const value = requireString(input, label);
+  rejectUriOrWindowsPath(value, label);
+  const requested = path.resolve(value);
+
+  let stat;
+  try {
+    stat = await fs.lstat(requested);
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`${label} must not be a symlink`);
+  }
+  if (!stat.isFile()) {
+    fail(`${label} must point to a file`);
+  }
+
+  try {
+    return await fs.realpath(requested);
+  } catch (error) {
+    fail(`cannot resolve ${label}: ${error.message}`);
+  }
 }
 
 function validateSafeRelativeBundlePath(value, label) {
@@ -786,19 +828,48 @@ async function main() {
 
   try {
     const targetProfile = parseTargetProfile(args.targetProfile);
+    if (
+      args.allowInstalledSubstrateTruth &&
+      targetProfile.value !== KIT_AIRGAP_TARGET_PROFILE
+    ) {
+      fail('--allow-installed-substrate-truth is accepted only for kit_installed airgap targets');
+    }
     const bundleRoot = await canonicalBundleRoot(args.bundleRoot);
+    const releaseContractPath = await bundleLocalFile(
+      args.releaseContract,
+      'release contract',
+      bundleRoot
+    );
+    const deployTemplatePackagePath = await bundleLocalFile(
+      args.deployTemplatePackage,
+      'deploy template package',
+      bundleRoot
+    );
+    const substrateTruthPath = args.allowInstalledSubstrateTruth
+      ? await localFile(args.substrateTruth, 'substrate truth')
+      : await bundleLocalFile(args.substrateTruth, 'substrate truth', bundleRoot);
+    const substrateInstallReportPath = args.allowInstalledSubstrateTruth
+      ? await localFile(args.substrateInstallReport, 'substrate install report')
+      : undefined;
+    if (args.allowInstalledSubstrateTruth) {
+      await validateInstalledSubstrateTruthProof({
+        substrateTruthPath,
+        substrateInstallReportPath,
+        targetProfile,
+        releaseContractPath,
+        deployTemplatePackagePath,
+        consumerOutputDir: args.outputDir,
+        fail
+      });
+    }
     const bundleLocalPaths = {
-      releaseContract: await bundleLocalFile(args.releaseContract, 'release contract', bundleRoot),
-      deployTemplatePackage: await bundleLocalFile(
-        args.deployTemplatePackage,
-        'deploy template package',
-        bundleRoot
-      ),
+      releaseContract: releaseContractPath,
+      deployTemplatePackage: deployTemplatePackagePath,
       archive: await bundleLocalFile(args.archive, 'deploy template archive', bundleRoot),
       imageMap: await bundleLocalFile(args.imageMap, 'image map', bundleRoot),
       bundleManifest: await bundleLocalFile(args.bundleManifest, 'bundle manifest', bundleRoot),
       renderValues: await bundleLocalFile(args.renderValues, 'render values', bundleRoot),
-      substrateTruth: await bundleLocalFile(args.substrateTruth, 'substrate truth', bundleRoot)
+      substrateTruth: substrateTruthPath
     };
 
     const bundleManifestInput = await readJson(bundleLocalPaths.bundleManifest, 'bundle manifest');

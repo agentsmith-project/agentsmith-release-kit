@@ -25,6 +25,7 @@ const TARGET_PREREQUISITES_SCHEMA = 'agentsmith.target-prerequisites.truth/v1';
 const SUBSTRATE_PACK_MANIFEST_SCHEMA = 'agentsmith.substrate-pack-manifest/v1';
 const SUBSTRATE_INSTALL_INPUTS_SCHEMA = 'agentsmith.substrate-install-inputs/v1';
 const SUBSTRATE_INSTALL_PRODUCER = 'agentsmith-release-kit-substrate-installer';
+const SUBSTRATE_INSTALL_OUTPUT_TRUTH_FILE = 'substrate-truth.json';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const OPERATOR_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
@@ -1372,6 +1373,10 @@ export function validateInstallSubstrateTruthBinding(installSummary, sourceInput
   if (!installSummary) {
     return;
   }
+  const outputSubstrateTruthDigest = requireDigest(
+    installSummary.output_substrate_truth_digest,
+    'substrate_install_report.output_substrate_truth_digest'
+  );
   const targetPreflightInput = requireSourceInput(sourceInputsByStep, 'target-preflight');
   const targetPreflightReport = requireInputReport(
     targetPreflightInput,
@@ -1385,10 +1390,31 @@ export function validateInstallSubstrateTruthBinding(installSummary, sourceInput
     substrateTruth.input_sha256,
     'target-preflight step report.substrate_truth.input_sha256'
   );
-  if (installSummary.output_substrate_truth_digest !== targetPreflightSubstrateTruthDigest) {
+  if (outputSubstrateTruthDigest !== targetPreflightSubstrateTruthDigest) {
     fail(
       'substrate_install_report.output_substrate_truth_digest must match target-preflight step report.substrate_truth.input_sha256'
     );
+  }
+  const offlineRenderInput = sourceInputsByStep.get('offline-render-check');
+  if (offlineRenderInput) {
+    const offlineRenderReport = requireInputReport(
+      offlineRenderInput,
+      'airgap-bundle-render-check step report'
+    );
+    const digestSummary = requireDigestSummary(
+      offlineRenderReport,
+      'airgap-bundle-render-check step report'
+    );
+    if (
+      requireDigest(
+        digestSummary.substrate_truth_input_sha256,
+        'airgap-bundle-render-check step report.digest_summary.substrate_truth_input_sha256'
+      ) !== outputSubstrateTruthDigest
+    ) {
+      fail(
+        'airgap-bundle-render-check step report.digest_summary.substrate_truth_input_sha256 must match substrate_install_report.output_substrate_truth_digest'
+      );
+    }
   }
   const prerequisites = requireObject(
     targetPreflightReport.target_prerequisites,
@@ -1604,11 +1630,23 @@ export function validateSubstrateInstallReport(report, release, expectedTargetPr
     }
     seenServices.add(service);
   }
+  if (
+    requireString(report.output_substrate_truth_path, 'substrate_install_report.output_substrate_truth_path') !==
+    SUBSTRATE_INSTALL_OUTPUT_TRUTH_FILE
+  ) {
+    fail(`substrate_install_report.output_substrate_truth_path must be ${SUBSTRATE_INSTALL_OUTPUT_TRUTH_FILE}`);
+  }
   requireDigest(
     report.output_substrate_truth_digest,
     'substrate_install_report.output_substrate_truth_digest'
   );
   const summary = requireObject(report.summary, 'substrate_install_report.summary');
+  if (
+    requireString(summary.installed_by, 'substrate_install_report.summary.installed_by') !==
+    'agentsmith-release-kit'
+  ) {
+    fail('substrate_install_report.summary.installed_by must be agentsmith-release-kit');
+  }
   if (
     requirePositiveInteger(summary.resources_count, 'substrate_install_report.summary.resources_count') !==
     proof.resource_count

@@ -663,6 +663,7 @@ function substrateInstall(dir, profile, operatorRunId) {
       resources_count: 1,
       substrate_services_count: 5
     },
+    output_substrate_truth_path: 'substrate-truth.json',
     output_substrate_truth_digest: sha(`${profile}:substrate-truth`)
   });
 }

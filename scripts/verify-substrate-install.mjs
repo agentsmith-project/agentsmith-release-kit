@@ -761,6 +761,7 @@ function buildReport({
       }
     },
     substrate_truth_digest: substrateTruthDigest,
+    output_substrate_truth_path: TRUTH_FILE,
     output_substrate_truth_digest: substrateTruthDigest,
     installed_services: serviceSummary.services,
     resource_refs: resourceRefs,

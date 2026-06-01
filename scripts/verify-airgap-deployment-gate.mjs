@@ -6,6 +6,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { validateInstalledSubstrateTruthProof } from './lib/substrate-install-proof.mjs';
+
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERIFY_RELEASE = path.join(ROOT_DIR, 'scripts', 'verify-release.sh');
 const REQUIRED_ARGS = [
@@ -109,6 +111,7 @@ function usage() {
     [--timeout-ms <ms>] \\
     [--allow-http] \\
     [--allow-localhost] \\
+    [--allow-installed-substrate-truth --substrate-install-report <json>] \\
     [--forbidden-source-root <dir>]`;
 }
 
@@ -160,7 +163,8 @@ function parseArgs(argv) {
     kubectlProvided: false,
     forbiddenSourceRoots: [],
     allowHttp: false,
-    allowLocalhost: false
+    allowLocalhost: false,
+    allowInstalledSubstrateTruth: false
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -220,6 +224,9 @@ function parseArgs(argv) {
       case '--substrate-truth':
         parsed.substrateTruth = nextValue();
         break;
+      case '--substrate-install-report':
+        parsed.substrateInstallReport = nextValue();
+        break;
       case '--target-prerequisites':
         parsed.targetPrerequisites = nextValue();
         break;
@@ -271,6 +278,9 @@ function parseArgs(argv) {
         break;
       case '--allow-localhost':
         parsed.allowLocalhost = true;
+        break;
+      case '--allow-installed-substrate-truth':
+        parsed.allowInstalledSubstrateTruth = true;
         break;
       case '--forbidden-source-root':
         parsed.forbiddenSourceRoots.push(nextValue());
@@ -463,6 +473,18 @@ function validateArgs(args) {
 
   if (!SUPPORTED_MODES.has(args.mode)) {
     cliFail('--mode must be server-dry-run or apply');
+  }
+  if (
+    args.allowInstalledSubstrateTruth &&
+    args.targetProfile.value !== KIT_AIRGAP_TARGET_PROFILE
+  ) {
+    cliFail('--allow-installed-substrate-truth is accepted only for kit_installed airgap targets');
+  }
+  if (args.allowInstalledSubstrateTruth && !args.substrateInstallReport) {
+    cliFail('--allow-installed-substrate-truth requires --substrate-install-report <json>');
+  }
+  if (args.substrateInstallReport && !args.allowInstalledSubstrateTruth) {
+    cliFail('--substrate-install-report requires --allow-installed-substrate-truth');
   }
 
   if (args.timeout !== undefined) {
@@ -731,6 +753,7 @@ function inputPathEntries(args) {
     ['bundle_manifest', args.bundleManifest],
     ['render_values', args.renderValues],
     ['substrate_truth', args.substrateTruth],
+    ['substrate_install_report', args.substrateInstallReport],
     ['target_prerequisites', args.targetPrerequisites]
   ];
 
@@ -746,6 +769,33 @@ function inputPathEntries(args) {
   }
 
   return entries.filter(([, value]) => value !== undefined);
+}
+
+async function assertSubstrateTruthSource(args) {
+  const bundleRoot = await canonicalBundleRoot(args.bundleRoot);
+  if (args.allowInstalledSubstrateTruth) {
+    const releaseContractPath = await bundleLocalFile(
+      args.releaseContract,
+      'release contract',
+      bundleRoot
+    );
+    const deployTemplatePackagePath = await bundleLocalFile(
+      args.deployTemplatePackage,
+      'deploy template package',
+      bundleRoot
+    );
+    await validateInstalledSubstrateTruthProof({
+      substrateTruthPath: args.substrateTruth,
+      substrateInstallReportPath: args.substrateInstallReport,
+      targetProfile: args.targetProfile,
+      releaseContractPath,
+      deployTemplatePackagePath,
+      consumerOutputDir: args.outputDir,
+      fail
+    });
+    return;
+  }
+  await bundleLocalFile(args.substrateTruth, 'substrate truth', bundleRoot);
 }
 
 async function assertInputPathsOutsideForbiddenRoots(args) {
@@ -916,6 +966,7 @@ async function main(argv) {
   await removeManagedOutputs(args.outputDir);
   validateArgs(args);
   await assertInputPathsOutsideForbiddenRoots(args);
+  await assertSubstrateTruthSource(args);
 
   const steps = [];
   const targetProfile = args.targetProfile.value;
@@ -1001,33 +1052,38 @@ async function main(argv) {
     });
   }
 
+  const bundleRenderCheckArgv = [
+    '--release-contract',
+    args.releaseContract,
+    '--deploy-template-package',
+    args.deployTemplatePackage,
+    '--archive',
+    args.archive,
+    '--image-map',
+    args.imageMap,
+    '--target-profile',
+    targetProfile,
+    '--bundle-root',
+    args.bundleRoot,
+    '--bundle-manifest',
+    args.bundleManifest,
+    '--render-values',
+    args.renderValues,
+    '--substrate-truth',
+    args.substrateTruth,
+    '--output-dir',
+    outputSubdir(args, 'airgap-bundle-render-check')
+  ];
+  if (args.allowInstalledSubstrateTruth) {
+    bundleRenderCheckArgv.push('--allow-installed-substrate-truth');
+    bundleRenderCheckArgv.push('--substrate-install-report', args.substrateInstallReport);
+  }
   runStep({
     args,
     steps,
     name: 'airgap-bundle-render-check',
     mode: '--airgap-bundle-render-check',
-    argv: [
-      '--release-contract',
-      args.releaseContract,
-      '--deploy-template-package',
-      args.deployTemplatePackage,
-      '--archive',
-      args.archive,
-      '--image-map',
-      args.imageMap,
-      '--target-profile',
-      targetProfile,
-      '--bundle-root',
-      args.bundleRoot,
-      '--bundle-manifest',
-      args.bundleManifest,
-      '--render-values',
-      args.renderValues,
-      '--substrate-truth',
-      args.substrateTruth,
-      '--output-dir',
-      outputSubdir(args, 'airgap-bundle-render-check')
-    ],
+    argv: bundleRenderCheckArgv,
     reportPaths: [
       path.join(
         outputSubdir(args, 'airgap-bundle-render-check'),
@@ -1112,17 +1168,17 @@ async function main(argv) {
       if (args.allowHttp) {
         smokeArgv.push('--allow-http');
       }
-      if (args.allowLocalhost) {
-        smokeArgv.push('--allow-localhost');
-      }
-      runStep({
+  if (args.allowLocalhost) {
+    smokeArgv.push('--allow-localhost');
+  }
+  runStep({
         args,
         steps,
         name: 'smoke',
         mode: '--smoke',
         argv: smokeArgv,
         reportPaths: [path.join(outputSubdir(args, 'smoke'), 'smoke-report.json')]
-      });
+  });
     }
   }
 

@@ -10,8 +10,8 @@ function usage() {
   node scripts/run-operator-inputs.mjs --operator-inputs <dir-or-json>
 
 Runs the current minimal operator-inputs orchestration slice. Only
-online/use_existing, online/install_substrates, and airgap/use_existing with
-mode apply are executed; airgap/install_substrates and server-dry-run modes
+online/use_existing, online/install_substrates, airgap/use_existing, and
+airgap/install_substrates with mode apply are executed; server-dry-run modes
 fail fast. This writes path-level deployment evidence only, not
 ga-release-report.json.`;
 }

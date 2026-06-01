@@ -739,6 +739,9 @@ if (
 if (report.output_substrate_truth_digest !== truthDigest || report.substrate_truth_digest !== truthDigest) {
   throw new Error('substrate install report must bind written substrate truth digest');
 }
+if (report.output_substrate_truth_path !== 'substrate-truth.json') {
+  throw new Error('substrate install report must bind written substrate truth path');
+}
 if (!Array.isArray(report.installed_services) || report.installed_services.length !== 5) {
   throw new Error('substrate install report must include installed services');
 }

@@ -57,8 +57,9 @@ and next producer argv. The plan is not GA evidence, not release readiness, and
 does not write `readiness` or `formal_verdict`.
 
 `bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run`
-currently executes `online/use_existing`, `online/install_substrates`, and
-`airgap/use_existing` with `mode: apply`. The runner validates the plan digest,
+currently executes `online/use_existing`, `online/install_substrates`,
+`airgap/use_existing`, and `airgap/install_substrates` with `mode: apply`.
+The runner validates the plan digest,
 absolute refs, package-root locality, and manifest-to-plan ref binding.
 `online/use_existing` runs the existing
 `online-deployment-gate` producer. `online/install_substrates` first runs
@@ -70,9 +71,12 @@ the existing internal `--deployment-path` finalizer. For airgap, the finalizer
 release contract and deploy package inputs are the bundle-local components
 declared by `airgap_bundle_manifest`, and `airgap/use_existing` requires
 package-local `kubectl` plus explicit `context`. It does not pass the consume
-report itself to the finalizer. These paths write path-level evidence only;
-they do not write `ga-release-report.json` or issue a GA verdict.
-`airgap/install_substrates` continues to fail fast in this slice.
+report itself to the finalizer. The airgap install path runs substrate-install,
+then runs bundle-check plus airgap deployment-gate directly rather than through
+consume rehearsal. That gate uses bundle-local release/template/archive/image
+map/render-values inputs and the installer generated substrate truth, which
+stays under `.release-kit-internal`. These paths write path-level evidence
+only; they do not write `ga-release-report.json` or issue a GA verdict.
 Server-dry-run modes also fail fast.
 
 The intake rejects unknown fields, path escapes, missing path-specific inputs,
@@ -113,10 +117,11 @@ diagnostic:
 `kit_provided` validates kit-supplied substrate pack/truth inputs and related
 focused evidence only; it is not substrate installation. `install_substrates`
 is not implemented by the old positional/transitional operator facade. Use
-`--operator-inputs` for install_substrates intake. The online install path now
-runs substrate-install before the online gate, then uses installer output truth
-for path-level evidence only; the existing separate substrate-install producer
-and deployment-path finalizer stay maintainer/internal building blocks.
+`--operator-inputs` for install_substrates intake. The package-driven install
+paths now run substrate-install before the deployment gate, then use installer
+output truth for path-level evidence only; the existing separate
+substrate-install producer and deployment-path finalizer stay
+maintainer/internal building blocks.
 `installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
 It is not installer proof and does not mean release-kit created databases,
 buckets, OIDC realms, or other substrate resources.

@@ -1089,6 +1089,7 @@ async function validateAirgapBundleComponents({
   }
 
   const seen = new Set();
+  const componentRefs = {};
   for (const [index, value] of components.entries()) {
     const label = `airgap_bundle_manifest.components[${index}]`;
     const component = assertAllowedKeys(value, AIRGAP_COMPONENT_KEYS, label);
@@ -1116,6 +1117,7 @@ async function validateAirgapBundleComponents({
     if (refs[kind] && refs[kind].sha256 !== declaredSha256) {
       fail(`airgap_bundle_manifest.components.${kind}.sha256 must match ${kind}`);
     }
+    componentRefs[kind] = componentFile;
   }
 
   for (const kind of expectedKinds) {
@@ -1123,6 +1125,8 @@ async function validateAirgapBundleComponents({
       fail(`airgap_bundle_manifest.components is missing ${kind}`);
     }
   }
+
+  return componentRefs;
 }
 
 function validateAirgapConsumerPathRefs({ refs, bundle }) {
@@ -1136,12 +1140,12 @@ function validateAirgapConsumerPathRefs({ refs, bundle }) {
 
 async function validateAirgapBundleRefs({ manifest, refs, config }) {
   if (!manifest.deployment_path.startsWith('airgap/')) {
-    return;
+    return {};
   }
   const bundle = refs.airgap_bundle;
   const bundleManifest = refs.airgap_bundle_manifest;
   if (!bundle || !bundleManifest) {
-    return;
+    return {};
   }
   if (!isInsidePath(bundle.absolute_path, bundleManifest.absolute_path)) {
     fail('airgap_bundle_manifest must resolve inside airgap_bundle');
@@ -1157,7 +1161,7 @@ async function validateAirgapBundleRefs({ manifest, refs, config }) {
     expectedTargetProfile
   });
   validateAirgapConsumerPathRefs({ refs, bundle });
-  await validateAirgapBundleComponents({
+  return validateAirgapBundleComponents({
     bundleRoot: bundle.absolute_path,
     bundleManifest: bundleManifestObject,
     expectedTargetProfile,
@@ -1505,6 +1509,10 @@ function buildInternalExpected({ manifest, config, outputRoot, mode }) {
   const substrateInstallOutputDir = config.installSubstrates
     ? path.join(outputBase, 'substrate-install')
     : null;
+  const airgapConsumeRehearsalOutputDir =
+    config.producer === 'airgap' && !config.installSubstrates
+      ? path.join(outputBase, 'airgap-consume-rehearsal')
+      : null;
   return {
     schema_version: INTERNAL_EXPECTED_SCHEMA,
     deployment_path: manifest.deployment_path,
@@ -1523,21 +1531,29 @@ function buildInternalExpected({ manifest, config, outputRoot, mode }) {
       substrate_install: substrateInstallOutputDir,
       online_deployment_gate:
         config.producer === 'online' ? path.join(outputBase, 'online-deployment-gate') : null,
-      airgap_consume_rehearsal:
-        config.producer === 'airgap' ? path.join(outputBase, 'airgap-consume-rehearsal') : null,
+      airgap_consume_rehearsal: airgapConsumeRehearsalOutputDir,
       airgap_bundle_check:
         config.producer === 'airgap'
-          ? path.join(outputBase, 'airgap-consume-rehearsal', 'airgap-bundle-check')
+          ? path.join(
+              airgapConsumeRehearsalOutputDir ?? outputBase,
+              'airgap-bundle-check'
+            )
           : null,
       airgap_deployment_gate:
         config.producer === 'airgap'
-          ? path.join(outputBase, 'airgap-consume-rehearsal', 'airgap-deployment-gate')
+          ? path.join(
+              airgapConsumeRehearsalOutputDir ?? outputBase,
+              'airgap-deployment-gate'
+            )
           : null,
       deployment_path: path.join(outputBase, 'deployment-path')
     },
     generated_refs: {
       substrate_truth: substrateInstallOutputDir
         ? path.join(substrateInstallOutputDir, 'substrate-truth.json')
+        : null,
+      substrate_install_report: substrateInstallOutputDir
+        ? path.join(substrateInstallOutputDir, 'substrate-install-report.json')
         : null
     },
     smoke: {
@@ -1608,7 +1624,75 @@ function addCommonDeploymentArgs({
   addApplyRuntimeArgs({ argv, refs, manifest, targetProfile, mode });
 }
 
-function buildProducerArgv({ manifest, refs, config, outputRoot, mode }) {
+function requireAirgapComponent(components, kind) {
+  const component = components?.[kind];
+  if (!component?.absolute_path) {
+    fail(`airgap_bundle_manifest.components must include ${kind}`);
+  }
+  return component.absolute_path;
+}
+
+function addCommonAirgapArgs({
+  argv,
+  refs,
+  manifest,
+  targetProfile,
+  outputDir,
+  mode,
+  airgapBundleComponents,
+  substrateTruthPath,
+  substrateInstallReportPath,
+  allowInstalledSubstrateTruth = false
+}) {
+  argv.push(
+    '--release-contract',
+    requireAirgapComponent(airgapBundleComponents, 'release_contract'),
+    '--deploy-template-package',
+    requireAirgapComponent(airgapBundleComponents, 'deploy_template_package'),
+    '--archive',
+    requireAirgapComponent(airgapBundleComponents, 'deploy_template_archive'),
+    '--image-map',
+    requireAirgapComponent(airgapBundleComponents, 'image_map'),
+    '--target-profile',
+    targetProfile,
+    '--bundle-root',
+    refPath(refs, 'airgap_bundle'),
+    '--bundle-manifest',
+    refPath(refs, 'airgap_bundle_manifest'),
+    '--render-values',
+    refPath(refs, 'render_values'),
+    '--substrate-truth',
+    substrateTruthPath ?? refPath(refs, 'substrate_truth'),
+    '--target-prerequisites',
+    refPath(refs, 'target_prerequisites'),
+    '--namespace',
+    manifest.namespace,
+    '--output-dir',
+    outputDir,
+    '--mode',
+    mode
+  );
+  if (allowInstalledSubstrateTruth) {
+    argv.push('--allow-installed-substrate-truth');
+    argv.push('--substrate-install-report', substrateInstallReportPath);
+  }
+  argv.push(
+    '--context',
+    manifest.context,
+    '--kubectl',
+    refPath(refs, 'kubectl')
+  );
+  addApplyRuntimeArgs({
+    argv,
+    refs,
+    manifest,
+    targetProfile,
+    mode,
+    includeAirgapLoaders: true
+  });
+}
+
+function buildProducerArgv({ manifest, refs, config, outputRoot, mode, airgapBundleComponents }) {
   const outputBase = deploymentPathOutputBase(outputRoot, manifest.deployment_path);
   const substrateInstallOutputDir = path.join(outputBase, 'substrate-install');
   const generatedSubstrateTruth = path.join(substrateInstallOutputDir, 'substrate-truth.json');
@@ -1677,7 +1761,7 @@ function buildProducerArgv({ manifest, refs, config, outputRoot, mode }) {
       name: 'online-deployment-gate',
       argv
     });
-  } else {
+  } else if (!config.installSubstrates) {
     const argv = [
       'bash',
       VERIFY_RELEASE_SCRIPT,
@@ -1717,6 +1801,50 @@ function buildProducerArgv({ manifest, refs, config, outputRoot, mode }) {
       name: 'airgap-consume-rehearsal',
       argv
     });
+  } else {
+    const bundleCheckArgv = [
+      'bash',
+      VERIFY_RELEASE_SCRIPT,
+      '--airgap-bundle-check',
+      '--release-contract',
+      requireAirgapComponent(airgapBundleComponents, 'release_contract'),
+      '--deploy-template-package',
+      requireAirgapComponent(airgapBundleComponents, 'deploy_template_package'),
+      '--archive',
+      requireAirgapComponent(airgapBundleComponents, 'deploy_template_archive'),
+      '--image-map',
+      requireAirgapComponent(airgapBundleComponents, 'image_map'),
+      '--target-profile',
+      config.targetProfile,
+      '--bundle-root',
+      refPath(refs, 'airgap_bundle'),
+      '--bundle-manifest',
+      refPath(refs, 'airgap_bundle_manifest'),
+      '--output-dir',
+      path.join(outputBase, 'airgap-bundle-check')
+    ];
+    steps.push({
+      name: 'airgap-bundle-check',
+      argv: bundleCheckArgv
+    });
+
+    const gateArgv = ['bash', VERIFY_RELEASE_SCRIPT, '--airgap-deployment-gate'];
+    addCommonAirgapArgs({
+      argv: gateArgv,
+      refs,
+      manifest,
+      targetProfile: config.targetProfile,
+      outputDir: path.join(outputBase, 'airgap-deployment-gate'),
+      mode,
+      airgapBundleComponents,
+      substrateTruthPath: generatedSubstrateTruth,
+      substrateInstallReportPath: path.join(substrateInstallOutputDir, 'substrate-install-report.json'),
+      allowInstalledSubstrateTruth: true
+    });
+    steps.push({
+      name: 'airgap-deployment-gate',
+      argv: gateArgv
+    });
   }
 
   return steps;
@@ -1751,7 +1879,7 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
   validateConfirmations({ manifest, config, mode });
 
   const refs = await resolveRefs({ manifest, baseDir: packageRoot });
-  await validateAirgapBundleRefs({ manifest, refs, config });
+  const airgapBundleComponents = await validateAirgapBundleRefs({ manifest, refs, config });
   const missingRequiredRef = [
     ...requiredInputs.files,
     ...requiredInputs.dirs,
@@ -1776,7 +1904,8 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
     refs,
     config,
     outputRoot: runtimeOutputRoot,
-    mode
+    mode,
+    airgapBundleComponents
   });
   const internalExpected = buildInternalExpected({
     manifest,

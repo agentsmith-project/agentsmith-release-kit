@@ -406,7 +406,10 @@ function stepReport(name, profile, bindings = {}) {
               ? sha('wrong-airgap-render-bundle-manifest')
               : bindings.bundleManifestDigest,
           render_values_input_sha256: sha(`${profile}:render-values`),
-          substrate_truth_input_sha256: sha(`${profile}:substrate-truth`),
+          substrate_truth_input_sha256:
+            mutation === 'render-check-substrate-truth-install-digest-mismatch'
+              ? sha('wrong-airgap-render-substrate-truth')
+              : sha(`${profile}:substrate-truth`),
           airgap_bundle_check_report_input_sha256: bindings.bundleCheckDigest,
           manifest_render_report_input_sha256: sha(`${profile}:render-report`),
           render_check_report_input_sha256: sha(`${profile}:render-check-report`)
@@ -739,6 +742,7 @@ function substrateInstall(dir, profile, operatorRunId) {
       resources_count: 1,
       substrate_services_count: 5
     },
+    output_substrate_truth_path: 'substrate-truth.json',
     output_substrate_truth_digest:
       mutation === 'install-output-substrate-truth-digest-mismatch'
         ? sha(`${profile}:wrong-output-substrate-truth`)
@@ -1705,5 +1709,20 @@ fi
 grep -Fq "substrate_install_report.output_substrate_truth_digest must match target-preflight step report.substrate_truth.input_sha256" "$TMP_DIR/deployment-path-install-output-truth-binding.out" || \
   fail "install output substrate truth binding failure message did not explain blocker"
 pass "install_substrates output truth digest is bound to same-path target-preflight truth input"
+
+AIRGAP_RENDER_INSTALL_TRUTH_BINDING_DIR="$TMP_DIR/render-check-substrate-truth-install-digest-mismatch"
+write_fixture_set "$AIRGAP_RENDER_INSTALL_TRUTH_BINDING_DIR" render-check-substrate-truth-install-digest-mismatch
+if run_airgap_path \
+  "$AIRGAP_RENDER_INSTALL_TRUTH_BINDING_DIR" \
+  "airgap/install_substrates" \
+  "$AIRGAP_RENDER_INSTALL_TRUTH_BINDING_DIR/airgap-install-substrates" \
+  "$TMP_DIR/out-render-check-substrate-truth-install-digest-mismatch" \
+  --substrate-install-report "$AIRGAP_RENDER_INSTALL_TRUTH_BINDING_DIR/airgap-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-airgap-install-10001" >"$TMP_DIR/deployment-path-render-install-truth-binding.out" 2>&1; then
+  fail "airgap render-check substrate truth digest mismatch should fail"
+fi
+grep -Fq "airgap-bundle-render-check step report.digest_summary.substrate_truth_input_sha256 must match substrate_install_report.output_substrate_truth_digest" "$TMP_DIR/deployment-path-render-install-truth-binding.out" || \
+  fail "airgap render-check substrate truth digest mismatch failure message did not explain blocker"
+pass "airgap install_substrates binds offline render-check substrate truth digest to installer output truth"
 
 echo "PASS: deployment path report finalization focused guard"

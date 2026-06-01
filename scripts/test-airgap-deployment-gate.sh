@@ -152,6 +152,46 @@ fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
 NODE
 }
 
+write_install_report() {
+  local report="$1"
+  local truth="$2"
+  local profile="${3:-$KIT_AIRGAP_PROFILE}"
+  local mutation="${4:-valid}"
+
+  "$NODE_BIN" --input-type=module - "$report" "$truth" "$profile" "$mutation" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [reportPath, truthPath, profile, mutation] = process.argv.slice(2);
+const [targetCluster, substrateSource, distribution] = profile.split('/');
+const truthDigest = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(truthPath)).digest('hex')}`;
+const mismatchDigest = `sha256:${crypto.createHash('sha256').update('mismatch').digest('hex')}`;
+const outputDigest = mutation === 'digest-mismatch' ? mismatchDigest : truthDigest;
+const report = {
+  schema: 'agentsmith.substrate-install-report/v1',
+  scope: 'substrate_install_only',
+  producer: 'agentsmith-release-kit-substrate-installer',
+  readiness: false,
+  status: 'pass',
+  target_profile: {
+    value: profile,
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution
+  },
+  mode: 'apply',
+  operator_run_id: 'operator-airgap-install-proof-1001',
+  output_substrate_truth_path:
+    mutation === 'path-mismatch' ? 'other-substrate-truth.json' : path.basename(truthPath),
+  output_substrate_truth_digest: outputDigest,
+  substrate_truth_digest: outputDigest
+};
+fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+NODE
+}
+
 write_prerequisites() {
   local output="$1"
   local profile="${2:-$AIRGAP_PROFILE}"
@@ -195,6 +235,128 @@ const prerequisites = {
 };
 
 fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+write_substrate_install_inputs() {
+  local dir="$1"
+  local profile="${2:-$KIT_AIRGAP_PROFILE}"
+
+  mkdir -p "$dir"
+  write_truth "$dir/substrate-truth-input.json" "$profile"
+  write_prerequisites "$dir/target-prerequisites.json" "$profile"
+  "$NODE_BIN" --input-type=module - "$dir" "$profile" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [dir, profile] = process.argv.slice(2);
+const substrateTruth = JSON.parse(fs.readFileSync(path.join(dir, 'substrate-truth-input.json'), 'utf8'));
+const ownerLabels = {
+  'app.kubernetes.io/managed-by': 'agentsmith-release-kit'
+};
+const ownerAnnotations = {
+  'agentsmith.io/managed-by': 'agentsmith-release-kit',
+  'agentsmith.io/installation-id': 'kit-install-10001'
+};
+const resources = [
+  {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'agentsmith-substrate-config',
+      namespace: 'agentsmith',
+      labels: ownerLabels,
+      annotations: ownerAnnotations
+    },
+    data: {
+      profile
+    }
+  }
+];
+const inputs = {
+  schema_version: 'agentsmith.substrate-install-inputs/v1',
+  target_profile: profile,
+  installation_id: 'kit-install-10001',
+  substrate_truth: substrateTruth,
+  resources
+};
+fs.writeFileSync(path.join(dir, 'substrate-install-inputs.json'), `${JSON.stringify(inputs, null, 2)}\n`);
+NODE
+}
+
+install_parameters_digest() {
+  local install_inputs="$1"
+  local namespace="${2:-agentsmith}"
+
+  "$NODE_BIN" --input-type=module - "$install_inputs" "$namespace" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [installInputsPath, namespace] = process.argv.slice(2);
+const raw = fs.readFileSync(installInputsPath);
+const inputs = JSON.parse(raw.toString('utf8'));
+const applyResourceListBytes = Buffer.from(`${JSON.stringify({
+  apiVersion: 'v1',
+  kind: 'List',
+  items: inputs.resources
+}, null, 2)}\n`);
+const digest = (buffer) => `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+const installInputDigest = digest(raw);
+const resourceListDigest = digest(applyResourceListBytes);
+const applyResourceListDigest = digest(applyResourceListBytes);
+console.log(digest(Buffer.from([
+  'agentsmith.substrate-install-parameters/v1',
+  `substrate_install_inputs=${installInputDigest}`,
+  `resource_list=${resourceListDigest}`,
+  `apply_resource_list=${applyResourceListDigest}`,
+  `effective_namespace=${namespace}`
+].join('\n'))));
+NODE
+}
+
+run_substrate_install_producer() {
+  local bundle_root="$1"
+  local output_dir="$2"
+  local fixture_dir="$3"
+  local operator_run_id="${4:-operator-airgap-install-proof-1001}"
+  local install_digest
+
+  write_substrate_install_inputs "$fixture_dir" "$KIT_AIRGAP_PROFILE"
+  install_digest="$(install_parameters_digest "$fixture_dir/substrate-install-inputs.json")"
+  bash "$ROOT_DIR/scripts/verify-release.sh" --substrate-install \
+    --release-contract "$bundle_root/components/release-contract.json" \
+    --deploy-template-package "$bundle_root/components/deploy-template-package.json" \
+    --target-profile "$KIT_AIRGAP_PROFILE" \
+    --substrate-pack-manifest "$bundle_root/components/substrate-pack-manifest.json" \
+    --substrate-install-inputs "$fixture_dir/substrate-install-inputs.json" \
+    --target-prerequisites "$fixture_dir/target-prerequisites.json" \
+    --namespace agentsmith \
+    --output-dir "$output_dir" \
+    --mode apply \
+    --confirm-substrate-install "$KIT_AIRGAP_PROFILE" \
+    --confirm-install-parameters "$install_digest" \
+    --operator-run-id "$operator_run_id" \
+    --kubectl "$FAKE_KUBECTL" >"$fixture_dir/substrate-install.out"
+}
+
+mutate_install_report() {
+  local report="$1"
+  local mutation="$2"
+
+  "$NODE_BIN" --input-type=module - "$report" "$mutation" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [reportPath, mutation] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+if (mutation === 'digest-mismatch') {
+  report.output_substrate_truth_digest =
+    `sha256:${crypto.createHash('sha256').update('mismatch').digest('hex')}`;
+}
+if (mutation === 'path-mismatch') {
+  report.output_substrate_truth_path = 'other-substrate-truth.json';
+}
+fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 NODE
 }
 
@@ -509,7 +671,11 @@ case "$command_name" in
     printf '%s\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
     ;;
   apply)
-    printf '%s\n' "deployment.apps/agentsmith-web"
+    if [[ " $* " == *".substrate-install-resources."* ]]; then
+      printf '%s\n' "configmap/agentsmith-substrate-config"
+    else
+      printf '%s\n' "deployment.apps/agentsmith-web"
+    fi
     ;;
   rollout)
     printf '%s\n' "deployment rolled out token=plain-secret-value"
@@ -537,6 +703,11 @@ JSON
 {"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"$FAKE_KUBECTL_TARGET_IMAGE","imageID":"docker-pullable://$FAKE_KUBECTL_TARGET_IMAGE"}],"containerStatuses":[{"name":"web","image":"$FAKE_KUBECTL_TARGET_IMAGE","imageID":"docker-pullable://$FAKE_KUBECTL_TARGET_IMAGE"}]}}]}
 JSON
       exit 0
+    fi
+
+    if [[ "$get_target" == "configmaps" || "$get_target" == "services" || "$get_target" == "networkpolicies.networking.k8s.io" ]]; then
+      echo "Error from server (NotFound): resource not found" >&2
+      exit 1
     fi
 
     echo "unexpected fake kubectl get target: $get_target" >&2
@@ -914,6 +1085,72 @@ assert_report \
   "" \
   "$KIT_AIRGAP_PROFILE"
 pass "kit airgap deployment server dry-run ran substrate pack check before render/apply"
+
+outside_kit_truth="$TMP_DIR/substrate-truth.kit-installed.json"
+write_truth "$outside_kit_truth" "$KIT_AIRGAP_PROFILE"
+reset_logs
+expect_gate_fail "kit-external-substrate-truth-without-install-flag" "$TMP_DIR/out-kit-external-truth-no-flag" \
+  run_airgap_gate "$KIT_BUNDLE_ROOT" "$TMP_DIR/out-kit-external-truth-no-flag" "$KIT_AIRGAP_PROFILE" \
+    --mode server-dry-run \
+    --substrate-truth "$outside_kit_truth"
+assert_no_apply_side_effects "kit external substrate truth without install flag"
+
+kit_installed_truth_dry_run_output="$TMP_DIR/out-kit-installed-truth-dry-run"
+reset_logs
+expect_gate_fail "kit-external-substrate-truth-with-install-flag-only" "$TMP_DIR/out-kit-external-truth-flag-only" \
+  run_airgap_gate "$KIT_BUNDLE_ROOT" "$TMP_DIR/out-kit-external-truth-flag-only" "$KIT_AIRGAP_PROFILE" \
+    --mode server-dry-run \
+    --substrate-truth "$outside_kit_truth" \
+    --allow-installed-substrate-truth
+assert_no_apply_side_effects "kit external substrate truth with install flag only"
+
+proof_dir="$TMP_DIR/proof/.release-kit-internal/airgap-install-substrates/substrate-install"
+proof_truth="$proof_dir/substrate-truth.json"
+proof_report="$proof_dir/substrate-install-report.json"
+run_substrate_install_producer "$KIT_BUNDLE_ROOT" "$proof_dir" "$TMP_DIR/proof-fixture"
+reset_logs
+FAKE_KUBECTL_TARGET_IMAGE="$KIT_TARGET_APP_IMAGE" \
+run_airgap_gate "$KIT_BUNDLE_ROOT" "$kit_installed_truth_dry_run_output" "$KIT_AIRGAP_PROFILE" \
+  --mode server-dry-run \
+  --substrate-truth "$proof_truth" \
+  --allow-installed-substrate-truth \
+  --substrate-install-report "$proof_report" >"$TMP_DIR/kit-installed-truth-dry-run.out"
+assert_report \
+  "$kit_installed_truth_dry_run_output/$REPORT_FILE" \
+  server-dry-run \
+  target-preflight,substrate-pack-check,airgap-bundle-render-check,apply \
+  "" \
+  "$KIT_AIRGAP_PROFILE"
+pass "kit airgap deployment gate accepts installer report-bound substrate truth"
+
+digest_mismatch_dir="$TMP_DIR/proof-digest-mismatch/.release-kit-internal/airgap-install-substrates/substrate-install"
+digest_mismatch_truth="$digest_mismatch_dir/substrate-truth.json"
+digest_mismatch_report="$digest_mismatch_dir/substrate-install-report.json"
+run_substrate_install_producer "$KIT_BUNDLE_ROOT" "$digest_mismatch_dir" "$TMP_DIR/proof-digest-mismatch-fixture"
+mutate_install_report "$digest_mismatch_report" digest-mismatch
+reset_logs
+expect_gate_fail "kit-external-substrate-truth-install-report-digest-mismatch" "$TMP_DIR/out-kit-external-truth-digest-mismatch" \
+  run_airgap_gate "$KIT_BUNDLE_ROOT" "$TMP_DIR/out-kit-external-truth-digest-mismatch" "$KIT_AIRGAP_PROFILE" \
+    --mode server-dry-run \
+    --substrate-truth "$digest_mismatch_truth" \
+    --allow-installed-substrate-truth \
+    --substrate-install-report "$digest_mismatch_report"
+assert_no_apply_side_effects "kit external substrate truth with digest-mismatched install report"
+
+synthetic_dir="$TMP_DIR/proof-synthetic/.release-kit-internal/airgap-install-substrates/substrate-install"
+synthetic_truth="$synthetic_dir/substrate-truth.json"
+synthetic_report="$synthetic_dir/substrate-install-report.json"
+mkdir -p "$synthetic_dir"
+write_truth "$synthetic_truth" "$KIT_AIRGAP_PROFILE"
+write_install_report "$synthetic_report" "$synthetic_truth" "$KIT_AIRGAP_PROFILE"
+reset_logs
+expect_gate_fail "kit-external-substrate-truth-minimal-synthetic-install-report" "$TMP_DIR/out-kit-external-truth-synthetic" \
+  run_airgap_gate "$KIT_BUNDLE_ROOT" "$TMP_DIR/out-kit-external-truth-synthetic" "$KIT_AIRGAP_PROFILE" \
+    --mode server-dry-run \
+    --substrate-truth "$synthetic_truth" \
+    --allow-installed-substrate-truth \
+    --substrate-install-report "$synthetic_report"
+assert_no_apply_side_effects "kit external substrate truth with minimal synthetic install report"
 
 apply_output="$TMP_DIR/out-apply-smoke"
 reset_logs

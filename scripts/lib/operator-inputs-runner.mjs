@@ -16,7 +16,8 @@ const AIRGAP_INSTALL_SUBSTRATES_PATH = 'airgap/install_substrates';
 const SUPPORTED_DEPLOYMENT_PATHS = new Set([
   ONLINE_USE_EXISTING_PATH,
   ONLINE_INSTALL_SUBSTRATES_PATH,
-  AIRGAP_USE_EXISTING_PATH
+  AIRGAP_USE_EXISTING_PATH,
+  AIRGAP_INSTALL_SUBSTRATES_PATH
 ]);
 const CLEANUP_DEPLOYMENT_PATHS = new Set([
   ...SUPPORTED_DEPLOYMENT_PATHS,
@@ -25,7 +26,8 @@ const CLEANUP_DEPLOYMENT_PATHS = new Set([
 const TARGET_PROFILE_BY_DEPLOYMENT_PATH = new Map([
   [ONLINE_USE_EXISTING_PATH, 'existing_kubernetes/external_declared/online'],
   [ONLINE_INSTALL_SUBSTRATES_PATH, 'existing_kubernetes/kit_installed/online'],
-  [AIRGAP_USE_EXISTING_PATH, 'existing_kubernetes/external_declared/airgap']
+  [AIRGAP_USE_EXISTING_PATH, 'existing_kubernetes/external_declared/airgap'],
+  [AIRGAP_INSTALL_SUBSTRATES_PATH, 'existing_kubernetes/kit_installed/airgap']
 ]);
 const PLAN_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -168,6 +170,51 @@ const AIRGAP_CONSUME_OPTIONAL_VALUE_FLAGS = new Set([
   '--timeout-ms'
 ]);
 const AIRGAP_CONSUME_BOOLEAN_FLAGS = new Set(['--allow-http', '--allow-localhost']);
+const AIRGAP_BUNDLE_CHECK_REQUIRED_VALUE_FLAGS = new Set([
+  '--release-contract',
+  '--deploy-template-package',
+  '--archive',
+  '--image-map',
+  '--target-profile',
+  '--bundle-root',
+  '--bundle-manifest',
+  '--output-dir'
+]);
+const AIRGAP_BUNDLE_CHECK_OPTIONAL_VALUE_FLAGS = new Set();
+const AIRGAP_BUNDLE_CHECK_BOOLEAN_FLAGS = new Set();
+const AIRGAP_DEPLOYMENT_GATE_REQUIRED_VALUE_FLAGS = new Set([
+  '--release-contract',
+  '--deploy-template-package',
+  '--archive',
+  '--image-map',
+  '--target-profile',
+  '--bundle-root',
+  '--bundle-manifest',
+  '--render-values',
+  '--substrate-truth',
+  '--target-prerequisites',
+  '--namespace',
+  '--output-dir',
+  '--mode',
+  '--context',
+  '--kubectl',
+  '--archive-probe',
+  '--image-loader',
+  '--smoke-url',
+  '--confirm-apply',
+  '--operator-run-id'
+]);
+const AIRGAP_DEPLOYMENT_GATE_OPTIONAL_VALUE_FLAGS = new Set([
+  '--substrate-install-report',
+  '--timeout',
+  '--expected-status',
+  '--timeout-ms'
+]);
+const AIRGAP_DEPLOYMENT_GATE_BOOLEAN_FLAGS = new Set([
+  '--allow-http',
+  '--allow-localhost',
+  '--allow-installed-substrate-truth'
+]);
 
 class OperatorInputsRunnerError extends Error {
   constructor(message, exitCode = 1) {
@@ -524,12 +571,15 @@ function deploymentPathOutputSlug(deploymentPath) {
 function expectedOutputDirs(internalRoot, deploymentPath) {
   const outputBase = path.join(internalRoot, deploymentPathOutputSlug(deploymentPath));
   const airgapConsumeRehearsal = path.join(outputBase, 'airgap-consume-rehearsal');
+  const airgapProducerBase = isAirgapInstallSubstratesPath(deploymentPath)
+    ? outputBase
+    : airgapConsumeRehearsal;
   return {
     substrateInstall: path.join(outputBase, 'substrate-install'),
     onlineDeploymentGate: path.join(outputBase, 'online-deployment-gate'),
     airgapConsumeRehearsal,
-    airgapBundleCheck: path.join(airgapConsumeRehearsal, 'airgap-bundle-check'),
-    airgapDeploymentGate: path.join(airgapConsumeRehearsal, 'airgap-deployment-gate'),
+    airgapBundleCheck: path.join(airgapProducerBase, 'airgap-bundle-check'),
+    airgapDeploymentGate: path.join(airgapProducerBase, 'airgap-deployment-gate'),
     deploymentPath: path.join(outputBase, 'deployment-path')
   };
 }
@@ -618,8 +668,22 @@ async function validatePlanPrecleanEnvelope(plan, canonicalPlanPath) {
   };
 }
 
-function isInstallSubstratesPath(deploymentPath) {
+function isOnlineInstallSubstratesPath(deploymentPath) {
   return deploymentPath === ONLINE_INSTALL_SUBSTRATES_PATH;
+}
+
+function isInstallSubstratesPath(deploymentPath) {
+  return (
+    deploymentPath === ONLINE_INSTALL_SUBSTRATES_PATH ||
+    deploymentPath === AIRGAP_INSTALL_SUBSTRATES_PATH
+  );
+}
+
+function isAirgapPath(deploymentPath) {
+  return (
+    deploymentPath === AIRGAP_USE_EXISTING_PATH ||
+    deploymentPath === AIRGAP_INSTALL_SUBSTRATES_PATH
+  );
 }
 
 function isAirgapUseExistingPath(deploymentPath) {
@@ -633,7 +697,7 @@ function isAirgapInstallSubstratesPath(deploymentPath) {
 function inputRefsForDeploymentPath(deploymentPath, mode) {
   const required = [...COMMON_INPUT_REFS];
   const optional = [];
-  if (isInstallSubstratesPath(deploymentPath)) {
+  if (isOnlineInstallSubstratesPath(deploymentPath)) {
     required.push(...INSTALL_INPUT_REFS);
   } else if (isAirgapUseExistingPath(deploymentPath)) {
     required.push(...AIRGAP_PACKAGE_INPUT_REFS, 'kubectl');
@@ -1294,7 +1358,8 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
   const outputDirs = requireObject(expected.output_dirs, 'plan._internal.expected.output_dirs');
   const canonicalOutputDirs = expectedOutputDirs(internalRoot, expected.deployment_path);
   const installExpected = isInstallSubstratesPath(expected.deployment_path);
-  const airgapExpected = isAirgapUseExistingPath(expected.deployment_path);
+  const airgapExpected = isAirgapPath(expected.deployment_path);
+  const airgapUseExistingExpected = isAirgapUseExistingPath(expected.deployment_path);
   if (installExpected) {
     if (outputDirs.substrate_install !== canonicalOutputDirs.substrateInstall) {
       fail('plan._internal.expected.output_dirs.substrate_install must be the internal expected dir');
@@ -1309,8 +1374,15 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
     fail('plan._internal.expected.output_dirs.online_deployment_gate must be null for airgap');
   }
   if (airgapExpected) {
-    if (outputDirs.airgap_consume_rehearsal !== canonicalOutputDirs.airgapConsumeRehearsal) {
-      fail('plan._internal.expected.output_dirs.airgap_consume_rehearsal must be the internal expected dir');
+    if (airgapUseExistingExpected) {
+      if (outputDirs.airgap_consume_rehearsal !== canonicalOutputDirs.airgapConsumeRehearsal) {
+        fail('plan._internal.expected.output_dirs.airgap_consume_rehearsal must be the internal expected dir');
+      }
+    } else if (
+      outputDirs.airgap_consume_rehearsal !== null &&
+      outputDirs.airgap_consume_rehearsal !== undefined
+    ) {
+      fail('plan._internal.expected.output_dirs.airgap_consume_rehearsal must be null for airgap install_substrates');
     }
     if (outputDirs.airgap_bundle_check !== canonicalOutputDirs.airgapBundleCheck) {
       fail('plan._internal.expected.output_dirs.airgap_bundle_check must be the internal expected dir');
@@ -1343,8 +1415,14 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
   const expectedGeneratedSubstrateTruth = installExpected
     ? path.join(canonicalOutputDirs.substrateInstall, 'substrate-truth.json')
     : null;
+  const expectedGeneratedSubstrateInstallReport = installExpected
+    ? path.join(canonicalOutputDirs.substrateInstall, 'substrate-install-report.json')
+    : null;
   if (generatedRefs.substrate_truth !== expectedGeneratedSubstrateTruth) {
     fail('plan._internal.expected.generated_refs.substrate_truth must point to installer output truth for install paths');
+  }
+  if (generatedRefs.substrate_install_report !== expectedGeneratedSubstrateInstallReport) {
+    fail('plan._internal.expected.generated_refs.substrate_install_report must point to installer output report for install paths');
   }
 
   let expectedInstall;
@@ -1468,7 +1546,8 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
     operatorRunId,
     install: expectedInstall,
     generatedRefs: {
-      substrateTruth: expectedGeneratedSubstrateTruth
+      substrateTruth: expectedGeneratedSubstrateTruth,
+      substrateInstallReport: expectedGeneratedSubstrateInstallReport
     },
     outputDirs: canonicalOutputDirs,
     smoke: expectedSmoke
@@ -1499,12 +1578,9 @@ async function validateFacadeArgv(plan) {
 }
 
 function validateUnsupportedScope(plan) {
-  if (plan.deployment_path === AIRGAP_INSTALL_SUBSTRATES_PATH) {
-    fail('operator-inputs --run does not implement airgap/install_substrates path-level orchestration yet');
-  }
   if (!SUPPORTED_DEPLOYMENT_PATHS.has(plan.deployment_path) || plan.mode !== SUPPORTED_MODE) {
     fail(
-      `operator-inputs --run currently supports only ${ONLINE_USE_EXISTING_PATH}, ${ONLINE_INSTALL_SUBSTRATES_PATH}, or ${AIRGAP_USE_EXISTING_PATH} with mode ${SUPPORTED_MODE}`
+      `operator-inputs --run currently supports only ${ONLINE_USE_EXISTING_PATH}, ${ONLINE_INSTALL_SUBSTRATES_PATH}, ${AIRGAP_USE_EXISTING_PATH}, or ${AIRGAP_INSTALL_SUBSTRATES_PATH} with mode ${SUPPORTED_MODE}`
     );
   }
 }
@@ -1682,7 +1758,7 @@ function validateOnlineDeploymentGateStep(step, refs, expected) {
   assertOptionalBoundValue(parsed, '--timeout-ms', expected.smoke.timeoutMs, step.name);
   assertOptionalBoundBoolean(parsed, '--allow-http', expected.smoke.allowHttp, step.name);
   assertOptionalBoundBoolean(parsed, '--allow-localhost', expected.smoke.allowLocalhost, step.name);
-  if (isInstallSubstratesPath(expected.deploymentPath)) {
+  if (isOnlineInstallSubstratesPath(expected.deploymentPath)) {
     assertBoundValue(
       parsed,
       '--substrate-pack-manifest',
@@ -1776,7 +1852,180 @@ function validateAirgapConsumeStep(step, refs, expected) {
   };
 }
 
-function validateProducerSteps(plan, refs, expected) {
+function requireAirgapComponentRef(airgapBundleComponents, kind) {
+  const component = airgapBundleComponents?.[kind];
+  if (!component?.absolute_path) {
+    fail(`airgap bundle component missing from validated bundle manifest: ${kind}`);
+  }
+  return component;
+}
+
+function validateAirgapBundleCheckStep(step, refs, airgapBundleComponents, expected) {
+  if (step.name !== 'airgap-bundle-check') {
+    fail(`operator-inputs --run airgap install path second producer must be airgap-bundle-check, got: ${step.name}`);
+  }
+  const argv = step.argv;
+  if (!Array.isArray(argv) || argv.length < 4) {
+    fail('airgap-bundle-check producer argv is invalid');
+  }
+  if (argv[0] !== 'bash' || argv[1] !== VERIFY_RELEASE_SCRIPT || argv[2] !== '--airgap-bundle-check') {
+    fail('airgap-bundle-check producer argv must call verify-release.sh --airgap-bundle-check');
+  }
+
+  const parsed = parseProducerFlags(
+    argv,
+    step.name,
+    producerFlagSpec({
+      requiredValueFlags: AIRGAP_BUNDLE_CHECK_REQUIRED_VALUE_FLAGS,
+      optionalValueFlags: AIRGAP_BUNDLE_CHECK_OPTIONAL_VALUE_FLAGS,
+      booleanFlags: AIRGAP_BUNDLE_CHECK_BOOLEAN_FLAGS
+    })
+  );
+  assertBoundValue(
+    parsed,
+    '--release-contract',
+    requireAirgapComponentRef(airgapBundleComponents, 'release_contract').absolute_path,
+    step.name
+  );
+  assertBoundValue(
+    parsed,
+    '--deploy-template-package',
+    requireAirgapComponentRef(airgapBundleComponents, 'deploy_template_package').absolute_path,
+    step.name
+  );
+  assertBoundValue(
+    parsed,
+    '--archive',
+    requireAirgapComponentRef(airgapBundleComponents, 'deploy_template_archive').absolute_path,
+    step.name
+  );
+  assertBoundValue(
+    parsed,
+    '--image-map',
+    requireAirgapComponentRef(airgapBundleComponents, 'image_map').absolute_path,
+    step.name
+  );
+  assertBoundValue(parsed, '--target-profile', expected.targetProfile, step.name);
+  assertBoundValue(parsed, '--bundle-root', refs.airgap_bundle.absolute_path, step.name);
+  assertBoundValue(
+    parsed,
+    '--bundle-manifest',
+    refs.airgap_bundle_manifest.absolute_path,
+    step.name
+  );
+  assertBoundValue(parsed, '--output-dir', expected.outputDirs.airgapBundleCheck, step.name);
+
+  const outputDir = requireAbsolutePath(
+    parsed.value('--output-dir'),
+    'airgap-bundle-check output dir'
+  );
+
+  return {
+    step,
+    outputDir,
+    reportPath: path.join(outputDir, 'airgap-bundle-check-report.json')
+  };
+}
+
+function validateAirgapDeploymentGateStep(step, refs, airgapBundleComponents, expected) {
+  if (step.name !== 'airgap-deployment-gate') {
+    fail(`operator-inputs --run airgap install path third producer must be airgap-deployment-gate, got: ${step.name}`);
+  }
+  const argv = step.argv;
+  if (!Array.isArray(argv) || argv.length < 4) {
+    fail('airgap-deployment-gate producer argv is invalid');
+  }
+  if (argv[0] !== 'bash' || argv[1] !== VERIFY_RELEASE_SCRIPT || argv[2] !== '--airgap-deployment-gate') {
+    fail('airgap-deployment-gate producer argv must call verify-release.sh --airgap-deployment-gate');
+  }
+
+  const parsed = parseProducerFlags(
+    argv,
+    step.name,
+    producerFlagSpec({
+      requiredValueFlags: AIRGAP_DEPLOYMENT_GATE_REQUIRED_VALUE_FLAGS,
+      optionalValueFlags: AIRGAP_DEPLOYMENT_GATE_OPTIONAL_VALUE_FLAGS,
+      booleanFlags: AIRGAP_DEPLOYMENT_GATE_BOOLEAN_FLAGS
+    })
+  );
+  assertBoundValue(
+    parsed,
+    '--release-contract',
+    requireAirgapComponentRef(airgapBundleComponents, 'release_contract').absolute_path,
+    step.name
+  );
+  assertBoundValue(
+    parsed,
+    '--deploy-template-package',
+    requireAirgapComponentRef(airgapBundleComponents, 'deploy_template_package').absolute_path,
+    step.name
+  );
+  assertBoundValue(
+    parsed,
+    '--archive',
+    requireAirgapComponentRef(airgapBundleComponents, 'deploy_template_archive').absolute_path,
+    step.name
+  );
+  assertBoundValue(
+    parsed,
+    '--image-map',
+    requireAirgapComponentRef(airgapBundleComponents, 'image_map').absolute_path,
+    step.name
+  );
+  assertBoundValue(parsed, '--target-profile', expected.targetProfile, step.name);
+  assertBoundValue(parsed, '--bundle-root', refs.airgap_bundle.absolute_path, step.name);
+  assertBoundValue(
+    parsed,
+    '--bundle-manifest',
+    refs.airgap_bundle_manifest.absolute_path,
+    step.name
+  );
+  assertBoundValue(parsed, '--render-values', refs.render_values.absolute_path, step.name);
+  assertBoundValue(parsed, '--substrate-truth', expected.generatedRefs.substrateTruth, step.name);
+  assertBoundValue(
+    parsed,
+    '--target-prerequisites',
+    refs.target_prerequisites.absolute_path,
+    step.name
+  );
+  assertBoundValue(parsed, '--namespace', expected.namespace, step.name);
+  assertBoundValue(parsed, '--output-dir', expected.outputDirs.airgapDeploymentGate, step.name);
+  assertBoundValue(parsed, '--mode', expected.mode, step.name);
+  assertBoundValue(parsed, '--context', expected.context, step.name);
+  assertBoundValue(parsed, '--kubectl', refs.kubectl.absolute_path, step.name);
+  assertBoundValue(parsed, '--archive-probe', refs.archive_probe.absolute_path, step.name);
+  assertBoundValue(parsed, '--image-loader', refs.image_loader.absolute_path, step.name);
+  assertBoundValue(parsed, '--smoke-url', expected.smoke.smokeUrl, step.name);
+  assertBoundValue(parsed, '--confirm-apply', expected.targetProfile, step.name);
+  assertBoundValue(parsed, '--operator-run-id', expected.operatorRunId, step.name);
+  assertOptionalBoundValue(parsed, '--timeout', expected.smoke.timeout, step.name);
+  assertOptionalBoundValue(parsed, '--expected-status', expected.smoke.expectedStatus, step.name);
+  assertOptionalBoundValue(parsed, '--timeout-ms', expected.smoke.timeoutMs, step.name);
+  assertOptionalBoundBoolean(parsed, '--allow-http', expected.smoke.allowHttp, step.name);
+  assertOptionalBoundBoolean(parsed, '--allow-localhost', expected.smoke.allowLocalhost, step.name);
+  if (!parsed.boolean('--allow-installed-substrate-truth')) {
+    fail('airgap-deployment-gate producer argv must include --allow-installed-substrate-truth for airgap/install_substrates');
+  }
+  assertBoundValue(
+    parsed,
+    '--substrate-install-report',
+    expected.generatedRefs.substrateInstallReport,
+    step.name
+  );
+
+  const outputDir = requireAbsolutePath(
+    parsed.value('--output-dir'),
+    'airgap-deployment-gate output dir'
+  );
+
+  return {
+    step,
+    outputDir,
+    reportPath: path.join(outputDir, 'airgap-deployment-gate-report.json')
+  };
+}
+
+function validateProducerSteps(plan, refs, airgapBundleComponents, expected) {
   if (!Array.isArray(plan.producer_argv)) {
     fail('plan.producer_argv must be an array');
   }
@@ -1789,13 +2038,15 @@ function validateProducerSteps(plan, refs, expected) {
     return {
       substrateInstall: undefined,
       onlineDeploymentGate: undefined,
+      airgapBundleCheck: undefined,
+      airgapDeploymentGate: undefined,
       airgapConsume: validateAirgapConsumeStep(airgapConsumeStep, refs, expected)
     };
   }
 
-  if (isInstallSubstratesPath(expected.deploymentPath)) {
+  if (isOnlineInstallSubstratesPath(expected.deploymentPath)) {
     if (plan.producer_argv.length !== 2) {
-      fail('operator-inputs --run install path requires exactly two producer steps');
+      fail('operator-inputs --run online install path requires exactly two producer steps');
     }
     const substrateInstallStep = requireObject(plan.producer_argv[0], 'plan.producer_argv[0]');
     const onlineGateStep = requireObject(plan.producer_argv[1], 'plan.producer_argv[1]');
@@ -1805,6 +2056,41 @@ function validateProducerSteps(plan, refs, expected) {
     return {
       substrateInstall: validateSubstrateInstallStep(substrateInstallStep, refs, expected),
       onlineDeploymentGate: validateOnlineDeploymentGateStep(onlineGateStep, refs, expected),
+      airgapBundleCheck: undefined,
+      airgapDeploymentGate: undefined,
+      airgapConsume: undefined
+    };
+  }
+
+  if (isAirgapInstallSubstratesPath(expected.deploymentPath)) {
+    if (plan.producer_argv.length !== 3) {
+      fail('operator-inputs --run airgap install path requires exactly three producer steps');
+    }
+    const substrateInstallStep = requireObject(plan.producer_argv[0], 'plan.producer_argv[0]');
+    const bundleCheckStep = requireObject(plan.producer_argv[1], 'plan.producer_argv[1]');
+    const deploymentGateStep = requireObject(plan.producer_argv[2], 'plan.producer_argv[2]');
+    if (
+      substrateInstallStep.name !== 'substrate-install' ||
+      bundleCheckStep.name !== 'airgap-bundle-check' ||
+      deploymentGateStep.name !== 'airgap-deployment-gate'
+    ) {
+      fail('operator-inputs --run airgap install path producer order must be substrate-install then airgap-bundle-check then airgap-deployment-gate');
+    }
+    return {
+      substrateInstall: validateSubstrateInstallStep(substrateInstallStep, refs, expected),
+      onlineDeploymentGate: undefined,
+      airgapBundleCheck: validateAirgapBundleCheckStep(
+        bundleCheckStep,
+        refs,
+        airgapBundleComponents,
+        expected
+      ),
+      airgapDeploymentGate: validateAirgapDeploymentGateStep(
+        deploymentGateStep,
+        refs,
+        airgapBundleComponents,
+        expected
+      ),
       airgapConsume: undefined
     };
   }
@@ -1814,6 +2100,8 @@ function validateProducerSteps(plan, refs, expected) {
   }
   return {
     substrateInstall: undefined,
+    airgapBundleCheck: undefined,
+    airgapDeploymentGate: undefined,
     onlineDeploymentGate: validateOnlineDeploymentGateStep(
       requireObject(plan.producer_argv[0], 'plan.producer_argv[0]'),
       refs,
@@ -1854,6 +2142,14 @@ async function validateSubstrateInstallOutputs(producer, expected) {
     report.output_substrate_truth_digest,
     'substrate-install report.output_substrate_truth_digest'
   );
+  if (
+    requireString(
+      report.output_substrate_truth_path,
+      'substrate-install report.output_substrate_truth_path'
+    ) !== 'substrate-truth.json'
+  ) {
+    fail('substrate-install report.output_substrate_truth_path must be substrate-truth.json');
+  }
   const generatedTruthDigest = await fileDigest(
     producer.truthPath,
     'substrate-install generated substrate truth'
@@ -2070,6 +2366,17 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
       expected.outputDirs.airgapConsumeRehearsal,
       'airgap-deployment-gate'
     );
+  } else if (isAirgapInstallSubstratesPath(expected.deploymentPath)) {
+    expected.outputDirs.airgapBundleCheck = await ensureDirectoryInsideInternalRoot({
+      internalRoot: envelope.internalRoot,
+      targetDir: expected.outputDirs.airgapBundleCheck,
+      label: 'airgap-bundle-check output dir'
+    });
+    expected.outputDirs.airgapDeploymentGate = await ensureDirectoryInsideInternalRoot({
+      internalRoot: envelope.internalRoot,
+      targetDir: expected.outputDirs.airgapDeploymentGate,
+      label: 'airgap-deployment-gate output dir'
+    });
   } else {
     expected.outputDirs.onlineDeploymentGate = await ensureDirectoryInsideInternalRoot({
       internalRoot: envelope.internalRoot,
@@ -2083,7 +2390,7 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
     label: 'deployment-path output dir'
   });
   await cleanupDeploymentPathOutputs(expected.outputDirs.deploymentPath);
-  const producers = validateProducerSteps(plan, refs, expected);
+  const producers = validateProducerSteps(plan, refs, airgapBundleComponents, expected);
 
   let substrateInstallReportPath;
   if (producers.substrateInstall) {
@@ -2107,6 +2414,26 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
     airgapConsumeReportPath = producers.airgapConsume.reportPath;
     airgapDeploymentGateReportPath = airgapReports.deploymentGateReportPath;
     airgapBundleCheckReportPath = airgapReports.bundleCheckReportPath;
+  } else if (producers.airgapDeploymentGate) {
+    runCommand(
+      producers.airgapBundleCheck.step.argv,
+      'operator-inputs producer airgap-bundle-check'
+    );
+    await requireGeneratedReport(
+      producers.airgapBundleCheck.reportPath,
+      'airgap-bundle-check report'
+    );
+    runCommand(
+      producers.airgapDeploymentGate.step.argv,
+      'operator-inputs producer airgap-deployment-gate'
+    );
+    await requireGeneratedReport(
+      producers.airgapDeploymentGate.reportPath,
+      'airgap-deployment-gate report'
+    );
+    producerReportPath = producers.airgapDeploymentGate.reportPath;
+    airgapDeploymentGateReportPath = producers.airgapDeploymentGate.reportPath;
+    airgapBundleCheckReportPath = producers.airgapBundleCheck.reportPath;
   } else {
     runCommand(
       producers.onlineDeploymentGate.step.argv,
@@ -2120,7 +2447,9 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
     onlineDeploymentGateReportPath = producers.onlineDeploymentGate.reportPath;
   }
 
-  const finalizerRefs = producers.airgapConsume ? airgapBundleComponents : refs;
+  const finalizerRefs = (producers.airgapConsume || producers.airgapDeploymentGate)
+    ? airgapBundleComponents
+    : refs;
   const finalizerArgv = [
     'bash',
     VERIFY_RELEASE_SCRIPT,
@@ -2132,7 +2461,7 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
     '--deploy-template-package',
     finalizerRefs.deploy_template_package.absolute_path
   ];
-  if (producers.airgapConsume) {
+  if (producers.airgapConsume || producers.airgapDeploymentGate) {
     finalizerArgv.push(
       '--airgap-deployment-gate-report',
       airgapDeploymentGateReportPath,
