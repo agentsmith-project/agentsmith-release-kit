@@ -5,14 +5,10 @@ Status: bootstrap-focused producers plus GA aggregate gate.
 This repository is the future deploy and package execution home for
 AgentSmith releases. It is intentionally small at bootstrap time: repo
 identity, boundary documents, handoff guidance, and focused diagnostics. It
-contains image-map, airgap bundle create, airgap bundle manifest/digest,
-airgap image archive materiality, airgap image load, registry presence,
-airgap bundle load-plan, airgap bundle render-check, airgap deployment focused
-chain orchestration, airgap consume rehearsal, airgap adoption aggregation,
-substrate pack check, apply-only, rollout/live digest, route smoke, and online
-focused chain orchestration diagnostics, release engineering gate candidate
-intake, plus operator signoff and scoped runbook acceptance binding, but does
-not contain full deploy tooling yet.
+contains package-driven operator intake/run orchestration, path-level evidence
+producers, focused diagnostics, operator runbooks, scoped runbook acceptance
+binding, and GA aggregate verification, but does not contain full deploy
+tooling yet.
 
 ## Canonical Identity
 
@@ -62,7 +58,7 @@ AgentSmith Release Kit does not own:
 
 ## Deployment Model
 
-The operator-facing path is a single package-driven flow:
+The operator-facing path is a single package-driven facade:
 
 ```bash
 bash scripts/operator-release.sh --operator-inputs <dir-or-json>
@@ -77,6 +73,10 @@ values are:
 - `online/install_substrates`
 - `airgap/use_existing`
 - `airgap/install_substrates`
+
+The GA operator substrate choices are `use_existing` and
+`install_substrates`. Legacy `kit_provided` is an internal compatibility alias
+for focused diagnostics; it is not a GA operator `deployment_path`.
 
 Without `--run`, this slice validates the package, rejects internal producer
 vocabulary, secret-looking payloads, missing path-specific inputs, and path
@@ -98,11 +98,11 @@ package-local `kubectl`, explicit `context`, package-local archive/image load
 tools, and apply smoke inputs. The airgap install path runs substrate-install,
 then runs bundle-check plus airgap deployment-gate using bundle-local release
 materials and the installer output substrate truth. These paths write
-path-level evidence under `.release-kit-internal/`. Server-dry-run modes also
-fail fast. This slice does not write `ga-release-report.json`; the final
-release-facing result is still the repo-local GA aggregate after all finalized
-deployment path reports and required AgentSmith product-side reports are
-supplied.
+path-level evidence under `.release-kit-internal/` for the release
+captain/finalizer. Server-dry-run modes also fail fast. Formal release success
+or failure is represented only by the final `ga-release-report.json` issued by
+the release finalizer/captain after required path evidence and AgentSmith
+product-side reports are available.
 
 For `online/install_substrates`, the package must provide namespace-scoped
 installer inputs, `kubectl` and `context` inputs, a package-local routability
@@ -114,7 +114,8 @@ archive/image loader probes for apply, and explicit install confirmation; it
 uses the installer-generated substrate truth under `.release-kit-internal` and
 does not require `routability_probe` or bundle/package `substrate_truth`.
 
-Package-driven GA handoff stays one package per deployment path:
+Release captain/finalizer handoff reference, not the operator success
+checklist:
 
 | Package `deployment_path` | Run | Finalized path report |
 | --- | --- | --- |
@@ -125,9 +126,10 @@ Package-driven GA handoff stays one package per deployment path:
 
 Each path report directory must also contain
 `deployment-path-finalizer-manifest.json` and `source-evidence/`. The package
-runs do not write `ga-release-report.json` or any formal GA verdict; pass the
-four path reports plus AgentSmith product readiness and post-deploy product
-smoke reports to `verify-release.sh --ga-release`.
+runs do not write `ga-release-report.json` or any formal GA verdict. The
+release captain/finalizer passes the four path reports plus AgentSmith product
+readiness and post-deploy product smoke reports to
+`verify-release.sh --ga-release`.
 These paths are still release-kit installer producer/finalizer evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
@@ -151,11 +153,12 @@ Those focused producer diagnostics use machine profile axes internally:
 - `substrate_source`: `external_declared` or `kit_installed`.
 - `distribution`: `online` or `airgap`.
 
-`kit_provided` is the legacy positional compatibility name for focused
+`kit_provided` is the legacy/internal positional compatibility name for focused
 diagnostics. It means the kit validates a supplied substrate pack manifest,
 declared substrate connection truth, and related routability/materiality
 evidence. It does not install databases, buckets, OIDC realms, or other
-substrates. Operator-facing packages use `install_substrates`.
+substrates, and it is not a GA operator model. Operator-facing packages use
+`install_substrates`.
 `install_substrates` requires an explicit report from the separate
 `--substrate-install` producer only when maintainers run focused diagnostics
 directly. The package-driven `operator-release.sh --operator-inputs <pkg> --run`
@@ -195,13 +198,11 @@ bash scripts/operator-release.sh --operator-inputs <dir-or-json>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 ```
 
-This package-driven path writes finalized deployment-path handoff evidence
-under `.release-kit-internal/<deployment-path>/deployment-path/` when `--run`
-executes an apply manifest. It does not write `ga-release-report.json` or issue
-a formal GA verdict.
-
-Operator-facing handoff stops at `--operator-inputs --run` plus the finalized
-deployment-path reports for the later GA aggregate.
+This package-driven path writes finalized deployment-path handoff evidence for
+the release captain/finalizer when `--run` executes an apply manifest. It does
+not issue a formal GA verdict. Operator-facing action stops at
+`--operator-inputs --run`; formal success or failure is the final
+`ga-release-report.json` issued by the release finalizer/captain.
 
 ### Maintainer/Internal Diagnostics
 

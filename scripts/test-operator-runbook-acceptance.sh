@@ -20,6 +20,61 @@ pass() {
   echo "PASS: $*"
 }
 
+assert_operator_success_contract_docs() {
+  local help_output="$TMP_DIR/operator-release-help.out"
+  local runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
+  local root_readme="$ROOT_DIR/README.md"
+  local first_screen="$TMP_DIR/runbook-first-screen.md"
+  local forbidden
+
+  bash "$ROOT_DIR/scripts/operator-release.sh" --help >"$help_output"
+  grep -q -- '--operator-inputs <package-or-json> \[--run\]' "$help_output" ||
+    fail "operator-release help must foreground the single --operator-inputs facade"
+  grep -q -- 'Formal release success or failure' "$help_output" ||
+    fail "operator-release help must name the formal success boundary"
+  grep -q -- 'ga-release-report.json issued by the release finalizer/captain' "$help_output" ||
+    fail "operator-release help must point formal success to ga-release-report.json"
+  if grep -q -- 'verify-release.sh' "$help_output"; then
+    fail "operator-release help must not expose finalizer command details"
+  fi
+  if grep -q -- 'No ga-release-report' "$help_output"; then
+    fail "operator-release help must explain the phase boundary without bare ga-release-report negation"
+  fi
+
+  awk '
+    /^## Operator Package Matrix$/ { exit }
+    { print }
+  ' "$runbooks_readme" >"$first_screen"
+  for forbidden in \
+    'operator-release-surface-report' \
+    'adoption' \
+    'candidate' \
+    'kit_provided' \
+    'deployment-path-report.json'; do
+    if grep -Eiq "$forbidden" "$first_screen"; then
+      fail "operator runbook first screen must not present $forbidden as a success path"
+    fi
+  done
+  if grep -q -- 'verify-release.sh' "$first_screen"; then
+    fail "operator runbook first screen must not expose finalizer command details"
+  fi
+  for required in \
+    '### 1. Which path do I choose?' \
+    '### 2. What do I prepare?' \
+    '### 3. What do I run?' \
+    '### 4. What is the final report?' \
+    'Formal release success or failure is represented only by the final'; do
+    grep -q -- "$required" "$first_screen" ||
+      fail "operator runbook first screen missing: $required"
+  done
+
+  grep -q -- 'The GA operator substrate choices are `use_existing` and' "$root_readme" ||
+    fail "root README must name the GA operator substrate choices"
+  grep -q -- 'Legacy `kit_provided` is an internal compatibility alias' "$root_readme" ||
+    fail "root README must mark kit_provided as legacy/internal"
+  pass "operator success contract docs keep internal diagnostics out of the first screen"
+}
+
 run_acceptance() {
   local case_dir="$1"
   local output_dir="$2"
@@ -518,6 +573,8 @@ surface.airgap_evidence_handoff.evidence_digest =
 writeJson(path.join(caseDir, 'operator-release-surface-report.json'), surface);
 NODE
 }
+
+assert_operator_success_contract_docs
 
 valid_case="$TMP_DIR/case-valid"
 valid_out="$TMP_DIR/out-valid"

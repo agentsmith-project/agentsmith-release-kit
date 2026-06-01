@@ -1,136 +1,80 @@
 # Runbooks
 
-Status: operator main path plus maintainer/internal diagnostic index for the
-current bootstrap diagnostics.
+Status: operator package flow first; maintainer/internal diagnostics are in
+the appendix.
 
-Use this page to prepare the operator intake package and understand which
-repo-local outputs are final versus internal. Focused diagnostic scripts here
-produce `readiness: false`; they do not sign off deploy, package, offline
-install, or release readiness.
+## Operator First Screen
 
-## Operator Main Path
+### 1. Which path do I choose?
 
-The current operator-facing entry is one input package and one facade command:
-
-```bash
-bash scripts/operator-release.sh --operator-inputs <dir-or-json>
-bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
-```
-
-`operator-inputs.json` describes exactly one selected deployment path. Use four
-packages for a full rehearsal across:
+Pick exactly one deployment path per input package:
 
 - `online/use_existing`
 - `online/install_substrates`
 - `airgap/use_existing`
 - `airgap/install_substrates`
 
-Without `--run`, the facade performs package intake and writes the internal
-`.release-kit-internal/operator-inputs-plan.json`. That plan is only the
-internal next-step plan: it is not runtime evidence, not a final one-command GA
-flow, and not deploy, package, or release readiness. Post-deploy smoke reports
-are produced after runtime checks and are not accepted as package inputs.
-For airgap packages, runtime inputs referenced by the airgap path must live
-inside the referenced `airgap_bundle`.
+Use four packages when the release captain asks for all four GA inputs. Do not
+combine the four paths into one manifest. `use_existing` means the target
+environment already provides the required substrates. `install_substrates`
+means the path runs the namespace-scoped substrate installer with explicit
+confirmation; it is not cloud provisioning for clusters, managed databases,
+buckets, IAM, networks, or OIDC realms.
 
-With `--run`, the current slice executes `online/use_existing`,
-`online/install_substrates`, `airgap/use_existing`, and
-`airgap/install_substrates` packages whose manifest sets `mode: apply`.
-`online/use_existing` runs the existing online focused
-producer chain. `online/install_substrates` first runs substrate-install, then
-runs the online deployment gate bound to the installer output substrate truth.
-`airgap/use_existing` runs the existing airgap consume rehearsal, extracts only
-the nested bundle-check and airgap deployment-gate reports, and finalizes a
-deployment path report under `.release-kit-internal/`. The airgap install path
-runs substrate-install, bundle-check, and airgap deployment-gate, with the gate
-bound to the installer output substrate truth. Server-dry-run modes still fail
-fast. This slice does not create
-`ga-release-report.json`, and it does not issue release readiness.
+### 2. What do I prepare?
 
-Final release closure is the final `ga-release-report.json` after finalized
-deployment path reports and AgentSmith product-side reports exist. The current
-operator-inputs intake slice does not create that final report.
+Prepare one directory or JSON manifest containing `operator-inputs.json` for
+the selected deployment path. Keep secrets as references, not raw values. For
+airgap packages, every runtime file referenced by the path must live inside the
+referenced `airgap_bundle`. Post-deploy product smoke is produced after the
+runtime check; it is not an operator input package field.
 
-### Package To GA Handoff
+### 3. What do I run?
 
-Use one package for each deployment path. Do not combine the four paths into a
-single manifest.
-
-| Package `deployment_path` | Operator run | Handoff report for `--ga-release` |
-| --- | --- | --- |
-| `online/use_existing` | `bash scripts/operator-release.sh --operator-inputs <online-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json` |
-| `online/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <online-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json` |
-| `airgap/use_existing` | `bash scripts/operator-release.sh --operator-inputs <airgap-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json` |
-| `airgap/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <airgap-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json` |
-
-Each handoff report is valid only with its sibling
-`deployment-path-finalizer-manifest.json` and `source-evidence/` directory.
-Package runs write path-level evidence only. They do not write
-`ga-release-report.json`, do not issue `formal_verdict`, and do not replace
-AgentSmith product readiness or post-deploy product smoke evidence.
-
-After all four package runs and product-side reports are available:
+Use the single operator facade:
 
 ```bash
-bash scripts/verify-release.sh --ga-release \
-  --release-contract <agentsmith-release-contract.json> \
-  --deploy-template-package <agentsmith-deploy-template-package.json> \
-  --deployment-path-report <online-use-existing-pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json \
-  --deployment-path-report <online-install-substrates-pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json \
-  --deployment-path-report <airgap-use-existing-pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json \
-  --deployment-path-report <airgap-install-substrates-pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json \
-  --product-readiness-report <agentsmith/product-readiness-report.json> \
-  --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \
-  --output-dir <ga-output-dir>
+bash scripts/operator-release.sh --operator-inputs <dir-or-json>
+bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 ```
 
-The post-deploy product smoke input must be the AgentSmith canonical report:
-`schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
-agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,
-input_sha256, release_id, git_sha }`. Its `input_sha256`, `release_id`, and
-`git_sha` must match the same `--release-contract` raw digest, id, and git sha.
-Legacy surrogate top-level fields are rejected: `release_id`, `git_sha`,
-`release_contract_digest`, `covered_flows`, and `artifact_provenance`.
+The first command validates the package. Add `--run` only when the package is
+ready to execute the selected apply path. A passing `--run` produces path-level
+evidence for the release captain/finalizer to consume; do not treat
+intermediate files as the formal release verdict.
 
-`install_substrates` means namespace-scoped substrate manifest install
-producer/finalizer evidence with explicit install confirmation. It is not a
-cloud resource provisioner and does not create clusters, managed databases,
-buckets, IAM, networks, or OIDC realms.
-Kind remains rehearsal-only; it is not a user deployment prerequisite or a
-replacement for real Kubernetes evidence.
+### 4. What is the final report?
 
-## Operator Choice Matrix
+Formal release success or failure is represented only by the final
+`ga-release-report.json` issued by the release finalizer/captain after required
+path evidence and AgentSmith product-side reports are available. If the
+operator facade passes, hand off the package outputs and wait for that final
+report.
 
-This table is the operator-facing package matrix. It is not a formal release
-verdict, package readiness, operator readiness, or GA signoff.
+## Operator Package Matrix
 
-`online/install_substrates` needs namespace-scoped installer producer/finalizer
-evidence, required `kubectl` and `context` inputs, a package-local
-`routability_probe`, substrate pack manifest, substrate install inputs, and an
-explicit installer confirmation. It does not accept package-local
-`substrate_truth`; the online deployment gate uses installer-generated truth.
-`airgap/install_substrates` needs package-local `kubectl`, explicit `context`,
-the airgap bundle plus manifest, package-local `archive_probe` and
-`image_loader` for apply, substrate pack manifest, substrate install inputs,
-and explicit installer confirmation. It uses the installer-generated substrate
-truth under `.release-kit-internal` for the airgap deployment gate and does not
-require `routability_probe` or bundle/package `substrate_truth`. These paths
-are not cloud substrate provisioners.
-`installed_by` stays a provenance marker, not installer proof; it does not mean
-release-kit created databases, buckets, OIDC realms, or other substrate
-resources.
+This table explains package contents for the four operator paths. It is not a
+formal release verdict, package readiness, operator readiness, or GA signoff.
 
-| `deployment_path` | Package must include | Current intake result |
+`online/install_substrates` needs namespace-scoped installer evidence,
+required `kubectl` and `context` inputs, a package-local `routability_probe`,
+substrate pack manifest, substrate install inputs, and an explicit installer
+confirmation. It does not accept package-local `substrate_truth`; the online
+deployment gate uses installer-generated truth. `airgap/install_substrates`
+needs package-local `kubectl`, explicit `context`, the airgap bundle plus
+manifest, package-local `archive_probe` and `image_loader` for apply,
+substrate pack manifest, substrate install inputs, and explicit installer
+confirmation. It uses installer-generated substrate truth for the airgap
+deployment gate and does not require `routability_probe` or bundle/package
+`substrate_truth`. `installed_by` stays a provenance marker, not installer
+proof.
+
+| `deployment_path` | Package must include | Current run result |
 | --- | --- | --- |
-| `online/use_existing` | Release contract, deploy template package and archive, render values, target substrate truth, target prerequisites, namespace, optional package-local `kubectl`. | Validates the package and writes the internal plan. With `--run` and `mode: apply`, also writes path-level deployment evidence through the existing online producer and deployment-path finalizer. |
-| `online/install_substrates` | Release contract, deploy template package and archive, render values, target prerequisites, substrate pack manifest, substrate install inputs, required `kubectl` and `context`, package-local `routability_probe`, and explicit install confirmation. No package-local `substrate_truth`. | Validates installer inputs and writes the internal plan for installer plus online focused producer steps. With `--run` and `mode: apply`, runs substrate-install before the online deployment gate; the installer output substrate truth drives that gate, then the deployment-path finalizer writes path-level evidence. |
-| `airgap/use_existing` | Bundle-local release contract, deploy template package and archive, render values, substrate truth, and target prerequisites; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL for run-time route-smoke evidence. | Validates the already assembled bundle reference and writes the internal plan for the airgap consume/deployment producer path. With `--run` and `mode: apply`, runs airgap consume rehearsal, extracts its nested bundle-check and deployment-gate reports, then the deployment-path finalizer writes path-level evidence from bundle-local release contract/deploy package components. |
-| `airgap/install_substrates` | Bundle-local release contract, deploy template package and archive, render values, and target prerequisites; substrate pack manifest; substrate install inputs; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL; explicit install confirmation. No bundle/package `substrate_truth`. | Validates installer and bundle references and writes the internal plan for installer plus bundle-check and airgap deployment producer steps. With `--run` and `mode: apply`, runs substrate-install first, keeps generated substrate truth under `.release-kit-internal`, uses that truth for the airgap deployment gate, then finalizes path-level evidence. |
-
-The operator-facing substrate choices are only `use_existing` and
-`install_substrates`. Legacy `kit_provided` appears only in the
-maintainer/internal diagnostics below; do not read legacy `kit_provided`
-"not yet" notes as package-driven operator status.
+| `online/use_existing` | Release contract, deploy template package and archive, render values, target substrate truth, target prerequisites, namespace, optional package-local `kubectl`. | Validates the package. With `--run` and `mode: apply`, executes the online path and writes path-level evidence for finalization. |
+| `online/install_substrates` | Release contract, deploy template package and archive, render values, target prerequisites, substrate pack manifest, substrate install inputs, required `kubectl` and `context`, package-local `routability_probe`, and explicit install confirmation. No package-local `substrate_truth`. | Validates installer inputs. With `--run` and `mode: apply`, runs substrate-install first, uses the installer output truth for the online gate, and writes path-level evidence for finalization. |
+| `airgap/use_existing` | Bundle-local release contract, deploy template package and archive, render values, substrate truth, and target prerequisites; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL for runtime route-smoke evidence. | Validates the bundle reference. With `--run` and `mode: apply`, runs airgap consume/deployment checks and writes path-level evidence for finalization. |
+| `airgap/install_substrates` | Bundle-local release contract, deploy template package and archive, render values, and target prerequisites; substrate pack manifest; substrate install inputs; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL; explicit install confirmation. No bundle/package `substrate_truth`. | Validates installer and bundle references. With `--run` and `mode: apply`, runs substrate-install first, uses the installer output truth for airgap deployment, and writes path-level evidence for finalization. |
 
 ### Airgap Tool Contract
 
@@ -158,10 +102,61 @@ does not download from the public internet, and an airgap package should treat
 network access by these tools as out of contract; the current checks bind
 local executable refs and digest output, not network isolation proof.
 
-## Maintainer/Internal Diagnostics
+## Maintainer/Internal Appendix
 
 Everything below is for maintainers changing release-kit internals or for CI
 diagnostic plumbing. It is not the operator main path.
+
+### Release Captain/Finalizer Handoff Reference
+
+This section names the internal files consumed by the final GA aggregate. It is
+not an operator success checklist.
+
+Use one package for each deployment path. Do not combine the four paths into a
+single manifest.
+
+| Package `deployment_path` | Operator run | Handoff report for `--ga-release` |
+| --- | --- | --- |
+| `online/use_existing` | `bash scripts/operator-release.sh --operator-inputs <online-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json` |
+| `online/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <online-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json` |
+| `airgap/use_existing` | `bash scripts/operator-release.sh --operator-inputs <airgap-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json` |
+| `airgap/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <airgap-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json` |
+
+Each handoff report is valid only with its sibling
+`deployment-path-finalizer-manifest.json` and `source-evidence/` directory.
+Package runs write path-level evidence only. They do not write
+`ga-release-report.json`, do not issue `formal_verdict`, and do not replace
+AgentSmith product readiness or post-deploy product smoke evidence.
+
+After all four package runs and product-side reports are available, the
+release captain/finalizer runs:
+
+```bash
+bash scripts/verify-release.sh --ga-release \
+  --release-contract <agentsmith-release-contract.json> \
+  --deploy-template-package <agentsmith-deploy-template-package.json> \
+  --deployment-path-report <online-use-existing-pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json \
+  --deployment-path-report <online-install-substrates-pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json \
+  --deployment-path-report <airgap-use-existing-pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json \
+  --deployment-path-report <airgap-install-substrates-pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json \
+  --product-readiness-report <agentsmith/product-readiness-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \
+  --output-dir <ga-output-dir>
+```
+
+The post-deploy product smoke input must be the AgentSmith canonical report:
+`schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
+agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,
+input_sha256, release_id, git_sha }`. Its `input_sha256`, `release_id`, and
+`git_sha` must match the same `--release-contract` raw digest, id, and git sha.
+Legacy surrogate top-level fields are rejected: `release_id`, `git_sha`,
+`release_contract_digest`, `covered_flows`, and `artifact_provenance`.
+
+Legacy `kit_provided` is a maintainer/internal alias for focused diagnostics.
+It is not a GA operator `deployment_path`; operator packages use
+`install_substrates`.
+
+### Maintainer/Internal Diagnostics
 
 Airgap bundle packaging commands are packaging-side helpers for the airgap
 producer diagnostics, not standalone operator choices. The table names their

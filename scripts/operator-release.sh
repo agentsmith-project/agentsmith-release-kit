@@ -10,6 +10,10 @@ usage() {
 Usage:
   bash scripts/operator-release.sh --operator-inputs <package-or-json> [--run]
 
+Operator facade:
+  This is the only operator-facing release-kit entry. Legacy positional flows
+  are maintainer/internal diagnostics only; see docs/RELEASE_GATES.md.
+
 Operator-inputs intake:
   --operator-inputs validates one deployment-path input package and writes
   .release-kit-internal/operator-inputs-plan.json.
@@ -25,10 +29,12 @@ Operator-inputs run:
   airgap/use_existing runs airgap-consume-rehearsal, extracts the
   nested bundle-check and deployment-gate reports, then runs the internal
   deployment-path finalizer. Server-dry-run modes fail fast.
-  No ga-release-report.json, GA verdict, or release readiness is issued.
 
-Legacy positional flows are maintainer/internal diagnostics only; see
-docs/RELEASE_GATES.md.
+Success boundary:
+  --run produces path-level evidence for the release captain/finalizer to
+  consume. Formal release success or failure is represented only by the final
+  ga-release-report.json issued by the release finalizer/captain after required
+  path evidence and AgentSmith product-side reports are available.
 USAGE
 }
 
