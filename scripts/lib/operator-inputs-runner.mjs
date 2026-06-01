@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { constants as fsConstants } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,15 +53,40 @@ const INSTALL_INPUT_REFS = [
   'kubectl',
   'routability_probe'
 ];
-const AIRGAP_USE_EXISTING_INPUT_REFS = [
+const AIRGAP_PACKAGE_INPUT_REFS = [
   'airgap_bundle',
-  'airgap_bundle_manifest',
+  'airgap_bundle_manifest'
+];
+const AIRGAP_APPLY_INPUT_REFS = [
   'archive_probe',
   'image_loader'
+];
+const AIRGAP_USE_EXISTING_INPUT_REFS = [
+  ...AIRGAP_PACKAGE_INPUT_REFS,
+  ...AIRGAP_APPLY_INPUT_REFS
 ];
 const DIRECTORY_INPUT_REFS = new Set(['airgap_bundle']);
 const COMMAND_INPUT_REFS = new Set([
   'kubectl',
+  'routability_probe',
+  'archive_probe',
+  'image_loader'
+]);
+const MANIFEST_FILE_REF_FIELDS = new Set([
+  'release_contract',
+  'deploy_template_package',
+  'deploy_template_archive',
+  'render_values',
+  'substrate_truth',
+  'target_prerequisites',
+  'airgap_bundle_manifest',
+  'substrate_pack_manifest',
+  'substrate_install_inputs'
+]);
+const MANIFEST_DIRECTORY_REF_FIELDS = new Set(['airgap_bundle']);
+const MANIFEST_COMMAND_REF_FIELDS = new Set([
+  'kubectl',
+  'registry_probe',
   'routability_probe',
   'archive_probe',
   'image_loader'
@@ -319,12 +345,27 @@ function isInsidePath(rootDir, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function isReservedOperatorOutputPath(relativePath) {
+  const normalized = path.posix.normalize(relativePath.replace(/\\/g, '/'));
+  return normalized === INTERNAL_DIR || normalized.startsWith(`${INTERNAL_DIR}/`);
+}
+
+function assertNotReservedOperatorOutputPath(relativePath, label) {
+  if (isReservedOperatorOutputPath(relativePath)) {
+    fail(`${label} must not point into reserved operator-inputs output tree: ${INTERNAL_DIR}`);
+  }
+}
+
 function packageRelativePath(operatorInputsRoot, absolutePath) {
   const relative = path.relative(operatorInputsRoot, absolutePath).split(path.sep).join('/');
   if (relative === '' || relative.startsWith('../') || relative === '..' || path.isAbsolute(relative)) {
     fail(`resolved path escaped operator-inputs package: ${absolutePath}`);
   }
   return relative;
+}
+
+function assertAbsolutePackagePathNotReserved(operatorInputsRoot, absolutePath, label) {
+  assertNotReservedOperatorOutputPath(packageRelativePath(operatorInputsRoot, absolutePath), label);
 }
 
 function assertPackageRelativeInput(value, label) {
@@ -344,6 +385,7 @@ function assertPackageRelativeInput(value, label) {
   ) {
     fail(`${label} escapes the operator-inputs package`);
   }
+  assertNotReservedOperatorOutputPath(normalized, label);
   return normalized;
 }
 
@@ -370,10 +412,12 @@ async function resolvePackagePath({ operatorInputsRoot, value, label, kind }) {
   if (!isInsidePath(operatorInputsRoot, realPath)) {
     fail(`${label} resolves outside the operator-inputs package`);
   }
+  const canonicalRelativePath = packageRelativePath(operatorInputsRoot, realPath);
+  assertNotReservedOperatorOutputPath(canonicalRelativePath, label);
 
   return {
     absolutePath: realPath,
-    path: packageRelativePath(operatorInputsRoot, realPath)
+    path: canonicalRelativePath
   };
 }
 
@@ -550,6 +594,30 @@ async function validatePlanEnvelope(plan) {
   };
 }
 
+async function validatePlanPrecleanEnvelope(plan, canonicalPlanPath) {
+  const declaredOperatorInputsRoot = requireAbsolutePath(
+    plan.operator_inputs_root,
+    'plan.operator_inputs_root'
+  );
+  const operatorInputsRoot = await realpathForExisting(
+    declaredOperatorInputsRoot,
+    'plan.operator_inputs_root'
+  );
+  if (declaredOperatorInputsRoot !== operatorInputsRoot) {
+    fail('operator-inputs plan operator_inputs_root must be canonical');
+  }
+  await requireDirectory(operatorInputsRoot, 'plan.operator_inputs_root');
+  const internalRoot = await ensureInternalRuntimeRoot(operatorInputsRoot);
+  if (!isInsidePath(internalRoot, canonicalPlanPath)) {
+    fail('operator-inputs plan path must be inside operator-inputs internal output root');
+  }
+
+  return {
+    internalRoot,
+    operatorInputsRoot
+  };
+}
+
 function isInstallSubstratesPath(deploymentPath) {
   return deploymentPath === ONLINE_INSTALL_SUBSTRATES_PATH;
 }
@@ -558,13 +626,26 @@ function isAirgapUseExistingPath(deploymentPath) {
   return deploymentPath === AIRGAP_USE_EXISTING_PATH;
 }
 
-function inputRefsForDeploymentPath(deploymentPath) {
+function isAirgapInstallSubstratesPath(deploymentPath) {
+  return deploymentPath === AIRGAP_INSTALL_SUBSTRATES_PATH;
+}
+
+function inputRefsForDeploymentPath(deploymentPath, mode) {
   const required = [...COMMON_INPUT_REFS];
   const optional = [];
   if (isInstallSubstratesPath(deploymentPath)) {
     required.push(...INSTALL_INPUT_REFS);
   } else if (isAirgapUseExistingPath(deploymentPath)) {
-    required.push(...AIRGAP_USE_EXISTING_INPUT_REFS, 'kubectl');
+    required.push(...AIRGAP_PACKAGE_INPUT_REFS, 'kubectl');
+    if (mode === SUPPORTED_MODE) {
+      required.push(...AIRGAP_APPLY_INPUT_REFS);
+    }
+  } else if (isAirgapInstallSubstratesPath(deploymentPath)) {
+    required.push('substrate_pack_manifest', 'substrate_install_inputs', 'kubectl');
+    required.push(...AIRGAP_PACKAGE_INPUT_REFS);
+    if (mode === SUPPORTED_MODE) {
+      required.push(...AIRGAP_APPLY_INPUT_REFS);
+    }
   } else {
     optional.push('kubectl');
   }
@@ -609,9 +690,24 @@ async function validateFileRef(refs, key, operatorInputsRoot) {
   if (absolutePath !== canonicalPath) {
     fail(`plan.input_refs.${key}.absolute_path must be canonical`);
   }
+  if (!isInsidePath(operatorInputsRoot, canonicalPath)) {
+    fail(`plan.input_refs.${key}.absolute_path must resolve inside operator-inputs package`);
+  }
+  assertAbsolutePackagePathNotReserved(
+    operatorInputsRoot,
+    canonicalPath,
+    `plan.input_refs.${key}.absolute_path`
+  );
   const actual = await fileDigest(canonicalPath, `plan.input_refs.${key}`);
   if (requireDigest(ref.sha256, `plan.input_refs.${key}.sha256`) !== actual) {
     fail(`input ref digest changed after plan generation: ${key}`);
+  }
+  if (COMMAND_INPUT_REFS.has(key)) {
+    try {
+      await fs.access(canonicalPath, fsConstants.X_OK);
+    } catch {
+      fail(`plan.input_refs.${key}.absolute_path must be executable`);
+    }
   }
   ref.absolute_path = canonicalPath;
   await validateRefPackageBinding({ ref, key, operatorInputsRoot });
@@ -634,6 +730,14 @@ async function validateDirectoryRef(refs, key, operatorInputsRoot) {
   if (absolutePath !== canonicalPath) {
     fail(`plan.input_refs.${key}.absolute_path must be canonical`);
   }
+  if (!isInsidePath(operatorInputsRoot, canonicalPath)) {
+    fail(`plan.input_refs.${key}.absolute_path must resolve inside operator-inputs package`);
+  }
+  assertAbsolutePackagePathNotReserved(
+    operatorInputsRoot,
+    canonicalPath,
+    `plan.input_refs.${key}.absolute_path`
+  );
   const actual = await digestDirectory(canonicalPath);
   if (!Number.isInteger(ref.entry_count) || ref.entry_count !== actual.entry_count) {
     fail(`input ref directory entry count changed after plan generation: ${key}`);
@@ -647,6 +751,68 @@ async function validateDirectoryRef(refs, key, operatorInputsRoot) {
   ref.absolute_path = canonicalPath;
   await validateRefPackageBinding({ ref, key, operatorInputsRoot });
   return ref;
+}
+
+function validateInputRefPathSafety(ref, key, operatorInputsRoot) {
+  if (!ref || typeof ref !== 'object' || Array.isArray(ref)) {
+    return undefined;
+  }
+
+  const safeRef = {};
+  if (ref.kind === 'file' || ref.kind === 'directory') {
+    safeRef.kind = ref.kind;
+  }
+
+  if (Object.hasOwn(ref, 'absolute_path')) {
+    const absolutePath = requireAbsolutePath(
+      ref.absolute_path,
+      `plan.input_refs.${key}.absolute_path`
+    );
+    const normalizedAbsolutePath = path.resolve(absolutePath);
+    if (absolutePath !== normalizedAbsolutePath) {
+      fail(`plan.input_refs.${key}.absolute_path must be canonical`);
+    }
+    if (!isInsidePath(operatorInputsRoot, normalizedAbsolutePath)) {
+      fail(`plan.input_refs.${key}.absolute_path must resolve inside operator-inputs package`);
+    }
+    assertAbsolutePackagePathNotReserved(
+      operatorInputsRoot,
+      normalizedAbsolutePath,
+      `plan.input_refs.${key}.absolute_path`
+    );
+    safeRef.absolute_path = normalizedAbsolutePath;
+  }
+
+  if (Object.hasOwn(ref, 'path')) {
+    const relativePath = assertPackageRelativeInput(ref.path, `plan.input_refs.${key}.path`);
+    safeRef.path = relativePath;
+    if (
+      safeRef.absolute_path &&
+      path.resolve(operatorInputsRoot, relativePath) !== safeRef.absolute_path
+    ) {
+      fail(`plan.input_refs.${key}.path must resolve to plan.input_refs.${key}.absolute_path`);
+    }
+  }
+
+  if (!safeRef.absolute_path) {
+    return undefined;
+  }
+  return safeRef;
+}
+
+function validatePlanInputRefPathSafety(plan, operatorInputsRoot) {
+  if (!plan.input_refs || typeof plan.input_refs !== 'object' || Array.isArray(plan.input_refs)) {
+    return {};
+  }
+
+  const safeRefs = {};
+  for (const key of Object.keys(plan.input_refs)) {
+    const safeRef = validateInputRefPathSafety(plan.input_refs[key], key, operatorInputsRoot);
+    if (safeRef) {
+      safeRefs[key] = safeRef;
+    }
+  }
+  return safeRefs;
 }
 
 async function validateManifestRefBindings({
@@ -734,8 +900,8 @@ async function resolveAirgapBundleComponent({ bundleRoot, component, label }) {
   };
 }
 
-async function validateAirgapBundleComponentBindings({ refs, plan }) {
-  if (!plan.deployment_path.startsWith('airgap/')) {
+async function validateAirgapBundleComponentBindings({ refs, deploymentPath }) {
+  if (!deploymentPath.startsWith('airgap/')) {
     return {};
   }
 
@@ -791,7 +957,18 @@ async function validateAirgapBundleComponentBindings({ refs, plan }) {
   return Object.fromEntries(components.entries());
 }
 
-async function validatePackageRefs(plan, operatorInputsRoot) {
+function validateManifestDeploymentPath(operatorManifest) {
+  const deploymentPath = requireString(
+    operatorManifest.deployment_path,
+    'operator-inputs manifest.deployment_path'
+  );
+  if (!CLEANUP_DEPLOYMENT_PATHS.has(deploymentPath)) {
+    fail('operator-inputs manifest.deployment_path must be a known operator-inputs cleanup path');
+  }
+  return deploymentPath;
+}
+
+async function validatePackageManifest(plan, operatorInputsRoot, { checkDigest = true } = {}) {
   const packageInfo = requireObject(plan.package, 'plan.package');
   const manifestPath = await requireFile(packageInfo.manifest_path, 'plan.package.manifest_path');
   const canonicalManifestPath = await realpathForExisting(
@@ -804,6 +981,11 @@ async function validatePackageRefs(plan, operatorInputsRoot) {
   if (!isInsidePath(operatorInputsRoot, canonicalManifestPath)) {
     fail('plan.package.manifest_path must resolve inside operator-inputs package');
   }
+  assertAbsolutePackagePathNotReserved(
+    operatorInputsRoot,
+    canonicalManifestPath,
+    'plan.package.manifest_path'
+  );
   const manifestFromRelative = await resolvePackagePath({
     operatorInputsRoot,
     value: packageInfo.manifest_relative_path,
@@ -813,32 +995,147 @@ async function validatePackageRefs(plan, operatorInputsRoot) {
   if (manifestFromRelative.absolutePath !== canonicalManifestPath) {
     fail('plan.package.manifest_relative_path must resolve to plan.package.manifest_path');
   }
-  const declaredManifestDigest = requireDigest(
-    packageInfo.manifest_sha256,
-    'plan.package.manifest_sha256'
-  );
-  const actualManifestDigest = await fileDigest(canonicalManifestPath, 'operator-inputs manifest');
-  if (declaredManifestDigest !== actualManifestDigest) {
-    fail('operator-inputs manifest digest changed after plan generation');
+  if (checkDigest) {
+    const declaredManifestDigest = requireDigest(
+      packageInfo.manifest_sha256,
+      'plan.package.manifest_sha256'
+    );
+    const actualManifestDigest = await fileDigest(canonicalManifestPath, 'operator-inputs manifest');
+    if (declaredManifestDigest !== actualManifestDigest) {
+      fail('operator-inputs manifest digest changed after plan generation');
+    }
   }
   const operatorManifest = requireObject(
     await readJson(canonicalManifestPath, 'operator-inputs manifest'),
     'operator-inputs manifest'
   );
+  const manifestDeploymentPath = validateManifestDeploymentPath(operatorManifest);
+  return {
+    operatorManifest,
+    manifestDeploymentPath
+  };
+}
+
+async function validatePackageManifestPathSafety(plan, operatorInputsRoot) {
+  const packageInfo = requireObject(plan.package, 'plan.package');
+  const manifestPath = requireAbsolutePath(
+    packageInfo.manifest_path,
+    'plan.package.manifest_path'
+  );
+  const normalizedManifestPath = path.resolve(manifestPath);
+  if (manifestPath !== normalizedManifestPath) {
+    fail('plan.package.manifest_path must be canonical');
+  }
+  if (!isInsidePath(operatorInputsRoot, normalizedManifestPath)) {
+    fail('plan.package.manifest_path must resolve inside operator-inputs package');
+  }
+  assertAbsolutePackagePathNotReserved(
+    operatorInputsRoot,
+    normalizedManifestPath,
+    'plan.package.manifest_path'
+  );
+
+  let stat;
+  try {
+    stat = await fs.lstat(normalizedManifestPath);
+  } catch (error) {
+    fail(`cannot read plan.package.manifest_path: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail('plan.package.manifest_path must not be a symlink');
+  }
+  if (!stat.isFile()) {
+    fail('plan.package.manifest_path must point to a file');
+  }
+
+  const canonicalManifestPath = await realpathForExisting(
+    normalizedManifestPath,
+    'plan.package.manifest_path'
+  );
+  if (normalizedManifestPath !== canonicalManifestPath) {
+    fail('plan.package.manifest_path must be canonical');
+  }
+  if (!isInsidePath(operatorInputsRoot, canonicalManifestPath)) {
+    fail('plan.package.manifest_path must resolve inside operator-inputs package');
+  }
+
+  const operatorManifest = requireObject(
+    await readJson(canonicalManifestPath, 'operator-inputs manifest'),
+    'operator-inputs manifest'
+  );
+  const manifestDeploymentPath = validateManifestDeploymentPath(operatorManifest);
+  return {
+    operatorManifest,
+    manifestDeploymentPath
+  };
+}
+
+function validateManifestRefSafety({
+  operatorManifest,
+  operatorInputsRoot
+}) {
+  const refs = {};
+  for (const key of [
+    ...MANIFEST_FILE_REF_FIELDS,
+    ...MANIFEST_DIRECTORY_REF_FIELDS,
+    ...MANIFEST_COMMAND_REF_FIELDS
+  ]) {
+    if (!Object.hasOwn(operatorManifest, key)) {
+      continue;
+    }
+    const relativePath = assertPackageRelativeInput(
+      operatorManifest[key],
+      `operator-inputs manifest.${key}`
+    );
+    refs[key] = {
+      kind: MANIFEST_DIRECTORY_REF_FIELDS.has(key) ? 'directory' : 'file',
+      path: relativePath,
+      absolute_path: path.resolve(operatorInputsRoot, relativePath)
+    };
+  }
+  return refs;
+}
+
+async function validatePackageRefSafety(plan, operatorInputsRoot) {
+  const { operatorManifest, manifestDeploymentPath } = await validatePackageManifestPathSafety(
+    plan,
+    operatorInputsRoot
+  );
+  const manifestRefs = validateManifestRefSafety({
+    operatorManifest,
+    operatorInputsRoot
+  });
+  const planRefs = validatePlanInputRefPathSafety(plan, operatorInputsRoot);
+
+  return {
+    refs: manifestRefs,
+    planRefs,
+    operatorManifest,
+    manifestDeploymentPath
+  };
+}
+
+async function validatePackageRefs(plan, operatorInputsRoot) {
+  const { operatorManifest, manifestDeploymentPath } = await validatePackageManifest(
+    plan,
+    operatorInputsRoot
+  );
+  const manifestMode =
+    typeof operatorManifest.mode === 'string' ? operatorManifest.mode : 'server-dry-run';
 
   const refs = requireObject(plan.input_refs, 'plan.input_refs');
-  const expectedRefs = inputRefsForDeploymentPath(plan.deployment_path);
+  const expectedRefs = inputRefsForDeploymentPath(manifestDeploymentPath, manifestMode);
   for (const key of Object.keys(refs)) {
     if (!SUPPORTED_INPUT_REFS.has(key)) {
       fail(`operator-inputs --run does not support input ref: ${key}`);
     }
     if (!expectedRefs.allowed.has(key)) {
-      fail(`operator-inputs --run does not support input ref for ${plan.deployment_path}: ${key}`);
+      fail(`operator-inputs --run does not support input ref for ${manifestDeploymentPath}: ${key}`);
     }
   }
   for (const key of expectedRefs.required) {
     if (!refs[key]) {
-      fail(`missing required input ref for ${plan.deployment_path}: ${key}`);
+      fail(`missing required input ref for ${manifestDeploymentPath}: ${key}`);
     }
   }
   for (const key of Object.keys(refs)) {
@@ -854,11 +1151,15 @@ async function validatePackageRefs(plan, operatorInputsRoot) {
     operatorInputsRoot,
     expectedRefs
   });
-  const airgapBundleComponents = await validateAirgapBundleComponentBindings({ refs, plan });
+  const airgapBundleComponents = await validateAirgapBundleComponentBindings({
+    refs,
+    deploymentPath: manifestDeploymentPath
+  });
   return {
     refs,
     operatorManifest,
-    airgapBundleComponents
+    airgapBundleComponents,
+    manifestDeploymentPath
   };
 }
 
@@ -1198,23 +1499,11 @@ function validateUnsupportedScope(plan) {
   }
 }
 
-function shouldRejectRunScope(plan) {
-  return (
-    plan.deployment_path === AIRGAP_INSTALL_SUBSTRATES_PATH ||
-    !SUPPORTED_DEPLOYMENT_PATHS.has(plan.deployment_path) ||
-    plan.mode !== SUPPORTED_MODE
-  );
-}
-
-async function cleanupDeploymentPathOutputsForRejectedScope(plan, internalRoot) {
-  if (!shouldRejectRunScope(plan) || !CLEANUP_DEPLOYMENT_PATHS.has(plan.deployment_path)) {
-    return;
-  }
-
-  const outputDirs = expectedOutputDirs(internalRoot, plan.deployment_path);
+async function cleanupDeploymentPathOutputsForDeploymentPath({ deploymentPath, internalRoot }) {
+  const outputDirs = expectedOutputDirs(internalRoot, deploymentPath);
   await ensureDirectoryInsideInternalRoot({
     internalRoot,
-    targetDir: path.join(internalRoot, deploymentPathOutputSlug(plan.deployment_path)),
+    targetDir: path.join(internalRoot, deploymentPathOutputSlug(deploymentPath)),
     label: 'operator-inputs deployment output base'
   });
   const deploymentPathDir = await ensureDirectoryInsideInternalRoot({
@@ -1223,6 +1512,37 @@ async function cleanupDeploymentPathOutputsForRejectedScope(plan, internalRoot) 
     label: 'deployment-path output dir'
   });
   await cleanupDeploymentPathOutputs(deploymentPathDir);
+}
+
+function assertRefsOutsideCleanupRange({ refs, cleanupDir, labelPrefix = 'operator-inputs manifest' }) {
+  for (const [key, ref] of Object.entries(refs)) {
+    const absolutePath = ref?.absolute_path;
+    if (!absolutePath) {
+      continue;
+    }
+    if (isInsidePath(cleanupDir, absolutePath)) {
+      fail(`${labelPrefix}.${key} must not overlap deployment-path cleanup output`);
+    }
+    if (ref.kind === 'directory' && isInsidePath(absolutePath, cleanupDir)) {
+      fail(`${labelPrefix}.${key} must not contain deployment-path cleanup output`);
+    }
+  }
+}
+
+function deploymentPathBindingError(plan, manifestDeploymentPath) {
+  const internal = requireObject(plan._internal, 'plan._internal');
+  const expected = requireObject(internal.expected, 'plan._internal.expected');
+  const expectedDeploymentPath = requireString(
+    expected.deployment_path,
+    'plan._internal.expected.deployment_path'
+  );
+  if (plan.deployment_path !== manifestDeploymentPath) {
+    return 'plan.deployment_path must match operator-inputs manifest.deployment_path';
+  }
+  if (expectedDeploymentPath !== manifestDeploymentPath) {
+    return 'plan._internal.expected.deployment_path must match operator-inputs manifest';
+  }
+  return undefined;
 }
 
 function validateSubstrateInstallStep(step, refs, expected) {
@@ -1670,13 +1990,37 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
     await readJson(canonicalPlanPath, 'operator-inputs plan'),
     'operator-inputs plan'
   );
+  const precleanEnvelope = await validatePlanPrecleanEnvelope(plan, canonicalPlanPath);
+  const {
+    refs: safetyRefs,
+    planRefs: safetyPlanRefs,
+    manifestDeploymentPath
+  } = await validatePackageRefSafety(plan, precleanEnvelope.operatorInputsRoot);
+  const manifestCleanupDir = expectedOutputDirs(
+    precleanEnvelope.internalRoot,
+    manifestDeploymentPath
+  ).deploymentPath;
+  assertRefsOutsideCleanupRange({ refs: safetyRefs, cleanupDir: manifestCleanupDir });
+  assertRefsOutsideCleanupRange({
+    refs: safetyPlanRefs,
+    cleanupDir: manifestCleanupDir,
+    labelPrefix: 'plan.input_refs'
+  });
+  await cleanupDeploymentPathOutputsForDeploymentPath({
+    deploymentPath: manifestDeploymentPath,
+    internalRoot: precleanEnvelope.internalRoot
+  });
+
   const envelope = await validatePlanEnvelope(plan);
   if (!isInsidePath(envelope.internalRoot, canonicalPlanPath)) {
     fail('operator-inputs plan path must be inside operator-inputs internal output root');
   }
-  await cleanupDeploymentPathOutputsForRejectedScope(plan, envelope.internalRoot);
-  validateUnsupportedScope(plan);
   await validateFacadeArgv(plan);
+  const bindingError = deploymentPathBindingError(plan, manifestDeploymentPath);
+  if (bindingError) {
+    fail(bindingError);
+  }
+  validateUnsupportedScope(plan);
   const { refs, operatorManifest, airgapBundleComponents } = await validatePackageRefs(
     plan,
     envelope.operatorInputsRoot

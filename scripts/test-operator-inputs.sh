@@ -313,6 +313,18 @@ switch (caseName) {
   case 'path_escape':
     manifest.release_contract = '../release-contract.json';
     break;
+  case 'reserved_output_tree_ref': {
+    const packageRoot = path.dirname(manifestPath);
+    const reservedRef = path.join(
+      packageRoot,
+      '.release-kit-internal/online-use-existing/deployment-path/source-evidence/release-contract-input.json'
+    );
+    fs.mkdirSync(path.dirname(reservedRef), { recursive: true });
+    fs.copyFileSync(path.join(packageRoot, 'release-contract.json'), reservedRef);
+    manifest.release_contract =
+      '.release-kit-internal/online-use-existing/deployment-path/source-evidence/release-contract-input.json';
+    break;
+  }
   case 'candidate_paths': {
     const packageRoot = path.dirname(manifestPath);
     fs.mkdirSync(path.join(packageRoot, 'candidate'), { recursive: true });
@@ -927,6 +939,38 @@ expect_fail_matching() {
   pass "operator-inputs rejected invalid case with expected message: $label"
 }
 
+deployment_path_dir() {
+  local package_dir="$1"
+  local slug="${2:-online-use-existing}"
+  printf '%s\n' "$package_dir/.release-kit-internal/$slug/deployment-path"
+}
+
+write_stale_path_evidence() {
+  local package_dir="$1"
+  local slug="${2:-online-use-existing}"
+  local path_dir
+  path_dir="$(deployment_path_dir "$package_dir" "$slug")"
+
+  mkdir -p "$path_dir/source-evidence"
+  printf '%s\n' '{"stale":true}' >"$path_dir/deployment-path-report.json"
+  printf '%s\n' '{"stale":true}' >"$path_dir/deployment-path-finalizer-manifest.json"
+  printf '%s\n' '{"stale":true}' >"$path_dir/source-evidence/stale-report.json"
+}
+
+assert_no_path_evidence() {
+  local package_dir="$1"
+  local slug="${2:-online-use-existing}"
+  local path_dir
+  path_dir="$(deployment_path_dir "$package_dir" "$slug")"
+
+  [[ ! -e "$path_dir/deployment-path-report.json" ]] ||
+    fail "unexpected deployment-path-report.json remained for $package_dir"
+  [[ ! -e "$path_dir/deployment-path-finalizer-manifest.json" ]] ||
+    fail "unexpected deployment-path-finalizer-manifest.json remained for $package_dir"
+  [[ ! -e "$path_dir/source-evidence" ]] ||
+    fail "unexpected source-evidence remained for $package_dir"
+}
+
 valid_paths=(
   online/use_existing
   online/install_substrates
@@ -961,6 +1005,17 @@ mkdir -p "$base_online"
 write_package_files "$base_online"
 write_manifest "$base_online" online/use_existing
 
+missing_release_contract_run_dir="$TMP_DIR/run-missing-release-contract"
+copy_valid_package "$base_online" "$missing_release_contract_run_dir"
+write_stale_path_evidence "$missing_release_contract_run_dir"
+rm "$missing_release_contract_run_dir/release-contract.json"
+expect_fail_matching public_preclean_missing_release_contract 'cannot read release_contract' \
+  bash "$ROOT_DIR/scripts/operator-release.sh" \
+    --operator-inputs "$missing_release_contract_run_dir" \
+    --run
+assert_no_path_evidence "$missing_release_contract_run_dir"
+pass "operator-inputs --run clears stale path evidence before missing release_contract validation"
+
 candidate_paths_dir="$TMP_DIR/valid-candidate-paths"
 copy_valid_package "$base_online" "$candidate_paths_dir"
 mutate_manifest "$candidate_paths_dir" candidate_paths
@@ -980,6 +1035,14 @@ for case_name in \
   expect_fail_matching "$case_name" 'internal report reference' \
     "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$invalid_dir"
 done
+
+reserved_ref_dir="$TMP_DIR/invalid-reserved-output-tree-ref"
+copy_valid_package "$base_online" "$reserved_ref_dir"
+mutate_manifest "$reserved_ref_dir" reserved_output_tree_ref
+expect_fail_matching reserved_output_tree_ref 'reserved operator-inputs output tree' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$reserved_ref_dir"
+[[ -f "$reserved_ref_dir/.release-kit-internal/online-use-existing/deployment-path/source-evidence/release-contract-input.json" ]] ||
+  fail "resolver must not delete operator package input in reserved output tree"
 
 for case_name in \
   missing_schema_version \

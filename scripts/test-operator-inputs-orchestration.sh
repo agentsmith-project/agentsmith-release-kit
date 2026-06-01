@@ -1363,6 +1363,8 @@ assert_path_evidence() {
     "$path_dir/source-evidence/route-smoke-report.json"; do
     [[ -f "$file" ]] || fail "missing expected path evidence file: $file"
   done
+  [[ ! -e "$path_dir/source-evidence/stale-report.json" ]] ||
+    fail "stale source evidence remained after successful online path run"
 
   "$NODE_BIN" --input-type=module - "$path_dir/deployment-path-report.json" <<'NODE'
 import fs from 'node:fs';
@@ -1415,6 +1417,8 @@ assert_install_path_evidence() {
     "$path_dir/source-evidence/route-smoke-report.json"; do
     [[ -f "$file" ]] || fail "missing expected install path evidence file: $file"
   done
+  [[ ! -e "$path_dir/source-evidence/stale-report.json" ]] ||
+    fail "stale source evidence remained after successful install path run"
 
   "$NODE_BIN" --input-type=module - \
     "$package_dir/substrate-truth.json" \
@@ -1516,6 +1520,8 @@ assert_airgap_path_evidence() {
     "$path_dir/source-evidence/image-map.json"; do
     [[ -f "$file" ]] || fail "missing expected airgap path evidence file: $file"
   done
+  [[ ! -e "$path_dir/source-evidence/stale-report.json" ]] ||
+    fail "stale source evidence remained after successful airgap path run"
 
   "$NODE_BIN" --input-type=module - \
     "$consume_dir/airgap-consume-rehearsal-report.json" \
@@ -1621,6 +1627,64 @@ try {
   process.exit(0);
 }
 throw new Error('tampered producer order should have failed');
+NODE
+}
+
+tamper_plan_deployment_path() {
+  local package_dir="$1"
+  local replacement="$2"
+  local expected_message="$3"
+
+  "$NODE_BIN" --input-type=module - \
+    "$ROOT_DIR" \
+    "$package_dir" \
+    "$replacement" \
+    "$expected_message" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, packageDir, replacement, expectedMessage] = process.argv.slice(2);
+const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestPlan(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
+
+plan.deployment_path = replacement;
+plan._internal.expected.deployment_path = replacement;
+plan.plan_sha256 = null;
+plan.plan_sha256 = digestPlan({ ...plan, plan_sha256: null });
+fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+
+const runnerUrl = pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-runner.mjs')).href;
+const { runOperatorInputsPlan } = await import(runnerUrl);
+
+try {
+  await runOperatorInputsPlan({ planPath });
+} catch (error) {
+  if (!String(error.message).includes(expectedMessage)) {
+    throw error;
+  }
+  process.exit(0);
+}
+throw new Error('tampered deployment_path should have failed');
 NODE
 }
 
@@ -1786,6 +1850,83 @@ throw new Error(`tampered ${refKey} should have failed`);
 NODE
 }
 
+run_direct_plan_expect_fail() {
+  local package_dir="$1"
+  local expected_message="$2"
+
+  "$NODE_BIN" --input-type=module - "$ROOT_DIR" "$package_dir" "$expected_message" <<'NODE'
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, packageDir, expectedMessage] = process.argv.slice(2);
+const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
+const runnerUrl = pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-runner.mjs')).href;
+const { runOperatorInputsPlan } = await import(runnerUrl);
+
+try {
+  await runOperatorInputsPlan({ planPath });
+} catch (error) {
+  if (!String(error.message).includes(expectedMessage)) {
+    throw error;
+  }
+  process.exit(0);
+}
+throw new Error('direct operator-inputs runner should have failed');
+NODE
+}
+
+tamper_direct_plan_digest_without_update() {
+  local package_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$package_dir" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [packageDir] = process.argv.slice(2);
+const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+plan.producer_argv[0].name = 'tampered-online-deployment-gate';
+fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+NODE
+}
+
+tamper_direct_plan_facade_argv() {
+  local package_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$package_dir" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [packageDir] = process.argv.slice(2);
+const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestPlan(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
+
+plan.facade_argv[0] = 'sh';
+plan.plan_sha256 = null;
+plan.plan_sha256 = digestPlan({ ...plan, plan_sha256: null });
+fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+NODE
+}
+
 run_operator_inputs() {
   local package_dir="$1"
   local label="$2"
@@ -1809,18 +1950,21 @@ start_server
 
 positive_package="$TMP_DIR/positive-online"
 prepare_online_package "$positive_package" apply /ok
+write_stale_finalizer "$positive_package"
 run_operator_inputs "$positive_package" positive >"$TMP_DIR/positive.out" 2>"$TMP_DIR/positive.err"
 assert_path_evidence "$positive_package"
 pass "operator-inputs --run executes online/use_existing apply and finalizes path evidence"
 
 positive_install_package="$TMP_DIR/positive-online-install"
 prepare_online_install_package "$positive_install_package" apply /ok
+write_stale_finalizer "$positive_install_package" online-install-substrates
 run_operator_inputs "$positive_install_package" positive-install >"$TMP_DIR/positive-install.out" 2>"$TMP_DIR/positive-install.err"
 assert_install_path_evidence "$positive_install_package"
 pass "operator-inputs --run executes online/install_substrates apply and finalizes path evidence"
 
 positive_airgap_package="$TMP_DIR/positive-airgap"
 prepare_airgap_package "$positive_airgap_package" apply /ok
+write_stale_finalizer "$positive_airgap_package" airgap-use-existing
 if ! run_airgap_operator_inputs "$positive_airgap_package" positive-airgap >"$TMP_DIR/positive-airgap.out" 2>"$TMP_DIR/positive-airgap.err"; then
   cat "$TMP_DIR/positive-airgap.out" >&2
   cat "$TMP_DIR/positive-airgap.err" >&2
@@ -1828,6 +1972,37 @@ if ! run_airgap_operator_inputs "$positive_airgap_package" positive-airgap >"$TM
 fi
 assert_airgap_path_evidence "$positive_airgap_package"
 pass "operator-inputs --run executes airgap/use_existing apply and finalizes path evidence"
+
+missing_release_contract_package="$TMP_DIR/missing-release-contract"
+prepare_online_package "$missing_release_contract_package" apply /ok
+write_stale_finalizer "$missing_release_contract_package"
+rm "$missing_release_contract_package/release-contract.json"
+expect_fail_matching missing_release_contract_preclean 'cannot read release_contract' \
+  run_operator_inputs "$missing_release_contract_package" missing-release-contract
+assert_no_path_evidence "$missing_release_contract_package"
+pass "operator-inputs --run clears stale path evidence before missing release_contract validation"
+
+reserved_ref_package="$TMP_DIR/reserved-output-tree-ref"
+prepare_online_package "$reserved_ref_package" apply /ok
+write_stale_finalizer "$reserved_ref_package"
+reserved_ref_path="$(deployment_path_dir "$reserved_ref_package")/source-evidence/release-contract-input.json"
+cp "$reserved_ref_package/release-contract.json" "$reserved_ref_path"
+"$NODE_BIN" --input-type=module - "$reserved_ref_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+manifest.release_contract =
+  '.release-kit-internal/online-use-existing/deployment-path/source-evidence/release-contract-input.json';
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+expect_fail_matching reserved_output_tree_ref 'reserved operator-inputs output tree' \
+  run_operator_inputs "$reserved_ref_package" reserved-output-tree-ref
+[[ -f "$reserved_ref_path" ]] ||
+  fail "operator-inputs --run must not delete manifest input under reserved output tree"
+[[ -f "$(deployment_path_dir "$reserved_ref_package")/source-evidence/stale-report.json" ]] ||
+  fail "reserved-tree ref failure must fail before unsafe stale evidence cleanup"
+pass "operator-inputs --run rejects reserved output tree refs before preclean"
 
 missing_airgap_kubectl_package="$TMP_DIR/missing-airgap-kubectl"
 prepare_airgap_package "$missing_airgap_kubectl_package" apply /ok
@@ -1839,6 +2014,7 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 delete manifest.kubectl;
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
+write_stale_finalizer "$missing_airgap_kubectl_package" airgap-use-existing
 expect_fail_matching missing_airgap_kubectl 'missing required operator-inputs field for airgap/use_existing: kubectl' \
   run_airgap_operator_inputs "$missing_airgap_kubectl_package" missing-airgap-kubectl
 assert_no_path_evidence "$missing_airgap_kubectl_package" airgap-use-existing
@@ -1854,6 +2030,7 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 delete manifest.context;
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
+write_stale_finalizer "$missing_airgap_context_package" airgap-use-existing
 expect_fail_matching missing_airgap_context 'missing required operator-inputs field for airgap/use_existing: context' \
   run_airgap_operator_inputs "$missing_airgap_context_package" missing-airgap-context
 assert_no_path_evidence "$missing_airgap_context_package" airgap-use-existing
@@ -1861,17 +2038,19 @@ pass "operator-inputs airgap path requires explicit context before orchestration
 
 dry_run_package="$TMP_DIR/dry-run-online"
 prepare_online_package "$dry_run_package" server-dry-run /ok
+write_stale_finalizer "$dry_run_package"
 expect_fail_matching dry_run_run 'currently supports only online/use_existing, online/install_substrates, or airgap/use_existing with mode apply' \
   run_operator_inputs "$dry_run_package" dry-run
 assert_no_path_evidence "$dry_run_package"
-pass "operator-inputs --run rejects server-dry-run without path evidence"
+pass "operator-inputs --run rejects server-dry-run and clears stale path evidence"
 
 dry_run_install_package="$TMP_DIR/dry-run-online-install"
 prepare_online_install_package "$dry_run_install_package" server-dry-run /ok
+write_stale_finalizer "$dry_run_install_package" online-install-substrates
 expect_fail_matching dry_run_install_run 'currently supports only online/use_existing, online/install_substrates, or airgap/use_existing with mode apply' \
   run_operator_inputs "$dry_run_install_package" dry-run-install
 assert_no_path_evidence "$dry_run_install_package" online-install-substrates
-pass "operator-inputs --run rejects online/install_substrates server-dry-run"
+pass "operator-inputs --run rejects online/install_substrates server-dry-run and clears stale path evidence"
 
 dry_run_airgap_package="$TMP_DIR/dry-run-airgap"
 prepare_airgap_package "$dry_run_airgap_package" server-dry-run /ok
@@ -1988,21 +2167,187 @@ FAKE_KUBECTL_LOG="$TMP_DIR/tampered-plan-kubectl.log" \
 assert_no_path_evidence "$tampered_plan_package" online-install-substrates
 pass "operator-inputs runner rejects tampered install producer order through direct library invocation"
 
+direct_plan_digest_mismatch_package="$TMP_DIR/direct-plan-digest-mismatch"
+prepare_online_package "$direct_plan_digest_mismatch_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$direct_plan_digest_mismatch_package" >/dev/null
+write_stale_finalizer "$direct_plan_digest_mismatch_package"
+tamper_direct_plan_digest_without_update "$direct_plan_digest_mismatch_package"
+run_direct_plan_expect_fail \
+  "$direct_plan_digest_mismatch_package" \
+  'operator-inputs plan digest mismatch'
+assert_no_path_evidence "$direct_plan_digest_mismatch_package"
+pass "operator-inputs direct runner clears stale path evidence before plan digest validation"
+
+direct_broken_facade_argv_package="$TMP_DIR/direct-broken-facade-argv"
+prepare_online_package "$direct_broken_facade_argv_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$direct_broken_facade_argv_package" >/dev/null
+write_stale_finalizer "$direct_broken_facade_argv_package"
+tamper_direct_plan_facade_argv "$direct_broken_facade_argv_package"
+run_direct_plan_expect_fail \
+  "$direct_broken_facade_argv_package" \
+  'plan.facade_argv must replay through scripts/operator-release.sh --operator-inputs'
+assert_no_path_evidence "$direct_broken_facade_argv_package"
+pass "operator-inputs direct runner clears stale path evidence before facade argv validation"
+
+direct_drift_ref_package="$TMP_DIR/direct-drift-ref"
+prepare_online_package "$direct_drift_ref_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$direct_drift_ref_package" >/dev/null
+write_stale_finalizer "$direct_drift_ref_package"
+printf '%s\n' '{"drift":true}' >"$direct_drift_ref_package/release-contract.json"
+run_direct_plan_expect_fail \
+  "$direct_drift_ref_package" \
+  'input ref digest changed after plan generation: release_contract'
+assert_no_path_evidence "$direct_drift_ref_package"
+pass "operator-inputs direct runner clears stale path evidence before ref digest validation"
+
+direct_missing_ref_package="$TMP_DIR/direct-missing-ref"
+prepare_online_package "$direct_missing_ref_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$direct_missing_ref_package" >/dev/null
+write_stale_finalizer "$direct_missing_ref_package"
+rm "$direct_missing_ref_package/release-contract.json"
+run_direct_plan_expect_fail \
+  "$direct_missing_ref_package" \
+  'cannot read plan.input_refs.release_contract.absolute_path'
+assert_no_path_evidence "$direct_missing_ref_package"
+pass "operator-inputs direct runner clears stale path evidence before missing ref validation"
+
+direct_mode_drift_package="$TMP_DIR/direct-mode-drift"
+prepare_airgap_package "$direct_mode_drift_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$direct_mode_drift_package" >/dev/null
+write_stale_finalizer "$direct_mode_drift_package" airgap-use-existing
+"$NODE_BIN" --input-type=module - "$direct_mode_drift_package" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [packageDir] = process.argv.slice(2);
+const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
+const manifestPath = path.join(packageDir, 'operator-inputs.json');
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+manifest.mode = 'server-dry-run';
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+plan.package.manifest_sha256 = digestBuffer(fs.readFileSync(manifestPath));
+plan.plan_sha256 = null;
+plan.plan_sha256 = digestBuffer(Buffer.from(JSON.stringify(stableJson(plan))));
+fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+NODE
+run_direct_plan_expect_fail \
+  "$direct_mode_drift_package" \
+  'operator-inputs --run does not support input ref for airgap/use_existing: archive_probe'
+assert_no_path_evidence "$direct_mode_drift_package" airgap-use-existing
+pass "operator-inputs direct runner clears stale path evidence before mode drift allowed-set validation"
+
+direct_manifest_extra_reserved_ref_package="$TMP_DIR/direct-manifest-extra-reserved-ref"
+prepare_online_package "$direct_manifest_extra_reserved_ref_package" apply /ok
+"$NODE_BIN" --input-type=module - "$direct_manifest_extra_reserved_ref_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+delete manifest.kubectl;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$direct_manifest_extra_reserved_ref_package" >/dev/null
+write_stale_finalizer "$direct_manifest_extra_reserved_ref_package"
+extra_reserved_ref_path="$(deployment_path_dir "$direct_manifest_extra_reserved_ref_package")/source-evidence/kubectl"
+cp "$direct_manifest_extra_reserved_ref_package/tools/kubectl" "$extra_reserved_ref_path"
+"$NODE_BIN" --input-type=module - "$direct_manifest_extra_reserved_ref_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+manifest.kubectl = '.release-kit-internal/online-use-existing/deployment-path/source-evidence/kubectl';
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+run_direct_plan_expect_fail \
+  "$direct_manifest_extra_reserved_ref_package" \
+  'reserved operator-inputs output tree'
+[[ -f "$extra_reserved_ref_path" ]] ||
+  fail "operator-inputs direct runner must not delete extra reserved-tree manifest ref before cleanup"
+[[ -f "$(deployment_path_dir "$direct_manifest_extra_reserved_ref_package")/source-evidence/stale-report.json" ]] ||
+  fail "extra manifest reserved-tree ref must fail before stale evidence cleanup"
+pass "operator-inputs direct runner scans manifest refs absent from plan before stale cleanup"
+
+direct_non_executable_command_package="$TMP_DIR/direct-non-executable-command"
+prepare_online_package "$direct_non_executable_command_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$direct_non_executable_command_package" >/dev/null
+write_stale_finalizer "$direct_non_executable_command_package"
+chmod 0644 "$direct_non_executable_command_package/tools/kubectl"
+run_direct_plan_expect_fail \
+  "$direct_non_executable_command_package" \
+  'plan.input_refs.kubectl.absolute_path must be executable'
+assert_no_path_evidence "$direct_non_executable_command_package"
+pass "operator-inputs direct runner clears stale path evidence before command executable validation"
+
+tampered_deployment_path_package="$TMP_DIR/tampered-deployment-path"
+prepare_online_install_package "$tampered_deployment_path_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_deployment_path_package" >/dev/null
+write_stale_finalizer "$tampered_deployment_path_package" online-install-substrates
+write_stale_finalizer "$tampered_deployment_path_package" online-use-existing
+tamper_plan_deployment_path \
+  "$tampered_deployment_path_package" \
+  online/use_existing \
+  'plan.deployment_path must match operator-inputs manifest.deployment_path'
+assert_no_path_evidence "$tampered_deployment_path_package" online-install-substrates
+[[ -f "$(deployment_path_dir "$tampered_deployment_path_package" online-use-existing)/source-evidence/stale-report.json" ]] ||
+  fail "tampered plan deployment_path must not clean unrelated known path"
+pass "operator-inputs runner binds deployment_path before stale cleanup"
+
+tampered_reserved_ref_package="$TMP_DIR/tampered-reserved-ref"
+prepare_online_package "$tampered_reserved_ref_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_reserved_ref_package" >/dev/null
+write_stale_finalizer "$tampered_reserved_ref_package"
+tampered_reserved_ref_path="$(deployment_path_dir "$tampered_reserved_ref_package")/source-evidence/release-contract-input.json"
+tamper_plan_ref_to_copy \
+  "$tampered_reserved_ref_package" \
+  release_contract \
+  "$tampered_reserved_ref_path" \
+  update-manifest \
+  'reserved operator-inputs output tree'
+[[ -f "$tampered_reserved_ref_path" ]] ||
+  fail "operator-inputs direct runner must not delete reserved-tree input before ref validation"
+[[ -f "$(deployment_path_dir "$tampered_reserved_ref_package")/source-evidence/stale-report.json" ]] ||
+  fail "operator-inputs direct runner must fail before unsafe reserved-tree cleanup"
+pass "operator-inputs direct runner rejects reserved output refs before stale cleanup"
+
 tampered_outside_package_ref="$TMP_DIR/tampered-outside-package-ref"
 prepare_online_package "$tampered_outside_package_ref" apply /ok
 bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_outside_package_ref" >/dev/null
+write_stale_finalizer "$tampered_outside_package_ref"
 tamper_plan_ref_to_copy \
   "$tampered_outside_package_ref" \
   release_contract \
   "$TMP_DIR/outside-package-release-contract-copy.json" \
   keep-manifest \
   'plan.input_refs.release_contract.absolute_path must resolve inside operator-inputs package'
-assert_no_path_evidence "$tampered_outside_package_ref"
-pass "operator-inputs runner rejects plan refs moved outside the package even with unchanged digest"
+[[ -f "$(deployment_path_dir "$tampered_outside_package_ref")/source-evidence/stale-report.json" ]] ||
+  fail "operator-inputs direct runner must fail before cleanup when a plan ref escapes the package"
+pass "operator-inputs runner rejects plan refs moved outside the package before stale cleanup"
 
 tampered_airgap_release_contract_ref="$TMP_DIR/tampered-airgap-release-contract-ref"
 prepare_airgap_package "$tampered_airgap_release_contract_ref" apply /ok
 bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_release_contract_ref" >/dev/null
+write_stale_finalizer "$tampered_airgap_release_contract_ref" airgap-use-existing
 tamper_plan_ref_to_copy \
   "$tampered_airgap_release_contract_ref" \
   release_contract \
@@ -2015,6 +2360,7 @@ pass "operator-inputs runner rejects airgap release_contract refs outside bundle
 tampered_airgap_deploy_template_ref="$TMP_DIR/tampered-airgap-deploy-template-ref"
 prepare_airgap_package "$tampered_airgap_deploy_template_ref" apply /ok
 bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_deploy_template_ref" >/dev/null
+write_stale_finalizer "$tampered_airgap_deploy_template_ref" airgap-use-existing
 tamper_plan_ref_to_copy \
   "$tampered_airgap_deploy_template_ref" \
   deploy_template_package \

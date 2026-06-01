@@ -16,6 +16,9 @@ const INTERNAL_EXPECTED_SCHEMA = 'agentsmith.operator-inputs-plan-internal/v1';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OPERATOR_RELEASE_SCRIPT = path.join(REPO_ROOT, 'scripts/operator-release.sh');
 const VERIFY_RELEASE_SCRIPT = path.join(REPO_ROOT, 'scripts/verify-release.sh');
+const DEPLOYMENT_PATH_REPORT_FILE = 'deployment-path-report.json';
+const DEPLOYMENT_PATH_FINALIZER_MANIFEST = 'deployment-path-finalizer-manifest.json';
+const DEPLOYMENT_PATH_SOURCE_EVIDENCE_DIR = 'source-evidence';
 const DEFAULT_MODE = 'server-dry-run';
 const SUPPORTED_MODES = new Set(['server-dry-run', 'apply']);
 const SUPPORTED_DEPLOYMENT_PATHS = new Set([
@@ -339,6 +342,17 @@ function packageRelativePath(baseDir, absolutePath) {
   return relative;
 }
 
+function isReservedOperatorOutputPath(relativePath) {
+  const normalized = path.posix.normalize(relativePath.replace(/\\/g, '/'));
+  return normalized === INTERNAL_DIR || normalized.startsWith(`${INTERNAL_DIR}/`);
+}
+
+function assertNotReservedOperatorOutputPath(relativePath, label) {
+  if (isReservedOperatorOutputPath(relativePath)) {
+    fail(`${label} must not point into reserved operator-inputs output tree: ${INTERNAL_DIR}`);
+  }
+}
+
 function isInsidePath(rootDir, candidate) {
   const relative = path.relative(rootDir, candidate);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -361,6 +375,7 @@ function assertPackageRelativeInput(value, label) {
   ) {
     fail(`${label} escapes the operator-inputs package`);
   }
+  assertNotReservedOperatorOutputPath(normalized, label);
   return normalized;
 }
 
@@ -392,10 +407,12 @@ async function resolvePackagePath({ baseDir, key, kind }) {
   if (!isInsidePath(baseDir, realPath)) {
     fail(`${key.label} resolves outside the operator-inputs package`);
   }
+  const canonicalRelativePath = packageRelativePath(baseDir, realPath);
+  assertNotReservedOperatorOutputPath(canonicalRelativePath, key.label);
 
   return {
     absolutePath: realPath,
-    path: packageRelativePath(baseDir, realPath)
+    path: canonicalRelativePath
   };
 }
 
@@ -915,6 +932,25 @@ async function resolveRefs({ manifest, baseDir }) {
   return refs;
 }
 
+function collectRawRefsForCleanupSafety({ manifest, baseDir }) {
+  const refs = {};
+  for (const field of [...FILE_FIELDS, ...DIRECTORY_FIELDS, ...COMMAND_FIELDS]) {
+    if (!Object.hasOwn(manifest, field)) {
+      continue;
+    }
+    const relativePath = assertPackageRelativeInput(
+      manifest[field],
+      `operator-inputs manifest.${field}`
+    );
+    refs[field] = {
+      kind: DIRECTORY_FIELDS.has(field) ? 'directory' : 'file',
+      path: relativePath,
+      absolute_path: path.resolve(baseDir, relativePath)
+    };
+  }
+  return refs;
+}
+
 function targetProfileObject(value) {
   const text = assertString(value, 'deployment_path target_profile');
   const [targetCluster, substrateSource, distribution] = text.split('/');
@@ -1388,6 +1424,76 @@ async function writePlanFileNoSymlink({ planPath, internalRoot, body }) {
 
 function deploymentPathOutputBase(outputRoot, deploymentPath) {
   return path.join(outputRoot, deploymentPathOutputSlug(deploymentPath));
+}
+
+async function cleanupDeploymentPathOutputs(outputDir) {
+  await fs.rm(path.join(outputDir, DEPLOYMENT_PATH_REPORT_FILE), { force: true });
+  await fs.rm(path.join(outputDir, DEPLOYMENT_PATH_FINALIZER_MANIFEST), { force: true });
+  await fs.rm(path.join(outputDir, DEPLOYMENT_PATH_SOURCE_EVIDENCE_DIR), {
+    recursive: true,
+    force: true
+  });
+}
+
+function assertRefsOutsideCleanupRange({ refs, cleanupDir }) {
+  for (const [key, ref] of Object.entries(refs)) {
+    const absolutePath = ref?.absolute_path;
+    if (!absolutePath) {
+      continue;
+    }
+    if (isInsidePath(cleanupDir, absolutePath)) {
+      fail(`operator-inputs manifest.${key} must not overlap deployment-path cleanup output`);
+    }
+    if (ref.kind === 'directory' && isInsidePath(absolutePath, cleanupDir)) {
+      fail(`operator-inputs manifest.${key} must not contain deployment-path cleanup output`);
+    }
+  }
+}
+
+export async function cleanupStaleOperatorInputsPathEvidence({ inputPath } = {}) {
+  if (!inputPath) {
+    fail('--operator-inputs is required');
+  }
+
+  const { packageRoot, manifestPath } = await resolveManifestInput(inputPath);
+  const { value: manifest } = await readJson(manifestPath, MANIFEST_FILE);
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    return {
+      cleaned: false,
+      deploymentPath: null
+    };
+  }
+
+  const deploymentPath =
+    typeof manifest.deployment_path === 'string' ? manifest.deployment_path : null;
+  if (!deploymentPath || !DEPLOYMENT_PATH_CONFIG.has(deploymentPath)) {
+    return {
+      cleaned: false,
+      deploymentPath
+    };
+  }
+
+  const refs = collectRawRefsForCleanupSafety({ manifest, baseDir: packageRoot });
+  const runtimeOutputRoot = await ensureInternalRuntimeRoot(packageRoot);
+  const deploymentOutputBase = deploymentPathOutputBase(runtimeOutputRoot, deploymentPath);
+  await ensureDirectoryInsideInternalRoot({
+    internalRoot: runtimeOutputRoot,
+    targetDir: deploymentOutputBase,
+    label: 'operator-inputs deployment output base'
+  });
+  const deploymentPathOutputDir = await ensureDirectoryInsideInternalRoot({
+    internalRoot: runtimeOutputRoot,
+    targetDir: path.join(deploymentOutputBase, 'deployment-path'),
+    label: 'deployment-path output dir'
+  });
+  assertRefsOutsideCleanupRange({ refs, cleanupDir: deploymentPathOutputDir });
+  await cleanupDeploymentPathOutputs(deploymentPathOutputDir);
+
+  return {
+    cleaned: true,
+    deploymentPath,
+    deploymentPathOutputDir
+  };
 }
 
 function optionalPlanString(value) {

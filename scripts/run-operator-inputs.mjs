@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-import { resolveOperatorInputs } from './lib/operator-inputs-resolver.mjs';
+import {
+  cleanupStaleOperatorInputsPathEvidence,
+  resolveOperatorInputs
+} from './lib/operator-inputs-resolver.mjs';
 import { runOperatorInputsPlan } from './lib/operator-inputs-runner.mjs';
 
 function usage() {
@@ -63,6 +66,7 @@ try {
     process.exit(0);
   }
 
+  await cleanupStaleOperatorInputsPathEvidence({ inputPath: args.inputPath });
   const resolved = await resolveOperatorInputs({ inputPath: args.inputPath });
   const planPath = resolved.planPath;
   console.log(`operator-inputs plan written: ${planPath}`);
