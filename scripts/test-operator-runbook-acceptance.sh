@@ -70,6 +70,17 @@ assert_operator_success_contract_docs() {
 
   grep -q -- 'The GA operator substrate choices are `use_existing` and' "$root_readme" ||
     fail "root README must name the GA operator substrate choices"
+  grep -q -- 'The operator-facing path is a single package-driven facade' "$root_readme" ||
+    fail "root README must name the operator-facing package-driven facade"
+  if grep -Fqi -- 'operator-facing path is a single package-driven flow' "$root_readme"; then
+    fail "root README must not regress to the old package-driven flow wording"
+  fi
+  grep -q -- 'Formal release success' "$root_readme" ||
+    fail "root README must name the formal GA success boundary"
+  grep -q -- 'or failure is represented only by the final `ga-release-report.json` issued by' "$root_readme" ||
+    fail "root README must point formal success to the finalizer GA report"
+  grep -q -- 'release finalizer/captain' "$root_readme" ||
+    fail "root README must point formal success to the finalizer GA report"
   grep -q -- 'Legacy `kit_provided` is an internal compatibility alias' "$root_readme" ||
     fail "root README must mark kit_provided as legacy/internal"
   pass "operator success contract docs keep internal diagnostics out of the first screen"

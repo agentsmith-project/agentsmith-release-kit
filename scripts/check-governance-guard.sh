@@ -226,8 +226,11 @@ require_text README.md "backend-real"
 require_text README.md "product flow"
 require_text README.md "Cloud resource provisioning"
 require_text README.md "release management UI"
-require_text README.md "operator-facing path is a single package-driven flow"
+require_text README.md "operator-facing path is a single package-driven facade"
 require_text README.md 'bash scripts/operator-release.sh --operator-inputs <dir-or-json>'
+require_text README.md "Formal release success"
+require_text README.md 'final `ga-release-report.json` issued by'
+require_text README.md 'release finalizer/captain'
 require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
 require_text README.md '`online/kit_provided`'
@@ -240,11 +243,14 @@ require_text README.md 'not installer proof'
 require_text README.md '`kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input'
 require_text README.md "is not a release profile, user deployment prerequisite, package-driven release"
 require_text README.md "target, or replacement for real Kubernetes evidence"
-require_text docs/runbooks/README.md "## Operator Choice Matrix"
+require_text docs/runbooks/README.md "Use the single operator facade"
+require_text docs/runbooks/README.md "Formal release success or failure is represented only by the final"
+require_text docs/runbooks/README.md '`ga-release-report.json` issued by the release finalizer/captain'
+require_text docs/runbooks/README.md "## Operator Package Matrix"
 require_text docs/runbooks/README.md "Airgap bundle packaging commands are packaging-side helpers"
 require_text docs/runbooks/README.md "not standalone operator choices"
 require_text docs/runbooks/README.md 'use `airgap/kit_provided` for the consume/deployment-focused path'
-require_text docs/runbooks/README.md '`installed_by` stays a provenance marker, not installer proof'
+require_text docs/runbooks/README.md "provenance marker, not installer"
 require_text docs/RELEASE_GATES.md "map to the operator choice surface"
 require_text docs/RELEASE_GATES.md 'kit-provided pack/truth identity marker / provenance marker'
 require_text docs/RELEASE_GATES.md "rehearsal-only accepted input"
