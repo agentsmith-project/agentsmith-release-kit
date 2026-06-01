@@ -890,6 +890,12 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
   producer: 'agentsmith-post-deploy-product-smoke',
   owner: 'agentsmith',
   repo: 'github.com/agentsmith-project/agentsmith',
+  release_contract: {
+    path: 'release-contract.json',
+    input_sha256: contractDigest,
+    release_id: contract.release_id,
+    git_sha: contract.git_sha
+  },
   status: 'passed',
   generated_at: '2026-05-31T12:00:00.000Z',
   source: {

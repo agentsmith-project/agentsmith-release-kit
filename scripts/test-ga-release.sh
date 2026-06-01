@@ -754,6 +754,12 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
   producer: 'agentsmith-post-deploy-product-smoke',
   owner: 'agentsmith',
   repo: 'github.com/agentsmith-project/agentsmith',
+  release_contract: {
+    path: 'release-contract.json',
+    input_sha256: contractDigest,
+    release_id: contract.release_id,
+    git_sha: contract.git_sha
+  },
   status: 'passed',
   generated_at: '2026-05-31T12:00:00.000Z',
   source: {
@@ -993,6 +999,26 @@ if (mutation === 'legacy-surrogate-shape') {
   report.release_id = 'agentsmith-ga-2026-05-31';
   report.git_sha = '1'.repeat(40);
   report.release_contract_digest = `sha256:${'1'.repeat(64)}`;
+} else if (mutation === 'missing-release-contract') {
+  delete report.release_contract;
+} else if (mutation === 'release-contract-digest-mismatch') {
+  report.release_contract.input_sha256 = `sha256:${'9'.repeat(64)}`;
+} else if (mutation === 'release-contract-release-id-mismatch') {
+  report.release_contract.release_id = `${report.release_contract.release_id}-other`;
+} else if (mutation === 'release-contract-git-sha-mismatch') {
+  report.release_contract.git_sha = '9'.repeat(40);
+} else if (mutation === 'release-contract-missing-path') {
+  delete report.release_contract.path;
+} else if (mutation === 'release-contract-empty-path') {
+  report.release_contract.path = '';
+} else if (mutation === 'release-contract-absolute-path') {
+  report.release_contract.path = '/reports/release-contract.json';
+} else if (mutation === 'release-contract-parent-escape-path') {
+  report.release_contract.path = '../release-contract.json';
+} else if (mutation === 'release-contract-backslash-path') {
+  report.release_contract.path = 'reports\\release-contract.json';
+} else if (mutation === 'release-contract-nested-legacy-field') {
+  report.release_contract.release_contract_digest = report.release_contract.input_sha256;
 } else if (mutation === 'missing-canonical-smoke') {
   delete report.smoke_results.usage;
 } else if (mutation === 'missing-source-evidence-path') {
@@ -1471,10 +1497,15 @@ write_fixture_set "$VALID_DIR" valid
 generate_path_bundles "$VALID_DIR" "$PATH_DIR"
 run_ga_release "$VALID_DIR" "$PATH_DIR" "$TMP_DIR/out-valid"
 
-"$NODE_BIN" --input-type=module - "$TMP_DIR/out-valid/ga-release-report.json" <<'NODE'
+"$NODE_BIN" --input-type=module - "$TMP_DIR/out-valid/ga-release-report.json" "$VALID_DIR/release-contract.json" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 
 const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const releaseContractBytes = fs.readFileSync(process.argv[3]);
+const releaseContract = JSON.parse(releaseContractBytes.toString('utf8'));
+const releaseContractDigest =
+  `sha256:${crypto.createHash('sha256').update(releaseContractBytes).digest('hex')}`;
 if (report.schema !== 'agentsmith.ga-release-report/v1') {
   throw new Error('unexpected schema');
 }
@@ -1508,6 +1539,24 @@ if (smoke?.schema !== 'agentsmith.post-deploy-product-smoke-report/v1') {
 }
 if (smoke?.producer !== 'agentsmith-post-deploy-product-smoke') {
   throw new Error('GA report did not bind canonical product smoke producer');
+}
+if (smoke?.release_contract?.path !== 'release-contract.json') {
+  throw new Error('GA report did not keep product smoke release contract path');
+}
+if (smoke?.release_contract?.input_sha256 !== releaseContractDigest) {
+  throw new Error('GA report did not bind product smoke to release contract digest');
+}
+if (
+  smoke?.release_contract?.release_id !== releaseContract.release_id ||
+  smoke?.release_contract?.release_id !== report.release.release_id
+) {
+  throw new Error('GA report did not bind product smoke to release id');
+}
+if (
+  smoke?.release_contract?.git_sha !== releaseContract.git_sha ||
+  smoke?.release_contract?.git_sha !== report.release.git_sha
+) {
+  throw new Error('GA report did not bind product smoke to git sha');
 }
 if (JSON.stringify(smoke?.canonical_smoke_ids) !== JSON.stringify(expectedSmokeIds)) {
   throw new Error('GA report did not bind canonical product smoke ids');
@@ -1606,6 +1655,16 @@ product_smoke_mutations=(
   legacy-surrogate-shape
   mixed-surrogate-schema
   legacy-fields-mixed
+  missing-release-contract
+  release-contract-digest-mismatch
+  release-contract-release-id-mismatch
+  release-contract-git-sha-mismatch
+  release-contract-missing-path
+  release-contract-empty-path
+  release-contract-absolute-path
+  release-contract-parent-escape-path
+  release-contract-backslash-path
+  release-contract-nested-legacy-field
   missing-canonical-smoke
   missing-source-evidence-path
   wrong-entry-id
@@ -1628,6 +1687,30 @@ for mutation in "${product_smoke_mutations[@]}"; do
       ;;
     legacy-fields-mixed)
       expected_message="post_deploy_product_smoke.covered_flows must not be present"
+      ;;
+    missing-release-contract)
+      expected_message="post_deploy_product_smoke.release_contract must be an object"
+      ;;
+    release-contract-digest-mismatch)
+      expected_message="post_deploy_product_smoke.release_contract.input_sha256 must match release contract digest"
+      ;;
+    release-contract-release-id-mismatch)
+      expected_message="post_deploy_product_smoke.release_contract.release_id must match release contract"
+      ;;
+    release-contract-git-sha-mismatch)
+      expected_message="post_deploy_product_smoke.release_contract.git_sha must match release contract"
+      ;;
+    release-contract-missing-path|release-contract-empty-path)
+      expected_message="post_deploy_product_smoke.release_contract.path is required"
+      ;;
+    release-contract-absolute-path|release-contract-backslash-path)
+      expected_message="post_deploy_product_smoke.release_contract.path must be a portable relative path"
+      ;;
+    release-contract-parent-escape-path)
+      expected_message="post_deploy_product_smoke.release_contract.path must not contain empty, current, or parent segments"
+      ;;
+    release-contract-nested-legacy-field)
+      expected_message="post_deploy_product_smoke.release_contract contains unknown field: release_contract_digest"
       ;;
     missing-canonical-smoke)
       expected_message="post-deploy product smoke missing canonical smoke id: usage"

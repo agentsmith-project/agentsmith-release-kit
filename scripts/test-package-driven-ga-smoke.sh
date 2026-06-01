@@ -246,6 +246,12 @@ writeJson(path.join(outputDir, 'post-deploy-product-smoke-report.json'), {
   producer: 'agentsmith-post-deploy-product-smoke',
   owner: 'agentsmith',
   repo: 'github.com/agentsmith-project/agentsmith',
+  release_contract: {
+    path: 'release-contract.json',
+    input_sha256: releaseContractDigest,
+    release_id: contract.release_id,
+    git_sha: contract.git_sha
+  },
   status: 'passed',
   generated_at: '2026-05-31T12:00:00.000Z',
   source: {
@@ -311,6 +317,18 @@ if (report.post_deploy_product_smoke?.schema !== 'agentsmith.post-deploy-product
 }
 if (report.post_deploy_product_smoke?.producer !== 'agentsmith-post-deploy-product-smoke') {
   throw new Error('GA report must bind canonical product smoke producer');
+}
+if (report.post_deploy_product_smoke?.release_contract?.input_sha256 !== report.release?.release_contract_digest) {
+  throw new Error('GA report must keep product smoke release contract digest binding');
+}
+if (report.post_deploy_product_smoke?.release_contract?.release_id !== report.release?.release_id) {
+  throw new Error('GA report must keep product smoke release id binding');
+}
+if (report.post_deploy_product_smoke?.release_contract?.git_sha !== report.release?.git_sha) {
+  throw new Error('GA report must keep product smoke git sha binding');
+}
+if (report.post_deploy_product_smoke?.release_contract?.path !== 'release-contract.json') {
+  throw new Error('GA report must keep product smoke release contract path');
 }
 if (JSON.stringify(report.post_deploy_product_smoke?.canonical_smoke_ids) !== JSON.stringify(expectedSmokeIds)) {
   throw new Error('GA report must bind canonical product smoke ids');

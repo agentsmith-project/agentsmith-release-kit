@@ -32,6 +32,12 @@ const PRODUCT_SMOKE_LEGACY_FIELDS = [
   'git_sha',
   'release_contract_digest'
 ];
+const PRODUCT_SMOKE_RELEASE_CONTRACT_KEYS = new Set([
+  'path',
+  'input_sha256',
+  'release_id',
+  'git_sha'
+]);
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
@@ -670,9 +676,72 @@ function rejectProductSmokeLegacyFields(report) {
   }
 }
 
-function validateProductSmoke(report, reportDigest) {
+function requirePortableRelativePath(value, label) {
+  const relative = requireString(value, label);
+  if (
+    relative.includes('\\') ||
+    path.posix.isAbsolute(relative) ||
+    path.win32.isAbsolute(relative)
+  ) {
+    fail(`${label} must be a portable relative path`);
+  }
+  if (relative.includes('//')) {
+    fail(`${label} must not contain empty, current, or parent segments`);
+  }
+  const parts = relative.split('/');
+  if (parts.some((part) => part === '' || part === '.' || part === '..')) {
+    fail(`${label} must not contain empty, current, or parent segments`);
+  }
+  return relative;
+}
+
+function validateProductSmokeReleaseContract(value, release) {
+  const binding = requireObject(value, 'post_deploy_product_smoke.release_contract');
+  rejectUnknownKeys(
+    binding,
+    PRODUCT_SMOKE_RELEASE_CONTRACT_KEYS,
+    'post_deploy_product_smoke.release_contract'
+  );
+
+  const inputSha256 = requireDigest(
+    binding.input_sha256,
+    'post_deploy_product_smoke.release_contract.input_sha256'
+  );
+  if (inputSha256 !== release.release_contract_digest) {
+    fail('post_deploy_product_smoke.release_contract.input_sha256 must match release contract digest');
+  }
+
+  const releaseId = requireString(
+    binding.release_id,
+    'post_deploy_product_smoke.release_contract.release_id'
+  );
+  if (releaseId !== release.release_id) {
+    fail('post_deploy_product_smoke.release_contract.release_id must match release contract');
+  }
+
+  const gitSha = requireGitSha(
+    binding.git_sha,
+    'post_deploy_product_smoke.release_contract.git_sha'
+  );
+  if (gitSha !== release.git_sha) {
+    fail('post_deploy_product_smoke.release_contract.git_sha must match release contract');
+  }
+
+  return {
+    path: requirePortableRelativePath(
+      binding.path,
+      'post_deploy_product_smoke.release_contract.path'
+    ),
+    input_sha256: inputSha256,
+    release_id: releaseId,
+    git_sha: gitSha
+  };
+}
+
+function validateProductSmoke(report, reportDigest, release) {
   const schemaVersion = requireProductSmokeSchemaVersion(report);
   rejectProductSmokeLegacyFields(report);
+  const releaseContract = validateProductSmokeReleaseContract(report.release_contract, release);
   requireEquals(
     requireString(report.producer, 'post_deploy_product_smoke.producer'),
     PRODUCT_SMOKE_PRODUCER,
@@ -742,6 +811,7 @@ function validateProductSmoke(report, reportDigest) {
     producer: report.producer,
     owner: report.owner,
     repo: report.repo,
+    release_contract: releaseContract,
     canonical_smoke_ids: [...REQUIRED_PRODUCT_SMOKE_IDS],
     source_evidence_paths: Object.fromEntries(
       Object.entries(sourceEvidencePaths).sort(([left], [right]) => left.localeCompare(right))
@@ -1496,6 +1566,7 @@ async function writeSummary(file, report) {
     `Post-deploy product smoke: ${report.post_deploy_product_smoke.report_digest}`,
     `Post-deploy product smoke schema: ${report.post_deploy_product_smoke.schema}`,
     `Post-deploy product smoke producer: ${report.post_deploy_product_smoke.producer}`,
+    `Post-deploy product smoke release contract: ${report.post_deploy_product_smoke.release_contract.input_sha256}`,
     `Post-deploy product smoke ids: ${report.post_deploy_product_smoke.canonical_smoke_ids.join(', ')}`,
     ''
   ];
@@ -1529,7 +1600,7 @@ async function main() {
   const release = validateReleaseContract(contract.value, contract.digest);
   const deployTemplateSummary = validateDeployTemplatePackage(deployTemplate.value, contract.value, deployTemplate.digest);
   const productReadinessSummary = validateProductReadiness(productReady.value, productReady.digest, release);
-  const productSmokeSummary = validateProductSmoke(productSmoke.value, productSmoke.digest);
+  const productSmokeSummary = validateProductSmoke(productSmoke.value, productSmoke.digest, release);
 
   const deploymentPaths = [];
   for (const entry of pathReports) {
@@ -1598,6 +1669,7 @@ async function main() {
         report_digest: productSmokeSummary.report_digest,
         schema: productSmokeSummary.schema,
         producer: productSmokeSummary.producer,
+        release_contract: productSmokeSummary.release_contract,
         canonical_smoke_ids: productSmokeSummary.canonical_smoke_ids
       }
     },
