@@ -49,6 +49,39 @@ Final release closure is the final `ga-release-report.json` after finalized
 deployment path reports and AgentSmith product-side reports exist. The current
 operator-inputs intake slice does not create that final report.
 
+### Package To GA Handoff
+
+Use one package for each deployment path. Do not combine the four paths into a
+single manifest.
+
+| Package `deployment_path` | Operator run | Handoff report for `--ga-release` |
+| --- | --- | --- |
+| `online/use_existing` | `bash scripts/operator-release.sh --operator-inputs <online-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json` |
+| `online/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <online-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json` |
+| `airgap/use_existing` | `bash scripts/operator-release.sh --operator-inputs <airgap-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json` |
+| `airgap/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <airgap-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json` |
+
+Each handoff report is valid only with its sibling
+`deployment-path-finalizer-manifest.json` and `source-evidence/` directory.
+Package runs write path-level evidence only. They do not write
+`ga-release-report.json`, do not issue `formal_verdict`, and do not replace
+AgentSmith product readiness or post-deploy product smoke evidence.
+
+After all four package runs and product-side reports are available:
+
+```bash
+bash scripts/verify-release.sh --ga-release \
+  --release-contract <agentsmith-release-contract.json> \
+  --deploy-template-package <agentsmith-deploy-template-package.json> \
+  --deployment-path-report <online-use-existing-pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json \
+  --deployment-path-report <online-install-substrates-pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json \
+  --deployment-path-report <airgap-use-existing-pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json \
+  --deployment-path-report <airgap-install-substrates-pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json \
+  --product-readiness-report <agentsmith/product-readiness-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \
+  --output-dir <ga-output-dir>
+```
+
 `install_substrates` means namespace-scoped installer producer/finalizer
 evidence with explicit install confirmation. It is not cloud provisioning.
 Kind remains rehearsal-only; it is not a user deployment prerequisite or a
@@ -144,7 +177,8 @@ Default PR/push CI follows the quick/core path only:
 `test-render.sh`, `test-render-check.sh`, and
 `test-operator-inputs.sh`, `test-operator-inputs-orchestration.sh`,
 `test-operator-release-surface.sh`, `test-substrate-install.sh`,
-`test-deployment-path-report.sh`, and `test-ga-release.sh`.
+`test-deployment-path-report.sh`, `test-ga-release.sh`, and
+`test-package-driven-ga-smoke.sh`.
 `test-substrate-install.sh` stays in this default path because it uses local
 fixtures and fake kubectl, including online plus low-cost airgap producer
 coverage. Maintainer diagnostics such as adoption aggregation, operator signoff

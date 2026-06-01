@@ -33,6 +33,7 @@ bash scripts/test-smoke.sh
 bash scripts/test-online-deployment-gate.sh
 bash scripts/test-deployment-path-report.sh
 bash scripts/test-ga-release.sh
+bash scripts/test-package-driven-ga-smoke.sh
 bash scripts/test-online-adoption.sh
 bash scripts/test-release-engineering-gate-intake.sh
 bash scripts/test-operator-release-surface.sh
@@ -52,13 +53,14 @@ Airgap-bundle surfaces may optionally write unsigned scoped
 digest-only airgap evidence handoff fields; runbook acceptance is checked by
 `scripts/test-operator-runbook-acceptance.sh` and does not issue readiness,
 identity, signature, or verdict claims.
-`airgap/use_existing` and `airgap/kit_provided` are the operator-facing
-entries for consuming an already assembled airgap bundle; they map to
-`--airgap-consume-rehearsal` and keep `readiness: false`.
+`airgap/use_existing` and `airgap/kit_provided` remain transitional focused
+entries for consuming an already assembled airgap bundle; the package-driven
+operator main path uses `airgap/use_existing` and `airgap/install_substrates`.
 `kit_provided` means pack/truth validation for kit-supplied substrate material,
-not substrate installation. `install_substrates` needs a separate
-`--substrate-install` producer report and explicit installer confirmation flag
-before it can be a successful operator path.
+not substrate installation. Package-driven `install_substrates` runs the
+namespace-scoped `substrate-install` producer inside
+`operator-release.sh --operator-inputs <pkg> --run`, requires explicit
+installer confirmation, and still writes path-level evidence only.
 Current `installed_by: agentsmith-release-kit` values are kit-provided
 pack/truth identity and provenance markers only; `installed_by` is not
 installer proof and does not mean release-kit created databases, buckets, OIDC

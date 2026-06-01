@@ -38,6 +38,15 @@ Current post-push contract index:
   AgentSmith product-side reports and is the only repo-local output here that
   may issue `formal_verdict: issued`.
 
+For package-driven operator runs, each
+`operator-release.sh --operator-inputs <pkg> --run` package still represents
+exactly one deployment path. The run writes only that path's finalized
+`deployment-path-report.json`, sibling finalizer manifest, and
+`source-evidence/` files under `.release-kit-internal/<path-slug>/`; it must
+not write `ga-release-report.json` or any formal verdict. The four path reports
+become GA inputs only when passed together with AgentSmith product-side reports
+to `--ga-release`.
+
 The current `--template-package` validator is a focused materialized archive
 intake diagnostic only. It confirms that the deploy template package descriptor
 matches the release contract and that the `.tgz` archive matches the declared

@@ -2320,6 +2320,10 @@ run_airgap_operator_inputs() {
     bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" --run
 }
 
+if [[ "${AGENTSMITH_OPERATOR_INPUTS_ORCHESTRATION_LIB_ONLY:-}" == "1" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 start_server
 
 positive_package="$TMP_DIR/positive-online"

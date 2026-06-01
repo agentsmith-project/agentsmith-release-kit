@@ -37,6 +37,8 @@ jobs:
         run: bash scripts/test-deployment-path-report.sh
       - name: GA release aggregate focused guard
         run: bash scripts/test-ga-release.sh
+      - name: Package-driven GA smoke focused guard
+        run: bash scripts/test-package-driven-ga-smoke.sh
 
   maintainer-diagnostics:
     if: github.event_name == 'workflow_dispatch'

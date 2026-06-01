@@ -113,6 +113,21 @@ probe, and an explicit install confirmation; it must not provide package-local
 archive/image loader probes for apply, and explicit install confirmation; it
 uses the installer-generated substrate truth under `.release-kit-internal` and
 does not require `routability_probe` or bundle/package `substrate_truth`.
+
+Package-driven GA handoff stays one package per deployment path:
+
+| Package `deployment_path` | Run | Finalized path report |
+| --- | --- | --- |
+| `online/use_existing` | `bash scripts/operator-release.sh --operator-inputs <online-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json` |
+| `online/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <online-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json` |
+| `airgap/use_existing` | `bash scripts/operator-release.sh --operator-inputs <airgap-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json` |
+| `airgap/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <airgap-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json` |
+
+Each path report directory must also contain
+`deployment-path-finalizer-manifest.json` and `source-evidence/`. The package
+runs do not write `ga-release-report.json` or any formal GA verdict; pass the
+four path reports plus AgentSmith product readiness and post-deploy product
+smoke reports to `verify-release.sh --ga-release`.
 These paths are still release-kit installer producer/finalizer evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
@@ -1115,6 +1130,9 @@ operator command or runbook step. Both install-substrate package paths run
 consume its report plus explicit confirmation, and finalize path-level
 evidence. This is path orchestration only, not GA verdict, package readiness,
 or deploy readiness.
+`bash scripts/test-package-driven-ga-smoke.sh` is the lightweight default CI
+guard proving the four package-driven finalized path reports can be handed
+directly to `--ga-release`.
 
 ## Handoff
 

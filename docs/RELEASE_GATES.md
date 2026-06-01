@@ -91,6 +91,29 @@ payloads, and inline truth-like payloads. `install_substrates` is represented
 as namespace-scoped installer producer/finalizer evidence with explicit
 confirmation; it is not cloud provisioning. Kind remains rehearsal-only.
 
+## Package-Driven GA Smoke Focused Guard
+
+Run:
+
+```bash
+bash scripts/test-package-driven-ga-smoke.sh
+```
+
+This lightweight default CI guard proves the handoff between package-driven
+operator runs and the final GA aggregate. It builds four minimal packages,
+runs `bash scripts/operator-release.sh --operator-inputs <pkg> --run` once for
+each package-driven deployment path, asserts that every run writes a finalized
+`deployment-path-report.json`, sibling
+`deployment-path-finalizer-manifest.json`, and `source-evidence/` directory,
+and asserts that no package run writes `ga-release-report.json` or
+`formal_verdict`.
+
+The guard then passes those four real package-run path reports, plus fixture
+AgentSmith product readiness and post-deploy product smoke reports, to
+`bash scripts/verify-release.sh --ga-release`. The only formal GA output in
+this smoke is the aggregate `ga-release-report.json` with `status: pass` and
+`formal_verdict: issued`.
+
 ## Operator Release Surface v0 Focused Guard
 
 Run:
@@ -1516,6 +1539,10 @@ single report JSON is not accepted. `operator-release-surface-report.json`,
 adoption reports, candidate intake reports, runbook acceptance reports, and
 other producer outputs remain internal evidence unless wrapped by a finalized
 `deployment-path-report.json`.
+`scripts/test-package-driven-ga-smoke.sh` verifies that finalized path reports
+created by the four package-driven operator-inputs runs can be consumed
+directly by this aggregate without adding a package-level verdict or a
+four-path package manifest.
 
 The GA aggregate must not delegate release readiness to AgentSmith product
 gates, AFSCP gates, ASBCP gates, or kind rehearsal alone. AgentSmith product
