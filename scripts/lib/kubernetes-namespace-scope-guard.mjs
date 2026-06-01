@@ -102,6 +102,8 @@ export function imageRefsFromSubstratePackManifest(manifest, options = {}) {
 const WORKLOAD_IMAGE_KINDS = new Set(['Deployment', 'StatefulSet', 'Job']);
 const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const ALLOWED_SERVICE_TYPES = new Set(['ClusterIP']);
+const FORBIDDEN_POD_SPEC_TRUE_FIELDS = ['hostNetwork', 'hostPID', 'hostIPC'];
+const FORBIDDEN_POD_SPEC_FIELDS = ['serviceAccountName', 'serviceAccount'];
 const FORBIDDEN_CLUSTER_IP_SERVICE_FIELDS = [
   'externalIPs',
   'loadBalancerIP',
@@ -281,6 +283,10 @@ function requireNonEmptyArray(value, label, fail) {
   return array;
 }
 
+function hasOwnField(object, field) {
+  return Object.prototype.hasOwnProperty.call(object, field);
+}
+
 function assertContainerImages(containers, label, allowedImages, fail) {
   for (const [index, container] of containers.entries()) {
     const itemLabel = `${label}[${index}]`;
@@ -289,6 +295,89 @@ function assertContainerImages(containers, label, allowedImages, fail) {
     imageDigestSuffix(image, `${itemLabel}.image`, fail);
     if (!allowedImages.has(image)) {
       fail(`${itemLabel}.image must match an image declared in substrate_pack_manifest.images`);
+    }
+  }
+}
+
+function assertPodSpecDenylist(podSpec, label, fail) {
+  for (const field of FORBIDDEN_POD_SPEC_TRUE_FIELDS) {
+    if (podSpec[field] === true) {
+      fail(`${label}.${field} true is not allowed for substrate install`);
+    }
+  }
+
+  for (const field of FORBIDDEN_POD_SPEC_FIELDS) {
+    if (hasOwnField(podSpec, field)) {
+      fail(`${label}.${field} is not allowed for substrate install`);
+    }
+  }
+
+  if (hasOwnField(podSpec, 'securityContext')) {
+    const securityContext = requireObject(
+      podSpec.securityContext,
+      `${label}.securityContext`,
+      fail
+    );
+    if (securityContext.privileged === true) {
+      fail(`${label}.securityContext.privileged true is not allowed for substrate install`);
+    }
+  }
+
+  if (hasOwnField(podSpec, 'volumes')) {
+    for (const [index, volume] of requireArray(podSpec.volumes, `${label}.volumes`, fail).entries()) {
+      const volumeLabel = `${label}.volumes[${index}]`;
+      const object = requireObject(volume, volumeLabel, fail);
+      if (hasOwnField(object, 'hostPath')) {
+        fail(`${volumeLabel}.hostPath is not allowed for substrate install`);
+      }
+    }
+  }
+}
+
+function assertContainerDenylist(containers, label, fail) {
+  for (const [index, container] of containers.entries()) {
+    const itemLabel = `${label}[${index}]`;
+    const object = requireObject(container, itemLabel, fail);
+
+    if (hasOwnField(object, 'securityContext')) {
+      const securityContext = requireObject(
+        object.securityContext,
+        `${itemLabel}.securityContext`,
+        fail
+      );
+      if (securityContext.privileged === true) {
+        fail(`${itemLabel}.securityContext.privileged true is not allowed for substrate install`);
+      }
+      if (securityContext.allowPrivilegeEscalation === true) {
+        fail(`${itemLabel}.securityContext.allowPrivilegeEscalation true is not allowed for substrate install`);
+      }
+      if (hasOwnField(securityContext, 'capabilities')) {
+        const capabilities = requireObject(
+          securityContext.capabilities,
+          `${itemLabel}.securityContext.capabilities`,
+          fail
+        );
+        if (
+          hasOwnField(capabilities, 'add') &&
+          requireArray(
+            capabilities.add,
+            `${itemLabel}.securityContext.capabilities.add`,
+            fail
+          ).length > 0
+        ) {
+          fail(`${itemLabel}.securityContext.capabilities.add must be empty or omitted for substrate install`);
+        }
+      }
+    }
+
+    if (hasOwnField(object, 'ports')) {
+      for (const [portIndex, port] of requireArray(object.ports, `${itemLabel}.ports`, fail).entries()) {
+        const portLabel = `${itemLabel}.ports[${portIndex}]`;
+        const portObject = requireObject(port, portLabel, fail);
+        if (hasOwnField(portObject, 'hostPort')) {
+          fail(`${portLabel}.hostPort is not allowed for substrate install`);
+        }
+      }
     }
   }
 }
@@ -310,17 +399,38 @@ function assertWorkloadImages(resource, label, options, fail) {
   const spec = requireObject(resource.spec, `${label}.spec`, fail);
   const template = requireObject(spec.template, `${label}.spec.template`, fail);
   const podSpec = requireObject(template.spec, `${label}.spec.template.spec`, fail);
+  assertPodSpecDenylist(podSpec, `${label}.spec.template.spec`, fail);
+  const containers = requireNonEmptyArray(
+    podSpec.containers,
+    `${label}.spec.template.spec.containers`,
+    fail
+  );
   assertContainerImages(
-    requireNonEmptyArray(podSpec.containers, `${label}.spec.template.spec.containers`, fail),
+    containers,
     `${label}.spec.template.spec.containers`,
     allowedImages,
     fail
   );
+  assertContainerDenylist(
+    containers,
+    `${label}.spec.template.spec.containers`,
+    fail
+  );
   if (Object.prototype.hasOwnProperty.call(podSpec, 'initContainers')) {
+    const initContainers = requireArray(
+      podSpec.initContainers,
+      `${label}.spec.template.spec.initContainers`,
+      fail
+    );
     assertContainerImages(
-      requireArray(podSpec.initContainers, `${label}.spec.template.spec.initContainers`, fail),
+      initContainers,
       `${label}.spec.template.spec.initContainers`,
       allowedImages,
+      fail
+    );
+    assertContainerDenylist(
+      initContainers,
+      `${label}.spec.template.spec.initContainers`,
       fail
     );
   }

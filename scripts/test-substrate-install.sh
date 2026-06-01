@@ -380,6 +380,27 @@ function pvcResource(storageClassName = 'gp3') {
   };
 }
 
+function setPodSpecField(resource, field, value) {
+  resource.spec.template.spec[field] = value;
+  return resource;
+}
+
+function mutateFirstContainer(resource, mutate) {
+  mutate(resource.spec.template.spec.containers[0]);
+  return resource;
+}
+
+function addInitContainer(resource, extraFields) {
+  resource.spec.template.spec.initContainers = [
+    {
+      name: 'init-substrate',
+      image: manifest.images.redis,
+      ...extraFields
+    }
+  ];
+  return resource;
+}
+
 let resources = [
   configMapResource(),
   serviceResource('ClusterIP'),
@@ -429,6 +450,91 @@ if (mutation === 'tag_only_workload_image') {
 }
 if (mutation === 'digest_drift_workload_image') {
   resources = [deploymentResource(image('postgresql', '16.3', '9'))];
+}
+if (mutation === 'workload_host_network') {
+  resources = [setPodSpecField(deploymentResource(), 'hostNetwork', true)];
+}
+if (mutation === 'workload_host_pid') {
+  resources = [setPodSpecField(statefulSetResource(), 'hostPID', true)];
+}
+if (mutation === 'workload_host_ipc') {
+  resources = [setPodSpecField(jobResource(), 'hostIPC', true)];
+}
+if (mutation === 'workload_host_path_volume') {
+  resources = [
+    setPodSpecField(deploymentResource(), 'volumes', [
+      {
+        name: 'host-docker-sock',
+        hostPath: {
+          type: 'Directory'
+        }
+      }
+    ])
+  ];
+}
+if (mutation === 'workload_service_account_name') {
+  resources = [setPodSpecField(jobResource(), 'serviceAccountName', 'substrate-installer')];
+}
+if (mutation === 'workload_service_account') {
+  resources = [setPodSpecField(deploymentResource(), 'serviceAccount', 'substrate-installer')];
+}
+if (mutation === 'workload_pod_privileged') {
+  resources = [
+    setPodSpecField(deploymentResource(), 'securityContext', {
+      privileged: true
+    })
+  ];
+}
+if (mutation === 'workload_container_privileged') {
+  resources = [
+    mutateFirstContainer(deploymentResource(), (container) => {
+      container.securityContext = {
+        privileged: true
+      };
+    })
+  ];
+}
+if (mutation === 'workload_allow_privilege_escalation') {
+  resources = [
+    mutateFirstContainer(deploymentResource(), (container) => {
+      container.securityContext = {
+        allowPrivilegeEscalation: true
+      };
+    })
+  ];
+}
+if (mutation === 'workload_capabilities_add') {
+  resources = [
+    mutateFirstContainer(deploymentResource(), (container) => {
+      container.securityContext = {
+        capabilities: {
+          add: ['NET_ADMIN']
+        }
+      };
+    })
+  ];
+}
+if (mutation === 'workload_host_port') {
+  resources = [
+    mutateFirstContainer(deploymentResource(), (container) => {
+      container.ports = [
+        {
+          name: 'postgresql',
+          containerPort: 5432,
+          hostPort: 5432
+        }
+      ];
+    })
+  ];
+}
+if (mutation === 'workload_init_container_privileged') {
+  resources = [
+    addInitContainer(deploymentResource(), {
+      securityContext: {
+        privileged: true
+      }
+    })
+  ];
 }
 if (mutation === 'daemonset_manifest') {
   resources = [
@@ -788,6 +894,23 @@ run_install() {
       "$@"
 }
 
+assert_install_rejected_before_kubectl() {
+  local mutation="$1"
+  local expected_message="$2"
+  local description="$3"
+  local fixture_dir="$TMP_DIR/$mutation"
+
+  write_fixture_set "$fixture_dir" "$mutation"
+  reset_kubectl_log
+  if run_install "$fixture_dir" "$TMP_DIR/out-$mutation" >"$TMP_DIR/$mutation.out" 2>&1; then
+    fail "$description should fail"
+  fi
+  grep -Fq "$expected_message" "$TMP_DIR/$mutation.out" || \
+    fail "$description failure message did not explain blocker"
+  assert_kubectl_not_called
+  pass "$description rejected before kubectl"
+}
+
 assert_install_report() {
   local report_file="$1"
   local truth_file="$2"
@@ -1038,6 +1161,66 @@ grep -Fq "must match an image declared in substrate_pack_manifest.images" "$TMP_
   fail "digest drift workload image failure message did not explain pack image inventory blocker"
 assert_kubectl_not_called
 pass "workload image digest drift rejected before kubectl"
+
+assert_install_rejected_before_kubectl \
+  workload_host_network \
+  "resources[0].spec.template.spec.hostNetwork true is not allowed for substrate install" \
+  "workload hostNetwork"
+
+assert_install_rejected_before_kubectl \
+  workload_host_pid \
+  "resources[0].spec.template.spec.hostPID true is not allowed for substrate install" \
+  "workload hostPID"
+
+assert_install_rejected_before_kubectl \
+  workload_host_ipc \
+  "resources[0].spec.template.spec.hostIPC true is not allowed for substrate install" \
+  "workload hostIPC"
+
+assert_install_rejected_before_kubectl \
+  workload_host_path_volume \
+  "resources[0].spec.template.spec.volumes[0].hostPath is not allowed for substrate install" \
+  "workload hostPath volume"
+
+assert_install_rejected_before_kubectl \
+  workload_service_account_name \
+  "resources[0].spec.template.spec.serviceAccountName is not allowed for substrate install" \
+  "workload serviceAccountName"
+
+assert_install_rejected_before_kubectl \
+  workload_service_account \
+  "resources[0].spec.template.spec.serviceAccount is not allowed for substrate install" \
+  "workload serviceAccount"
+
+assert_install_rejected_before_kubectl \
+  workload_pod_privileged \
+  "resources[0].spec.template.spec.securityContext.privileged true is not allowed for substrate install" \
+  "workload pod securityContext privileged"
+
+assert_install_rejected_before_kubectl \
+  workload_container_privileged \
+  "resources[0].spec.template.spec.containers[0].securityContext.privileged true is not allowed for substrate install" \
+  "workload container securityContext privileged"
+
+assert_install_rejected_before_kubectl \
+  workload_allow_privilege_escalation \
+  "resources[0].spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation true is not allowed for substrate install" \
+  "workload container allowPrivilegeEscalation"
+
+assert_install_rejected_before_kubectl \
+  workload_capabilities_add \
+  "resources[0].spec.template.spec.containers[0].securityContext.capabilities.add must be empty or omitted for substrate install" \
+  "workload container added capabilities"
+
+assert_install_rejected_before_kubectl \
+  workload_host_port \
+  "resources[0].spec.template.spec.containers[0].ports[0].hostPort is not allowed for substrate install" \
+  "workload container hostPort"
+
+assert_install_rejected_before_kubectl \
+  workload_init_container_privileged \
+  "resources[0].spec.template.spec.initContainers[0].securityContext.privileged true is not allowed for substrate install" \
+  "workload initContainer securityContext privileged"
 
 "$NODE_BIN" --input-type=module - "$ROOT_DIR" <<'NODE'
 import { pathToFileURL } from 'node:url';
