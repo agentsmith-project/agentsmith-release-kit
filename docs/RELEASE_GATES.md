@@ -75,8 +75,13 @@ report itself to the finalizer. The airgap install path runs substrate-install,
 then runs bundle-check plus airgap deployment-gate directly rather than through
 consume rehearsal. That gate uses bundle-local release/template/archive/image
 map/render-values inputs and the installer generated substrate truth, which
-stays under `.release-kit-internal`. These paths write path-level evidence
-only; they do not write `ga-release-report.json` or issue a GA verdict.
+stays under `.release-kit-internal`. The online install package includes
+`routability_probe` plus installer inputs; the airgap install package includes
+`kubectl`, `context`, the airgap bundle plus manifest, `archive_probe` and
+`image_loader` for apply, plus installer inputs. Neither install path accepts a
+package-local or bundle-local `substrate_truth` field. These paths write
+path-level evidence only; they do not write `ga-release-report.json` or issue a
+GA verdict.
 Server-dry-run modes also fail fast.
 
 The intake rejects unknown fields, path escapes, missing path-specific inputs,

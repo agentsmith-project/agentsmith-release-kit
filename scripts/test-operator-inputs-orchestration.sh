@@ -747,7 +747,6 @@ const manifest = {
   deploy_template_package: 'deploy-template-package.json',
   deploy_template_archive: 'deploy-template-package.tgz',
   render_values: 'render-values.json',
-  substrate_truth: 'substrate-truth.json',
   target_prerequisites: 'target-prerequisites.json',
   substrate_pack_manifest: 'substrate-pack-manifest.json',
   substrate_install_inputs: 'substrate-install-inputs.json',
@@ -1176,7 +1175,6 @@ const manifest = {
   deploy_template_package: 'bundle/components/deploy-template-package.json',
   deploy_template_archive: 'bundle/components/agentsmith-deploy-template-package.tgz',
   render_values: 'bundle/operator-inputs/render-values.json',
-  substrate_truth: 'bundle/operator-inputs/substrate-truth.json',
   target_prerequisites: 'bundle/operator-inputs/target-prerequisites.json',
   substrate_pack_manifest: 'bundle/components/substrate-pack-manifest.json',
   substrate_install_inputs: 'bundle/operator-inputs/substrate-install-inputs.json',
@@ -1382,7 +1380,6 @@ writeJson(path.join(packageDir, 'operator-inputs.json'), {
   deploy_template_package: 'bundle/components/deploy-template-package.json',
   deploy_template_archive: 'bundle/components/deploy-template-package.tgz',
   render_values: 'bundle/operator-inputs/render-values.json',
-  substrate_truth: 'bundle/operator-inputs/substrate-truth.json',
   target_prerequisites: 'bundle/operator-inputs/target-prerequisites.json',
   substrate_pack_manifest: 'bundle/components/substrate-pack-manifest.json',
   substrate_install_inputs: 'bundle/operator-inputs/substrate-install-inputs.json',
@@ -2107,7 +2104,7 @@ const index = step.argv.indexOf('--substrate-truth');
 if (index === -1 || !step.argv[index + 1]) {
   throw new Error('fixture airgap gate must include --substrate-truth');
 }
-step.argv[index + 1] = plan.input_refs.substrate_truth.absolute_path;
+step.argv[index + 1] = path.join(packageDir, 'bundle/operator-inputs/substrate-truth.json');
 plan.plan_sha256 = null;
 plan.plan_sha256 = digestPlan({ ...plan, plan_sha256: null });
 fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
@@ -2359,6 +2356,22 @@ expect_fail_matching missing_release_contract_preclean 'cannot read release_cont
 assert_no_path_evidence "$missing_release_contract_package"
 pass "operator-inputs --run clears stale path evidence before missing release_contract validation"
 
+missing_online_truth_package="$TMP_DIR/missing-online-substrate-truth"
+prepare_online_package "$missing_online_truth_package" apply /ok
+"$NODE_BIN" --input-type=module - "$missing_online_truth_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+delete manifest.substrate_truth;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+write_stale_finalizer "$missing_online_truth_package"
+expect_fail_matching missing_online_substrate_truth 'missing required operator-inputs field for online/use_existing: substrate_truth' \
+  run_operator_inputs "$missing_online_truth_package" missing-online-substrate-truth
+assert_no_path_evidence "$missing_online_truth_package"
+pass "operator-inputs online/use_existing still requires target substrate truth"
+
 reserved_ref_package="$TMP_DIR/reserved-output-tree-ref"
 prepare_online_package "$reserved_ref_package" apply /ok
 write_stale_finalizer "$reserved_ref_package"
@@ -2412,6 +2425,22 @@ expect_fail_matching missing_airgap_context 'missing required operator-inputs fi
   run_airgap_operator_inputs "$missing_airgap_context_package" missing-airgap-context
 assert_no_path_evidence "$missing_airgap_context_package" airgap-use-existing
 pass "operator-inputs airgap path requires explicit context before orchestration"
+
+missing_airgap_truth_package="$TMP_DIR/missing-airgap-substrate-truth"
+prepare_airgap_package "$missing_airgap_truth_package" apply /ok
+"$NODE_BIN" --input-type=module - "$missing_airgap_truth_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+delete manifest.substrate_truth;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+write_stale_finalizer "$missing_airgap_truth_package" airgap-use-existing
+expect_fail_matching missing_airgap_substrate_truth 'missing required operator-inputs field for airgap/use_existing: substrate_truth' \
+  run_airgap_operator_inputs "$missing_airgap_truth_package" missing-airgap-substrate-truth
+assert_no_path_evidence "$missing_airgap_truth_package" airgap-use-existing
+pass "operator-inputs airgap/use_existing still requires bundle-local substrate truth"
 
 dry_run_package="$TMP_DIR/dry-run-online"
 prepare_online_package "$dry_run_package" server-dry-run /ok
@@ -2725,7 +2754,6 @@ const manifest = {
   deploy_template_package: 'deploy-template-package.json',
   deploy_template_archive: 'deploy-template-package.tgz',
   render_values: 'render-values.json',
-  substrate_truth: 'alternate/substrate-truth.json',
   target_prerequisites: 'alternate/target-prerequisites.json',
   substrate_pack_manifest: 'alternate/substrate-pack-manifest.json',
   substrate_install_inputs: 'alternate/substrate-install-inputs.json',

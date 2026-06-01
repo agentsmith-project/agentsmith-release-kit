@@ -34,8 +34,8 @@ AgentSmith Release Kit consumes:
 - AgentSmith release contract.
 - AgentSmith deploy template package.
 - Operator inputs through `operator-inputs` packages that reference release
-  contract, deploy template, render values, substrate truth, target
-  prerequisites, bundle, installer, and probe/loader materials without
+  contract, deploy template, render values, use-existing substrate truth,
+  target prerequisites, bundle, installer, and probe/loader materials without
   inlining business truth or secrets.
 
 AgentSmith Release Kit owns:
@@ -106,14 +106,16 @@ supplied.
 
 For `online/install_substrates`, the package must provide namespace-scoped
 installer inputs, `kubectl` and `context` inputs, a package-local routability
-probe, and an explicit install confirmation. For
+probe, and an explicit install confirmation; it must not provide package-local
+`substrate_truth` because the online gate uses installer-generated truth. For
 `airgap/install_substrates`, the package must provide package-local
 `kubectl`, `context`, the airgap bundle plus manifest, package-local
 archive/image loader probes for apply, and explicit install confirmation; it
 uses the installer-generated substrate truth under `.release-kit-internal` and
-does not require `routability_probe`. These paths are still release-kit
-installer producer/finalizer evidence flows; they are not cloud provisioning
-for clusters, databases, buckets, IAM, networks, or OIDC realms.
+does not require `routability_probe` or bundle/package `substrate_truth`.
+These paths are still release-kit installer producer/finalizer evidence flows;
+they are not cloud provisioning for clusters, databases, buckets, IAM,
+networks, or OIDC realms.
 
 Maintainer/internal diagnostics still expose the old positional surface:
 `online use_existing`, `online kit_provided`, `airgap use_existing`, and

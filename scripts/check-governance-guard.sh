@@ -95,6 +95,47 @@ reject_scan() {
   fi
 }
 
+reject_operator_substrate_surface() {
+  local paths=("$@")
+  local label="install_substrates exposed as successful operator substrate surface"
+  local hard_pattern='operator-release[.]sh[[:space:]]+(online|airgap|airgap-bundle)[[:space:]]+install_substrates|`(online|airgap|airgap-bundle)/install_substrates`[[:space:]]*(->|backed|requires|repo-local)|install_substrates[[:space:]]+maps|--substrate-strategy[[:space:]]+use_existing[|]install_substrates'
+  local package_pair_pattern='`(online|airgap|airgap-bundle)/install_substrates`[[:space:]]+and'
+  local allowed_context='operator-release[.]sh[[:space:]]+--operator-inputs[[:space:]]+<[^>]+>[[:space:]]+--run'
+  local matches
+  local file
+  local line
+  local text
+  local start
+  local end
+  local context
+  local found=0
+
+  if ((${#paths[@]} == 0)); then
+    return
+  fi
+
+  matches="$(grep -IInE -- "$hard_pattern" "${paths[@]}" || true)"
+  if [[ -n "$matches" ]]; then
+    printf '%s\n' "$matches"
+    found=1
+  fi
+
+  while IFS=: read -r file line text; do
+    [[ -n "$file" && -n "$line" ]] || continue
+    start=$((line > 3 ? line - 3 : 1))
+    end=$((line + 3))
+    context="$(sed -n "${start},${end}p" "$file")"
+    if ! grep -Eqi -- "$allowed_context" <<<"$context"; then
+      printf '%s:%s:%s\n' "$file" "$line" "$text"
+      found=1
+    fi
+  done < <(grep -IInE -- "$package_pair_pattern" "${paths[@]}" || true)
+
+  if ((found)); then
+    fail "$label"
+  fi
+}
+
 reject_ecosystem_bootstrap_files
 
 remote_url="$(git remote get-url origin 2>/dev/null || true)"
@@ -170,10 +211,7 @@ reject_scan \
   'operator release choices?' \
   "${doc_policy_paths[@]}"
 
-reject_scan \
-  "install_substrates exposed as successful operator substrate surface" \
-  'operator-release[.]sh[[:space:]]+(online|airgap|airgap-bundle)[[:space:]]+install_substrates|`(online|airgap|airgap-bundle)/install_substrates`[[:space:]]*(->|backed|requires|repo-local|and)|install_substrates[[:space:]]+maps|--substrate-strategy[[:space:]]+use_existing[|]install_substrates' \
-  "${operator_substrate_surface_paths[@]}"
+reject_operator_substrate_surface "${operator_substrate_surface_paths[@]}"
 
 require_text README.md "$EXPECTED_IDENTITY"
 require_text README.md "AgentSmith release contract"

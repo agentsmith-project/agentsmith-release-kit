@@ -102,8 +102,11 @@ const COMMON_REQUIRED_FILES = [
   'deploy_template_package',
   'deploy_template_archive',
   'render_values',
-  'substrate_truth',
   'target_prerequisites'
+];
+const USE_EXISTING_REQUIRED_FILES = [
+  ...COMMON_REQUIRED_FILES,
+  'substrate_truth'
 ];
 const SMOKE_MODIFIER_FIELDS = [
   'expected_status',
@@ -134,7 +137,7 @@ const DEPLOYMENT_PATH_CONFIG = new Map([
     {
       targetProfile: 'existing_kubernetes/external_declared/online',
       operatorChoice: ['online', 'use_existing'],
-      requiredFiles: COMMON_REQUIRED_FILES,
+      requiredFiles: USE_EXISTING_REQUIRED_FILES,
       requiredDirs: [],
       requiredCommands: [],
       requiredScalars: [],
@@ -165,7 +168,7 @@ const DEPLOYMENT_PATH_CONFIG = new Map([
       targetProfile: 'existing_kubernetes/external_declared/airgap',
       operatorChoice: ['airgap', 'use_existing'],
       requiredFiles: [
-        ...COMMON_REQUIRED_FILES,
+        ...USE_EXISTING_REQUIRED_FILES,
         'airgap_bundle_manifest'
       ],
       requiredDirs: ['airgap_bundle'],
@@ -734,6 +737,12 @@ function validateSmokeRuntimeFields(manifest, mode) {
 function validateUnsupportedInputs(manifest) {
   if (Object.hasOwn(manifest, 'registry_probe')) {
     fail('registry_probe is not supported by operator-inputs intake because target_registry is not modeled; omit registry_probe');
+  }
+}
+
+function validatePathSpecificUnsupportedInputs({ manifest, config }) {
+  if (config.installSubstrates && Object.hasOwn(manifest, 'substrate_truth')) {
+    fail('substrate_truth is accepted only for use_existing deployment_path');
   }
 }
 
@@ -1875,6 +1884,7 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
   validateSmokeUrlField(manifest);
   validateUnsupportedInputs(manifest);
   const config = DEPLOYMENT_PATH_CONFIG.get(manifest.deployment_path);
+  validatePathSpecificUnsupportedInputs({ manifest, config });
   const requiredInputs = requireFields({ manifest, config, mode });
   validateConfirmations({ manifest, config, mode });
 

@@ -46,8 +46,11 @@ const COMMON_INPUT_REFS = [
   'deploy_template_package',
   'deploy_template_archive',
   'render_values',
-  'substrate_truth',
   'target_prerequisites'
+];
+const USE_EXISTING_INPUT_REFS = [
+  ...COMMON_INPUT_REFS,
+  'substrate_truth'
 ];
 const INSTALL_INPUT_REFS = [
   'substrate_pack_manifest',
@@ -99,7 +102,7 @@ const AIRGAP_BUNDLE_COMPONENT_REF_KEYS = [
   'deploy_template_archive'
 ];
 const SUPPORTED_INPUT_REFS = new Set([
-  ...COMMON_INPUT_REFS,
+  ...USE_EXISTING_INPUT_REFS,
   ...INSTALL_INPUT_REFS,
   ...AIRGAP_USE_EXISTING_INPUT_REFS,
   'kubectl'
@@ -695,7 +698,9 @@ function isAirgapInstallSubstratesPath(deploymentPath) {
 }
 
 function inputRefsForDeploymentPath(deploymentPath, mode) {
-  const required = [...COMMON_INPUT_REFS];
+  const required = isInstallSubstratesPath(deploymentPath)
+    ? [...COMMON_INPUT_REFS]
+    : [...USE_EXISTING_INPUT_REFS];
   const optional = [];
   if (isOnlineInstallSubstratesPath(deploymentPath)) {
     required.push(...INSTALL_INPUT_REFS);

@@ -21,7 +21,8 @@ Operator-inputs run:
   install_substrates runs substrate-install, then online-deployment-gate bound
   to the installer output substrate truth for online, or bundle-check plus
   airgap-deployment-gate bound to that truth for airgap, then the internal
-  deployment-path finalizer. airgap/use_existing runs airgap-consume-rehearsal, extracts the
+  deployment-path finalizer. Install packages do not provide substrate_truth.
+  airgap/use_existing runs airgap-consume-rehearsal, extracts the
   nested bundle-check and deployment-gate reports, then runs the internal
   deployment-path finalizer. Server-dry-run modes fail fast.
   No ga-release-report.json, GA verdict, or release readiness is issued.

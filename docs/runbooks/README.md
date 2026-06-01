@@ -61,12 +61,15 @@ verdict, package readiness, operator readiness, or GA signoff.
 
 `online/install_substrates` needs namespace-scoped installer producer/finalizer
 evidence, required `kubectl` and `context` inputs, a package-local
-`routability_probe`, and an explicit installer confirmation.
+`routability_probe`, substrate pack manifest, substrate install inputs, and an
+explicit installer confirmation. It does not accept package-local
+`substrate_truth`; the online deployment gate uses installer-generated truth.
 `airgap/install_substrates` needs package-local `kubectl`, explicit `context`,
 the airgap bundle plus manifest, package-local `archive_probe` and
-`image_loader` for apply, and explicit installer confirmation. It uses the
-installer-generated substrate truth under `.release-kit-internal` for the
-airgap deployment gate and does not require `routability_probe`. These paths
+`image_loader` for apply, substrate pack manifest, substrate install inputs,
+and explicit installer confirmation. It uses the installer-generated substrate
+truth under `.release-kit-internal` for the airgap deployment gate and does not
+require `routability_probe` or bundle/package `substrate_truth`. These paths
 are not cloud substrate provisioners.
 `installed_by` stays a provenance marker, not installer proof; it does not mean
 release-kit created databases, buckets, OIDC realms, or other substrate
@@ -74,10 +77,10 @@ resources.
 
 | `deployment_path` | Package must include | Current intake result |
 | --- | --- | --- |
-| `online/use_existing` | Common release/template/render/substrate/prerequisite files, namespace, optional package-local `kubectl`. | Validates the package and writes the internal plan. With `--run` and `mode: apply`, also writes path-level deployment evidence through the existing online producer and deployment-path finalizer. |
-| `online/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, package-local `routability_probe`, and explicit install confirmation. | Validates installer inputs and writes the internal plan for installer plus online focused producer steps. With `--run` and `mode: apply`, runs substrate-install before the online deployment gate; the installer output substrate truth drives that gate, then the deployment-path finalizer writes path-level evidence. |
-| `airgap/use_existing` | Common files plus `airgap_bundle`, explicit `airgap_bundle_manifest` inside that bundle, required package-local `kubectl`, explicit `context`, package-local `archive_probe` and `image_loader` for apply, and a smoke URL for run-time route-smoke evidence. | Validates the already assembled bundle reference and writes the internal plan for the airgap consume/deployment producer path. With `--run` and `mode: apply`, runs airgap consume rehearsal, extracts its nested bundle-check and deployment-gate reports, then the deployment-path finalizer writes path-level evidence from bundle-local release contract/deploy package components. |
-| `airgap/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, explicit install confirmation, `airgap_bundle`, explicit `airgap_bundle_manifest` inside that bundle, package-local archive/image loader probes for apply, and a smoke URL for run-time route-smoke evidence. | Validates installer and bundle references and writes the internal plan for installer plus bundle-check and airgap deployment producer steps. With `--run` and `mode: apply`, runs substrate-install first, keeps generated substrate truth under `.release-kit-internal`, uses that truth for the airgap deployment gate, then finalizes path-level evidence. |
+| `online/use_existing` | Release contract, deploy template package and archive, render values, target substrate truth, target prerequisites, namespace, optional package-local `kubectl`. | Validates the package and writes the internal plan. With `--run` and `mode: apply`, also writes path-level deployment evidence through the existing online producer and deployment-path finalizer. |
+| `online/install_substrates` | Release contract, deploy template package and archive, render values, target prerequisites, substrate pack manifest, substrate install inputs, required `kubectl` and `context`, package-local `routability_probe`, and explicit install confirmation. No package-local `substrate_truth`. | Validates installer inputs and writes the internal plan for installer plus online focused producer steps. With `--run` and `mode: apply`, runs substrate-install before the online deployment gate; the installer output substrate truth drives that gate, then the deployment-path finalizer writes path-level evidence. |
+| `airgap/use_existing` | Bundle-local release contract, deploy template package and archive, render values, substrate truth, and target prerequisites; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL for run-time route-smoke evidence. | Validates the already assembled bundle reference and writes the internal plan for the airgap consume/deployment producer path. With `--run` and `mode: apply`, runs airgap consume rehearsal, extracts its nested bundle-check and deployment-gate reports, then the deployment-path finalizer writes path-level evidence from bundle-local release contract/deploy package components. |
+| `airgap/install_substrates` | Bundle-local release contract, deploy template package and archive, render values, and target prerequisites; substrate pack manifest; substrate install inputs; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL; explicit install confirmation. No bundle/package `substrate_truth`. | Validates installer and bundle references and writes the internal plan for installer plus bundle-check and airgap deployment producer steps. With `--run` and `mode: apply`, runs substrate-install first, keeps generated substrate truth under `.release-kit-internal`, uses that truth for the airgap deployment gate, then finalizes path-level evidence. |
 
 ## Maintainer/Internal Diagnostics
 

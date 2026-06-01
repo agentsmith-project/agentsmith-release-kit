@@ -84,14 +84,17 @@ agentsmith.image-map/v1`, `readiness: false`, and `scope: image_map_only`.
 The report is a plan for source/target digest references only; it must not
 claim registry presence, deploy readiness, package readiness, release
 readiness, product-flow evidence, or registry credential handling.
-The operator-facing kit-installed paths validate kit-supplied substrate
-pack/truth inputs. For the two install-substrates evidence paths
-(`online/install_substrates`, `airgap/install_substrates`), the finalizer and
-GA aggregate now accept explicit installer confirmation evidence. The release
-kit can validate that installer evidence and its output substrate truth
-binding to target-preflight truth. The operator facade still does not install
-substrates automatically: the separate `--substrate-install` producer report
-must be supplied explicitly. Internal
+The operator-facing kit-installed diagnostics validate kit-supplied substrate
+pack/truth inputs. For package-driven operator inputs runs
+(`operator-release.sh --operator-inputs <pkg> --run`), the
+`online/install_substrates` and `airgap/install_substrates` paths internally
+run namespace-scoped `substrate-install` and produce path-level installer
+confirmation evidence plus output substrate truth binding to target-preflight
+truth; package-driven install paths do not accept a separate package-local or
+bundle-local `substrate_truth` input. For lower-level/internal producer and
+finalizer use, an explicit `--substrate-install` producer report remains the
+maintainer diagnostic input for that installer confirmation and truth binding.
+Internal
 `installed_by: agentsmith-release-kit` values stay as kit-provided pack/truth
 identity and provenance markers; `installed_by` stays a provenance marker, not
 facade installer proof.

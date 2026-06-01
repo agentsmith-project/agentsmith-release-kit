@@ -97,6 +97,7 @@ import path from 'node:path';
 
 const [output, deploymentPath, mode] = process.argv.slice(2);
 const packageRoot = path.dirname(output);
+const installsSubstrates = deploymentPath.endsWith('/install_substrates');
 
 function targetProfileObject(value) {
   const [targetCluster, substrateSource, distribution] = value.split('/');
@@ -195,10 +196,12 @@ if (deploymentPath.startsWith('airgap/')) {
     'render-values.json',
     'operator-inputs/render-values.json'
   );
-  manifest.substrate_truth = copyPackageFileIntoBundle(
-    'substrate-truth.json',
-    'operator-inputs/substrate-truth.json'
-  );
+  if (!installsSubstrates) {
+    manifest.substrate_truth = copyPackageFileIntoBundle(
+      'substrate-truth.json',
+      'operator-inputs/substrate-truth.json'
+    );
+  }
   manifest.target_prerequisites = copyPackageFileIntoBundle(
     'target-prerequisites.json',
     'operator-inputs/target-prerequisites.json'
@@ -210,7 +213,7 @@ if (deploymentPath.startsWith('airgap/')) {
     bundleComponent('deploy_template_archive', 'components/deploy-template-package.tgz'),
     bundleComponent('image_map', 'components/image-map.json')
   ];
-  if (deploymentPath.endsWith('/install_substrates')) {
+  if (installsSubstrates) {
     manifest.substrate_pack_manifest = copyPackageFileIntoBundle(
       'substrate-pack-manifest.json',
       'components/substrate-pack-manifest.json'
@@ -224,7 +227,7 @@ if (deploymentPath.startsWith('airgap/')) {
     );
   }
   writeAirgapBundleManifest(
-    deploymentPath.endsWith('/install_substrates')
+    installsSubstrates
       ? 'existing_kubernetes/kit_installed/airgap'
       : 'existing_kubernetes/external_declared/airgap',
     components
@@ -235,7 +238,8 @@ if (deploymentPath.startsWith('airgap/')) {
   }
 }
 
-if (deploymentPath.endsWith('/install_substrates')) {
+if (installsSubstrates) {
+  delete manifest.substrate_truth;
   if (!deploymentPath.startsWith('airgap/')) {
     manifest.substrate_pack_manifest = 'substrate-pack-manifest.json';
     manifest.substrate_install_inputs = 'substrate-install-inputs.json';
@@ -573,6 +577,11 @@ switch (caseName) {
   case 'missing_substrate_truth':
     delete manifest.substrate_truth;
     break;
+  case 'install_substrate_truth':
+    manifest.substrate_truth = manifest.deployment_path.startsWith('airgap/')
+      ? 'bundle/operator-inputs/substrate-truth.json'
+      : 'substrate-truth.json';
+    break;
   case 'missing_target_prerequisites':
     manifest.target_prerequisites = 'missing-target-prerequisites.json';
     break;
@@ -599,6 +608,7 @@ import path from 'node:path';
 const [planPath, deploymentPath, rootDir] = process.argv.slice(2);
 const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
 const serialized = JSON.stringify(plan);
+const installsSubstrates = deploymentPath.endsWith('/install_substrates');
 const existingArgPathFlags = new Set([
   '--operator-inputs',
   '--release-contract',
@@ -735,7 +745,6 @@ for (const key of [
   'deploy_template_package',
   'deploy_template_archive',
   'render_values',
-  'substrate_truth',
   'target_prerequisites'
 ]) {
   const ref = plan.input_refs?.[key];
@@ -743,6 +752,17 @@ for (const key of [
     throw new Error(`missing file digest ref: ${key}`);
   }
   assertAccessibleFile(ref.absolute_path, `input ref ${key}`);
+}
+if (installsSubstrates) {
+  if (plan.input_refs?.substrate_truth) {
+    throw new Error('install path plan must not include package-local substrate truth ref');
+  }
+} else {
+  const ref = plan.input_refs?.substrate_truth;
+  if (!ref || ref.kind !== 'file' || !/^sha256:[0-9a-f]{64}$/.test(ref.sha256 || '')) {
+    throw new Error('missing file digest ref: substrate_truth');
+  }
+  assertAccessibleFile(ref.absolute_path, 'input ref substrate_truth');
 }
 for (const key of [
   'kubectl',
@@ -787,10 +807,16 @@ if (deploymentPath.startsWith('airgap/')) {
       throw new Error(`${key} must match a bundle-local component`);
     }
   }
-  for (const key of ['render_values', 'substrate_truth']) {
+  for (const key of ['render_values']) {
     const ref = plan.input_refs?.[key];
     if (!isInsidePath(bundleRef.absolute_path, ref?.absolute_path || '')) {
       throw new Error(`${key} must be inside airgap_bundle`);
+    }
+  }
+  if (!installsSubstrates) {
+    const ref = plan.input_refs?.substrate_truth;
+    if (!isInsidePath(bundleRef.absolute_path, ref?.absolute_path || '')) {
+      throw new Error('substrate_truth must be inside airgap_bundle');
     }
   }
   let sawBundleManifestArg = false;
@@ -819,7 +845,7 @@ if (deploymentPath.startsWith('airgap/')) {
           if (argv[index + 1] !== generatedTruth) {
             throw new Error('airgap install gate must use installer output substrate truth');
           }
-          if (argv[index + 1] === plan.input_refs.substrate_truth.absolute_path) {
+          if (plan.input_refs?.substrate_truth && argv[index + 1] === plan.input_refs.substrate_truth.absolute_path) {
             throw new Error('airgap install gate must not use bundle-local substrate truth');
           }
         } else {
@@ -955,7 +981,10 @@ for (const step of plan.producer_argv) {
     if (argValue(step.argv, '--substrate-truth', 'online-deployment-gate') !== generatedTruth) {
       throw new Error('online install gate must use installer output substrate truth');
     }
-    if (generatedTruth === plan.input_refs.substrate_truth.absolute_path) {
+    if (plan.input_refs?.substrate_truth) {
+      throw new Error('online install plan must not include package-local substrate truth');
+    }
+    if (generatedTruth === plan.input_refs?.substrate_truth?.absolute_path) {
       throw new Error('online install gate must not use package-local substrate truth');
     }
   }
@@ -1128,7 +1157,6 @@ for case_name in \
   product_readiness_report \
   slashless_kubectl \
   smoke_endpoint \
-  missing_substrate_truth \
   missing_target_prerequisites \
   post_deploy_smoke_report; do
   invalid_dir="$TMP_DIR/invalid-$case_name"
@@ -1137,6 +1165,12 @@ for case_name in \
   expect_fail "$case_name" \
     "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$invalid_dir"
 done
+
+missing_online_truth_dir="$TMP_DIR/invalid-online-use-existing-missing-substrate-truth"
+copy_valid_package "$base_online" "$missing_online_truth_dir"
+mutate_manifest "$missing_online_truth_dir" missing_substrate_truth
+expect_fail_matching online_use_existing_missing_substrate_truth 'missing required operator-inputs field for online/use_existing: substrate_truth' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_online_truth_dir"
 
 registry_probe_dir="$TMP_DIR/invalid-registry-probe"
 copy_valid_package "$base_online" "$registry_probe_dir"
@@ -1167,6 +1201,12 @@ base_install="$TMP_DIR/base-install"
 mkdir -p "$base_install"
 write_package_files "$base_install"
 write_manifest "$base_install" online/install_substrates
+legacy_install_truth_dir="$TMP_DIR/invalid-online-install-substrate-truth"
+copy_valid_package "$base_install" "$legacy_install_truth_dir"
+mutate_manifest "$legacy_install_truth_dir" install_substrate_truth
+expect_fail_matching online_install_substrate_truth 'substrate_truth is accepted only for use_existing deployment_path' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$legacy_install_truth_dir"
+
 missing_install_dir="$TMP_DIR/invalid-missing-install-confirmation"
 copy_valid_package "$base_install" "$missing_install_dir"
 mutate_manifest "$missing_install_dir" missing_install_confirmation
@@ -1224,6 +1264,12 @@ copy_valid_package "$base_airgap" "$missing_airgap_context_dir"
 mutate_manifest "$missing_airgap_context_dir" missing_context
 expect_fail_matching airgap_missing_context 'missing required operator-inputs field for airgap/use_existing: context' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_airgap_context_dir"
+
+missing_airgap_truth_dir="$TMP_DIR/invalid-airgap-use-existing-missing-substrate-truth"
+copy_valid_package "$base_airgap" "$missing_airgap_truth_dir"
+mutate_manifest "$missing_airgap_truth_dir" missing_substrate_truth
+expect_fail_matching airgap_use_existing_missing_substrate_truth 'missing required operator-inputs field for airgap/use_existing: substrate_truth' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_airgap_truth_dir"
 
 outside_airgap_manifest_dir="$TMP_DIR/invalid-airgap-bundle-manifest-outside-bundle"
 copy_valid_package "$base_airgap" "$outside_airgap_manifest_dir"
@@ -1283,6 +1329,12 @@ base_airgap_install="$TMP_DIR/base-airgap-install"
 mkdir -p "$base_airgap_install"
 write_package_files "$base_airgap_install"
 write_manifest "$base_airgap_install" airgap/install_substrates
+legacy_airgap_install_truth_dir="$TMP_DIR/invalid-airgap-install-substrate-truth"
+copy_valid_package "$base_airgap_install" "$legacy_airgap_install_truth_dir"
+mutate_manifest "$legacy_airgap_install_truth_dir" install_substrate_truth
+expect_fail_matching airgap_install_substrate_truth 'substrate_truth is accepted only for use_existing deployment_path' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$legacy_airgap_install_truth_dir"
+
 airgap_install_mismatch_dir="$TMP_DIR/invalid-airgap-install-bundle-profile-mismatch"
 copy_valid_package "$base_airgap_install" "$airgap_install_mismatch_dir"
 mutate_manifest "$airgap_install_mismatch_dir" airgap_bundle_manifest_install_mismatch
