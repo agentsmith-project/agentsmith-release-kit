@@ -1269,6 +1269,8 @@ help_output="$TMP_DIR/operator-release-help.out"
 bash "$ROOT_DIR/scripts/operator-release.sh" --help >"$help_output"
 grep -q -- '--operator-inputs <package-or-json>' "$help_output" ||
   fail "operator-release help must foreground --operator-inputs"
+grep -q -- '--ga-report' "$help_output" ||
+  fail "operator-release help must document final GA report facade"
 grep -q 'maintainer/internal diagnostics only; see' "$help_output" ||
   fail "operator-release help must demote legacy positional diagnostics"
 if grep -Eq 'external_declared|kit_installed|existing_kubernetes|kind_rehearsal|operator-release[.]sh (online|airgap|airgap-bundle)' "$help_output"; then
@@ -2363,8 +2365,18 @@ runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
 
 grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run' "$root_readme" ||
   fail "root README must document package-driven --operator-inputs --run main path"
+grep -q -- 'bash scripts/operator-release.sh --ga-report' "$root_readme" ||
+  fail "root README must document package-driven --ga-report final facade"
 grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run' "$runbooks_readme" ||
   fail "runbook README must document package-driven --operator-inputs --run main path"
+grep -q -- 'bash scripts/operator-release.sh --ga-report' "$runbooks_readme" ||
+  fail "runbook README must document package-driven --ga-report final facade"
+if grep -Fq -- '--deployment-path-report' "$runbooks_readme"; then
+  fail "runbook README must not expose internal --deployment-path-report copy path"
+fi
+if grep -Eq '\.release-kit-internal/.*/deployment-path-report[.]json' "$runbooks_readme"; then
+  fail "runbook README must not expose internal deployment-path-report.json package paths"
+fi
 grep -q -- '--operator-inputs' "$example_readme" ||
   fail "online existing Kubernetes example must use package-driven --operator-inputs"
 grep -q 'deployment-path-report.json' "$example_readme" ||

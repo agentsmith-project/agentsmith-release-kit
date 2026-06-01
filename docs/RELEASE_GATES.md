@@ -108,11 +108,12 @@ each package-driven deployment path, asserts that every run writes a finalized
 and asserts that no package run writes `ga-release-report.json` or
 `formal_verdict`.
 
-The guard then passes those four real package-run path reports, plus fixture
-AgentSmith product readiness and post-deploy product smoke reports, to
-`bash scripts/verify-release.sh --ga-release`. The only formal GA output in
-this smoke is the aggregate `ga-release-report.json` with `status: pass` and
-`formal_verdict: issued`.
+The guard then passes the four package paths, plus fixture AgentSmith product
+readiness and post-deploy product smoke reports, to
+`bash scripts/operator-release.sh --ga-report`. The facade locates the
+finalized path reports inside those packages and calls the existing GA
+aggregate verifier. The only formal GA output in this smoke is
+`ga-release-report.json` with `status: pass` and `formal_verdict: issued`.
 
 ## Operator Release Surface v0 Focused Guard
 
@@ -1512,7 +1513,21 @@ install report; it does not install substrates itself.
 
 ## GA Release Aggregate Gate
 
-Run:
+Operator-facing final facade:
+
+```bash
+bash scripts/operator-release.sh --ga-report \
+  --operator-inputs <online-use-existing-package> \
+  --operator-inputs <online-install-substrates-package> \
+  --operator-inputs <airgap-use-existing-package> \
+  --operator-inputs <airgap-install-substrates-package> \
+  --product-readiness-report <agentsmith/product-readiness-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \
+  --output-dir <dir>
+```
+
+Maintainer/internal verifier entry, for diagnostics and CI plumbing only; this
+is not the operator path:
 
 ```bash
 bash scripts/verify-release.sh --ga-release \

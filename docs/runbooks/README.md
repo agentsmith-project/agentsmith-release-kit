@@ -36,20 +36,29 @@ Use the single operator facade:
 ```bash
 bash scripts/operator-release.sh --operator-inputs <dir-or-json>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
+bash scripts/operator-release.sh --ga-report \
+  --operator-inputs <online-use-existing-pkg> \
+  --operator-inputs <online-install-substrates-pkg> \
+  --operator-inputs <airgap-use-existing-pkg> \
+  --operator-inputs <airgap-install-substrates-pkg> \
+  --product-readiness-report <json> \
+  --post-deploy-product-smoke-report <json> \
+  --output-dir <dir>
 ```
 
 The first command validates the package. Add `--run` only when the package is
 ready to execute the selected apply path. A passing `--run` produces path-level
 evidence for the release captain/finalizer to consume; do not treat
-intermediate files as the formal release verdict.
+intermediate files as the formal release verdict. After all four package runs
+and product-side reports are available, use `--ga-report` to write the final
+`ga-release-report.json`.
 
 ### 4. What is the final report?
 
 Formal release success or failure is represented only by the final
-`ga-release-report.json` issued by the release finalizer/captain after required
-path evidence and AgentSmith product-side reports are available. If the
-operator facade passes, hand off the package outputs and wait for that final
-report.
+`ga-release-report.json` issued by the release finalizer/captain through
+`operator-release.sh --ga-report`. The facade takes four package paths plus
+AgentSmith product-side reports and locates internal path evidence itself.
 
 ## Operator Package Matrix
 
@@ -109,40 +118,26 @@ diagnostic plumbing. It is not the operator main path.
 
 ### Release Captain/Finalizer Handoff Reference
 
-This section names the internal files consumed by the final GA aggregate. It is
-not an operator success checklist.
-
 Use one package for each deployment path. Do not combine the four paths into a
 single manifest.
 
-| Package `deployment_path` | Operator run | Handoff report for `--ga-release` |
-| --- | --- | --- |
-| `online/use_existing` | `bash scripts/operator-release.sh --operator-inputs <online-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json` |
-| `online/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <online-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json` |
-| `airgap/use_existing` | `bash scripts/operator-release.sh --operator-inputs <airgap-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json` |
-| `airgap/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <airgap-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json` |
-
-Each handoff report is valid only with its sibling
-`deployment-path-finalizer-manifest.json` and `source-evidence/` directory.
-Package runs write path-level evidence only. They do not write
-`ga-release-report.json`, do not issue `formal_verdict`, and do not replace
-AgentSmith product readiness or post-deploy product smoke evidence.
-
 After all four package runs and product-side reports are available, the
-release captain/finalizer runs:
+operator/release captain runs the package facade:
 
 ```bash
-bash scripts/verify-release.sh --ga-release \
-  --release-contract <agentsmith-release-contract.json> \
-  --deploy-template-package <agentsmith-deploy-template-package.json> \
-  --deployment-path-report <online-use-existing-pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json \
-  --deployment-path-report <online-install-substrates-pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json \
-  --deployment-path-report <airgap-use-existing-pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json \
-  --deployment-path-report <airgap-install-substrates-pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json \
+bash scripts/operator-release.sh --ga-report \
+  --operator-inputs <online-use-existing-pkg> \
+  --operator-inputs <online-install-substrates-pkg> \
+  --operator-inputs <airgap-use-existing-pkg> \
+  --operator-inputs <airgap-install-substrates-pkg> \
   --product-readiness-report <agentsmith/product-readiness-report.json> \
   --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \
-  --output-dir <ga-output-dir>
+  --output-dir <dir>
 ```
+
+Maintainer diagnostics and internal verifier details live in
+`docs/RELEASE_GATES.md`; this runbook intentionally keeps operators on
+package inputs and the final `ga-release-report.json`.
 
 The post-deploy product smoke input must be the AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:

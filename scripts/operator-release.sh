@@ -9,6 +9,14 @@ usage() {
   cat <<'USAGE'
 Usage:
   bash scripts/operator-release.sh --operator-inputs <package-or-json> [--run]
+  bash scripts/operator-release.sh --ga-report \
+    --operator-inputs <online-use-existing-package> \
+    --operator-inputs <online-install-substrates-package> \
+    --operator-inputs <airgap-use-existing-package> \
+    --operator-inputs <airgap-install-substrates-package> \
+    --product-readiness-report <json> \
+    --post-deploy-product-smoke-report <json> \
+    --output-dir <dir>
 
 Operator facade:
   This is the only operator-facing release-kit entry. Legacy positional flows
@@ -35,6 +43,12 @@ Success boundary:
   consume. Formal release success or failure is represented only by the final
   ga-release-report.json issued by the release finalizer/captain after required
   path evidence and AgentSmith product-side reports are available.
+
+Final GA report:
+  --ga-report consumes four operator-inputs packages that have already been
+  run with --operator-inputs <package> --run, locates the finalized path
+  evidence from those packages, and writes the final ga-release-report.json.
+  Operators do not pass .release-kit-internal deployment-path report paths.
 USAGE
 }
 
@@ -406,8 +420,343 @@ if (manifestProfile !== expectedProfile) {
 NODE
 }
 
+run_ga_report_facade() {
+  "$NODE_BIN" --input-type=module - "$ROOT_DIR" "$@" <<'NODE'
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+
+const rootDir = process.argv[2];
+const argv = process.argv.slice(3);
+const REPORT_FILE = 'ga-release-report.json';
+const PATH_REPORT_FILE = 'deployment-path-report.json';
+const FINALIZER_MANIFEST_FILE = 'deployment-path-finalizer-manifest.json';
+const SOURCE_EVIDENCE_DIR = 'source-evidence';
+const REQUIRED_DEPLOYMENT_PATHS = [
+  'online/use_existing',
+  'online/install_substrates',
+  'airgap/use_existing',
+  'airgap/install_substrates'
+];
+
+class CliError extends Error {
+  constructor(message) {
+    super(message);
+    this.exitCode = 2;
+  }
+}
+
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.exitCode = 1;
+  }
+}
+
+function usage() {
+  return `Usage:
+  bash scripts/operator-release.sh --ga-report \\
+    --operator-inputs <online-use-existing-package> \\
+    --operator-inputs <online-install-substrates-package> \\
+    --operator-inputs <airgap-use-existing-package> \\
+    --operator-inputs <airgap-install-substrates-package> \\
+    --product-readiness-report <json> \\
+    --post-deploy-product-smoke-report <json> \\
+    --output-dir <dir>`;
+}
+
+function cliFail(message) {
+  throw new CliError(message);
+}
+
+function fail(message) {
+  throw new ValidationError(message);
+}
+
+function readArgValue(argvIndex, arg) {
+  const value = argv[argvIndex + 1];
+  if (!value || value.trim() === '' || value.startsWith('--')) {
+    cliFail(`missing value for ${arg}`);
+  }
+  return value;
+}
+
+function setSingleton(parsed, key, value, flag) {
+  if (parsed[key]) {
+    cliFail(`duplicate argument for --ga-report: ${flag}`);
+  }
+  parsed[key] = value;
+}
+
+function parseArgs() {
+  const parsed = {
+    operatorInputs: []
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const nextValue = () => {
+      const value = readArgValue(index, arg);
+      index += 1;
+      return value;
+    };
+
+    switch (arg) {
+      case '--operator-inputs':
+        parsed.operatorInputs.push(nextValue());
+        break;
+      case '--product-readiness-report':
+        setSingleton(parsed, 'productReadinessReport', nextValue(), arg);
+        break;
+      case '--post-deploy-product-smoke-report':
+        setSingleton(parsed, 'postDeployProductSmokeReport', nextValue(), arg);
+        break;
+      case '--output-dir':
+        setSingleton(parsed, 'outputDir', nextValue(), arg);
+        break;
+      case '--deployment-path-report':
+        cliFail('--ga-report does not accept --deployment-path-report; provide the corresponding --operator-inputs package and rerun that package with --run if path evidence is missing');
+        break;
+      case '--release-contract':
+      case '--deploy-template-package':
+        cliFail(`${arg} is resolved from operator-inputs packages for --ga-report`);
+        break;
+      case '--run':
+        cliFail('--run is accepted only with a single --operator-inputs package, not --ga-report');
+        break;
+      case '--help':
+      case '-h':
+        parsed.help = true;
+        break;
+      default:
+        if (arg.startsWith('--operator-inputs=')) {
+          cliFail('--ga-report accepts repeated --operator-inputs as separate arguments only');
+        }
+        if (
+          arg.startsWith('--product-readiness-report=') ||
+          arg.startsWith('--post-deploy-product-smoke-report=') ||
+          arg.startsWith('--output-dir=') ||
+          arg.startsWith('--deployment-path-report=') ||
+          arg.startsWith('--release-contract=') ||
+          arg.startsWith('--deploy-template-package=')
+        ) {
+          cliFail(`--ga-report does not accept equals form: ${arg.split('=')[0]}`);
+        }
+        cliFail(`unknown --ga-report argument: ${arg}`);
+    }
+  }
+
+  if (parsed.help) {
+    return parsed;
+  }
+  if (parsed.operatorInputs.length !== REQUIRED_DEPLOYMENT_PATHS.length) {
+    cliFail(
+      `--ga-report requires exactly ${REQUIRED_DEPLOYMENT_PATHS.length} --operator-inputs packages: ` +
+        REQUIRED_DEPLOYMENT_PATHS.join(', ')
+    );
+  }
+  if (!parsed.productReadinessReport) {
+    cliFail('missing required --product-readiness-report');
+  }
+  if (!parsed.postDeployProductSmokeReport) {
+    cliFail('missing required --post-deploy-product-smoke-report');
+  }
+  if (!parsed.outputDir) {
+    cliFail('missing required --output-dir');
+  }
+  return parsed;
+}
+
+function requireString(value, label) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    fail(`${label} is required`);
+  }
+  return value;
+}
+
+function rerunMessage(packageInput) {
+  return `rerun the corresponding package: bash scripts/operator-release.sh --operator-inputs ${packageInput} --run`;
+}
+
+async function requirePathEvidenceEntry(file, kind, { deploymentPath, packageInput }) {
+  let stat;
+  try {
+    stat = await fs.lstat(file);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      fail(`finalized path evidence is missing for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+    }
+    fail(`cannot read finalized path evidence for ${deploymentPath}: ${error.message}; ${rerunMessage(packageInput)}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`finalized path evidence must not be a symlink for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+  }
+  if (kind === 'file' && !stat.isFile()) {
+    fail(`finalized path evidence file is invalid for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+  }
+  if (kind === 'directory' && !stat.isDirectory()) {
+    fail(`finalized path source evidence is invalid for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+  }
+}
+
+async function resolvePackage({ resolveOperatorInputs, packageInput }) {
+  let resolved;
+  try {
+    resolved = await resolveOperatorInputs({ inputPath: packageInput });
+  } catch (error) {
+    fail(`cannot resolve operator-inputs package ${packageInput}: ${error.message}`);
+  }
+
+  const plan = resolved.plan;
+  const deploymentPath = requireString(plan.deployment_path, 'operator-inputs deployment_path');
+  if (!REQUIRED_DEPLOYMENT_PATHS.includes(deploymentPath)) {
+    fail(`unsupported operator-inputs deployment_path for --ga-report: ${deploymentPath}`);
+  }
+  const pathOutputDir = requireString(
+    plan._internal?.expected?.output_dirs?.deployment_path,
+    `deployment-path output dir for ${deploymentPath}`
+  );
+  const pathReport = path.join(pathOutputDir, PATH_REPORT_FILE);
+  await requirePathEvidenceEntry(pathReport, 'file', { deploymentPath, packageInput });
+  await requirePathEvidenceEntry(
+    path.join(pathOutputDir, FINALIZER_MANIFEST_FILE),
+    'file',
+    { deploymentPath, packageInput }
+  );
+  await requirePathEvidenceEntry(
+    path.join(pathOutputDir, SOURCE_EVIDENCE_DIR),
+    'directory',
+    { deploymentPath, packageInput }
+  );
+
+  return {
+    deploymentPath,
+    pathReport,
+    packageInput,
+    releaseContract: plan.input_refs?.release_contract,
+    deployTemplatePackage: plan.input_refs?.deploy_template_package
+  };
+}
+
+function requireFileRef(ref, key, deploymentPath) {
+  if (!ref || ref.kind !== 'file') {
+    fail(`${key} ref is missing from operator-inputs package for ${deploymentPath}`);
+  }
+  return {
+    path: requireString(ref.absolute_path, `${key} path for ${deploymentPath}`),
+    sha256: requireString(ref.sha256, `${key} digest for ${deploymentPath}`)
+  };
+}
+
+function pickSharedRef(resolvedPackages, key) {
+  const first = requireFileRef(
+    resolvedPackages[0][key],
+    key,
+    resolvedPackages[0].deploymentPath
+  );
+  for (const entry of resolvedPackages.slice(1)) {
+    const current = requireFileRef(entry[key], key, entry.deploymentPath);
+    if (current.sha256 !== first.sha256) {
+      fail(`${key} digest differs across operator-inputs packages; rerun the mismatched package before --ga-report`);
+    }
+  }
+  return first.path;
+}
+
+async function main() {
+  const args = parseArgs();
+  if (args.help) {
+    console.log(usage());
+    return;
+  }
+
+  const { resolveOperatorInputs } = await import(
+    pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-resolver.mjs')).href
+  );
+  const resolvedPackages = [];
+  const byDeploymentPath = new Map();
+  for (const packageInput of args.operatorInputs) {
+    const resolved = await resolvePackage({ resolveOperatorInputs, packageInput });
+    if (byDeploymentPath.has(resolved.deploymentPath)) {
+      fail(
+        `duplicate deployment_path ${resolved.deploymentPath}; provide one package for each of: ` +
+          REQUIRED_DEPLOYMENT_PATHS.join(', ')
+      );
+    }
+    byDeploymentPath.set(resolved.deploymentPath, resolved);
+    resolvedPackages.push(resolved);
+  }
+
+  for (const deploymentPath of REQUIRED_DEPLOYMENT_PATHS) {
+    if (!byDeploymentPath.has(deploymentPath)) {
+      fail(`missing operator-inputs package for deployment_path ${deploymentPath}`);
+    }
+  }
+
+  const verifyArgs = [
+    path.join(rootDir, 'scripts/verify-release.sh'),
+    '--ga-release',
+    '--release-contract',
+    pickSharedRef(resolvedPackages, 'releaseContract'),
+    '--deploy-template-package',
+    pickSharedRef(resolvedPackages, 'deployTemplatePackage')
+  ];
+  for (const deploymentPath of REQUIRED_DEPLOYMENT_PATHS) {
+    verifyArgs.push(
+      '--deployment-path-report',
+      byDeploymentPath.get(deploymentPath).pathReport
+    );
+  }
+  verifyArgs.push(
+    '--product-readiness-report',
+    args.productReadinessReport,
+    '--post-deploy-product-smoke-report',
+    args.postDeployProductSmokeReport,
+    '--output-dir',
+    args.outputDir
+  );
+
+  const result = spawnSync('bash', verifyArgs, {
+    cwd: rootDir,
+    encoding: 'utf8',
+    env: process.env
+  });
+  if (result.error) {
+    fail(`cannot run GA verifier: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    if (result.stdout) {
+      process.stdout.write(result.stdout);
+    }
+    if (result.stderr) {
+      process.stderr.write(result.stderr);
+    }
+    process.exit(result.status ?? 1);
+  }
+
+  console.log(`operator ga-release report: ${path.resolve(args.outputDir, REPORT_FILE)}`);
+}
+
+main().catch((error) => {
+  const exitCode = error.exitCode ?? 1;
+  console.error(`${exitCode === 2 ? 'error' : 'FAIL'}: ${error.message}`);
+  if (exitCode === 2) {
+    console.error(usage());
+  }
+  process.exit(exitCode);
+});
+NODE
+}
+
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   usage
+  exit 0
+fi
+
+if [[ "${1:-}" == "--ga-report" ]]; then
+  shift
+  run_ga_report_facade "$@"
   exit 0
 fi
 

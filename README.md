@@ -63,6 +63,14 @@ The operator-facing path is a single package-driven facade:
 ```bash
 bash scripts/operator-release.sh --operator-inputs <dir-or-json>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
+bash scripts/operator-release.sh --ga-report \
+  --operator-inputs <online-use-existing-pkg> \
+  --operator-inputs <online-install-substrates-pkg> \
+  --operator-inputs <airgap-use-existing-pkg> \
+  --operator-inputs <airgap-install-substrates-pkg> \
+  --product-readiness-report <json> \
+  --post-deploy-product-smoke-report <json> \
+  --output-dir <dir>
 ```
 
 The package contains one `operator-inputs.json` for one selected deployment
@@ -114,22 +122,12 @@ archive/image loader probes for apply, and explicit install confirmation; it
 uses the installer-generated substrate truth under `.release-kit-internal` and
 does not require `routability_probe` or bundle/package `substrate_truth`.
 
-Release captain/finalizer handoff reference, not the operator success
-checklist:
-
-| Package `deployment_path` | Run | Finalized path report |
-| --- | --- | --- |
-| `online/use_existing` | `bash scripts/operator-release.sh --operator-inputs <online-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json` |
-| `online/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <online-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json` |
-| `airgap/use_existing` | `bash scripts/operator-release.sh --operator-inputs <airgap-use-existing-pkg> --run` | `<pkg>/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json` |
-| `airgap/install_substrates` | `bash scripts/operator-release.sh --operator-inputs <airgap-install-substrates-pkg> --run` | `<pkg>/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json` |
-
-Each path report directory must also contain
-`deployment-path-finalizer-manifest.json` and `source-evidence/`. The package
-runs do not write `ga-release-report.json` or any formal GA verdict. The
-release captain/finalizer passes the four path reports plus AgentSmith product
-readiness and post-deploy product smoke reports to
-`verify-release.sh --ga-release`.
+After the four packages have been run, the operator-facing final step is
+`operator-release.sh --ga-report` with those four package paths plus the
+AgentSmith product readiness and post-deploy product smoke reports. The facade
+locates finalized path evidence inside each package and writes the final
+`ga-release-report.json`; operators do not pass `.release-kit-internal` path
+report files.
 These paths are still release-kit installer producer/finalizer evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
@@ -196,13 +194,20 @@ Operator package intake and run path:
 ```bash
 bash scripts/operator-release.sh --operator-inputs <dir-or-json>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
+bash scripts/operator-release.sh --ga-report \
+  --operator-inputs <online-use-existing-pkg> \
+  --operator-inputs <online-install-substrates-pkg> \
+  --operator-inputs <airgap-use-existing-pkg> \
+  --operator-inputs <airgap-install-substrates-pkg> \
+  --product-readiness-report <json> \
+  --post-deploy-product-smoke-report <json> \
+  --output-dir <dir>
 ```
 
 This package-driven path writes finalized deployment-path handoff evidence for
 the release captain/finalizer when `--run` executes an apply manifest. It does
-not issue a formal GA verdict. Operator-facing action stops at
-`--operator-inputs --run`; formal success or failure is the final
-`ga-release-report.json` issued by the release finalizer/captain.
+not issue a formal GA verdict. Formal success or failure is issued only by
+`--ga-report`, which writes the final `ga-release-report.json`.
 
 ### Maintainer/Internal Diagnostics
 
@@ -1128,8 +1133,10 @@ evidence, package readiness, deploy readiness, or release readiness.
 
 The GA release aggregate gate is the repo-local final verdict authority. It
 consumes finalized deployment path reports, AgentSmith product readiness, and
-post-deploy product smoke reports through `bash scripts/verify-release.sh
---ga-release`. It writes `ga-release-report.json` with
+post-deploy product smoke reports through the operator-facing
+`bash scripts/operator-release.sh --ga-report` facade. The maintainer/internal
+`bash scripts/verify-release.sh --ga-release` entry remains available for
+diagnostics. The aggregate writes `ga-release-report.json` with
 `formal_verdict=issued` only on pass and does not rerun producers.
 The post-deploy product smoke input must be the AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
@@ -1148,7 +1155,7 @@ evidence. This is path orchestration only, not GA verdict, package readiness,
 or deploy readiness.
 `bash scripts/test-package-driven-ga-smoke.sh` is the lightweight default CI
 guard proving the four package-driven finalized path reports can be handed
-directly to `--ga-release`.
+to the `--ga-report` facade.
 
 ## Handoff
 
