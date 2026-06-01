@@ -14,6 +14,7 @@ The current operator-facing entry is one input package and one facade command:
 
 ```bash
 bash scripts/operator-release.sh --operator-inputs <dir-or-json>
+bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 ```
 
 `operator-inputs.json` describes exactly one selected deployment path. Use four
@@ -24,11 +25,17 @@ packages for a full rehearsal across:
 - `airgap/use_existing`
 - `airgap/install_substrates`
 
-The facade currently performs package intake and writes the internal
+Without `--run`, the facade performs package intake and writes the internal
 `.release-kit-internal/operator-inputs-plan.json`. That plan is only the
 internal next-step plan: it is not runtime evidence, not a final one-command GA
 flow, and not deploy, package, or release readiness. Post-deploy smoke reports
 are produced after runtime checks and are not accepted as package inputs.
+
+With `--run`, the current slice executes only `online/use_existing` packages
+whose manifest sets `mode: apply`. It runs the existing online focused producer
+chain and internally finalizes the deployment path report under
+`.release-kit-internal/online-use-existing/deployment-path/`. It does not create
+`ga-release-report.json`, and it does not issue release readiness.
 
 Final release closure is the final `ga-release-report.json` after finalized
 deployment path reports and AgentSmith product-side reports exist. The current
@@ -53,10 +60,10 @@ resources.
 
 | `deployment_path` | Package must include | Current intake result |
 | --- | --- | --- |
-| `online/use_existing` | Common release/template/render/substrate/prerequisite files, namespace, optional package-local `kubectl`. | Validates the package and writes the internal plan for the existing online focused producer path. |
-| `online/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, package-local `routability_probe`, and explicit install confirmation. | Validates installer inputs and writes the internal plan for installer plus online focused producer steps. |
-| `airgap/use_existing` | Common files plus `airgap_bundle` and explicit `airgap_bundle_manifest` inside that bundle. | Validates the already assembled bundle reference and writes the internal plan for the airgap consume/deployment producer path. |
-| `airgap/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, explicit install confirmation, `airgap_bundle`, and explicit `airgap_bundle_manifest` inside that bundle. | Validates installer and bundle references and writes the internal plan for installer plus airgap consume/deployment producer steps. |
+| `online/use_existing` | Common release/template/render/substrate/prerequisite files, namespace, optional package-local `kubectl`. | Validates the package and writes the internal plan. With `--run` and `mode: apply`, also writes path-level deployment evidence through the existing online producer and deployment-path finalizer. |
+| `online/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, package-local `routability_probe`, and explicit install confirmation. | Validates installer inputs and writes the internal plan for installer plus online focused producer steps. `--run` fails fast in this slice. |
+| `airgap/use_existing` | Common files plus `airgap_bundle` and explicit `airgap_bundle_manifest` inside that bundle. | Validates the already assembled bundle reference and writes the internal plan for the airgap consume/deployment producer path. `--run` fails fast in this slice. |
+| `airgap/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, explicit install confirmation, `airgap_bundle`, and explicit `airgap_bundle_manifest` inside that bundle. | Validates installer and bundle references and writes the internal plan for installer plus airgap consume/deployment producer steps. `--run` fails fast in this slice. |
 
 ## Maintainer/Internal Diagnostics
 
@@ -118,7 +125,8 @@ command.
 Default PR/push CI follows the quick/core path only:
 `verify-release.sh --quick`, `test-inputs.sh`, `test-template-package.sh`,
 `test-render.sh`, `test-render-check.sh`, and
-`test-operator-inputs.sh`, `test-operator-release-surface.sh`, `test-substrate-install.sh`,
+`test-operator-inputs.sh`, `test-operator-inputs-orchestration.sh`,
+`test-operator-release-surface.sh`, `test-substrate-install.sh`,
 `test-deployment-path-report.sh`, and `test-ga-release.sh`.
 `test-substrate-install.sh` stays in this default path because it uses local
 fixtures and fake kubectl, including online plus low-cost airgap producer

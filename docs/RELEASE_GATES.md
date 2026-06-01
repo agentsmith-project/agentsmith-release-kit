@@ -34,6 +34,7 @@ Run:
 
 ```bash
 bash scripts/test-operator-inputs.sh
+bash scripts/test-operator-inputs-orchestration.sh
 ```
 
 This focused guard exercises the new single-package intake:
@@ -50,10 +51,18 @@ The manifest names exactly one `deployment_path`:
 - `airgap/install_substrates`
 
 The resolver accepts a directory containing `operator-inputs.json` or a direct
-JSON manifest file. It writes only the internal
+JSON manifest file. Without `--run`, it writes only the internal
 `.release-kit-internal/operator-inputs-plan.json`, containing digest/path refs
 and next producer argv. The plan is not GA evidence, not release readiness, and
 does not write `readiness` or `formal_verdict`.
+
+`bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run`
+currently executes only `online/use_existing` with `mode: apply`. The runner
+validates the plan digest and absolute refs, runs the existing
+`online-deployment-gate` producer, then calls the existing internal
+`--deployment-path` finalizer to write path-level evidence. It does not write
+`ga-release-report.json` and does not issue a GA verdict. Other intake-valid
+paths fail fast in this slice.
 
 The intake rejects unknown fields, path escapes, missing path-specific inputs,
 missing install confirmation, airgap paths without an airgap bundle, internal
@@ -93,10 +102,9 @@ diagnostic:
 `kit_provided` validates kit-supplied substrate pack/truth inputs and related
 focused evidence only; it is not substrate installation. `install_substrates`
 is not implemented by the old positional/transitional operator facade. Use
-`--operator-inputs` for install_substrates intake; execution still closes
-through `verify-release.sh --substrate-install` as a separate producer, then
-provides its explicit report and confirmation to deployment-path finalization
-and GA.
+`--operator-inputs` for install_substrates intake. Installer execution remains
+a later orchestration slice; the existing separate substrate-install producer
+and deployment-path finalizer stay maintainer/internal building blocks.
 `installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
 It is not installer proof and does not mean release-kit created databases,
 buckets, OIDC realms, or other substrate resources.

@@ -66,6 +66,7 @@ The operator-facing path is a single package-driven flow:
 
 ```bash
 bash scripts/operator-release.sh --operator-inputs <dir-or-json>
+bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 ```
 
 The package contains one `operator-inputs.json` for one selected deployment
@@ -77,15 +78,21 @@ values are:
 - `airgap/use_existing`
 - `airgap/install_substrates`
 
-This first slice validates the package, rejects internal producer vocabulary,
-secret-looking payloads, missing path-specific inputs, and path escapes, then
-writes `.release-kit-internal/operator-inputs-plan.json`. The plan is internal
-only: it is not GA evidence, not release readiness, and does not write
-`formal_verdict`. Post-deploy smoke reports are runtime evidence and are not
-operator-inputs. GA rehearsal can cover the four paths by using four separate
-input packages. The final release-facing result is still the repo-local GA
-aggregate, which writes `ga-release-report.json` after finalized deployment
-path reports and required AgentSmith product-side reports are supplied.
+Without `--run`, this slice validates the package, rejects internal producer
+vocabulary, secret-looking payloads, missing path-specific inputs, and path
+escapes, then writes `.release-kit-internal/operator-inputs-plan.json`. The
+plan is internal only: it is not GA evidence, not release readiness, and does
+not write `formal_verdict`. Post-deploy smoke reports are runtime evidence and
+are not operator-inputs.
+
+With `--run`, the current orchestration slice supports only
+`online/use_existing` with `mode: apply`. It runs the existing online focused
+producer chain and then internally calls the deployment-path finalizer, writing
+path-level evidence under
+`.release-kit-internal/online-use-existing/deployment-path/`. It does not write
+`ga-release-report.json`; the final release-facing result is still the
+repo-local GA aggregate after all finalized deployment path reports and required
+AgentSmith product-side reports are supplied.
 
 For `install_substrates`, the package can name namespace-scoped installer
 inputs plus an explicit install confirmation. That path is still a

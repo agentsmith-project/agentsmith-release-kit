@@ -8,14 +8,18 @@ REPORT_FILE="operator-release-surface-report.json"
 usage() {
   cat <<'USAGE'
 Usage:
-  bash scripts/operator-release.sh --operator-inputs <package-or-json>
+  bash scripts/operator-release.sh --operator-inputs <package-or-json> [--run]
 
 Operator-inputs intake:
   --operator-inputs validates one deployment-path input package and writes
-  .release-kit-internal/operator-inputs-plan.json. This slice performs intake
-  and planning only; full execution still closes through the existing
-  path-specific focused producer flow. No GA verdict or release readiness is
-  issued.
+  .release-kit-internal/operator-inputs-plan.json.
+
+Operator-inputs run:
+  Add --run to execute the current minimal orchestration slice. This currently
+  supports only online/use_existing with mode apply: it runs the existing
+  online-deployment-gate producer and then the internal deployment-path
+  finalizer to write path-level evidence. Other intake-valid paths fail fast.
+  No ga-release-report.json, GA verdict, or release readiness is issued.
 
 Legacy positional flows are maintainer/internal diagnostics only; see
 docs/RELEASE_GATES.md.
@@ -189,6 +193,9 @@ reject_raw_internal_flags() {
     case "$arg" in
       --operator-inputs|--operator-inputs=*)
         fail "--operator-inputs must be the first and only operator facade argument"
+        ;;
+      --run)
+        fail "--run is accepted only after --operator-inputs <package-or-json>"
         ;;
     esac
   done
@@ -393,8 +400,18 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 if [[ "${1:-}" == "--operator-inputs" ]]; then
-  if [[ "$#" -ne 2 ]]; then
-    fail "--operator-inputs accepts exactly one directory or JSON manifest"
+  if [[ "$#" -ne 2 && "$#" -ne 3 ]]; then
+    fail "--operator-inputs accepts one directory or JSON manifest plus optional --run"
+  fi
+  if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
+    fail "missing directory or JSON manifest for --operator-inputs"
+  fi
+  if [[ "$#" -eq 3 ]]; then
+    if [[ "${3:-}" != "--run" ]]; then
+      fail "--operator-inputs accepts only optional --run after the package or JSON manifest"
+    fi
+    "$NODE_BIN" "$ROOT_DIR/scripts/run-operator-inputs.mjs" --operator-inputs "$2"
+    exit 0
   fi
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$2"
   exit 0
@@ -402,6 +419,10 @@ fi
 
 if [[ "${1:-}" == --operator-inputs=* ]]; then
   fail "operator facade accepts --operator-inputs as a separate argument only"
+fi
+
+if [[ "${1:-}" == "--run" ]]; then
+  fail "--run is accepted only after --operator-inputs <package-or-json>"
 fi
 
 if [[ "$#" -lt 2 ]]; then

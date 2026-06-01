@@ -877,9 +877,8 @@ write_package_files "$direct_package"
 write_manifest "$direct_package" online/use_existing
 "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
   --operator-inputs "$direct_package/operator-inputs.json" \
-  --output-dir "$TMP_DIR/direct-json-plan" \
   --stdout >"$TMP_DIR/direct-json-plan.out"
-assert_plan "$TMP_DIR/direct-json-plan/operator-inputs-plan.json" online/use_existing
+assert_plan "$direct_package/.release-kit-internal/operator-inputs-plan.json" online/use_existing
 pass "resolve-operator-inputs accepts a direct JSON manifest"
 
 base_online="$TMP_DIR/base-online"
@@ -891,9 +890,8 @@ candidate_paths_dir="$TMP_DIR/valid-candidate-paths"
 copy_valid_package "$base_online" "$candidate_paths_dir"
 mutate_manifest "$candidate_paths_dir" candidate_paths
 "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
-  --operator-inputs "$candidate_paths_dir" \
-  --output-dir "$TMP_DIR/candidate-path-plan" >/dev/null
-assert_plan "$TMP_DIR/candidate-path-plan/operator-inputs-plan.json" online/use_existing
+  --operator-inputs "$candidate_paths_dir" >/dev/null
+assert_plan "$candidate_paths_dir/.release-kit-internal/operator-inputs-plan.json" online/use_existing
 pass "resolve-operator-inputs accepts package path refs containing candidate"
 
 for case_name in \
@@ -957,6 +955,16 @@ rm "$manifest_symlink_dir/operator-inputs.json"
 ln -s "$outside_manifest" "$manifest_symlink_dir/operator-inputs.json"
 expect_fail_matching manifest_symlink 'operator-inputs manifest must not be a symlink' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$manifest_symlink_dir"
+
+plan_leaf_symlink_dir="$TMP_DIR/invalid-plan-leaf-symlink"
+copy_valid_package "$base_online" "$plan_leaf_symlink_dir"
+outside_plan="$TMP_DIR/outside-plan-leaf.json"
+mkdir -p "$plan_leaf_symlink_dir/.release-kit-internal"
+ln -s "$outside_plan" "$plan_leaf_symlink_dir/.release-kit-internal/operator-inputs-plan.json"
+expect_fail_matching plan_leaf_symlink 'operator-inputs plan output must not be a symlink' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$plan_leaf_symlink_dir"
+[[ ! -e "$outside_plan" ]] ||
+  fail "operator-inputs intake must not write through operator-inputs-plan.json symlink"
 
 base_install="$TMP_DIR/base-install"
 mkdir -p "$base_install"
@@ -1071,9 +1079,8 @@ mkdir -p "$base_airgap_apply"
 write_package_files "$base_airgap_apply"
 write_manifest "$base_airgap_apply" airgap/use_existing apply
 "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
-  --operator-inputs "$base_airgap_apply" \
-  --output-dir "$TMP_DIR/airgap-apply-plan" >/dev/null
-assert_plan "$TMP_DIR/airgap-apply-plan/operator-inputs-plan.json" airgap/use_existing
+  --operator-inputs "$base_airgap_apply" >/dev/null
+assert_plan "$base_airgap_apply/.release-kit-internal/operator-inputs-plan.json" airgap/use_existing
 pass "resolve-operator-inputs accepts airgap apply with loader probes"
 
 missing_archive_dir="$TMP_DIR/invalid-missing-archive-probe"

@@ -3,11 +3,12 @@ import { resolveOperatorInputs } from './lib/operator-inputs-resolver.mjs';
 
 function usage() {
   return `Usage:
-  node scripts/resolve-operator-inputs.mjs --operator-inputs <dir-or-json> [--output-dir <dir>] [--stdout]
+  node scripts/resolve-operator-inputs.mjs --operator-inputs <dir-or-json> [--output-dir <internal-dir>] [--stdout]
 
 This is an internal/test helper for operator-inputs intake. It writes
-.release-kit-internal/operator-inputs-plan.json by default. The plan is not a
-GA verdict, release readiness report, or runtime evidence.`;
+.release-kit-internal/operator-inputs-plan.json by default. Alternate output
+dirs must stay inside .release-kit-internal. The plan is not a GA verdict,
+release readiness report, or runtime evidence.`;
 }
 
 function readArgValue(argv, index, arg) {

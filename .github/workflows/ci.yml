@@ -27,6 +27,8 @@ jobs:
         run: bash scripts/test-render-check.sh
       - name: Operator inputs focused guard
         run: bash scripts/test-operator-inputs.sh
+      - name: Operator inputs orchestration focused guard
+        run: bash scripts/test-operator-inputs-orchestration.sh
       - name: Operator release surface focused guard
         run: bash scripts/test-operator-release-surface.sh
       - name: Substrate install producer focused guard

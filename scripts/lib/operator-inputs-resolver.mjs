@@ -12,6 +12,7 @@ const MANIFEST_OPERATOR_INPUTS_VERSION = 1;
 const AIRGAP_BUNDLE_MANIFEST_SCHEMA = 'agentsmith.airgap-bundle-manifest/v1';
 const PLAN_SCHEMA = 'agentsmith.operator-inputs-plan/v1';
 const PLAN_SCOPE = 'operator_inputs_intake_only';
+const INTERNAL_EXPECTED_SCHEMA = 'agentsmith.operator-inputs-plan-internal/v1';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const OPERATOR_RELEASE_SCRIPT = path.join(REPO_ROOT, 'scripts/operator-release.sh');
 const VERIFY_RELEASE_SCRIPT = path.join(REPO_ROOT, 'scripts/verify-release.sh');
@@ -1148,6 +1149,274 @@ function addOptionalBoolean(argv, flag, value) {
   }
 }
 
+function deploymentPathOutputSlug(deploymentPath) {
+  return deploymentPath.replace(/[/_]+/g, '-');
+}
+
+function internalRuntimeRoot(packageRoot) {
+  return path.join(packageRoot, INTERNAL_DIR);
+}
+
+async function lstatIfExists(absolutePath, label) {
+  try {
+    return await fs.lstat(absolutePath);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return undefined;
+    }
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+}
+
+async function realpathForExisting(absolutePath, label) {
+  try {
+    return await fs.realpath(absolutePath);
+  } catch (error) {
+    fail(`cannot resolve ${label}: ${error.message}`);
+  }
+}
+
+async function ensureInternalRuntimeRoot(packageRoot) {
+  const internalPath = internalRuntimeRoot(packageRoot);
+  let stat = await lstatIfExists(internalPath, 'operator-inputs internal output root');
+  if (!stat) {
+    try {
+      await fs.mkdir(internalPath);
+    } catch (error) {
+      if (error.code !== 'EEXIST') {
+        fail(`cannot create operator-inputs internal output root: ${error.message}`);
+      }
+    }
+    stat = await lstatIfExists(internalPath, 'operator-inputs internal output root');
+  }
+  if (!stat) {
+    fail('cannot create operator-inputs internal output root');
+  }
+  if (stat.isSymbolicLink()) {
+    fail('operator-inputs internal output root must not be a symlink');
+  }
+  if (!stat.isDirectory()) {
+    fail('operator-inputs internal output root must be a directory');
+  }
+
+  const realPath = await realpathForExisting(
+    internalPath,
+    'operator-inputs internal output root'
+  );
+  if (!isInsidePath(packageRoot, realPath)) {
+    fail('operator-inputs internal output root resolves outside the operator-inputs package');
+  }
+  return realPath;
+}
+
+async function ensureDirectoryInsideInternalRoot({ internalRoot, targetDir, label }) {
+  const absoluteDir = path.resolve(targetDir);
+  if (!isInsidePath(internalRoot, absoluteDir)) {
+    fail(`${label} must be inside operator-inputs internal output root`);
+  }
+
+  const relativePath = path.relative(internalRoot, absoluteDir);
+  const segments = relativePath === '' ? [] : relativePath.split(path.sep);
+  let current = internalRoot;
+
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    let stat = await lstatIfExists(current, label);
+    if (!stat) {
+      try {
+        await fs.mkdir(current);
+      } catch (error) {
+        if (error.code !== 'EEXIST') {
+          fail(`cannot create ${label}: ${error.message}`);
+        }
+      }
+      stat = await lstatIfExists(current, label);
+    }
+    if (!stat) {
+      fail(`cannot create ${label}`);
+    }
+    if (stat.isSymbolicLink()) {
+      fail(`${label} must not contain a symlink`);
+    }
+    if (!stat.isDirectory()) {
+      fail(`${label} must be a directory`);
+    }
+
+    const realPath = await realpathForExisting(current, label);
+    if (!isInsidePath(internalRoot, realPath)) {
+      fail(`${label} resolves outside operator-inputs internal output root`);
+    }
+  }
+
+  const realTarget = await realpathForExisting(absoluteDir, label);
+  if (!isInsidePath(internalRoot, realTarget)) {
+    fail(`${label} resolves outside operator-inputs internal output root`);
+  }
+  return realTarget;
+}
+
+async function requireExistingDirectoryInsideInternalRoot({ internalRoot, targetDir, label }) {
+  const absoluteDir = path.resolve(targetDir);
+  if (!isInsidePath(internalRoot, absoluteDir)) {
+    fail(`${label} must be inside operator-inputs internal output root`);
+  }
+
+  const stat = await lstatIfExists(absoluteDir, label);
+  if (!stat) {
+    fail(`${label} must exist`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`${label} must not be a symlink`);
+  }
+  if (!stat.isDirectory()) {
+    fail(`${label} must be a directory`);
+  }
+
+  const realTarget = await realpathForExisting(absoluteDir, label);
+  if (!isInsidePath(internalRoot, realTarget)) {
+    fail(`${label} resolves outside operator-inputs internal output root`);
+  }
+  return realTarget;
+}
+
+async function cleanupTempPlanFile(tempPath) {
+  try {
+    await fs.unlink(tempPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      fail(`cannot remove operator-inputs plan temp file: ${error.message}`);
+    }
+  }
+}
+
+async function writePlanFileNoSymlink({ planPath, internalRoot, body }) {
+  const outputDir = path.dirname(planPath);
+  const fileName = path.basename(planPath);
+  const canonicalDir = await requireExistingDirectoryInsideInternalRoot({
+    internalRoot,
+    targetDir: outputDir,
+    label: 'operator-inputs plan output dir'
+  });
+  const canonicalPlanPath = path.join(canonicalDir, fileName);
+  const existingStat = await lstatIfExists(canonicalPlanPath, 'operator-inputs plan output');
+  if (existingStat?.isSymbolicLink()) {
+    fail('operator-inputs plan output must not be a symlink');
+  }
+  if (existingStat && !existingStat.isFile()) {
+    fail('operator-inputs plan output must be a regular file');
+  }
+
+  const tempPath = path.join(
+    canonicalDir,
+    `.${fileName}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`
+  );
+  let handle;
+  try {
+    handle = await fs.open(tempPath, 'wx', 0o600);
+    await handle.writeFile(body);
+    await handle.sync();
+  } catch (error) {
+    await cleanupTempPlanFile(tempPath);
+    fail(`cannot write operator-inputs plan temp file: ${error.message}`);
+  } finally {
+    if (handle) {
+      await handle.close();
+    }
+  }
+
+  const tempStat = await lstatIfExists(tempPath, 'operator-inputs plan temp file');
+  if (!tempStat || tempStat.isSymbolicLink() || !tempStat.isFile()) {
+    await cleanupTempPlanFile(tempPath);
+    fail('operator-inputs plan temp file must be a regular file');
+  }
+
+  const commitDir = await requireExistingDirectoryInsideInternalRoot({
+    internalRoot,
+    targetDir: canonicalDir,
+    label: 'operator-inputs plan output dir'
+  });
+  if (commitDir !== canonicalDir) {
+    await cleanupTempPlanFile(tempPath);
+    fail('operator-inputs plan output dir changed while writing');
+  }
+
+  const currentStat = await lstatIfExists(canonicalPlanPath, 'operator-inputs plan output');
+  if (currentStat?.isSymbolicLink()) {
+    await cleanupTempPlanFile(tempPath);
+    fail('operator-inputs plan output must not be a symlink');
+  }
+  if (currentStat) {
+    if (!currentStat.isFile()) {
+      await cleanupTempPlanFile(tempPath);
+      fail('operator-inputs plan output must be a regular file');
+    }
+    try {
+      await fs.unlink(canonicalPlanPath);
+    } catch (error) {
+      await cleanupTempPlanFile(tempPath);
+      fail(`cannot replace operator-inputs plan output: ${error.message}`);
+    }
+  }
+
+  try {
+    await fs.link(tempPath, canonicalPlanPath);
+  } catch (error) {
+    await cleanupTempPlanFile(tempPath);
+    if (error.code === 'EEXIST') {
+      fail('operator-inputs plan output changed while writing; refusing to overwrite');
+    }
+    fail(`cannot commit operator-inputs plan output: ${error.message}`);
+  }
+  await cleanupTempPlanFile(tempPath);
+
+  const finalDir = await requireExistingDirectoryInsideInternalRoot({
+    internalRoot,
+    targetDir: canonicalDir,
+    label: 'operator-inputs plan output dir'
+  });
+  if (finalDir !== canonicalDir) {
+    fail('operator-inputs plan output dir changed after writing');
+  }
+  const finalStat = await lstatIfExists(canonicalPlanPath, 'operator-inputs plan output');
+  if (!finalStat || finalStat.isSymbolicLink() || !finalStat.isFile()) {
+    fail('operator-inputs plan output must be a regular file');
+  }
+}
+
+function deploymentPathOutputBase(outputRoot, deploymentPath) {
+  return path.join(outputRoot, deploymentPathOutputSlug(deploymentPath));
+}
+
+function optionalPlanString(value) {
+  return value === undefined ? null : String(value);
+}
+
+function buildInternalExpected({ manifest, config, outputRoot, mode }) {
+  const outputBase = deploymentPathOutputBase(outputRoot, manifest.deployment_path);
+  return {
+    schema_version: INTERNAL_EXPECTED_SCHEMA,
+    deployment_path: manifest.deployment_path,
+    target_profile: config.targetProfile,
+    namespace: manifest.namespace,
+    context: Object.hasOwn(manifest, 'context') ? manifest.context : null,
+    mode,
+    operator_run_id: manifest.deploy_confirmation?.operator_run_id ?? null,
+    output_dirs: {
+      online_deployment_gate:
+        config.producer === 'online' ? path.join(outputBase, 'online-deployment-gate') : null,
+      deployment_path: path.join(outputBase, 'deployment-path')
+    },
+    smoke: {
+      timeout: optionalPlanString(manifest.timeout),
+      smoke_url: optionalPlanString(manifest.smoke_url),
+      expected_status: optionalPlanString(manifest.expected_status),
+      timeout_ms: optionalPlanString(manifest.timeout_ms),
+      allow_http: manifest.allow_http === true,
+      allow_localhost: manifest.allow_localhost === true
+    }
+  };
+}
+
 function addApplyRuntimeArgs({ argv, refs, manifest, targetProfile, mode, includeAirgapLoaders = false }) {
   if (mode !== 'apply') {
     return;
@@ -1198,7 +1467,7 @@ function addCommonDeploymentArgs({ argv, refs, manifest, targetProfile, outputDi
 }
 
 function buildProducerArgv({ manifest, refs, config, outputRoot, mode }) {
-  const outputBase = path.join(outputRoot, manifest.deployment_path.replace('/', '-'));
+  const outputBase = deploymentPathOutputBase(outputRoot, manifest.deployment_path);
   const steps = [];
 
   if (config.installSubstrates) {
@@ -1344,16 +1613,26 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
     fail(`missing resolved input ref: ${missingRequiredRef}`);
   }
 
-  const internalOutputDir = outputDir
-    ? path.resolve(outputDir)
-    : path.join(packageRoot, INTERNAL_DIR);
-  await fs.mkdir(internalOutputDir, { recursive: true });
-  const planPath = path.join(internalOutputDir, PLAN_FILE);
+  const runtimeOutputRoot = await ensureInternalRuntimeRoot(packageRoot);
+  const planOutputDir = outputDir
+    ? await ensureDirectoryInsideInternalRoot({
+        internalRoot: runtimeOutputRoot,
+        targetDir: outputDir,
+        label: 'operator-inputs plan output dir'
+      })
+    : runtimeOutputRoot;
+  const planPath = path.join(planOutputDir, PLAN_FILE);
   const producerArgv = buildProducerArgv({
     manifest,
     refs,
     config,
-    outputRoot: internalOutputDir,
+    outputRoot: runtimeOutputRoot,
+    mode
+  });
+  const internalExpected = buildInternalExpected({
+    manifest,
+    config,
+    outputRoot: runtimeOutputRoot,
     mode
   });
   const plan = {
@@ -1371,6 +1650,9 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
       manifest_sha256: manifestSha256
     },
     input_refs: refs,
+    _internal: {
+      expected: internalExpected
+    },
     facade_argv: [
       'bash',
       OPERATOR_RELEASE_SCRIPT,
@@ -1381,7 +1663,11 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
     plan_sha256: null
   };
   plan.plan_sha256 = digestJson({ ...plan, plan_sha256: null });
-  await fs.writeFile(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+  await writePlanFileNoSymlink({
+    planPath,
+    internalRoot: runtimeOutputRoot,
+    body: `${JSON.stringify(plan, null, 2)}\n`
+  });
 
   return {
     plan,
