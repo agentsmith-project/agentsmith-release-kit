@@ -2,6 +2,11 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 
 import { validateImageMapEvidence } from './image-map-validation.mjs';
+import {
+  SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST_BY_KIND,
+  substrateInstallAllowedKindList,
+  substrateInstallAllowedKubectlResourceList
+} from './kubernetes-namespace-scope-guard.mjs';
 
 export const ONLINE_GATE_SCHEMA = 'agentsmith.online-deployment-gate/v1';
 export const AIRGAP_GATE_SCHEMA = 'agentsmith.airgap-deployment-gate/v1';
@@ -31,31 +36,8 @@ const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const OPERATOR_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const KUBERNETES_NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const SERVICE_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
-const SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST = new Map([
-  ['ConfigMap', {
-    apiVersion: 'v1',
-    group: '',
-    resource: 'configmaps',
-    kubectlResources: new Set(['configmap', 'configmaps'])
-  }],
-  ['NetworkPolicy', {
-    apiVersion: 'networking.k8s.io/v1',
-    group: 'networking.k8s.io',
-    resource: 'networkpolicies.networking.k8s.io',
-    kubectlResources: new Set([
-      'networkpolicy',
-      'networkpolicies',
-      'networkpolicy.networking.k8s.io',
-      'networkpolicies.networking.k8s.io'
-    ])
-  }],
-  ['Service', {
-    apiVersion: 'v1',
-    group: '',
-    resource: 'services',
-    kubectlResources: new Set(['service', 'services'])
-  }]
-]);
+const SUBSTRATE_INSTALL_ALLOWED_KINDS = substrateInstallAllowedKindList();
+const SUBSTRATE_INSTALL_ALLOWED_KUBECTL_RESOURCES = substrateInstallAllowedKubectlResourceList();
 const TARGET_PREFLIGHT_SUBSTRATE_SERVICES = [
   'postgresql',
   'mongodb',
@@ -951,9 +933,9 @@ function validateSubstrateInstallResourceRefs(value, label, effectiveNamespace) 
   for (const [index, ref] of refs.entries()) {
     const itemLabel = `${label}[${index}]`;
     const kind = requireString(ref.kind, `${itemLabel}.kind`);
-    const identity = SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST.get(kind);
+    const identity = SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST_BY_KIND.get(kind);
     if (!identity) {
-      fail(`${itemLabel}.kind ${kind} is not allowed for substrate install; allowed kinds are ConfigMap, NetworkPolicy, Service`);
+      fail(`${itemLabel}.kind ${kind} is not allowed for substrate install; allowed kinds are ${SUBSTRATE_INSTALL_ALLOWED_KINDS}`);
     }
     if (requireString(ref.apiVersion, `${itemLabel}.apiVersion`) !== identity.apiVersion) {
       fail(`${itemLabel}.apiVersion must match substrate install resource kind ${kind}`);
@@ -999,7 +981,7 @@ function decrementCount(map, key) {
 }
 
 function substrateInstallKindFromKubectlResource(resource) {
-  for (const [kind, identity] of SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST) {
+  for (const [kind, identity] of SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST_BY_KIND) {
     if (identity.kubectlResources.has(resource)) {
       return kind;
     }
@@ -1016,7 +998,7 @@ function parseSubstrateInstallKubectlResourceRef(value, label) {
   const [resource, name] = parts;
   const kind = substrateInstallKindFromKubectlResource(resource);
   if (!kind) {
-    fail(`${label} resource ${resource} is not allowed for substrate install; allowed resources are configmap, service, and networkpolicy.networking.k8s.io`);
+    fail(`${label} resource ${resource} is not allowed for substrate install; allowed resources are ${SUBSTRATE_INSTALL_ALLOWED_KUBECTL_RESOURCES}`);
   }
   return { kind, name };
 }

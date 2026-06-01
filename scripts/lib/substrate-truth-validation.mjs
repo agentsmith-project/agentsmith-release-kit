@@ -709,11 +709,11 @@ export function validateTargetPrerequisitesTruth(
   );
 
   const storage = requireObject(prerequisites.storage, `${label}.storage`);
-  assertNonDisabledString(
+  const storageClass = assertNonDisabledString(
     storage.storage_class,
     `${label}.storage.storage_class`
   );
-  assertNonDisabledString(
+  const persistentVolumePolicy = assertNonDisabledString(
     storage.persistent_volume_policy,
     `${label}.storage.persistent_volume_policy`
   );
@@ -734,6 +734,8 @@ export function validateTargetPrerequisitesTruth(
       target_profile: targetProfileValue,
       namespace,
       ingress_host: ingressHost,
+      storage_class: storageClass,
+      persistent_volume_policy: persistentVolumePolicy,
       substrate_secret_refs_count: substrateRefsSummary.count
     }
   };

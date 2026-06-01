@@ -3,26 +3,112 @@ export const K8S_KIT_OWNER_ANNOTATION = 'agentsmith.io/managed-by';
 export const K8S_KIT_INSTALLATION_ID_ANNOTATION = 'agentsmith.io/installation-id';
 export const K8S_KIT_OWNER_VALUE = 'agentsmith-release-kit';
 
-export const NAMESPACE_SCOPED_RESOURCE_ALLOWLIST = new Map([
-  ['v1|Service', {
+const NAMESPACE_SCOPED_RESOURCE_DEFINITIONS = [
+  {
     apiVersion: 'v1',
     group: '',
     kind: 'Service',
-    resource: 'services'
-  }],
-  ['v1|ConfigMap', {
+    resource: 'services',
+    kubectlResources: new Set(['service', 'services'])
+  },
+  {
     apiVersion: 'v1',
     group: '',
     kind: 'ConfigMap',
-    resource: 'configmaps'
-  }],
-  ['networking.k8s.io/v1|NetworkPolicy', {
+    resource: 'configmaps',
+    kubectlResources: new Set(['configmap', 'configmaps'])
+  },
+  {
     apiVersion: 'networking.k8s.io/v1',
     group: 'networking.k8s.io',
     kind: 'NetworkPolicy',
-    resource: 'networkpolicies.networking.k8s.io'
-  }]
-]);
+    resource: 'networkpolicies.networking.k8s.io',
+    kubectlResources: new Set([
+      'networkpolicy',
+      'networkpolicies',
+      'networkpolicy.networking.k8s.io',
+      'networkpolicies.networking.k8s.io'
+    ])
+  },
+  {
+    apiVersion: 'apps/v1',
+    group: 'apps',
+    kind: 'StatefulSet',
+    resource: 'statefulsets.apps',
+    kubectlResources: new Set(['statefulset', 'statefulsets', 'statefulset.apps', 'statefulsets.apps'])
+  },
+  {
+    apiVersion: 'apps/v1',
+    group: 'apps',
+    kind: 'Deployment',
+    resource: 'deployments.apps',
+    kubectlResources: new Set(['deployment', 'deployments', 'deployment.apps', 'deployments.apps'])
+  },
+  {
+    apiVersion: 'batch/v1',
+    group: 'batch',
+    kind: 'Job',
+    resource: 'jobs.batch',
+    kubectlResources: new Set(['job', 'jobs', 'job.batch', 'jobs.batch'])
+  },
+  {
+    apiVersion: 'v1',
+    group: '',
+    kind: 'PersistentVolumeClaim',
+    resource: 'persistentvolumeclaims',
+    kubectlResources: new Set([
+      'persistentvolumeclaim',
+      'persistentvolumeclaims',
+      'pvc',
+      'pvcs'
+    ])
+  }
+];
+
+function allowlistKey(apiVersion, kind) {
+  return `${apiVersion}|${kind}`;
+}
+
+export const NAMESPACE_SCOPED_RESOURCE_ALLOWLIST = new Map(
+  NAMESPACE_SCOPED_RESOURCE_DEFINITIONS.map((identity) => [
+    allowlistKey(identity.apiVersion, identity.kind),
+    identity
+  ])
+);
+
+export const SUBSTRATE_INSTALL_RESOURCE_ALLOWLIST_BY_KIND = new Map(
+  NAMESPACE_SCOPED_RESOURCE_DEFINITIONS.map((identity) => [identity.kind, identity])
+);
+
+export function substrateInstallAllowedKindList() {
+  return NAMESPACE_SCOPED_RESOURCE_DEFINITIONS.map((identity) => identity.kind).join(', ');
+}
+
+export function substrateInstallAllowedKubectlResourceList() {
+  return NAMESPACE_SCOPED_RESOURCE_DEFINITIONS.flatMap((identity) => [
+    ...identity.kubectlResources
+  ]).join(', ');
+}
+
+export function imageRefsFromSubstratePackManifest(manifest, options = {}) {
+  const fail = options.fail || defaultFail;
+  const label = options.label || 'substrate_pack_manifest';
+  const images = requireObject(manifest?.images, `${label}.images`, fail);
+  return new Set(Object.values(images).map((image, index) =>
+    requireString(image, `${label}.images[${index}]`, fail)
+  ));
+}
+
+const WORKLOAD_IMAGE_KINDS = new Set(['Deployment', 'StatefulSet', 'Job']);
+const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+const ALLOWED_SERVICE_TYPES = new Set(['ClusterIP']);
+const FORBIDDEN_CLUSTER_IP_SERVICE_FIELDS = [
+  'externalIPs',
+  'loadBalancerIP',
+  'loadBalancerClass',
+  'externalName',
+  'healthCheckNodePort'
+];
 
 const CLUSTER_SCOPED_KIND_DENYLIST = new Set([
   'APIService',
@@ -39,16 +125,9 @@ const CLUSTER_SCOPED_KIND_DENYLIST = new Set([
   'ValidatingWebhookConfiguration',
   'VolumeSnapshotClass'
 ]);
+
 const KUBERNETES_OBJECT_NAME_RE =
   /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
-const ALLOWED_SERVICE_TYPES = new Set(['ClusterIP']);
-const FORBIDDEN_CLUSTER_IP_SERVICE_FIELDS = [
-  'externalIPs',
-  'loadBalancerIP',
-  'loadBalancerClass',
-  'externalName',
-  'healthCheckNodePort'
-];
 
 function defaultFail(message) {
   throw new Error(message);
@@ -131,10 +210,6 @@ export function flattenKubernetesResources(value, options = {}) {
   return resources;
 }
 
-function allowlistKey(apiVersion, kind) {
-  return `${apiVersion}|${kind}`;
-}
-
 function assertAllowedResource(apiVersion, kind, label, fail) {
   if (kind === 'Secret') {
     fail(`${label}.kind Secret is not allowed for substrate install; use secret refs only and do not include Secret payload resources`);
@@ -174,6 +249,100 @@ function assertAllowedServiceType(resource, label, fail) {
   }
 }
 
+function imageDigestSuffix(image, label, fail) {
+  const value = requireString(image, label, fail);
+  const marker = '@sha256:';
+  const index = value.lastIndexOf(marker);
+  if (index < 0) {
+    fail(`${label} must be digest-pinned with @sha256`);
+  }
+  const digest = `sha256:${value.slice(index + marker.length)}`;
+  if (!IMAGE_DIGEST_RE.test(digest)) {
+    fail(`${label} must include a sha256 digest`);
+  }
+  return digest;
+}
+
+function normalizeAllowedImages(value, label, fail) {
+  if (value instanceof Set) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return new Set(value.map((image, index) => requireString(image, `${label}[${index}]`, fail)));
+  }
+  return undefined;
+}
+
+function requireNonEmptyArray(value, label, fail) {
+  const array = requireArray(value, label, fail);
+  if (array.length === 0) {
+    fail(`${label} must not be empty`);
+  }
+  return array;
+}
+
+function assertContainerImages(containers, label, allowedImages, fail) {
+  for (const [index, container] of containers.entries()) {
+    const itemLabel = `${label}[${index}]`;
+    const object = requireObject(container, itemLabel, fail);
+    const image = requireString(object.image, `${itemLabel}.image`, fail);
+    imageDigestSuffix(image, `${itemLabel}.image`, fail);
+    if (!allowedImages.has(image)) {
+      fail(`${itemLabel}.image must match an image declared in substrate_pack_manifest.images`);
+    }
+  }
+}
+
+function assertWorkloadImages(resource, label, options, fail) {
+  if (!WORKLOAD_IMAGE_KINDS.has(resource.kind)) {
+    return;
+  }
+
+  const allowedImages = normalizeAllowedImages(
+    options.allowedImages,
+    'substrate_pack_manifest.images',
+    fail
+  );
+  if (!allowedImages || allowedImages.size === 0) {
+    fail(`${label} requires substrate_pack_manifest.images to validate workload images`);
+  }
+
+  const spec = requireObject(resource.spec, `${label}.spec`, fail);
+  const template = requireObject(spec.template, `${label}.spec.template`, fail);
+  const podSpec = requireObject(template.spec, `${label}.spec.template.spec`, fail);
+  assertContainerImages(
+    requireNonEmptyArray(podSpec.containers, `${label}.spec.template.spec.containers`, fail),
+    `${label}.spec.template.spec.containers`,
+    allowedImages,
+    fail
+  );
+  if (Object.prototype.hasOwnProperty.call(podSpec, 'initContainers')) {
+    assertContainerImages(
+      requireArray(podSpec.initContainers, `${label}.spec.template.spec.initContainers`, fail),
+      `${label}.spec.template.spec.initContainers`,
+      allowedImages,
+      fail
+    );
+  }
+}
+
+function assertPersistentVolumeClaim(resource, label, options, fail) {
+  if (resource.apiVersion !== 'v1' || resource.kind !== 'PersistentVolumeClaim') {
+    return;
+  }
+  const spec = requireObject(resource.spec, `${label}.spec`, fail);
+  if (!Object.prototype.hasOwnProperty.call(spec, 'storageClassName')) {
+    return;
+  }
+  const storageClassName = requireString(spec.storageClassName, `${label}.spec.storageClassName`, fail);
+  if (
+    options.storageClassName !== undefined &&
+    storageClassName !== options.storageClassName
+  ) {
+    fail(`${label}.spec.storageClassName must match target_prerequisites.storage.storage_class`);
+  }
+}
+
 export function validateNamespaceScopedResources(resources, namespace, options = {}) {
   const fail = options.fail || defaultFail;
   const label = options.label || 'resources';
@@ -186,6 +355,8 @@ export function validateNamespaceScopedResources(resources, namespace, options =
     const kind = requireString(resource.kind, `${itemLabel}.kind`, fail);
     const identity = assertAllowedResource(apiVersion, kind, itemLabel, fail);
     assertAllowedServiceType(resource, itemLabel, fail);
+    assertWorkloadImages(resource, itemLabel, options, fail);
+    assertPersistentVolumeClaim(resource, itemLabel, options, fail);
 
     const metadata = metadataFor(resource, itemLabel, fail);
     const name = assertKubernetesObjectName(

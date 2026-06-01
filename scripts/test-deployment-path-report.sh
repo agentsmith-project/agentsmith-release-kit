@@ -645,6 +645,80 @@ function substrateInstall(dir, profile, operatorRunId) {
     mutation === 'install-target-prerequisites-digest-mismatch'
       ? sha(`${profile}:other-target-prerequisites`)
       : sha(`${profile}:target-prerequisites`);
+  const resourceRefs = [
+    {
+      apiVersion: 'v1',
+      group: '',
+      kind: 'ConfigMap',
+      resource: 'configmaps',
+      namespace: effectiveNamespace,
+      name: 'agentsmith-substrate-config',
+      document_index: 1
+    },
+    {
+      apiVersion: 'v1',
+      group: '',
+      kind: 'Service',
+      resource: 'services',
+      namespace: effectiveNamespace,
+      name: 'agentsmith-substrate-service',
+      document_index: 2
+    },
+    {
+      apiVersion: 'networking.k8s.io/v1',
+      group: 'networking.k8s.io',
+      kind: 'NetworkPolicy',
+      resource: 'networkpolicies.networking.k8s.io',
+      namespace: effectiveNamespace,
+      name: 'agentsmith-substrate-network',
+      document_index: 3
+    },
+    {
+      apiVersion: 'apps/v1',
+      group: 'apps',
+      kind: 'Deployment',
+      resource: 'deployments.apps',
+      namespace: effectiveNamespace,
+      name: 'agentsmith-substrate-postgresql',
+      document_index: 4
+    },
+    {
+      apiVersion: 'apps/v1',
+      group: 'apps',
+      kind: 'StatefulSet',
+      resource: 'statefulsets.apps',
+      namespace: effectiveNamespace,
+      name: 'agentsmith-substrate-mongodb',
+      document_index: 5
+    },
+    {
+      apiVersion: 'batch/v1',
+      group: 'batch',
+      kind: 'Job',
+      resource: 'jobs.batch',
+      namespace: effectiveNamespace,
+      name: 'agentsmith-substrate-installer',
+      document_index: 6
+    },
+    {
+      apiVersion: 'v1',
+      group: '',
+      kind: 'PersistentVolumeClaim',
+      resource: 'persistentvolumeclaims',
+      namespace: effectiveNamespace,
+      name: 'agentsmith-substrate-postgresql-data',
+      document_index: 7
+    }
+  ];
+  const kubectlResourceRefs = [
+    'configmap/agentsmith-substrate-config',
+    'service/agentsmith-substrate-service',
+    'networkpolicy.networking.k8s.io/agentsmith-substrate-network',
+    'deployment.apps/agentsmith-substrate-postgresql',
+    'statefulset.apps/agentsmith-substrate-mongodb',
+    'job.batch/agentsmith-substrate-installer',
+    'persistentvolumeclaim/agentsmith-substrate-postgresql-data'
+  ];
   const report = {
     schema: 'agentsmith.substrate-install-report/v1',
     scope: 'substrate_install_only',
@@ -692,18 +766,8 @@ function substrateInstall(dir, profile, operatorRunId) {
     operator_run_id: operatorRunId,
     substrate_truth_digest: sha(`${profile}:substrate-truth`),
     installed_services: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc'],
-    resource_refs: [
-      {
-        apiVersion: 'v1',
-        group: '',
-        kind: 'ConfigMap',
-        resource: 'configmaps',
-        namespace: effectiveNamespace,
-        name: 'agentsmith-substrate-config',
-        document_index: 1
-      }
-    ],
-    kubectl_resource_refs: ['configmap/agentsmith-substrate-config'],
+    resource_refs: resourceRefs,
+    kubectl_resource_refs: kubectlResourceRefs,
     checks: {
       substrate_pack_manifest: 'pass',
       substrate_install_inputs: 'pass',
@@ -711,21 +775,21 @@ function substrateInstall(dir, profile, operatorRunId) {
       namespace_scope: {
         status: 'pass',
         namespace: effectiveNamespace,
-        resource_count: 1,
-        allowed_resource_count: 1
+        resource_count: resourceRefs.length,
+        allowed_resource_count: resourceRefs.length
       },
       collision_guard: {
         status: 'pass',
-        checked_resource_count: 1,
-        kubectl_get_count: 1,
-        not_found_count: 1,
+        checked_resource_count: resourceRefs.length,
+        kubectl_get_count: resourceRefs.length,
+        not_found_count: resourceRefs.length,
         owned_resource_count: 0
       },
       kubectl_apply: {
         status: 'pass',
         mode: mutation === 'install-server-dry-run' ? 'server-dry-run' : 'apply',
-        applied_resource_count: 1,
-        kubectl_resource_count: 1,
+        applied_resource_count: resourceRefs.length,
+        kubectl_resource_count: kubectlResourceRefs.length,
         command_summary: {
           command: 'kubectl apply --server-side --namespace agentsmith -f <apply-resource-list> -o name',
           server_side: true,
@@ -739,7 +803,7 @@ function substrateInstall(dir, profile, operatorRunId) {
       release_kit_version: '0.1.0',
       substrate_pack_release_kit_version: '0.1.0',
       installed_by: 'agentsmith-release-kit',
-      resources_count: 1,
+      resources_count: resourceRefs.length,
       substrate_services_count: 5
     },
     output_substrate_truth_path: 'substrate-truth.json',
@@ -1068,8 +1132,27 @@ const smokeMaterial = onlineManifest.source_evidence_files?.find(
 if (!smokeMaterial || digest(path.join(onlineDir, smokeMaterial.path)) !== smokeStep.report_digest) {
   throw new Error('finalizer manifest did not materialize route-smoke source evidence');
 }
+if (airgap.airgap_offline?.proof_scope !== 'release_kit_package_local_bundle_local_digest_bound_inputs_only') {
+  throw new Error('airgap path must declare release-kit proof scope');
+}
+if (airgap.airgap_offline?.public_internet_downloads_observed_by_release_kit !== false) {
+  throw new Error('airgap path must report no public internet downloads observed by release-kit');
+}
 if (airgap.airgap_offline?.public_internet_downloads !== false) {
-  throw new Error('airgap path must prove no public internet downloads');
+  throw new Error('airgap path legacy public download field must stay false');
+}
+if (airgap.airgap_offline?.release_kit_inputs_package_local_digest_bound !== true) {
+  throw new Error('airgap path must bind package-local/bundle-local inputs by digest');
+}
+if (airgap.airgap_offline?.release_kit_inputs_and_tools_package_local_or_bundle_local_digest_bound !== true) {
+  throw new Error('airgap path must bind package-local/bundle-local inputs and tools by digest');
+}
+const limitations = new Set(airgap.airgap_offline?.proof_limitations || []);
+if (
+  !limitations.has('does_not_prove_physical_network_isolation') ||
+  !limitations.has('does_not_prove_absence_of_public_internet_access_outside_release_kit')
+) {
+  throw new Error('airgap path must state release-kit proof limitations');
 }
 if (airgapManifest.path_report_sha256 !== digest(airgapPathReportFile)) {
   throw new Error('airgap finalizer manifest did not bind path report bytes');

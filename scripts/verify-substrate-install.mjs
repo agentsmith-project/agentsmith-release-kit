@@ -20,6 +20,7 @@ import {
 } from './lib/substrate-install-input-validation.mjs';
 import {
   formatResourceRef,
+  imageRefsFromSubstratePackManifest,
   isKitOwnedResource,
   resourceRefForKubectl,
   validateNamespaceScopedResources
@@ -827,7 +828,7 @@ async function main() {
   const prerequisitesInput = await readJson(args.targetPrerequisites, 'target prerequisites');
 
   const release = validateReleaseInputs(releaseContractInput, deployTemplateInput);
-  const { manifestSummary } = validateSubstratePackManifest(
+  const { manifest, manifestSummary } = validateSubstratePackManifest(
     packInput.value,
     args.targetProfile,
     { fail }
@@ -856,12 +857,6 @@ async function main() {
   ) {
     fail('--confirm-install-parameters must match the substrate install parameters sha256');
   }
-  const resources = resourceListBinding.resources;
-  const resourceRefs = validateNamespaceScopedResources(resources, args.namespace, {
-    fail,
-    label: 'substrate install resources',
-    installationId: installSummary.installationId
-  });
 
   assertNoUnsafeSubstratePayload(
     prerequisitesInput.value,
@@ -877,6 +872,15 @@ async function main() {
       expectedNamespace: args.namespace
     }
   );
+
+  const resources = resourceListBinding.resources;
+  const resourceRefs = validateNamespaceScopedResources(resources, args.namespace, {
+    fail,
+    label: 'substrate install resources',
+    installationId: installSummary.installationId,
+    allowedImages: imageRefsFromSubstratePackManifest(manifest, { fail }),
+    storageClassName: prerequisitesSummary.storage_class
+  });
 
   const kubectlVersion = runKubectlVersion(args);
   const collisionSummary = assertNoNonKitCollision(args, resources, installSummary.installationId);

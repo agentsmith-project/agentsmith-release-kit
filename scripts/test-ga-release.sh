@@ -1180,6 +1180,7 @@ function installParametersDigest({
 if (mutation === 'missing-install-confirmation') {
   report.install_substrates_confirmation.confirmed = false;
 } else if (mutation === 'airgap-download') {
+  report.airgap_offline.public_internet_downloads_observed_by_release_kit = true;
   report.airgap_offline.public_internet_downloads = true;
 } else if (mutation === 'airgap-missing-target-preflight') {
   report.steps = report.steps.filter((step) => step.name !== 'target-preflight');
@@ -1268,6 +1269,26 @@ import fs from 'node:fs';
 const manifestFile = process.argv[2];
 const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
 manifest.source_evidence_files[0].operator_note = 'ordinary diagnostic note';
+fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+remove_manifest_source_evidence_entry() {
+  local report_dir="$1"
+  local kind="$2"
+
+  "$NODE_BIN" --input-type=module - "$report_dir/deployment-path-finalizer-manifest.json" "$kind" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [manifestFile, kind] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+const reportDir = path.dirname(manifestFile);
+const removedEntries = manifest.source_evidence_files.filter((entry) => entry.kind === kind);
+manifest.source_evidence_files = manifest.source_evidence_files.filter((entry) => entry.kind !== kind);
+for (const entry of removedEntries) {
+  fs.rmSync(path.join(reportDir, entry.path), { force: true });
+}
 fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
@@ -1587,6 +1608,25 @@ if (report.status !== 'pass' || report.formal_verdict !== 'issued') {
 }
 if (!Array.isArray(report.deployment_paths) || report.deployment_paths.length !== 4) {
   throw new Error('expected four deployment paths');
+}
+const airgapPaths = report.deployment_paths.filter((entry) => entry.operator_path?.startsWith('airgap/'));
+if (airgapPaths.length !== 2) {
+  throw new Error('GA report must include two airgap deployment paths');
+}
+for (const pathEntry of airgapPaths) {
+  const offline = pathEntry.airgap_offline;
+  if (offline?.proof_scope !== 'release_kit_package_local_bundle_local_digest_bound_inputs_only') {
+    throw new Error(`GA report airgap path missing scoped offline proof: ${pathEntry.operator_path}`);
+  }
+  if (offline.public_internet_downloads_observed_by_release_kit !== false) {
+    throw new Error(`GA report airgap path must only report release-kit observed downloads: ${pathEntry.operator_path}`);
+  }
+  if (offline.release_kit_inputs_package_local_digest_bound !== true) {
+    throw new Error(`GA report airgap path must bind package-local/bundle-local inputs: ${pathEntry.operator_path}`);
+  }
+  if (offline.release_kit_inputs_and_tools_package_local_or_bundle_local_digest_bound !== true) {
+    throw new Error(`GA report airgap path must bind package-local/bundle-local inputs and tools: ${pathEntry.operator_path}`);
+  }
 }
 const expectedCanonicalRepos = [
   'github.com/agentsmith-project/agentsmith',
@@ -1969,6 +2009,23 @@ grep -Fq "finalizer_manifest.source_evidence_files[0] contains unknown field: op
   fail "manifest unknown source evidence field failure message did not explain blocker"
 pass "GA aggregate rejects unknown finalizer manifest entry fields"
 
+AIRGAP_SOURCE_MISSING_DIR="$TMP_DIR/airgap-source-missing-image-map"
+write_fixture_set "$AIRGAP_SOURCE_MISSING_DIR" valid
+generate_path_bundles "$AIRGAP_SOURCE_MISSING_DIR" "$TMP_DIR/path-airgap-source-missing-image-map"
+remove_manifest_source_evidence_entry "$TMP_DIR/path-airgap-source-missing-image-map/airgap-use-existing" airgap_image_map
+if run_ga_release "$AIRGAP_SOURCE_MISSING_DIR" "$TMP_DIR/path-airgap-source-missing-image-map" "$TMP_DIR/out-airgap-source-missing-image-map" >"$TMP_DIR/ga-release-airgap-source-missing-image-map.out" 2>&1; then
+  fail "airgap path missing image-map source evidence should fail"
+fi
+grep -Fq "finalizer_manifest.source_evidence_files must exactly cover path report source evidence" "$TMP_DIR/ga-release-airgap-source-missing-image-map.out" || \
+  fail "airgap missing source evidence failure message did not explain blocker"
+old_airgap_claim_a="must "
+old_airgap_claim_b="prove "
+old_airgap_claim_c="no public internet downloads"
+if grep -Fq "${old_airgap_claim_a}${old_airgap_claim_b}${old_airgap_claim_c}" "$TMP_DIR/ga-release-airgap-source-missing-image-map.out"; then
+  fail "airgap missing source evidence failure must not claim network isolation proof"
+fi
+pass "GA aggregate rejects missing airgap package-local digest-bound source evidence"
+
 SOURCE_DRIFT_DIR="$TMP_DIR/source-drift"
 write_fixture_set "$SOURCE_DRIFT_DIR" valid
 generate_path_bundles "$SOURCE_DRIFT_DIR" "$TMP_DIR/path-source-drift"
@@ -2182,6 +2239,12 @@ grep -Fq "airgap image map.mappings must not be empty" "$TMP_DIR/ga-release-sour
 if grep -Fq "sha256 must match" "$TMP_DIR/ga-release-source-airgap-image-map-empty.out"; then
   fail "airgap source image-map negative hit digest mismatch instead of semantic validation"
 fi
+old_airgap_claim_a="must "
+old_airgap_claim_b="prove "
+old_airgap_claim_c="no public internet downloads"
+if grep -Fq "${old_airgap_claim_a}${old_airgap_claim_b}${old_airgap_claim_c}" "$TMP_DIR/ga-release-source-airgap-image-map-empty.out"; then
+  fail "airgap source image-map semantic failure must not claim network isolation proof"
+fi
 pass "GA aggregate revalidates digest-refreshed airgap source image-map semantics"
 
 LEDGER_DIGEST_MISMATCH_DIR="$TMP_DIR/source-ledger-step-digest-mismatch"
@@ -2287,7 +2350,7 @@ mutate_path_report "$TMP_DIR/path-airgap-download/airgap-use-existing/deployment
 if run_ga_release "$AIRGAP_DIR" "$TMP_DIR/path-airgap-download" "$TMP_DIR/out-airgap-download" >"$TMP_DIR/ga-release-airgap-download.out" 2>&1; then
   fail "airgap public download should fail"
 fi
-grep -Fq "must prove no public internet downloads" "$TMP_DIR/ga-release-airgap-download.out" || \
+grep -Fq "reports public internet downloads observed by release-kit" "$TMP_DIR/ga-release-airgap-download.out" || \
   fail "airgap offline failure message did not explain blocker"
 pass "airgap public download fails fast"
 

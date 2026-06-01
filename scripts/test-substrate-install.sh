@@ -254,21 +254,140 @@ const manifest = {
   }
 };
 
-let resources = [
-  {
+function kitMetadata(name) {
+  return {
+    name,
+    namespace: 'agentsmith',
+    labels: ownerLabels,
+    annotations: ownerAnnotations
+  };
+}
+
+function configMapResource() {
+  return {
     apiVersion: 'v1',
     kind: 'ConfigMap',
-    metadata: {
-      name: 'agentsmith-substrate-config',
-      namespace: 'agentsmith',
-      labels: ownerLabels,
-      annotations: ownerAnnotations
-    },
+    metadata: kitMetadata('agentsmith-substrate-config'),
     data: {
       installation_id: 'kit-install-10001',
       profile
     }
-  }
+  };
+}
+
+function networkPolicyResource() {
+  return {
+    apiVersion: 'networking.k8s.io/v1',
+    kind: 'NetworkPolicy',
+    metadata: kitMetadata('agentsmith-substrate-network'),
+    spec: {
+      podSelector: {},
+      policyTypes: ['Ingress']
+    }
+  };
+}
+
+function workloadLabels(name) {
+  return {
+    'app.kubernetes.io/name': name,
+    'app.kubernetes.io/part-of': 'agentsmith-substrate'
+  };
+}
+
+function podTemplate(name, containerName, imageRef) {
+  const labels = workloadLabels(name);
+  return {
+    metadata: {
+      labels
+    },
+    spec: {
+      containers: [
+        {
+          name: containerName,
+          image: imageRef
+        }
+      ]
+    }
+  };
+}
+
+function deploymentResource(imageRef = manifest.images.postgresql) {
+  const name = 'agentsmith-substrate-postgresql';
+  const labels = workloadLabels(name);
+  return {
+    apiVersion: 'apps/v1',
+    kind: 'Deployment',
+    metadata: kitMetadata(name),
+    spec: {
+      replicas: 1,
+      selector: {
+        matchLabels: labels
+      },
+      template: podTemplate(name, 'postgresql', imageRef)
+    }
+  };
+}
+
+function statefulSetResource(imageRef = manifest.images.mongodb) {
+  const name = 'agentsmith-substrate-mongodb';
+  const labels = workloadLabels(name);
+  return {
+    apiVersion: 'apps/v1',
+    kind: 'StatefulSet',
+    metadata: kitMetadata(name),
+    spec: {
+      serviceName: 'agentsmith-substrate-service',
+      replicas: 1,
+      selector: {
+        matchLabels: labels
+      },
+      template: podTemplate(name, 'mongodb', imageRef)
+    }
+  };
+}
+
+function jobResource(imageRef = manifest.images.redis) {
+  return {
+    apiVersion: 'batch/v1',
+    kind: 'Job',
+    metadata: kitMetadata('agentsmith-substrate-installer'),
+    spec: {
+      template: {
+        ...podTemplate('agentsmith-substrate-installer', 'installer', imageRef),
+        spec: {
+          ...podTemplate('agentsmith-substrate-installer', 'installer', imageRef).spec,
+          restartPolicy: 'Never'
+        }
+      }
+    }
+  };
+}
+
+function pvcResource(storageClassName = 'gp3') {
+  return {
+    apiVersion: 'v1',
+    kind: 'PersistentVolumeClaim',
+    metadata: kitMetadata('agentsmith-substrate-postgresql-data'),
+    spec: {
+      storageClassName,
+      accessModes: ['ReadWriteOnce'],
+      resources: {
+        requests: {
+          storage: '1Gi'
+        }
+      }
+    }
+  };
+}
+
+let resources = [
+  configMapResource(),
+  serviceResource('ClusterIP'),
+  networkPolicyResource(),
+  deploymentResource(),
+  statefulSetResource(),
+  jobResource(),
+  pvcResource()
 ];
 
 if (mutation === 'cluster_scoped_manifest') {
@@ -283,32 +402,10 @@ if (mutation === 'cluster_scoped_manifest') {
   ];
 }
 if (mutation === 'deployment_manifest') {
-  resources = [
-    {
-      apiVersion: 'apps/v1',
-      kind: 'Deployment',
-      metadata: {
-        name: 'agentsmith-substrate-postgresql',
-        namespace: 'agentsmith',
-        labels: ownerLabels,
-        annotations: ownerAnnotations
-      }
-    }
-  ];
+  resources = [deploymentResource()];
 }
 if (mutation === 'statefulset_manifest') {
-  resources = [
-    {
-      apiVersion: 'apps/v1',
-      kind: 'StatefulSet',
-      metadata: {
-        name: 'agentsmith-substrate-postgresql',
-        namespace: 'agentsmith',
-        labels: ownerLabels,
-        annotations: ownerAnnotations
-      }
-    }
-  ];
+  resources = [statefulSetResource()];
 }
 if (mutation === 'unknown_deployment_api_version') {
   resources = [
@@ -321,6 +418,51 @@ if (mutation === 'unknown_deployment_api_version') {
         labels: ownerLabels,
         annotations: ownerAnnotations
       }
+    }
+  ];
+}
+if (mutation === 'unknown_workload_image') {
+  resources = [deploymentResource(image('postgresql-extra', '16.3', '9'))];
+}
+if (mutation === 'tag_only_workload_image') {
+  resources = [deploymentResource('ghcr.io/agentsmith-project/substrates/postgresql:16.3')];
+}
+if (mutation === 'digest_drift_workload_image') {
+  resources = [deploymentResource(image('postgresql', '16.3', '9'))];
+}
+if (mutation === 'daemonset_manifest') {
+  resources = [
+    {
+      apiVersion: 'apps/v1',
+      kind: 'DaemonSet',
+      metadata: kitMetadata('agentsmith-substrate-daemon')
+    }
+  ];
+}
+if (mutation === 'cronjob_manifest') {
+  resources = [
+    {
+      apiVersion: 'batch/v1',
+      kind: 'CronJob',
+      metadata: kitMetadata('agentsmith-substrate-cron')
+    }
+  ];
+}
+if (mutation === 'pod_manifest') {
+  resources = [
+    {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: kitMetadata('agentsmith-substrate-pod')
+    }
+  ];
+}
+if (mutation === 'replicaset_manifest') {
+  resources = [
+    {
+      apiVersion: 'apps/v1',
+      kind: 'ReplicaSet',
+      metadata: kitMetadata('agentsmith-substrate-replicaset')
     }
   ];
 }
@@ -352,26 +494,7 @@ if (mutation === 'service_health_check_node_port') {
   resources = [serviceResource('ClusterIP', { healthCheckNodePort: 32080 })];
 }
 if (mutation === 'pvc_manifest') {
-  resources = [
-    {
-      apiVersion: 'v1',
-      kind: 'PersistentVolumeClaim',
-      metadata: {
-        name: 'agentsmith-substrate-postgresql-data',
-        namespace: 'agentsmith',
-        labels: ownerLabels,
-        annotations: ownerAnnotations
-      },
-      spec: {
-        accessModes: ['ReadWriteOnce'],
-        resources: {
-          requests: {
-            storage: '1Gi'
-          }
-        }
-      }
-    }
-  ];
+  resources = [pvcResource()];
 }
 if (mutation === 'secret_manifest') {
   resources = [
@@ -395,31 +518,7 @@ if (mutation === 'secret_manifest') {
   ];
 }
 if (mutation === 'job_manifest') {
-  resources = [
-    {
-      apiVersion: 'batch/v1',
-      kind: 'Job',
-      metadata: {
-        name: 'agentsmith-substrate-installer',
-        namespace: 'agentsmith',
-        labels: ownerLabels,
-        annotations: ownerAnnotations
-      },
-      spec: {
-        template: {
-          spec: {
-            restartPolicy: 'Never',
-            containers: [
-              {
-                name: 'installer',
-                image: image('postgresql', '16.3', '1')
-              }
-            ]
-          }
-        }
-      }
-    }
-  ];
+  resources = [jobResource()];
 }
 if (mutation === 'service_account_manifest') {
   resources = [
@@ -601,6 +700,40 @@ if [[ "$command_name" == "get" ]]; then
 fi
 
 if [[ "$command_name" == "apply" ]]; then
+  resource_file=""
+  previous=""
+  for arg in "$@"; do
+    if [[ "$previous" == "-f" ]]; then
+      resource_file="$arg"
+    fi
+    previous="$arg"
+  done
+  if [[ "$resource_file" == *".substrate-install-resources."* ]]; then
+    node --input-type=module - "$resource_file" <<'APPLY_NODE'
+import fs from 'node:fs';
+
+const [resourceFile] = process.argv.slice(2);
+const resourceNames = new Map([
+  ['v1|ConfigMap', 'configmap'],
+  ['v1|Service', 'service'],
+  ['networking.k8s.io/v1|NetworkPolicy', 'networkpolicy.networking.k8s.io'],
+  ['apps/v1|Deployment', 'deployment.apps'],
+  ['apps/v1|StatefulSet', 'statefulset.apps'],
+  ['batch/v1|Job', 'job.batch'],
+  ['v1|PersistentVolumeClaim', 'persistentvolumeclaim']
+]);
+const list = JSON.parse(fs.readFileSync(resourceFile, 'utf8'));
+const refs = list.items.map((item) => {
+  const resource = resourceNames.get(item.apiVersion + '|' + item.kind);
+  if (!resource) {
+    throw new Error('unexpected substrate install resource ' + item.apiVersion + '/' + item.kind);
+  }
+  return resource + '/' + item.metadata.name;
+});
+process.stdout.write(refs.join('\\n') + '\\n');
+APPLY_NODE
+    exit 0
+  fi
   printf '%s\\n' "configmap/agentsmith-substrate-config"
   exit 0
 fi
@@ -745,10 +878,13 @@ if (report.output_substrate_truth_path !== 'substrate-truth.json') {
 if (!Array.isArray(report.installed_services) || report.installed_services.length !== 5) {
   throw new Error('substrate install report must include installed services');
 }
-if (!Array.isArray(report.resource_refs) || report.resource_refs.length !== 1) {
+if (!Array.isArray(report.resource_refs) || report.resource_refs.length === 0) {
   throw new Error('substrate install report must include namespace-scoped resource refs');
 }
-if (!Array.isArray(report.kubectl_resource_refs) || report.kubectl_resource_refs.length !== 1) {
+if (
+  !Array.isArray(report.kubectl_resource_refs) ||
+  report.kubectl_resource_refs.length !== report.resource_refs.length
+) {
   throw new Error('substrate install report must include kubectl resource refs');
 }
 if (report.checks?.namespace_scope?.status !== 'pass') {
@@ -843,25 +979,21 @@ pass "cluster-scoped substrate install resources rejected before kubectl"
 
 deployment_dir="$TMP_DIR/deployment-manifest"
 write_fixture_set "$deployment_dir" deployment_manifest
+deployment_output="$TMP_DIR/out-deployment"
 reset_kubectl_log
-if run_install "$deployment_dir" "$TMP_DIR/out-deployment" >"$TMP_DIR/deployment.out" 2>&1; then
-  fail "Deployment substrate install manifest should fail"
-fi
-grep -Fq "apiVersion apps/v1 with kind Deployment is not in the namespace-scoped substrate install allowlist" "$TMP_DIR/deployment.out" || \
-  fail "Deployment resource failure message did not explain allowlist blocker"
-assert_kubectl_not_called
-pass "substrate installer rejects Deployment resources before kubectl"
+run_install "$deployment_dir" "$deployment_output" >/dev/null
+grep -q '^get deployments.apps ' "$KUBECTL_LOG" || fail "Deployment collision guard did not use canonical Deployment resource"
+assert_install_report "$deployment_output/substrate-install-report.json" "$deployment_output/substrate-truth.json" server-dry-run
+pass "Deployment substrate install resource accepted with pack image binding"
 
 statefulset_dir="$TMP_DIR/statefulset-manifest"
 write_fixture_set "$statefulset_dir" statefulset_manifest
+statefulset_output="$TMP_DIR/out-statefulset"
 reset_kubectl_log
-if run_install "$statefulset_dir" "$TMP_DIR/out-statefulset" >"$TMP_DIR/statefulset.out" 2>&1; then
-  fail "StatefulSet substrate install manifest should fail"
-fi
-grep -Fq "apiVersion apps/v1 with kind StatefulSet is not in the namespace-scoped substrate install allowlist" "$TMP_DIR/statefulset.out" || \
-  fail "StatefulSet resource failure message did not explain allowlist blocker"
-assert_kubectl_not_called
-pass "substrate installer rejects StatefulSet resources before kubectl"
+run_install "$statefulset_dir" "$statefulset_output" >/dev/null
+grep -q '^get statefulsets.apps ' "$KUBECTL_LOG" || fail "StatefulSet collision guard did not use canonical StatefulSet resource"
+assert_install_report "$statefulset_output/substrate-install-report.json" "$statefulset_output/substrate-truth.json" server-dry-run
+pass "StatefulSet substrate install resource accepted with pack image binding"
 
 unknown_api_dir="$TMP_DIR/unknown-api-version"
 write_fixture_set "$unknown_api_dir" unknown_deployment_api_version
@@ -873,6 +1005,39 @@ grep -Fq "apiVersion evil.example/v1 with kind Deployment" "$TMP_DIR/unknown-api
   fail "unknown apiVersion failure message did not explain blocker"
 assert_kubectl_not_called
 pass "namespace-scope guard rejects known kind under unknown apiVersion"
+
+unknown_image_dir="$TMP_DIR/unknown-workload-image"
+write_fixture_set "$unknown_image_dir" unknown_workload_image
+reset_kubectl_log
+if run_install "$unknown_image_dir" "$TMP_DIR/out-unknown-workload-image" >"$TMP_DIR/unknown-workload-image.out" 2>&1; then
+  fail "workload image outside substrate pack manifest should fail"
+fi
+grep -Fq "must match an image declared in substrate_pack_manifest.images" "$TMP_DIR/unknown-workload-image.out" || \
+  fail "unknown workload image failure message did not explain pack image inventory blocker"
+assert_kubectl_not_called
+pass "workload image outside substrate pack manifest rejected before kubectl"
+
+tag_only_image_dir="$TMP_DIR/tag-only-workload-image"
+write_fixture_set "$tag_only_image_dir" tag_only_workload_image
+reset_kubectl_log
+if run_install "$tag_only_image_dir" "$TMP_DIR/out-tag-only-workload-image" >"$TMP_DIR/tag-only-workload-image.out" 2>&1; then
+  fail "tag-only workload image should fail"
+fi
+grep -Fq "must be digest-pinned with @sha256" "$TMP_DIR/tag-only-workload-image.out" || \
+  fail "tag-only workload image failure message did not explain digest pin blocker"
+assert_kubectl_not_called
+pass "tag-only workload image rejected before kubectl"
+
+digest_drift_dir="$TMP_DIR/digest-drift-workload-image"
+write_fixture_set "$digest_drift_dir" digest_drift_workload_image
+reset_kubectl_log
+if run_install "$digest_drift_dir" "$TMP_DIR/out-digest-drift-workload-image" >"$TMP_DIR/digest-drift-workload-image.out" 2>&1; then
+  fail "workload image digest drift should fail"
+fi
+grep -Fq "must match an image declared in substrate_pack_manifest.images" "$TMP_DIR/digest-drift-workload-image.out" || \
+  fail "digest drift workload image failure message did not explain pack image inventory blocker"
+assert_kubectl_not_called
+pass "workload image digest drift rejected before kubectl"
 
 "$NODE_BIN" --input-type=module - "$ROOT_DIR" <<'NODE'
 import { pathToFileURL } from 'node:url';
@@ -999,16 +1164,32 @@ grep -Fq "use secret refs only and do not include Secret payload resources" "$TM
 assert_kubectl_not_called
 pass "substrate installer rejects Secret payload resources before kubectl"
 
+for workload_case in \
+  "daemonset_manifest apps/v1 DaemonSet" \
+  "cronjob_manifest batch/v1 CronJob" \
+  "pod_manifest v1 Pod" \
+  "replicaset_manifest apps/v1 ReplicaSet"; do
+  read -r workload_mutation workload_api workload_kind <<<"$workload_case"
+  workload_dir="$TMP_DIR/$workload_mutation"
+  write_fixture_set "$workload_dir" "$workload_mutation"
+  reset_kubectl_log
+  if run_install "$workload_dir" "$TMP_DIR/out-$workload_mutation" >"$TMP_DIR/$workload_mutation.out" 2>&1; then
+    fail "$workload_kind substrate install manifest should fail"
+  fi
+  grep -Fq "apiVersion $workload_api with kind $workload_kind is not in the namespace-scoped substrate install allowlist" "$TMP_DIR/$workload_mutation.out" || \
+    fail "$workload_kind failure message did not explain allowlist blocker"
+  assert_kubectl_not_called
+  pass "substrate installer rejects $workload_kind resources before kubectl"
+done
+
 job_dir="$TMP_DIR/job-manifest"
 write_fixture_set "$job_dir" job_manifest
+job_output="$TMP_DIR/out-job"
 reset_kubectl_log
-if run_install "$job_dir" "$TMP_DIR/out-job" >"$TMP_DIR/job.out" 2>&1; then
-  fail "Job substrate install manifest should fail"
-fi
-grep -Fq "apiVersion batch/v1 with kind Job is not in the namespace-scoped substrate install allowlist" "$TMP_DIR/job.out" || \
-  fail "Job resource failure message did not explain allowlist blocker"
-assert_kubectl_not_called
-pass "substrate installer rejects Job resources before kubectl"
+run_install "$job_dir" "$job_output" >/dev/null
+grep -q '^get jobs.batch ' "$KUBECTL_LOG" || fail "Job collision guard did not use canonical Job resource"
+assert_install_report "$job_output/substrate-install-report.json" "$job_output/substrate-truth.json" server-dry-run
+pass "Job substrate install resource accepted with pack image binding"
 
 service_account_dir="$TMP_DIR/service-account-manifest"
 write_fixture_set "$service_account_dir" service_account_manifest
@@ -1045,14 +1226,12 @@ pass "substrate installer rejects RoleBinding resources before kubectl"
 
 pvc_dir="$TMP_DIR/pvc"
 write_fixture_set "$pvc_dir" pvc_manifest
+pvc_output="$TMP_DIR/out-pvc"
 reset_kubectl_log
-if run_install "$pvc_dir" "$TMP_DIR/out-pvc" >"$TMP_DIR/pvc.out" 2>&1; then
-  fail "PersistentVolumeClaim substrate install manifest should fail"
-fi
-grep -Fq "PersistentVolumeClaim" "$TMP_DIR/pvc.out" || \
-  fail "PVC failure message did not explain blocker"
-assert_kubectl_not_called
-pass "substrate installer rejects PVC resources and relies on target storage proof only"
+run_install "$pvc_dir" "$pvc_output" >/dev/null
+grep -q '^get persistentvolumeclaims ' "$KUBECTL_LOG" || fail "PVC collision guard did not use canonical PersistentVolumeClaim resource"
+assert_install_report "$pvc_output/substrate-install-report.json" "$pvc_output/substrate-truth.json" server-dry-run
+pass "PVC substrate install resource accepted with target storage prerequisite binding"
 
 flag_like_name_dir="$TMP_DIR/flag-like-name"
 write_fixture_set "$flag_like_name_dir" flag_like_name

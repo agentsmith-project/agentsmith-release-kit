@@ -27,6 +27,7 @@ const FINALIZER_SCHEMA = 'agentsmith.deployment-path-report-finalizer/v1';
 const FINALIZER_TOOL = 'verify-deployment-path-report.mjs';
 const FINALIZER_MANIFEST_TOOL = 'verify-deployment-path-report';
 const FINALIZER_MODE = 'deployment_path_source_evidence_finalization';
+const AIRGAP_OFFLINE_PROOF_SCOPE = 'release_kit_package_local_bundle_local_digest_bound_inputs_only';
 const PRODUCT_READY_SCHEMA = 'agentsmith.product-readiness-report/v1';
 const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke-report/v1';
 const PRODUCT_SMOKE_PRODUCER = 'agentsmith-post-deploy-product-smoke';
@@ -1655,6 +1656,87 @@ async function validateFinalizerManifest({
   return materializedSourceEvidence;
 }
 
+function validateAirgapOfflineSummary({ report, steps, operatorPath }) {
+  const offline = requireObject(report.airgap_offline, 'deployment_path_report.airgap_offline');
+  const proofScope = requireString(
+    offline.proof_scope,
+    'deployment_path_report.airgap_offline.proof_scope'
+  );
+  if (proofScope !== AIRGAP_OFFLINE_PROOF_SCOPE) {
+    fail(
+      `deployment_path_report.airgap_offline.proof_scope must be ${AIRGAP_OFFLINE_PROOF_SCOPE}`
+    );
+  }
+  if (offline.public_internet_downloads_observed_by_release_kit !== false) {
+    fail(`deployment path ${operatorPath} reports public internet downloads observed by release-kit`);
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(offline, 'public_internet_downloads') &&
+    offline.public_internet_downloads !== false
+  ) {
+    fail('deployment_path_report.airgap_offline.public_internet_downloads legacy field must be false');
+  }
+  if (offline.release_kit_inputs_package_local_digest_bound !== true) {
+    fail(
+      'deployment_path_report.airgap_offline.release_kit_inputs_package_local_digest_bound must be true'
+    );
+  }
+  if (offline.release_kit_inputs_and_tools_package_local_or_bundle_local_digest_bound !== true) {
+    fail(
+      'deployment_path_report.airgap_offline.release_kit_inputs_and_tools_package_local_or_bundle_local_digest_bound must be true'
+    );
+  }
+
+  const proofLimitations = requireArray(
+    offline.proof_limitations,
+    'deployment_path_report.airgap_offline.proof_limitations'
+  );
+  const limitationSet = new Set(
+    proofLimitations.map((limitation, index) =>
+      requireString(limitation, `deployment_path_report.airgap_offline.proof_limitations[${index}]`)
+    )
+  );
+  for (const requiredLimitation of [
+    'does_not_prove_physical_network_isolation',
+    'does_not_prove_absence_of_public_internet_access_outside_release_kit'
+  ]) {
+    if (!limitationSet.has(requiredLimitation)) {
+      fail(
+        `deployment_path_report.airgap_offline.proof_limitations must include ${requiredLimitation}`
+      );
+    }
+  }
+
+  const bundleManifestDigest = requireDigest(
+    offline.bundle_manifest_digest,
+    'deployment_path_report.airgap_offline.bundle_manifest_digest'
+  );
+  const imageLoadReportDigest = requireDigest(
+    offline.image_load_report_digest,
+    'deployment_path_report.airgap_offline.image_load_report_digest'
+  );
+  if (imageLoadReportDigest !== steps.get('image-load').report_digest) {
+    fail('deployment_path_report.airgap_offline.image_load_report_digest must match image-load step');
+  }
+  const offlineRenderReportDigest = requireDigest(
+    offline.offline_render_report_digest,
+    'deployment_path_report.airgap_offline.offline_render_report_digest'
+  );
+  if (offlineRenderReportDigest !== steps.get('offline-render-check').report_digest) {
+    fail('deployment_path_report.airgap_offline.offline_render_report_digest must match offline-render-check step');
+  }
+
+  return {
+    proof_scope: proofScope,
+    public_internet_downloads_observed_by_release_kit: false,
+    release_kit_inputs_package_local_digest_bound: true,
+    release_kit_inputs_and_tools_package_local_or_bundle_local_digest_bound: true,
+    bundle_manifest_digest: bundleManifestDigest,
+    image_load_report_digest: imageLoadReportDigest,
+    offline_render_report_digest: offlineRenderReportDigest
+  };
+}
+
 async function validateDeploymentPathReport(pathInput, release, deployTemplate) {
   const report = pathInput.value;
   const reportDigest = pathInput.digest;
@@ -1708,29 +1790,9 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
     }
   }
 
-  if (requirement.source === 'airgap') {
-    const offline = requireObject(report.airgap_offline, 'deployment_path_report.airgap_offline');
-    if (offline.public_internet_downloads !== false) {
-      fail(`deployment path ${operatorPath} must prove no public internet downloads`);
-    }
-    requireDigest(offline.bundle_manifest_digest, 'deployment_path_report.airgap_offline.bundle_manifest_digest');
-    if (
-      requireDigest(
-        offline.image_load_report_digest,
-        'deployment_path_report.airgap_offline.image_load_report_digest'
-      ) !== steps.get('image-load').report_digest
-    ) {
-      fail('deployment_path_report.airgap_offline.image_load_report_digest must match image-load step');
-    }
-    if (
-      requireDigest(
-        offline.offline_render_report_digest,
-        'deployment_path_report.airgap_offline.offline_render_report_digest'
-      ) !== steps.get('offline-render-check').report_digest
-    ) {
-      fail('deployment_path_report.airgap_offline.offline_render_report_digest must match offline-render-check step');
-    }
-  }
+  const airgapOffline = requirement.source === 'airgap'
+    ? validateAirgapOfflineSummary({ report, steps, operatorPath })
+    : null;
 
   const ledger = validateSourceEvidenceLedger(report, requirement, requiredSteps, steps, operatorPath);
   const materializedSourceEvidence = await validateFinalizerManifest({
@@ -1761,7 +1823,8 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
     operator_path: operatorPath,
     target_profile: report.target_profile.value,
     report_digest: reportDigest,
-    steps: [...steps.keys()]
+    steps: [...steps.keys()],
+    ...(airgapOffline ? { airgap_offline: airgapOffline } : {})
   };
 }
 

@@ -13,6 +13,7 @@ const MANIFEST_SCHEMA = 'agentsmith.deployment-path-finalizer-manifest/v1';
 const SOURCE_EVIDENCE_SCHEMA = 'agentsmith.deployment-path-source-evidence/v1';
 const FINALIZER_SCHEMA = 'agentsmith.deployment-path-report-finalizer/v1';
 const FINALIZER_MANIFEST_TOOL = 'verify-deployment-path-report';
+const AIRGAP_OFFLINE_PROOF_SCOPE = 'release_kit_package_local_bundle_local_digest_bound_inputs_only';
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
@@ -792,7 +793,15 @@ async function main() {
     const imageLoadDigest = steps.find((step) => step.name === 'image-load').report_digest;
     const offlineRenderDigest = steps.find((step) => step.name === 'offline-render-check').report_digest;
     report.airgap_offline = {
+      proof_scope: AIRGAP_OFFLINE_PROOF_SCOPE,
+      public_internet_downloads_observed_by_release_kit: false,
       public_internet_downloads: false,
+      release_kit_inputs_package_local_digest_bound: true,
+      release_kit_inputs_and_tools_package_local_or_bundle_local_digest_bound: true,
+      proof_limitations: [
+        'does_not_prove_physical_network_isolation',
+        'does_not_prove_absence_of_public_internet_access_outside_release_kit'
+      ],
       bundle_manifest_digest: bundleManifestDigest,
       image_load_report_digest: imageLoadDigest,
       offline_render_report_digest: offlineRenderDigest
