@@ -1688,6 +1688,69 @@ throw new Error('tampered deployment_path should have failed');
 NODE
 }
 
+tamper_plan_manifest_path() {
+  local package_dir="$1"
+  local replacement_manifest="$2"
+  local expected_message="$3"
+
+  "$NODE_BIN" --input-type=module - \
+    "$ROOT_DIR" \
+    "$package_dir" \
+    "$replacement_manifest" \
+    "$expected_message" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, packageDir, replacementManifest, expectedMessage] = process.argv.slice(2);
+const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function digestPlan(value) {
+  return digestBuffer(Buffer.from(JSON.stringify(stableJson(value))));
+}
+
+const canonicalManifestPath = fs.realpathSync(replacementManifest);
+plan.package.manifest_path = canonicalManifestPath;
+plan.package.manifest_sha256 = digestBuffer(fs.readFileSync(canonicalManifestPath));
+plan.plan_sha256 = null;
+plan.plan_sha256 = digestPlan({ ...plan, plan_sha256: null });
+fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+
+const runnerUrl = pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-runner.mjs')).href;
+const { runOperatorInputsPlan } = await import(runnerUrl);
+
+try {
+  await runOperatorInputsPlan({ planPath });
+} catch (error) {
+  if (!String(error.message).includes(expectedMessage)) {
+    throw error;
+  }
+  process.exit(0);
+}
+throw new Error('tampered manifest_path should have failed');
+NODE
+}
+
 tamper_airgap_plan_arg() {
   local package_dir="$1"
   local flag="$2"
@@ -2299,6 +2362,68 @@ run_direct_plan_expect_fail \
 assert_no_path_evidence "$direct_non_executable_command_package"
 pass "operator-inputs direct runner clears stale path evidence before command executable validation"
 
+tampered_manifest_path_package="$TMP_DIR/tampered-manifest-path"
+prepare_online_package "$tampered_manifest_path_package" apply /ok
+mkdir -p "$tampered_manifest_path_package/alternate"
+write_truth "$tampered_manifest_path_package/alternate/substrate-truth.json" "$KIT_ONLINE_TARGET_PROFILE"
+write_prerequisites "$tampered_manifest_path_package/alternate/target-prerequisites.json" "$KIT_ONLINE_TARGET_PROFILE"
+write_substrate_install_materials "$tampered_manifest_path_package/alternate" "$KIT_ONLINE_TARGET_PROFILE"
+write_fake_routability_probe "$tampered_manifest_path_package/tools/routability-probe"
+alternate_install_parameters_sha256="$(install_parameters_digest "$tampered_manifest_path_package/alternate/substrate-install-inputs.json" agentsmith)"
+"$NODE_BIN" --input-type=module - \
+  "$tampered_manifest_path_package/alternate-operator-inputs.json" \
+  "http://127.0.0.1:$SERVER_PORT/ok" \
+  "$alternate_install_parameters_sha256" <<'NODE'
+import fs from 'node:fs';
+
+const [output, smokeUrl, installParametersSha256] = process.argv.slice(2);
+const manifest = {
+  schema_version: 'agentsmith.operator-inputs/v1',
+  operator_inputs_version: 1,
+  deployment_path: 'online/install_substrates',
+  release_contract: 'release-contract.json',
+  deploy_template_package: 'deploy-template-package.json',
+  deploy_template_archive: 'deploy-template-package.tgz',
+  render_values: 'render-values.json',
+  substrate_truth: 'alternate/substrate-truth.json',
+  target_prerequisites: 'alternate/target-prerequisites.json',
+  substrate_pack_manifest: 'alternate/substrate-pack-manifest.json',
+  substrate_install_inputs: 'alternate/substrate-install-inputs.json',
+  namespace: 'agentsmith',
+  mode: 'apply',
+  kubectl: 'tools/kubectl',
+  context: 'operator-inputs-context',
+  routability_probe: 'tools/routability-probe',
+  install_confirmation: {
+    confirmed: true,
+    install_parameters_sha256: installParametersSha256,
+    operator_run_id: 'operator-inputs-alt-install-1001'
+  },
+  deploy_confirmation: {
+    confirmed: true,
+    operator_run_id: 'operator-inputs-alt-online-install-apply-1001'
+  },
+  smoke_url: smokeUrl,
+  expected_status: 200,
+  timeout: '60s',
+  timeout_ms: 5000,
+  allow_http: true,
+  allow_localhost: true
+};
+
+fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_manifest_path_package" >/dev/null
+write_stale_finalizer "$tampered_manifest_path_package" online-use-existing
+write_stale_finalizer "$tampered_manifest_path_package" online-install-substrates
+tamper_plan_manifest_path \
+  "$tampered_manifest_path_package" \
+  "$tampered_manifest_path_package/alternate-operator-inputs.json" \
+  'plan.package.manifest_relative_path must resolve to plan.package.manifest_path'
+[[ -f "$(deployment_path_dir "$tampered_manifest_path_package" online-install-substrates)/source-evidence/stale-report.json" ]] ||
+  fail "tampered plan manifest_path must not clean unrelated known path"
+pass "operator-inputs direct runner binds manifest_path to manifest_relative_path before stale cleanup"
+
 tampered_deployment_path_package="$TMP_DIR/tampered-deployment-path"
 prepare_online_install_package "$tampered_deployment_path_package" apply /ok
 bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_deployment_path_package" >/dev/null
@@ -2308,7 +2433,8 @@ tamper_plan_deployment_path \
   "$tampered_deployment_path_package" \
   online/use_existing \
   'plan.deployment_path must match operator-inputs manifest.deployment_path'
-assert_no_path_evidence "$tampered_deployment_path_package" online-install-substrates
+[[ -f "$(deployment_path_dir "$tampered_deployment_path_package" online-install-substrates)/source-evidence/stale-report.json" ]] ||
+  fail "tampered plan deployment_path must fail before manifest path cleanup"
 [[ -f "$(deployment_path_dir "$tampered_deployment_path_package" online-use-existing)/source-evidence/stale-report.json" ]] ||
   fail "tampered plan deployment_path must not clean unrelated known path"
 pass "operator-inputs runner binds deployment_path before stale cleanup"

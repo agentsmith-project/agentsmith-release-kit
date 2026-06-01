@@ -1059,6 +1059,16 @@ async function validatePackageManifestPathSafety(plan, operatorInputsRoot) {
     fail('plan.package.manifest_path must resolve inside operator-inputs package');
   }
 
+  const manifestFromRelative = await resolvePackagePath({
+    operatorInputsRoot,
+    value: packageInfo.manifest_relative_path,
+    label: 'plan.package.manifest_relative_path',
+    kind: 'file'
+  });
+  if (manifestFromRelative.absolutePath !== canonicalManifestPath) {
+    fail('plan.package.manifest_relative_path must resolve to plan.package.manifest_path');
+  }
+
   const operatorManifest = requireObject(
     await readJson(canonicalManifestPath, 'operator-inputs manifest'),
     'operator-inputs manifest'
@@ -1996,6 +2006,10 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
     planRefs: safetyPlanRefs,
     manifestDeploymentPath
   } = await validatePackageRefSafety(plan, precleanEnvelope.operatorInputsRoot);
+  const precleanBindingError = deploymentPathBindingError(plan, manifestDeploymentPath);
+  if (precleanBindingError) {
+    fail(precleanBindingError);
+  }
   const manifestCleanupDir = expectedOutputDirs(
     precleanEnvelope.internalRoot,
     manifestDeploymentPath
