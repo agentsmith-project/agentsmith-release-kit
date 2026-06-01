@@ -501,6 +501,30 @@ switch (caseName) {
     fs.writeFileSync(bundleManifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`);
     break;
   }
+  case 'airgap_bundle_manifest_component_sha_mismatch': {
+    const bundleManifestPath = path.join(
+      path.dirname(manifestPath),
+      manifest.airgap_bundle_manifest
+    );
+    const bundleManifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
+    bundleManifest.components[0].sha256 = `sha256:${'a'.repeat(64)}`;
+    fs.writeFileSync(bundleManifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`);
+    break;
+  }
+  case 'airgap_release_contract_outside_bundle_same_digest': {
+    const packageRoot = path.dirname(manifestPath);
+    const copyPath = path.join(packageRoot, 'release-contract-copy.json');
+    fs.copyFileSync(path.join(packageRoot, manifest.release_contract), copyPath);
+    manifest.release_contract = 'release-contract-copy.json';
+    break;
+  }
+  case 'airgap_deploy_template_package_outside_bundle_same_digest': {
+    const packageRoot = path.dirname(manifestPath);
+    const copyPath = path.join(packageRoot, 'deploy-template-package-copy.json');
+    fs.copyFileSync(path.join(packageRoot, manifest.deploy_template_package), copyPath);
+    manifest.deploy_template_package = 'deploy-template-package-copy.json';
+    break;
+  }
   case 'airgap_render_values_outside_bundle':
     manifest.render_values = 'render-values.json';
     break;
@@ -737,6 +761,12 @@ if (deploymentPath.startsWith('airgap/')) {
   if (!isInsidePath(bundleRef.absolute_path, manifestRef.absolute_path)) {
     throw new Error('airgap_bundle_manifest must be inside airgap_bundle');
   }
+  for (const key of ['release_contract', 'deploy_template_package', 'deploy_template_archive']) {
+    const ref = plan.input_refs?.[key];
+    if (!isInsidePath(bundleRef.absolute_path, ref?.absolute_path || '')) {
+      throw new Error(`${key} must match a bundle-local component`);
+    }
+  }
   for (const key of ['render_values', 'substrate_truth']) {
     const ref = plan.input_refs?.[key];
     if (!isInsidePath(bundleRef.absolute_path, ref?.absolute_path || '')) {
@@ -774,6 +804,22 @@ if (deploymentPath.startsWith('airgap/')) {
   }
   if (!sawBundleLocalRenderValuesArg || !sawBundleLocalSubstrateTruthArg) {
     throw new Error('airgap producer argv must include bundle-local render and substrate inputs');
+  }
+  if (deploymentPath === 'airgap/use_existing') {
+    const kubectlRef = plan.input_refs?.kubectl;
+    if (!kubectlRef || kubectlRef.kind !== 'file') {
+      throw new Error('airgap use_existing plan must include package-local kubectl ref');
+    }
+    const consumeStep = (plan.producer_argv || []).find((step) => step.name === 'airgap-consume-rehearsal');
+    if (!consumeStep) {
+      throw new Error('airgap use_existing plan must include airgap-consume-rehearsal step');
+    }
+    if (argValue(consumeStep.argv, '--kubectl', 'airgap-consume-rehearsal') !== kubectlRef.absolute_path) {
+      throw new Error('airgap consume plan must use package-local kubectl');
+    }
+    if (argValue(consumeStep.argv, '--context', 'airgap-consume-rehearsal') !== 'operator-inputs-context') {
+      throw new Error('airgap consume plan must pass operator-inputs context');
+    }
   }
 }
 if (!Array.isArray(plan.producer_argv) || plan.producer_argv.length < 1) {
@@ -1045,6 +1091,18 @@ mutate_manifest "$missing_airgap_manifest_dir" missing_airgap_bundle_manifest
 expect_fail_matching missing_airgap_bundle_manifest 'missing required operator-inputs field for airgap/use_existing: airgap_bundle_manifest' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_airgap_manifest_dir"
 
+missing_airgap_kubectl_dir="$TMP_DIR/invalid-airgap-missing-kubectl"
+copy_valid_package "$base_airgap" "$missing_airgap_kubectl_dir"
+mutate_manifest "$missing_airgap_kubectl_dir" missing_kubectl
+expect_fail_matching airgap_missing_kubectl 'missing required operator-inputs field for airgap/use_existing: kubectl' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_airgap_kubectl_dir"
+
+missing_airgap_context_dir="$TMP_DIR/invalid-airgap-missing-context"
+copy_valid_package "$base_airgap" "$missing_airgap_context_dir"
+mutate_manifest "$missing_airgap_context_dir" missing_context
+expect_fail_matching airgap_missing_context 'missing required operator-inputs field for airgap/use_existing: context' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_airgap_context_dir"
+
 outside_airgap_manifest_dir="$TMP_DIR/invalid-airgap-bundle-manifest-outside-bundle"
 copy_valid_package "$base_airgap" "$outside_airgap_manifest_dir"
 mutate_manifest "$outside_airgap_manifest_dir" airgap_bundle_manifest_outside_bundle
@@ -1062,6 +1120,24 @@ copy_valid_package "$base_airgap" "$empty_airgap_components_dir"
 mutate_manifest "$empty_airgap_components_dir" airgap_bundle_manifest_empty_components
 expect_fail_matching airgap_bundle_manifest_empty_components 'airgap_bundle_manifest.components must contain release_contract' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$empty_airgap_components_dir"
+
+airgap_component_sha_mismatch_dir="$TMP_DIR/invalid-airgap-component-sha-mismatch"
+copy_valid_package "$base_airgap" "$airgap_component_sha_mismatch_dir"
+mutate_manifest "$airgap_component_sha_mismatch_dir" airgap_bundle_manifest_component_sha_mismatch
+expect_fail_matching airgap_bundle_manifest_component_sha_mismatch 'airgap_bundle_manifest.components\[0\].sha256 must match component file sha256' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$airgap_component_sha_mismatch_dir"
+
+outside_release_contract_dir="$TMP_DIR/invalid-airgap-release-contract-outside-bundle"
+copy_valid_package "$base_airgap" "$outside_release_contract_dir"
+mutate_manifest "$outside_release_contract_dir" airgap_release_contract_outside_bundle_same_digest
+expect_fail_matching airgap_release_contract_outside_bundle 'release_contract must match airgap_bundle_manifest.components.release_contract.path' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$outside_release_contract_dir"
+
+outside_deploy_template_package_dir="$TMP_DIR/invalid-airgap-deploy-template-package-outside-bundle"
+copy_valid_package "$base_airgap" "$outside_deploy_template_package_dir"
+mutate_manifest "$outside_deploy_template_package_dir" airgap_deploy_template_package_outside_bundle_same_digest
+expect_fail_matching airgap_deploy_template_package_outside_bundle 'deploy_template_package must match airgap_bundle_manifest.components.deploy_template_package.path' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$outside_deploy_template_package_dir"
 
 outside_render_values_dir="$TMP_DIR/invalid-airgap-render-values-outside-bundle"
 copy_valid_package "$base_airgap" "$outside_render_values_dir"

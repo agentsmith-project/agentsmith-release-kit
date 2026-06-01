@@ -166,8 +166,8 @@ const DEPLOYMENT_PATH_CONFIG = new Map([
         'airgap_bundle_manifest'
       ],
       requiredDirs: ['airgap_bundle'],
-      requiredCommands: [],
-      requiredScalars: [],
+      requiredCommands: ['kubectl'],
+      requiredScalars: ['context'],
       installSubstrates: false,
       producer: 'airgap'
     }
@@ -1074,6 +1074,9 @@ async function validateAirgapBundleComponents({
     if (componentFile.sha256 !== declaredSha256) {
       fail(`${label}.sha256 must match component file sha256`);
     }
+    if (refs[kind] && refs[kind].absolute_path !== componentFile.absolute_path) {
+      fail(`${kind} must match airgap_bundle_manifest.components.${kind}.path for airgap deployment_path`);
+    }
     if (refs[kind] && refs[kind].sha256 !== declaredSha256) {
       fail(`airgap_bundle_manifest.components.${kind}.sha256 must match ${kind}`);
     }
@@ -1414,6 +1417,16 @@ function buildInternalExpected({ manifest, config, outputRoot, mode }) {
       substrate_install: substrateInstallOutputDir,
       online_deployment_gate:
         config.producer === 'online' ? path.join(outputBase, 'online-deployment-gate') : null,
+      airgap_consume_rehearsal:
+        config.producer === 'airgap' ? path.join(outputBase, 'airgap-consume-rehearsal') : null,
+      airgap_bundle_check:
+        config.producer === 'airgap'
+          ? path.join(outputBase, 'airgap-consume-rehearsal', 'airgap-bundle-check')
+          : null,
+      airgap_deployment_gate:
+        config.producer === 'airgap'
+          ? path.join(outputBase, 'airgap-consume-rehearsal', 'airgap-deployment-gate')
+          : null,
       deployment_path: path.join(outputBase, 'deployment-path')
     },
     generated_refs: {
@@ -1580,8 +1593,12 @@ function buildProducerArgv({ manifest, refs, config, outputRoot, mode }) {
       '--mode',
       mode
     ];
-    addOptional(argv, '--context', manifest.context);
-    addOptional(argv, '--kubectl', refPath(refs, 'kubectl'));
+    argv.push(
+      '--context',
+      manifest.context,
+      '--kubectl',
+      refPath(refs, 'kubectl')
+    );
     addApplyRuntimeArgs({
       argv,
       refs,

@@ -16,10 +16,14 @@ Operator-inputs intake:
 
 Operator-inputs run:
   Add --run to execute the current minimal orchestration slice. This currently
-  supports online/use_existing and online/install_substrates with mode apply.
+  supports online/use_existing, online/install_substrates, and
+  airgap/use_existing with mode apply.
   install_substrates runs substrate-install, then online-deployment-gate bound
   to the installer output substrate truth, then the internal deployment-path
-  finalizer. Airgap paths and server-dry-run modes fail fast.
+  finalizer. airgap/use_existing runs airgap-consume-rehearsal, extracts the
+  nested bundle-check and deployment-gate reports, then runs the internal
+  deployment-path finalizer. airgap/install_substrates and server-dry-run modes
+  fail fast.
   No ga-release-report.json, GA verdict, or release readiness is issued.
 
 Legacy positional flows are maintainer/internal diagnostics only; see

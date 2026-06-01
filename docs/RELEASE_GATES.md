@@ -57,14 +57,23 @@ and next producer argv. The plan is not GA evidence, not release readiness, and
 does not write `readiness` or `formal_verdict`.
 
 `bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run`
-currently executes `online/use_existing` and `online/install_substrates` with
-`mode: apply`. The runner validates the plan digest and absolute refs.
-`online/use_existing` runs the existing `online-deployment-gate` producer.
-`online/install_substrates` first runs substrate-install, then runs the online
-gate bound to the installer output substrate truth. Both online paths call the
-existing internal `--deployment-path` finalizer to write path-level evidence.
-It does not write `ga-release-report.json` and does not issue a GA verdict.
-Airgap paths still fail fast in this slice.
+currently executes `online/use_existing`, `online/install_substrates`, and
+`airgap/use_existing` with `mode: apply`. The runner validates the plan digest,
+absolute refs, package-root locality, and manifest-to-plan ref binding.
+`online/use_existing` runs the existing
+`online-deployment-gate` producer. `online/install_substrates` first runs
+substrate-install, then runs the online gate bound to the installer output
+substrate truth. `airgap/use_existing` runs `airgap-consume-rehearsal`, safely
+extracts the nested `airgap-bundle-check` and `airgap-deployment-gate`
+reports from its steps, and passes those reports plus the bundle manifest to
+the existing internal `--deployment-path` finalizer. For airgap, the finalizer
+release contract and deploy package inputs are the bundle-local components
+declared by `airgap_bundle_manifest`, and `airgap/use_existing` requires
+package-local `kubectl` plus explicit `context`. It does not pass the consume
+report itself to the finalizer. These paths write path-level evidence only;
+they do not write `ga-release-report.json` or issue a GA verdict.
+`airgap/install_substrates` continues to fail fast in this slice.
+Server-dry-run modes also fail fast.
 
 The intake rejects unknown fields, path escapes, missing path-specific inputs,
 missing install confirmation, airgap paths without an airgap bundle, internal

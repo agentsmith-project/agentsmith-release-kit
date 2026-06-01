@@ -7,6 +7,19 @@ FIXTURE_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 FIXTURE_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-package.valid.json"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 KIT_ONLINE_TARGET_PROFILE="existing_kubernetes/kit_installed/online"
+AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
+AIRGAP_REGISTRY="registry.example.internal/releases"
+mapfile -t RELEASE_IMAGE_IDS < <(
+  "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
+import fs from 'node:fs';
+
+const [fixtureContract] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(fixtureContract, 'utf8'));
+for (const item of contract.deploy_image_inventory) {
+  console.log(item.id);
+}
+NODE
+)
 
 TMP_DIR="$(mktemp -d)"
 SERVER_PID=""
@@ -820,6 +833,339 @@ prepare_online_install_package() {
   write_online_install_operator_inputs "$package_dir" "$mode" "$install_parameters_sha256" "$smoke_path"
 }
 
+create_airgap_payloads() {
+  local package_dir="$1"
+  local payload_dir="$package_dir/payload"
+
+  mkdir -p "$payload_dir"
+  cat >"$payload_dir/runbook.md" <<'EOF_RUNBOOK'
+# AgentSmith airgap runbook
+
+Use the approved operator-held substrate and registry records.
+EOF_RUNBOOK
+  cat >"$payload_dir/install.sh" <<'EOF_SCRIPT'
+#!/usr/bin/env sh
+set -eu
+printf '%s\n' "operator-reviewed local install placeholder"
+EOF_SCRIPT
+  chmod +x "$payload_dir/install.sh"
+  cat >"$payload_dir/profile-values.schema.json" <<'JSON'
+{
+  "type": "object",
+  "additionalProperties": false
+}
+JSON
+  printf '%s\n' 'namespace: agentsmith' >"$payload_dir/profile-values.example.yaml"
+}
+
+create_airgap_image_archives() {
+  local package_dir="$1"
+  local contract="$2"
+  local image_dir="$package_dir/image-archives"
+
+  mkdir -p "$image_dir"
+  "$NODE_BIN" --input-type=module - "$contract" "$image_dir" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [contractInput, imageDir] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+for (const image of contract.deploy_image_inventory) {
+  fs.writeFileSync(
+    path.join(imageDir, `${image.id}.oci-layout.tar`),
+    [
+      'local oci layout tar fixture',
+      `id=${image.id}`,
+      `target_digest=${image.digest}`,
+      ''
+    ].join('\n')
+  );
+}
+NODE
+}
+
+write_airgap_operator_prerequisites() {
+  local package_dir="$1"
+  local output="$2"
+  local tool_file="$package_dir/payload/kubectl-local"
+
+  printf '%s\n' 'bundled kubectl placeholder' >"$tool_file"
+  "$NODE_BIN" --input-type=module - "$output" "$tool_file" <<'NODE'
+import fs from 'node:fs';
+
+const [output, toolFile] = process.argv.slice(2);
+const prerequisites = {
+  substrate_connection_truth_ref: 'operator held substrate truth record AS-123',
+  target_registry_proof_ref: 'operator held target registry proof AS-123',
+  tools: [
+    {
+      name: 'kubectl',
+      version: '1.30.0',
+      source: 'bundled',
+      path: toolFile
+    },
+    {
+      name: 'skopeo',
+      version: '1.16.0',
+      source: 'operator_prerequisite',
+      location: 'operator workstation inventory skopeo',
+      proof: 'signed operator prerequisite proof skopeo'
+    }
+  ]
+};
+
+fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+run_airgap_bundle_create() {
+  local package_dir="$1"
+  local release_contract="$2"
+  local deploy_template_package="$3"
+  local archive="$4"
+  local bundle_root="$5"
+  local output_dir="$6"
+  local payload_dir="$package_dir/payload"
+  local image_archive_args=()
+
+  for id in "${RELEASE_IMAGE_IDS[@]}"; do
+    image_archive_args+=(--image-archive "$id=$package_dir/image-archives/$id.oci-layout.tar")
+  done
+
+  bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
+    --release-contract "$release_contract" \
+    --deploy-template-package "$deploy_template_package" \
+    --archive "$archive" \
+    --target-profile "$AIRGAP_PROFILE" \
+    --target-registry "$AIRGAP_REGISTRY" \
+    --bundle-root "$bundle_root" \
+    --output-dir "$output_dir" \
+    "${image_archive_args[@]}" \
+    --runbook "$payload_dir/runbook.md" \
+    --script "$payload_dir/install.sh" \
+    --profile-values-schema "$payload_dir/profile-values.schema.json" \
+    --profile-values-example "$payload_dir/profile-values.example.yaml" \
+    --operator-prerequisites "$package_dir/operator-prerequisites.json"
+}
+
+write_bundle_operator_inputs() {
+  local bundle_root="$1"
+
+  mkdir -p "$bundle_root/operator-inputs"
+  write_render_values "$bundle_root/operator-inputs/render-values.json"
+  write_truth "$bundle_root/operator-inputs/substrate-truth.json" "$AIRGAP_PROFILE"
+  write_prerequisites "$bundle_root/operator-inputs/target-prerequisites.json" "$AIRGAP_PROFILE"
+}
+
+target_image_for_id() {
+  local image_map="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" --input-type=module - "$image_map" "$image_id" <<'NODE'
+import fs from 'node:fs';
+
+const [imageMapInput, imageId] = process.argv.slice(2);
+const imageMap = JSON.parse(fs.readFileSync(imageMapInput, 'utf8'));
+const mapping = imageMap.mappings.find((item) => item.id === imageId);
+if (!mapping) {
+  throw new Error(`missing image-map mapping: ${imageId}`);
+}
+console.log(mapping.target_image);
+NODE
+}
+
+write_fake_airgap_archive_probe() {
+  local fake_probe="$1"
+
+  cat >"$fake_probe" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const archivePath = process.argv[2] || process.env.AGENTSMITH_IMAGE_ARCHIVE_PATH;
+if (!archivePath) {
+  process.exit(2);
+}
+const body = fs.readFileSync(archivePath, 'utf8');
+const matches = [...body.matchAll(/^target_digest=(sha256:[0-9a-f]{64})$/gm)];
+if (matches.length !== 1) {
+  process.exit(3);
+}
+console.log(matches[0][1]);
+NODE
+  chmod +x "$fake_probe"
+}
+
+write_fake_airgap_image_loader() {
+  local fake_loader="$1"
+
+  cat >"$fake_loader" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const [archivePath, targetImage, targetDigest] = process.argv.slice(2);
+if (!archivePath || !targetImage || !targetDigest) {
+  process.exit(2);
+}
+const body = fs.readFileSync(archivePath, 'utf8');
+const matches = [...body.matchAll(/^target_digest=(sha256:[0-9a-f]{64})$/gm)];
+if (matches.length !== 1 || matches[0][1] !== targetDigest) {
+  process.exit(3);
+}
+if (!targetImage.endsWith(`@${targetDigest}`)) {
+  process.exit(4);
+}
+if (process.env.AGENTSMITH_LOAD_LOG) {
+  fs.appendFileSync(process.env.AGENTSMITH_LOAD_LOG, `${targetDigest}\n`);
+}
+console.log(targetDigest);
+NODE
+  chmod +x "$fake_loader"
+}
+
+write_fake_airgap_kubectl() {
+  local fake_kubectl="$1"
+
+  cat >"$fake_kubectl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+: "${FAKE_KUBECTL_LOG:?}"
+printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
+
+command_name=""
+for arg in "$@"; do
+  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
+    command_name="$arg"
+    break
+  fi
+done
+
+case "$command_name" in
+  version)
+    printf '%s\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
+    ;;
+  apply)
+    printf '%s\n' "deployment.apps/agentsmith-web"
+    ;;
+  rollout)
+    printf '%s\n' "deployment.apps/agentsmith-web rolled out"
+    ;;
+  get)
+    get_target=""
+    previous=""
+    for arg in "$@"; do
+      if [[ "$previous" == "get" ]]; then
+        get_target="$arg"
+      fi
+      previous="$arg"
+    done
+
+    if [[ "$get_target" == "Deployment/agentsmith-web" ]]; then
+      cat <<'JSON'
+{"spec":{"selector":{"matchLabels":{"app.kubernetes.io/part":"web","app.kubernetes.io/name":"agentsmith-web"}}}}
+JSON
+      exit 0
+    fi
+
+    if [[ "$get_target" == "pods" ]]; then
+      : "${FAKE_KUBECTL_TARGET_IMAGE:?}"
+      cat <<JSON
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"$FAKE_KUBECTL_TARGET_IMAGE","imageID":"docker-pullable://$FAKE_KUBECTL_TARGET_IMAGE"}],"containerStatuses":[{"name":"web","image":"$FAKE_KUBECTL_TARGET_IMAGE","imageID":"docker-pullable://$FAKE_KUBECTL_TARGET_IMAGE"}]}}]}
+JSON
+      exit 0
+    fi
+
+    echo "unexpected fake kubectl get target: $get_target" >&2
+    exit 2
+    ;;
+  *)
+    echo "unexpected fake kubectl args: $*" >&2
+    exit 2
+    ;;
+esac
+SH
+  chmod +x "$fake_kubectl"
+}
+
+write_airgap_operator_inputs() {
+  local package_dir="$1"
+  local mode="$2"
+  local smoke_path="${3:-/ok}"
+  local smoke_url="http://127.0.0.1:$SERVER_PORT$smoke_path"
+
+  "$NODE_BIN" --input-type=module - "$package_dir/operator-inputs.json" "$mode" "$smoke_url" <<'NODE'
+import fs from 'node:fs';
+
+const [output, mode, smokeUrl] = process.argv.slice(2);
+const manifest = {
+  schema_version: 'agentsmith.operator-inputs/v1',
+  operator_inputs_version: 1,
+  deployment_path: 'airgap/use_existing',
+  release_contract: 'bundle/components/release-contract.json',
+  deploy_template_package: 'bundle/components/deploy-template-package.json',
+  deploy_template_archive: 'bundle/components/agentsmith-deploy-template-package.tgz',
+  render_values: 'bundle/operator-inputs/render-values.json',
+  substrate_truth: 'bundle/operator-inputs/substrate-truth.json',
+  target_prerequisites: 'bundle/operator-inputs/target-prerequisites.json',
+  airgap_bundle: 'bundle',
+  airgap_bundle_manifest: 'bundle/airgap-bundle-manifest.json',
+  namespace: 'agentsmith',
+  mode,
+  kubectl: 'tools/kubectl',
+  context: 'operator-inputs-context'
+};
+
+if (mode === 'apply') {
+  Object.assign(manifest, {
+    archive_probe: 'tools/archive-probe',
+    image_loader: 'tools/image-loader',
+    deploy_confirmation: {
+      confirmed: true,
+      operator_run_id: 'operator-inputs-airgap-apply-1001'
+    },
+    smoke_url: smokeUrl,
+    expected_status: 200,
+    timeout: '60s',
+    timeout_ms: 5000,
+    allow_http: true,
+    allow_localhost: true
+  });
+}
+
+fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+prepare_airgap_package() {
+  local package_dir="$1"
+  local mode="$2"
+  local smoke_path="${3:-/ok}"
+
+  mkdir -p "$package_dir/tools" "$package_dir/bundle"
+  local archive="$package_dir/deploy-template-package.tgz"
+  local manifest_sha
+  manifest_sha="$(create_archive "$(basename "$package_dir")" "$archive")"
+  local archive_sha
+  archive_sha="$(sha256_file "$archive")"
+  write_materials "$manifest_sha" "$archive_sha" \
+    "$package_dir/release-contract.json" \
+    "$package_dir/deploy-template-package.json"
+  create_airgap_payloads "$package_dir"
+  create_airgap_image_archives "$package_dir" "$package_dir/release-contract.json"
+  write_airgap_operator_prerequisites "$package_dir" "$package_dir/operator-prerequisites.json"
+  run_airgap_bundle_create \
+    "$package_dir" \
+    "$package_dir/release-contract.json" \
+    "$package_dir/deploy-template-package.json" \
+    "$archive" \
+    "$package_dir/bundle" \
+    "$package_dir/bundle-create-output" >"$package_dir/bundle-create.out"
+  write_bundle_operator_inputs "$package_dir/bundle"
+  write_fake_airgap_kubectl "$package_dir/tools/kubectl"
+  write_fake_airgap_archive_probe "$package_dir/tools/archive-probe"
+  write_fake_airgap_image_loader "$package_dir/tools/image-loader"
+  write_airgap_operator_inputs "$package_dir" "$mode" "$smoke_path"
+}
+
 write_minimal_airgap_install_package() {
   local package_dir="$1"
 
@@ -1146,6 +1492,87 @@ NODE
   assert_no_ga_report "$package_dir"
 }
 
+assert_airgap_path_evidence() {
+  local package_dir="$1"
+  local consume_dir="$package_dir/.release-kit-internal/airgap-use-existing/airgap-consume-rehearsal"
+  local path_dir="$package_dir/.release-kit-internal/airgap-use-existing/deployment-path"
+
+  for file in \
+    "$package_dir/.release-kit-internal/operator-inputs-plan.json" \
+    "$consume_dir/airgap-consume-rehearsal-report.json" \
+    "$consume_dir/airgap-bundle-check/airgap-bundle-check-report.json" \
+    "$consume_dir/airgap-deployment-gate/airgap-deployment-gate-report.json" \
+    "$path_dir/deployment-path-report.json" \
+    "$path_dir/deployment-path-finalizer-manifest.json" \
+    "$path_dir/source-evidence/deployment-gate-report.json" \
+    "$path_dir/source-evidence/bundle-check-report.json" \
+    "$path_dir/source-evidence/target-preflight-report.json" \
+    "$path_dir/source-evidence/image-load-report.json" \
+    "$path_dir/source-evidence/offline-render-check-report.json" \
+    "$path_dir/source-evidence/apply-report.json" \
+    "$path_dir/source-evidence/rollout-report.json" \
+    "$path_dir/source-evidence/route-smoke-report.json" \
+    "$path_dir/source-evidence/airgap-bundle-manifest.json" \
+    "$path_dir/source-evidence/image-map.json"; do
+    [[ -f "$file" ]] || fail "missing expected airgap path evidence file: $file"
+  done
+
+  "$NODE_BIN" --input-type=module - \
+    "$consume_dir/airgap-consume-rehearsal-report.json" \
+    "$path_dir/deployment-path-report.json" \
+    "$path_dir/deployment-path-finalizer-manifest.json" <<'NODE'
+import fs from 'node:fs';
+
+const [consumeReportFile, pathReportFile, finalizerManifestFile] = process.argv.slice(2);
+const consumeReport = JSON.parse(fs.readFileSync(consumeReportFile, 'utf8'));
+const pathReport = JSON.parse(fs.readFileSync(pathReportFile, 'utf8'));
+const finalizerManifest = JSON.parse(fs.readFileSync(finalizerManifestFile, 'utf8'));
+const consumeSteps = (consumeReport.steps || []).map((step) => `${step.name}:${step.report_path}`).join(',');
+const pathSteps = (pathReport.steps || []).map((step) => step.name).join(',');
+const sourceEvidencePaths = new Set((finalizerManifest.source_evidence_files || []).map((entry) => entry.path));
+
+if (consumeReport.schema !== 'agentsmith.airgap-consume-rehearsal/v1') {
+  throw new Error(`unexpected consume schema: ${consumeReport.schema}`);
+}
+if (consumeSteps !== 'airgap-bundle-check:airgap-bundle-check/airgap-bundle-check-report.json,airgap-deployment-gate:airgap-deployment-gate/airgap-deployment-gate-report.json') {
+  throw new Error(`unexpected consume steps: ${consumeSteps}`);
+}
+if (pathReport.schema !== 'agentsmith.deployment-path-report/v1') {
+  throw new Error(`unexpected path schema: ${pathReport.schema}`);
+}
+if (pathReport.operator_path !== 'airgap/use_existing') {
+  throw new Error(`unexpected operator_path: ${pathReport.operator_path}`);
+}
+if (pathSteps !== 'target-preflight,bundle-check,image-load,offline-render-check,apply,rollout,route-smoke') {
+  throw new Error(`unexpected airgap finalized steps: ${pathSteps}`);
+}
+if (pathReport.status !== 'pass' || pathReport.readiness !== false) {
+  throw new Error('airgap path report must be pass with readiness=false');
+}
+if ('formal_verdict' in pathReport) {
+  throw new Error('airgap path report must not issue formal_verdict');
+}
+if (!pathReport.airgap_offline || pathReport.airgap_offline.public_internet_downloads !== false) {
+  throw new Error('airgap path report must include offline evidence summary');
+}
+if (sourceEvidencePaths.has('source-evidence/airgap-consume-rehearsal-report.json')) {
+  throw new Error('finalizer must not ingest the consume rehearsal report as source evidence');
+}
+for (const required of [
+  'source-evidence/bundle-check-report.json',
+  'source-evidence/deployment-gate-report.json',
+  'source-evidence/route-smoke-report.json',
+  'source-evidence/airgap-bundle-manifest.json',
+  'source-evidence/image-map.json'
+]) {
+  if (!sourceEvidencePaths.has(required)) {
+    throw new Error(`missing source evidence entry: ${required}`);
+  }
+}
+NODE
+  assert_no_ga_report "$package_dir"
+}
+
 tamper_plan_swap_producers() {
   local package_dir="$1"
 
@@ -1197,10 +1624,184 @@ throw new Error('tampered producer order should have failed');
 NODE
 }
 
+tamper_airgap_plan_arg() {
+  local package_dir="$1"
+  local flag="$2"
+  local replacement="$3"
+  local expected_message="$4"
+
+  "$NODE_BIN" --input-type=module - "$ROOT_DIR" "$package_dir" "$flag" "$replacement" "$expected_message" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, packageDir, flag, replacement, expectedMessage] = process.argv.slice(2);
+const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestPlan(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
+
+const step = plan.producer_argv.find((candidate) => candidate.name === 'airgap-consume-rehearsal');
+if (!step) {
+  throw new Error('fixture plan must include airgap-consume-rehearsal');
+}
+const index = step.argv.indexOf(flag);
+if (index === -1 || !step.argv[index + 1]) {
+  throw new Error(`fixture plan step must include ${flag}`);
+}
+step.argv[index + 1] = replacement;
+plan.plan_sha256 = null;
+plan.plan_sha256 = digestPlan({ ...plan, plan_sha256: null });
+fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+
+const runnerUrl = pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-runner.mjs')).href;
+const { runOperatorInputsPlan } = await import(runnerUrl);
+
+try {
+  await runOperatorInputsPlan({ planPath });
+} catch (error) {
+  if (!String(error.message).includes(expectedMessage)) {
+    throw error;
+  }
+  process.exit(0);
+}
+throw new Error(`tampered ${flag} should have failed`);
+NODE
+}
+
+tamper_plan_ref_to_copy() {
+  local package_dir="$1"
+  local ref_key="$2"
+  local copy_path="$3"
+  local manifest_mode="$4"
+  local expected_message="$5"
+
+  "$NODE_BIN" --input-type=module - \
+    "$ROOT_DIR" \
+    "$package_dir" \
+    "$ref_key" \
+    "$copy_path" \
+    "$manifest_mode" \
+    "$expected_message" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [
+  rootDir,
+  packageDir,
+  refKey,
+  copyPath,
+  manifestMode,
+  expectedMessage
+] = process.argv.slice(2);
+const planPath = path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json');
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function digestFile(file) {
+  return digestBuffer(fs.readFileSync(file));
+}
+
+function digestPlan(value) {
+  return digestBuffer(Buffer.from(JSON.stringify(stableJson(value))));
+}
+
+function packageRelativePath(absolutePath) {
+  return path.relative(plan.operator_inputs_root, absolutePath).split(path.sep).join('/');
+}
+
+const ref = plan.input_refs?.[refKey];
+if (!ref || ref.kind !== 'file') {
+  throw new Error(`fixture plan must include file ref ${refKey}`);
+}
+fs.mkdirSync(path.dirname(copyPath), { recursive: true });
+fs.copyFileSync(ref.absolute_path, copyPath);
+const canonicalCopyPath = fs.realpathSync(copyPath);
+ref.absolute_path = canonicalCopyPath;
+ref.path = packageRelativePath(canonicalCopyPath);
+ref.sha256 = digestFile(canonicalCopyPath);
+
+if (manifestMode === 'update-manifest') {
+  const manifestPath = plan.package.manifest_path;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest[refKey] = packageRelativePath(canonicalCopyPath);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  plan.package.manifest_sha256 = digestFile(manifestPath);
+} else if (manifestMode !== 'keep-manifest') {
+  throw new Error(`unknown manifest tamper mode: ${manifestMode}`);
+}
+
+plan.plan_sha256 = null;
+plan.plan_sha256 = digestPlan({ ...plan, plan_sha256: null });
+fs.writeFileSync(planPath, `${JSON.stringify(plan, null, 2)}\n`);
+
+const runnerUrl = pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-runner.mjs')).href;
+const { runOperatorInputsPlan } = await import(runnerUrl);
+
+try {
+  await runOperatorInputsPlan({ planPath });
+} catch (error) {
+  if (!String(error.message).includes(expectedMessage)) {
+    throw error;
+  }
+  process.exit(0);
+}
+throw new Error(`tampered ${refKey} should have failed`);
+NODE
+}
+
 run_operator_inputs() {
   local package_dir="$1"
   local label="$2"
   FAKE_KUBECTL_LOG="$TMP_DIR/$label-kubectl.log" \
+    bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" --run
+}
+
+run_airgap_operator_inputs() {
+  local package_dir="$1"
+  local label="$2"
+  local target_image
+  target_image="$(target_image_for_id "$package_dir/bundle/components/image-map.json" agentsmith_app)"
+
+  FAKE_KUBECTL_LOG="$TMP_DIR/$label-kubectl.log" \
+    FAKE_KUBECTL_TARGET_IMAGE="$target_image" \
+    AGENTSMITH_LOAD_LOG="$TMP_DIR/$label-image-load.log" \
     bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" --run
 }
 
@@ -1218,29 +1819,96 @@ run_operator_inputs "$positive_install_package" positive-install >"$TMP_DIR/posi
 assert_install_path_evidence "$positive_install_package"
 pass "operator-inputs --run executes online/install_substrates apply and finalizes path evidence"
 
+positive_airgap_package="$TMP_DIR/positive-airgap"
+prepare_airgap_package "$positive_airgap_package" apply /ok
+if ! run_airgap_operator_inputs "$positive_airgap_package" positive-airgap >"$TMP_DIR/positive-airgap.out" 2>"$TMP_DIR/positive-airgap.err"; then
+  cat "$TMP_DIR/positive-airgap.out" >&2
+  cat "$TMP_DIR/positive-airgap.err" >&2
+  fail "airgap/use_existing positive run failed"
+fi
+assert_airgap_path_evidence "$positive_airgap_package"
+pass "operator-inputs --run executes airgap/use_existing apply and finalizes path evidence"
+
+missing_airgap_kubectl_package="$TMP_DIR/missing-airgap-kubectl"
+prepare_airgap_package "$missing_airgap_kubectl_package" apply /ok
+"$NODE_BIN" --input-type=module - "$missing_airgap_kubectl_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+delete manifest.kubectl;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+expect_fail_matching missing_airgap_kubectl 'missing required operator-inputs field for airgap/use_existing: kubectl' \
+  run_airgap_operator_inputs "$missing_airgap_kubectl_package" missing-airgap-kubectl
+assert_no_path_evidence "$missing_airgap_kubectl_package" airgap-use-existing
+pass "operator-inputs airgap path requires package-local kubectl before orchestration"
+
+missing_airgap_context_package="$TMP_DIR/missing-airgap-context"
+prepare_airgap_package "$missing_airgap_context_package" apply /ok
+"$NODE_BIN" --input-type=module - "$missing_airgap_context_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+delete manifest.context;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+expect_fail_matching missing_airgap_context 'missing required operator-inputs field for airgap/use_existing: context' \
+  run_airgap_operator_inputs "$missing_airgap_context_package" missing-airgap-context
+assert_no_path_evidence "$missing_airgap_context_package" airgap-use-existing
+pass "operator-inputs airgap path requires explicit context before orchestration"
+
 dry_run_package="$TMP_DIR/dry-run-online"
 prepare_online_package "$dry_run_package" server-dry-run /ok
-expect_fail_matching dry_run_run 'currently supports only online/use_existing or online/install_substrates with mode apply' \
+expect_fail_matching dry_run_run 'currently supports only online/use_existing, online/install_substrates, or airgap/use_existing with mode apply' \
   run_operator_inputs "$dry_run_package" dry-run
 assert_no_path_evidence "$dry_run_package"
 pass "operator-inputs --run rejects server-dry-run without path evidence"
 
 dry_run_install_package="$TMP_DIR/dry-run-online-install"
 prepare_online_install_package "$dry_run_install_package" server-dry-run /ok
-expect_fail_matching dry_run_install_run 'currently supports only online/use_existing or online/install_substrates with mode apply' \
+expect_fail_matching dry_run_install_run 'currently supports only online/use_existing, online/install_substrates, or airgap/use_existing with mode apply' \
   run_operator_inputs "$dry_run_install_package" dry-run-install
 assert_no_path_evidence "$dry_run_install_package" online-install-substrates
 pass "operator-inputs --run rejects online/install_substrates server-dry-run"
 
+dry_run_airgap_package="$TMP_DIR/dry-run-airgap"
+prepare_airgap_package "$dry_run_airgap_package" server-dry-run /ok
+write_stale_finalizer "$dry_run_airgap_package" airgap-use-existing
+expect_fail_matching dry_run_airgap_run 'currently supports only online/use_existing, online/install_substrates, or airgap/use_existing with mode apply' \
+  run_airgap_operator_inputs "$dry_run_airgap_package" dry-run-airgap
+assert_no_path_evidence "$dry_run_airgap_package" airgap-use-existing
+pass "operator-inputs --run rejects airgap/use_existing server-dry-run and clears stale path evidence"
+
 airgap_install_package="$TMP_DIR/airgap-install"
 mkdir -p "$airgap_install_package"
 write_minimal_airgap_install_package "$airgap_install_package"
-expect_fail_matching airgap_install_run 'currently supports only online/use_existing or online/install_substrates with mode apply' \
+write_stale_finalizer "$airgap_install_package" airgap-install-substrates
+expect_fail_matching airgap_install_run 'does not implement airgap/install_substrates path-level orchestration yet' \
   bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$airgap_install_package" --run
-if find "$airgap_install_package/.release-kit-internal" -name deployment-path-report.json -print -quit | grep -q .; then
-  fail "unsupported airgap/install_substrates run must not write a deployment path report"
-fi
-pass "operator-inputs --run fail-fasts unsupported airgap/install_substrates"
+assert_no_path_evidence "$airgap_install_package" airgap-install-substrates
+pass "operator-inputs --run fail-fasts unsupported airgap/install_substrates and clears stale path evidence"
+
+missing_smoke_airgap_package="$TMP_DIR/missing-smoke-airgap"
+prepare_airgap_package "$missing_smoke_airgap_package" apply /ok
+"$NODE_BIN" --input-type=module - "$missing_smoke_airgap_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+delete manifest.smoke_url;
+delete manifest.expected_status;
+delete manifest.timeout_ms;
+delete manifest.allow_http;
+delete manifest.allow_localhost;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+write_stale_finalizer "$missing_smoke_airgap_package" airgap-use-existing
+expect_fail_matching missing_smoke_airgap 'airgap-consume-rehearsal producer argv must include --smoke-url' \
+  run_airgap_operator_inputs "$missing_smoke_airgap_package" missing-smoke-airgap
+assert_no_path_evidence "$missing_smoke_airgap_package" airgap-use-existing
+pass "operator-inputs airgap path requires smoke_url and clears stale finalizer evidence"
 
 wrong_install_digest_package="$TMP_DIR/wrong-install-digest"
 prepare_online_install_package "$wrong_install_digest_package" apply /ok wrong
@@ -1304,6 +1972,14 @@ expect_fail_matching install_gate_fail 'operator-inputs producer online-deployme
 assert_no_path_evidence "$install_gate_fail_package" online-install-substrates
 pass "operator-inputs install path gate failure clears stale finalizer evidence"
 
+airgap_smoke_fail_package="$TMP_DIR/airgap-smoke-fail"
+prepare_airgap_package "$airgap_smoke_fail_package" apply /missing
+write_stale_finalizer "$airgap_smoke_fail_package" airgap-use-existing
+expect_fail_matching airgap_smoke_fail 'operator-inputs producer airgap-consume-rehearsal failed' \
+  run_airgap_operator_inputs "$airgap_smoke_fail_package" airgap-smoke-fail
+assert_no_path_evidence "$airgap_smoke_fail_package" airgap-use-existing
+pass "operator-inputs airgap producer smoke failure clears stale finalizer evidence"
+
 tampered_plan_package="$TMP_DIR/tampered-plan-order"
 prepare_online_install_package "$tampered_plan_package" apply /ok
 bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_plan_package" >/dev/null
@@ -1311,5 +1987,85 @@ FAKE_KUBECTL_LOG="$TMP_DIR/tampered-plan-kubectl.log" \
   tamper_plan_swap_producers "$tampered_plan_package"
 assert_no_path_evidence "$tampered_plan_package" online-install-substrates
 pass "operator-inputs runner rejects tampered install producer order through direct library invocation"
+
+tampered_outside_package_ref="$TMP_DIR/tampered-outside-package-ref"
+prepare_online_package "$tampered_outside_package_ref" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_outside_package_ref" >/dev/null
+tamper_plan_ref_to_copy \
+  "$tampered_outside_package_ref" \
+  release_contract \
+  "$TMP_DIR/outside-package-release-contract-copy.json" \
+  keep-manifest \
+  'plan.input_refs.release_contract.absolute_path must resolve inside operator-inputs package'
+assert_no_path_evidence "$tampered_outside_package_ref"
+pass "operator-inputs runner rejects plan refs moved outside the package even with unchanged digest"
+
+tampered_airgap_release_contract_ref="$TMP_DIR/tampered-airgap-release-contract-ref"
+prepare_airgap_package "$tampered_airgap_release_contract_ref" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_release_contract_ref" >/dev/null
+tamper_plan_ref_to_copy \
+  "$tampered_airgap_release_contract_ref" \
+  release_contract \
+  "$tampered_airgap_release_contract_ref/release-contract-copy.json" \
+  update-manifest \
+  'release_contract must match airgap_bundle_manifest.components.release_contract.path'
+assert_no_path_evidence "$tampered_airgap_release_contract_ref" airgap-use-existing
+pass "operator-inputs runner rejects airgap release_contract refs outside bundle components with unchanged digest"
+
+tampered_airgap_deploy_template_ref="$TMP_DIR/tampered-airgap-deploy-template-ref"
+prepare_airgap_package "$tampered_airgap_deploy_template_ref" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_deploy_template_ref" >/dev/null
+tamper_plan_ref_to_copy \
+  "$tampered_airgap_deploy_template_ref" \
+  deploy_template_package \
+  "$tampered_airgap_deploy_template_ref/deploy-template-package-copy.json" \
+  update-manifest \
+  'deploy_template_package must match airgap_bundle_manifest.components.deploy_template_package.path'
+assert_no_path_evidence "$tampered_airgap_deploy_template_ref" airgap-use-existing
+pass "operator-inputs runner rejects airgap deploy_template_package refs outside bundle components with unchanged digest"
+
+tampered_airgap_bundle_root_package="$TMP_DIR/tampered-airgap-bundle-root"
+prepare_airgap_package "$tampered_airgap_bundle_root_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_bundle_root_package" >/dev/null
+tamper_airgap_plan_arg \
+  "$tampered_airgap_bundle_root_package" \
+  --bundle-root \
+  "$tampered_airgap_bundle_root_package" \
+  'airgap-consume-rehearsal --bundle-root must match plan expected value'
+assert_no_path_evidence "$tampered_airgap_bundle_root_package" airgap-use-existing
+pass "operator-inputs runner rejects tampered airgap bundle root argv"
+
+tampered_airgap_bundle_manifest_package="$TMP_DIR/tampered-airgap-bundle-manifest"
+prepare_airgap_package "$tampered_airgap_bundle_manifest_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_bundle_manifest_package" >/dev/null
+tamper_airgap_plan_arg \
+  "$tampered_airgap_bundle_manifest_package" \
+  --bundle-manifest \
+  "$tampered_airgap_bundle_manifest_package/bundle/components/release-contract.json" \
+  'airgap-consume-rehearsal --bundle-manifest must match plan expected value'
+assert_no_path_evidence "$tampered_airgap_bundle_manifest_package" airgap-use-existing
+pass "operator-inputs runner rejects tampered airgap bundle manifest argv"
+
+tampered_airgap_kubectl_package="$TMP_DIR/tampered-airgap-kubectl"
+prepare_airgap_package "$tampered_airgap_kubectl_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_kubectl_package" >/dev/null
+tamper_airgap_plan_arg \
+  "$tampered_airgap_kubectl_package" \
+  --kubectl \
+  "$tampered_airgap_kubectl_package/tools/archive-probe" \
+  'airgap-consume-rehearsal --kubectl must match plan expected value'
+assert_no_path_evidence "$tampered_airgap_kubectl_package" airgap-use-existing
+pass "operator-inputs runner rejects tampered airgap kubectl argv"
+
+tampered_airgap_context_package="$TMP_DIR/tampered-airgap-context"
+prepare_airgap_package "$tampered_airgap_context_package" apply /ok
+bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$tampered_airgap_context_package" >/dev/null
+tamper_airgap_plan_arg \
+  "$tampered_airgap_context_package" \
+  --context \
+  other-context \
+  'airgap-consume-rehearsal --context must match plan expected value'
+assert_no_path_evidence "$tampered_airgap_context_package" airgap-use-existing
+pass "operator-inputs runner rejects tampered airgap context argv"
 
 pass "operator-inputs orchestration focused tests completed"

@@ -85,12 +85,18 @@ plan is internal only: it is not GA evidence, not release readiness, and does
 not write `formal_verdict`. Post-deploy smoke reports are runtime evidence and
 are not operator-inputs.
 
-With `--run`, the current orchestration slice supports `online/use_existing`
-and `online/install_substrates` with `mode: apply`. `online/use_existing` runs
-the existing online focused producer chain. `online/install_substrates` first
-runs substrate-install, then runs the online gate bound to the installer output
-substrate truth. Both paths internally call the deployment-path finalizer and
-write path-level evidence under `.release-kit-internal/`. Airgap paths still
+With `--run`, the current orchestration slice supports `online/use_existing`,
+`online/install_substrates`, and `airgap/use_existing` with `mode: apply`.
+`online/use_existing` runs the existing online focused producer chain.
+`online/install_substrates` first runs substrate-install, then runs the online
+gate bound to the installer output substrate truth. `airgap/use_existing` runs
+the existing airgap consume rehearsal, extracts only its nested bundle-check
+and airgap deployment-gate reports, then calls the deployment-path finalizer
+with bundle-local release contract/deploy package components. It requires
+package-local `kubectl`, explicit `context`, package-local archive/image load
+tools, and apply smoke inputs. These paths write path-level evidence under
+`.release-kit-internal/`.
+`airgap/install_substrates` continues to fail fast. Server-dry-run modes also
 fail fast. This slice does not write `ga-release-report.json`; the final
 release-facing result is still the repo-local GA aggregate after all finalized
 deployment path reports and required AgentSmith product-side reports are
@@ -129,8 +135,10 @@ substrates. `install_substrates` requires an explicit report from the separate
 directly. The package-driven `operator-release.sh --operator-inputs <pkg> --run`
 path creates that namespace-scoped installer report internally for
 `online/install_substrates`, binds the installer output truth into the online
-gate, and finalizes path-level evidence. Airgap `install_substrates` run
-orchestration is still not implemented.
+gate, and finalizes path-level evidence. `airgap/use_existing` now finalizes
+path-level evidence from an already assembled bundle with package-local
+`kubectl`, explicit `context`, and bundle-local release/template components.
+Airgap `install_substrates` run orchestration is still not implemented.
 `installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
 It is not installer proof and does not mean release-kit created databases,
 buckets, OIDC realms, or other substrate resources.
@@ -1091,9 +1099,11 @@ post-deploy product smoke reports through `bash scripts/verify-release.sh
 Deployment path report finalization is internal evidence plumbing for
 maintainers/CI; it writes a sibling finalizer manifest plus copied
 `source-evidence/` JSON files for GA materiality checks and is not a new
-operator command or runbook step. `install_substrates` consumes a separate
-substrate installer report plus explicit confirmation; the operator facade
-does not install substrates today.
+operator command or runbook step. For `online/install_substrates`, the operator
+facade runs `substrate-install` internally, consumes its report plus explicit
+confirmation, and finalizes path-level evidence. This is path orchestration
+only, not GA verdict, package readiness, or deploy readiness.
+`airgap/install_substrates` remains unsupported.
 
 ## Handoff
 
