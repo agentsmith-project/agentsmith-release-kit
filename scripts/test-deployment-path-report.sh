@@ -854,6 +854,28 @@ function provenance(subjectName) {
   };
 }
 
+function canonicalSmokeResults() {
+  const specs = [
+    { id: 'login_profile', source_flow: 'login_profile', label: 'login/profile' },
+    { id: 'workspace_project', source_flow: 'workspace_project', label: 'workspace/project' },
+    { id: 'provider_neutral_endpoint', source_flow: 'chat_via_llmup', label: 'provider-neutral Endpoint' },
+    { id: 'agent_task_managed_runner', source_flow: 'agent_task_managed_runner', label: 'Agent task managed runner' },
+    { id: 'files', source_flow: 'files', label: 'Files' },
+    { id: 'audit', source_flow: 'audit', label: 'audit' },
+    { id: 'usage', source_flow: 'usage', label: 'usage' }
+  ];
+  return Object.fromEntries(specs.map((spec) => [
+    spec.id,
+    {
+      id: spec.id,
+      status: 'passed',
+      label: spec.label,
+      source_flow: spec.source_flow,
+      source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`
+    }
+  ]));
+}
+
 writeJson(path.join(outDir, 'product-readiness-report.json'), {
   schema: 'agentsmith.product-readiness-report/v1',
   status: 'pass',
@@ -864,20 +886,24 @@ writeJson(path.join(outDir, 'product-readiness-report.json'), {
 });
 
 writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
-  schema: 'agentsmith.post-deploy-product-smoke/v1',
-  status: 'pass',
-  release_id: contract.release_id,
-  git_sha: contract.git_sha,
-  release_contract_digest: contractDigest,
-  artifact_provenance: provenance('post-deploy-product-smoke-report'),
-  covered_flows: [
-    'auth_profile',
-    'workspace_project',
-    'files',
-    'managed_runner_agent_task',
-    'provider_neutral_endpoint',
-    'audit_usage_readback'
-  ]
+  schema_version: 'agentsmith.post-deploy-product-smoke-report/v1',
+  producer: 'agentsmith-post-deploy-product-smoke',
+  owner: 'agentsmith',
+  repo: 'github.com/agentsmith-project/agentsmith',
+  status: 'passed',
+  generated_at: '2026-05-31T12:00:00.000Z',
+  source: {
+    product_flows_path: 'unified-deploy/product-flows/product-flows-aggregate.json',
+    aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
+    aggregate_producer: 'unified-deploy-product-flows',
+    aggregate_generated_at: '2026-05-31T12:00:00.000Z',
+    aggregate_command: 'focused fixture'
+  },
+  smoke_results: canonicalSmokeResults(),
+  failures: [],
+  paths: {
+    report_path: 'post-deploy-product-smoke/post-deploy-product-smoke-report.json'
+  }
 });
 NODE
 }

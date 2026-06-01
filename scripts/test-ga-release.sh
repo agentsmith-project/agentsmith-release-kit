@@ -691,6 +691,28 @@ function provenance(subjectName) {
   };
 }
 
+function canonicalSmokeResults() {
+  const specs = [
+    { id: 'login_profile', source_flow: 'login_profile', label: 'login/profile' },
+    { id: 'workspace_project', source_flow: 'workspace_project', label: 'workspace/project' },
+    { id: 'provider_neutral_endpoint', source_flow: 'chat_via_llmup', label: 'provider-neutral Endpoint' },
+    { id: 'agent_task_managed_runner', source_flow: 'agent_task_managed_runner', label: 'Agent task managed runner' },
+    { id: 'files', source_flow: 'files', label: 'Files' },
+    { id: 'audit', source_flow: 'audit', label: 'audit' },
+    { id: 'usage', source_flow: 'usage', label: 'usage' }
+  ];
+  return Object.fromEntries(specs.map((spec) => [
+    spec.id,
+    {
+      id: spec.id,
+      status: 'passed',
+      label: spec.label,
+      source_flow: spec.source_flow,
+      source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`
+    }
+  ]));
+}
+
 fs.mkdirSync(outDir, { recursive: true });
 writeJson(path.join(outDir, 'release-contract.json'), contract);
 writeJson(path.join(outDir, 'deploy-template-package.json'), template);
@@ -728,20 +750,24 @@ writeJson(path.join(outDir, 'product-readiness-report.json'), {
 });
 
 writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
-  schema: 'agentsmith.post-deploy-product-smoke/v1',
-  status: 'pass',
-  release_id: contract.release_id,
-  git_sha: contract.git_sha,
-  release_contract_digest: contractDigest,
-  artifact_provenance: provenance('post-deploy-product-smoke-report'),
-  covered_flows: [
-    'auth_profile',
-    'workspace_project',
-    'files',
-    'managed_runner_agent_task',
-    'provider_neutral_endpoint',
-    'audit_usage_readback'
-  ]
+  schema_version: 'agentsmith.post-deploy-product-smoke-report/v1',
+  producer: 'agentsmith-post-deploy-product-smoke',
+  owner: 'agentsmith',
+  repo: 'github.com/agentsmith-project/agentsmith',
+  status: 'passed',
+  generated_at: '2026-05-31T12:00:00.000Z',
+  source: {
+    product_flows_path: 'unified-deploy/product-flows/product-flows-aggregate.json',
+    aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
+    aggregate_producer: 'unified-deploy-product-flows',
+    aggregate_generated_at: '2026-05-31T12:00:00.000Z',
+    aggregate_command: 'focused fixture'
+  },
+  smoke_results: canonicalSmokeResults(),
+  failures: [],
+  paths: {
+    report_path: 'post-deploy-product-smoke/post-deploy-product-smoke-report.json'
+  }
 });
 NODE
 }
@@ -904,7 +930,108 @@ NODE
 }
 
 mutate_product_smoke_report() {
-  mutate_product_report "$@"
+  local report_file="$1"
+  local mutation="$2"
+
+  "$NODE_BIN" --input-type=module - "$report_file" "$mutation" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile, mutation] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+
+if (mutation === 'legacy-surrogate-shape') {
+  const legacy = {
+    schema: 'agentsmith.post-deploy-product-smoke/v1',
+    status: 'pass',
+    release_id: 'agentsmith-ga-2026-05-31',
+    git_sha: '1'.repeat(40),
+    release_contract_digest: `sha256:${'1'.repeat(64)}`,
+    artifact_provenance: {
+      schema_version: 'agentsmith.artifact-provenance/v1',
+      provenance_kind: 'ci_artifact',
+      producer_repo: 'github.com/agentsmith-project/agentsmith',
+      normalized_remote: 'github.com/agentsmith-project/agentsmith',
+      commit_sha: '1'.repeat(40),
+      run_id: 'legacy-10001',
+      run_attempt: '1',
+      subject_sha256: `sha256:${'2'.repeat(64)}`,
+      generated_at: '2026-05-31T12:00:00.000Z'
+    },
+    covered_flows: [
+      'auth_profile',
+      'workspace_project',
+      'files',
+      'managed_runner_agent_task',
+      'provider_neutral_endpoint',
+      'audit_usage_readback'
+    ]
+  };
+  fs.writeFileSync(reportFile, `${JSON.stringify(legacy, null, 2)}\n`);
+  process.exit(0);
+} else if (mutation === 'mixed-surrogate-schema') {
+  report.schema = 'agentsmith.post-deploy-product-smoke/v1';
+} else if (mutation === 'legacy-fields-mixed') {
+  report.covered_flows = [
+    'auth_profile',
+    'workspace_project',
+    'files',
+    'managed_runner_agent_task',
+    'provider_neutral_endpoint',
+    'audit_usage_readback'
+  ];
+  report.artifact_provenance = {
+    schema_version: 'agentsmith.artifact-provenance/v1',
+    provenance_kind: 'ci_artifact',
+    producer_repo: 'github.com/agentsmith-project/agentsmith',
+    normalized_remote: 'github.com/agentsmith-project/agentsmith',
+    commit_sha: '1'.repeat(40),
+    run_id: 'legacy-10001',
+    run_attempt: '1',
+    subject_sha256: `sha256:${'2'.repeat(64)}`,
+    generated_at: '2026-05-31T12:00:00.000Z'
+  };
+  report.release_id = 'agentsmith-ga-2026-05-31';
+  report.git_sha = '1'.repeat(40);
+  report.release_contract_digest = `sha256:${'1'.repeat(64)}`;
+} else if (mutation === 'missing-canonical-smoke') {
+  delete report.smoke_results.usage;
+} else if (mutation === 'missing-source-evidence-path') {
+  delete report.smoke_results.files.source_evidence_path;
+} else if (mutation === 'wrong-entry-id') {
+  report.smoke_results.files.id = 'workspace_project';
+} else if (mutation === 'wrong-source-flow') {
+  report.smoke_results.provider_neutral_endpoint.source_flow = 'provider_neutral_endpoint';
+} else if (mutation === 'wrong-source-evidence-path') {
+  report.smoke_results.provider_neutral_endpoint.source_evidence_path =
+    'unified-deploy/product-flows/provider_neutral_endpoint.json';
+} else if (mutation === 'absolute-product-flows-path') {
+  report.source.product_flows_path = [
+    '',
+    'home',
+    'percy',
+    'works',
+    'mbos-v1',
+    'agentsmith',
+    '.artifacts',
+    'product-flows-aggregate.json'
+  ].join('/');
+} else if (mutation === 'absolute-source-evidence-path') {
+  report.smoke_results.files.source_evidence_path = [
+    '',
+    'tmp',
+    'agentsmith',
+    'product-flows',
+    'files.json'
+  ].join('/');
+} else if (mutation === 'file-uri-product-flows-path') {
+  report.source.product_flows_path =
+    'file://agentsmith/unified-deploy/product-flows/product-flows-aggregate.json';
+} else {
+  throw new Error(`unknown product smoke report mutation: ${mutation}`);
+}
+
+fs.writeFileSync(reportFile, `${JSON.stringify(report, null, 2)}\n`);
+NODE
 }
 
 mutate_release_contract_image_closure() {
@@ -1357,6 +1484,42 @@ if (report.status !== 'pass' || report.formal_verdict !== 'issued') {
 if (!Array.isArray(report.deployment_paths) || report.deployment_paths.length !== 4) {
   throw new Error('expected four deployment paths');
 }
+const smoke = report.post_deploy_product_smoke;
+const expectedSmokeIds = [
+  'login_profile',
+  'workspace_project',
+  'provider_neutral_endpoint',
+  'agent_task_managed_runner',
+  'files',
+  'audit',
+  'usage'
+];
+const expectedSourceEvidencePaths = {
+  login_profile: 'unified-deploy/product-flows/login_profile.json',
+  workspace_project: 'unified-deploy/product-flows/workspace_project.json',
+  provider_neutral_endpoint: 'unified-deploy/product-flows/chat_via_llmup.json',
+  agent_task_managed_runner: 'unified-deploy/product-flows/agent_task_managed_runner.json',
+  files: 'unified-deploy/product-flows/files.json',
+  audit: 'unified-deploy/product-flows/audit.json',
+  usage: 'unified-deploy/product-flows/usage.json'
+};
+if (smoke?.schema !== 'agentsmith.post-deploy-product-smoke-report/v1') {
+  throw new Error('GA report did not bind canonical product smoke schema');
+}
+if (smoke?.producer !== 'agentsmith-post-deploy-product-smoke') {
+  throw new Error('GA report did not bind canonical product smoke producer');
+}
+if (JSON.stringify(smoke?.canonical_smoke_ids) !== JSON.stringify(expectedSmokeIds)) {
+  throw new Error('GA report did not bind canonical product smoke ids');
+}
+for (const id of expectedSmokeIds) {
+  if (smoke?.source_evidence_paths?.[id] !== expectedSourceEvidencePaths[id]) {
+    throw new Error(`GA report did not bind source evidence path for product smoke id: ${id}`);
+  }
+}
+if (Object.hasOwn(report.summary || {}, 'product_smoke_flows')) {
+  throw new Error('GA report must not expose covered_flows as product smoke truth');
+}
 NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
 pass "valid GA aggregate consumes finalizer-generated path bundles"
@@ -1375,7 +1538,6 @@ pass "GA aggregate allows rollout observed sidecar digest extras"
 
 product_report_cases=(
   "product-readiness-report.json|product_readiness_report.artifact_provenance|product readiness"
-  "post-deploy-product-smoke-report.json|post_deploy_product_smoke.artifact_provenance|post-deploy product smoke"
 )
 product_provenance_mutations=(
   missing-provenance
@@ -1437,8 +1599,76 @@ for report_case in "${product_report_cases[@]}"; do
       fail "$report_label $mutation failure message did not explain blocker"
   done
 done
-pass "GA aggregate requires full product readiness and product smoke provenance shape"
-pass "GA aggregate accepts product artifact_uri as the sole artifact binding"
+pass "GA aggregate requires full product readiness provenance shape"
+pass "GA aggregate accepts product readiness artifact_uri as the sole artifact binding"
+
+product_smoke_mutations=(
+  legacy-surrogate-shape
+  mixed-surrogate-schema
+  legacy-fields-mixed
+  missing-canonical-smoke
+  missing-source-evidence-path
+  wrong-entry-id
+  wrong-source-flow
+  wrong-source-evidence-path
+)
+for mutation in "${product_smoke_mutations[@]}"; do
+  PRODUCT_SMOKE_DIR="$TMP_DIR/product-smoke-$mutation"
+  write_fixture_set "$PRODUCT_SMOKE_DIR" valid
+  mutate_product_smoke_report "$PRODUCT_SMOKE_DIR/post-deploy-product-smoke-report.json" "$mutation"
+  if run_ga_release "$PRODUCT_SMOKE_DIR" "$PATH_DIR" "$TMP_DIR/out-product-smoke-$mutation" >"$TMP_DIR/ga-release-product-smoke-$mutation.out" 2>&1; then
+    fail "product smoke $mutation should fail"
+  fi
+  case "$mutation" in
+    legacy-surrogate-shape)
+      expected_message="post_deploy_product_smoke.schema must not be present; use schema_version"
+      ;;
+    mixed-surrogate-schema)
+      expected_message="post_deploy_product_smoke.schema must not be present; use schema_version"
+      ;;
+    legacy-fields-mixed)
+      expected_message="post_deploy_product_smoke.covered_flows must not be present"
+      ;;
+    missing-canonical-smoke)
+      expected_message="post-deploy product smoke missing canonical smoke id: usage"
+      ;;
+    missing-source-evidence-path)
+      expected_message="post_deploy_product_smoke.smoke_results.files.source_evidence_path is required"
+      ;;
+    wrong-entry-id)
+      expected_message="post_deploy_product_smoke.smoke_results.files.id must be files"
+      ;;
+    wrong-source-flow)
+      expected_message="post_deploy_product_smoke.smoke_results.provider_neutral_endpoint.source_flow must be chat_via_llmup"
+      ;;
+    wrong-source-evidence-path)
+      expected_message="post_deploy_product_smoke.smoke_results.provider_neutral_endpoint.source_evidence_path must be unified-deploy/product-flows/chat_via_llmup.json"
+      ;;
+    *)
+      fail "missing expected message for product smoke mutation: $mutation"
+      ;;
+  esac
+  grep -Fq "$expected_message" "$TMP_DIR/ga-release-product-smoke-$mutation.out" || \
+    fail "product smoke $mutation failure message did not explain blocker"
+done
+pass "GA aggregate requires AgentSmith canonical product smoke report shape"
+
+product_smoke_forbidden_path_mutations=(
+  absolute-product-flows-path
+  absolute-source-evidence-path
+  file-uri-product-flows-path
+)
+for mutation in "${product_smoke_forbidden_path_mutations[@]}"; do
+  PRODUCT_SMOKE_DIR="$TMP_DIR/product-smoke-$mutation"
+  write_fixture_set "$PRODUCT_SMOKE_DIR" valid
+  mutate_product_smoke_report "$PRODUCT_SMOKE_DIR/post-deploy-product-smoke-report.json" "$mutation"
+  if run_ga_release "$PRODUCT_SMOKE_DIR" "$PATH_DIR" "$TMP_DIR/out-product-smoke-$mutation" >"$TMP_DIR/ga-release-product-smoke-$mutation.out" 2>&1; then
+    fail "product smoke $mutation should fail"
+  fi
+  grep -Fq "input report contains forbidden local path or secret-like text" "$TMP_DIR/ga-release-product-smoke-$mutation.out" || \
+    fail "product smoke $mutation failure message did not come from release-kit scanner"
+done
+pass "GA aggregate rejects local absolute paths in canonical product smoke input"
 
 IMAGE_CLOSURE_DIR="$TMP_DIR/release-contract-image-closure"
 write_fixture_set "$IMAGE_CLOSURE_DIR" valid

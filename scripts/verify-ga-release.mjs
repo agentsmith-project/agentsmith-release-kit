@@ -22,7 +22,16 @@ const FINALIZER_TOOL = 'verify-deployment-path-report.mjs';
 const FINALIZER_MANIFEST_TOOL = 'verify-deployment-path-report';
 const FINALIZER_MODE = 'deployment_path_source_evidence_finalization';
 const PRODUCT_READY_SCHEMA = 'agentsmith.product-readiness-report/v1';
-const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke/v1';
+const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke-report/v1';
+const PRODUCT_SMOKE_PRODUCER = 'agentsmith-post-deploy-product-smoke';
+const PRODUCT_SMOKE_OWNER = 'agentsmith';
+const PRODUCT_SMOKE_LEGACY_FIELDS = [
+  'covered_flows',
+  'artifact_provenance',
+  'release_id',
+  'git_sha',
+  'release_contract_digest'
+];
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
@@ -51,14 +60,20 @@ const DEPLOYMENT_PATHS = sourceValidation.DEPLOYMENT_PATHS;
 const SOURCE_STEP_REPORTS = sourceValidation.FINALIZED_STEP_SOURCE_REPORTS;
 const DEPLOYMENT_GATE_BY_SOURCE = sourceValidation.DEPLOYMENT_GATE_BY_SOURCE;
 
-const REQUIRED_PRODUCT_SMOKE_FLOWS = [
-  'auth_profile',
-  'workspace_project',
-  'files',
-  'managed_runner_agent_task',
-  'provider_neutral_endpoint',
-  'audit_usage_readback'
-];
+const canonicalProductSmokeSpec = (sourceFlow) => ({
+  source_flow: sourceFlow,
+  source_evidence_path: `unified-deploy/product-flows/${sourceFlow}.json`
+});
+const CANONICAL_PRODUCT_SMOKE_SPECS = {
+  login_profile: canonicalProductSmokeSpec('login_profile'),
+  workspace_project: canonicalProductSmokeSpec('workspace_project'),
+  provider_neutral_endpoint: canonicalProductSmokeSpec('chat_via_llmup'),
+  agent_task_managed_runner: canonicalProductSmokeSpec('agent_task_managed_runner'),
+  files: canonicalProductSmokeSpec('files'),
+  audit: canonicalProductSmokeSpec('audit'),
+  usage: canonicalProductSmokeSpec('usage')
+};
+const REQUIRED_PRODUCT_SMOKE_IDS = Object.keys(CANONICAL_PRODUCT_SMOKE_SPECS);
 
 const REQUIRED_IMAGE_IDS = ['agentsmith_app', 'managed_runner', 'llmup', 'afscp', 'asbcp'];
 const FINALIZER_MANIFEST_KEYS = new Set([
@@ -354,6 +369,12 @@ function requireStatusPass(report, label) {
   }
 }
 
+function requireStatusPassed(report, label) {
+  if (report.status !== 'passed') {
+    fail(`${label} status must be passed`);
+  }
+}
+
 function requireSchema(report, schema, label) {
   if (report.schema !== schema && report.schema_version !== schema) {
     fail(`${label} schema must be ${schema}`);
@@ -618,22 +639,114 @@ function validateProductReadiness(report, reportDigest, release) {
   return { report_digest: reportDigest, provenance };
 }
 
-function validateProductSmoke(report, reportDigest, release) {
-  requireSchema(report, PRODUCT_SMOKE_SCHEMA, 'post-deploy product smoke report');
-  commonReportChecks(report, 'post-deploy product smoke report', release);
-  const provenance = requireProductArtifactProvenance(
-    report.artifact_provenance,
-    'post_deploy_product_smoke.artifact_provenance',
-    release,
-    'post-deploy product smoke'
+function productSmokeEntries(smokeResults) {
+  const value = requireObject(smokeResults, 'post_deploy_product_smoke.smoke_results');
+  return Object.entries(value).map(([id, entry]) => ({
+    id: requireString(id, 'post_deploy_product_smoke.smoke_results key'),
+    value: requireObject(entry, `post_deploy_product_smoke.smoke_results.${id}`),
+    label: `post_deploy_product_smoke.smoke_results.${id}`
+  }));
+}
+
+function requireProductSmokeSchemaVersion(report) {
+  if (Object.prototype.hasOwnProperty.call(report, 'schema')) {
+    fail('post_deploy_product_smoke.schema must not be present; use schema_version');
+  }
+  const schemaVersion = requireString(
+    report.schema_version,
+    'post_deploy_product_smoke.schema_version'
   );
-  const flows = new Set(requireArray(report.covered_flows, 'post_deploy_product_smoke.covered_flows'));
-  for (const flow of REQUIRED_PRODUCT_SMOKE_FLOWS) {
-    if (!flows.has(flow)) {
-      fail(`post-deploy product smoke missing required flow: ${flow}`);
+  if (schemaVersion !== PRODUCT_SMOKE_SCHEMA) {
+    fail(`post_deploy_product_smoke.schema_version must be ${PRODUCT_SMOKE_SCHEMA}`);
+  }
+  return schemaVersion;
+}
+
+function rejectProductSmokeLegacyFields(report) {
+  for (const field of PRODUCT_SMOKE_LEGACY_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(report, field)) {
+      fail(`post_deploy_product_smoke.${field} must not be present`);
     }
   }
-  return { report_digest: reportDigest, provenance, covered_flows: [...flows].sort() };
+}
+
+function validateProductSmoke(report, reportDigest) {
+  const schemaVersion = requireProductSmokeSchemaVersion(report);
+  rejectProductSmokeLegacyFields(report);
+  requireEquals(
+    requireString(report.producer, 'post_deploy_product_smoke.producer'),
+    PRODUCT_SMOKE_PRODUCER,
+    'post_deploy_product_smoke.producer'
+  );
+  requireEquals(
+    requireString(report.owner, 'post_deploy_product_smoke.owner'),
+    PRODUCT_SMOKE_OWNER,
+    'post_deploy_product_smoke.owner'
+  );
+  requireEquals(
+    requireString(report.repo, 'post_deploy_product_smoke.repo'),
+    AGENTSMITH_REPO,
+    'post_deploy_product_smoke.repo'
+  );
+  requireStatusPassed(report, 'post-deploy product smoke report');
+  const failures = requireArray(report.failures, 'post_deploy_product_smoke.failures');
+  if (failures.length !== 0) {
+    fail('post_deploy_product_smoke.failures must be empty');
+  }
+
+  const expectedIds = new Set(REQUIRED_PRODUCT_SMOKE_IDS);
+  const seenIds = new Set();
+  const sourceEvidencePaths = {};
+  for (const entry of productSmokeEntries(report.smoke_results)) {
+    const spec = CANONICAL_PRODUCT_SMOKE_SPECS[entry.id];
+    if (seenIds.has(entry.id)) {
+      fail(`post-deploy product smoke duplicate canonical smoke id: ${entry.id}`);
+    }
+    seenIds.add(entry.id);
+    if (!spec || !expectedIds.has(entry.id)) {
+      fail(`post-deploy product smoke contains unknown canonical smoke id: ${entry.id}`);
+    }
+    requireEquals(
+      requireString(entry.value.id, `${entry.label}.id`),
+      entry.id,
+      `${entry.label}.id`
+    );
+    requireEquals(
+      requireString(entry.value.source_flow, `${entry.label}.source_flow`),
+      spec.source_flow,
+      `${entry.label}.source_flow`
+    );
+    if (entry.value.status !== 'passed') {
+      fail(`${entry.label}.status must be passed`);
+    }
+    const sourceEvidencePath = requireString(
+      entry.value.source_evidence_path,
+      `${entry.label}.source_evidence_path`
+    );
+    requireEquals(
+      sourceEvidencePath,
+      spec.source_evidence_path,
+      `${entry.label}.source_evidence_path`
+    );
+    sourceEvidencePaths[entry.id] = sourceEvidencePath;
+  }
+  for (const id of REQUIRED_PRODUCT_SMOKE_IDS) {
+    if (!seenIds.has(id)) {
+      fail(`post-deploy product smoke missing canonical smoke id: ${id}`);
+    }
+  }
+
+  return {
+    report_digest: reportDigest,
+    schema: schemaVersion,
+    producer: report.producer,
+    owner: report.owner,
+    repo: report.repo,
+    canonical_smoke_ids: [...REQUIRED_PRODUCT_SMOKE_IDS],
+    source_evidence_paths: Object.fromEntries(
+      Object.entries(sourceEvidencePaths).sort(([left], [right]) => left.localeCompare(right))
+    )
+  };
 }
 
 function requireEquals(actual, expected, label) {
@@ -1381,6 +1494,9 @@ async function writeSummary(file, report) {
     '',
     `Product readiness: ${report.product_readiness.report_digest}`,
     `Post-deploy product smoke: ${report.post_deploy_product_smoke.report_digest}`,
+    `Post-deploy product smoke schema: ${report.post_deploy_product_smoke.schema}`,
+    `Post-deploy product smoke producer: ${report.post_deploy_product_smoke.producer}`,
+    `Post-deploy product smoke ids: ${report.post_deploy_product_smoke.canonical_smoke_ids.join(', ')}`,
     ''
   ];
   await fs.writeFile(file, `${lines.join('\n')}\n`, 'utf8');
@@ -1413,7 +1529,7 @@ async function main() {
   const release = validateReleaseContract(contract.value, contract.digest);
   const deployTemplateSummary = validateDeployTemplatePackage(deployTemplate.value, contract.value, deployTemplate.digest);
   const productReadinessSummary = validateProductReadiness(productReady.value, productReady.digest, release);
-  const productSmokeSummary = validateProductSmoke(productSmoke.value, productSmoke.digest, release);
+  const productSmokeSummary = validateProductSmoke(productSmoke.value, productSmoke.digest);
 
   const deploymentPaths = [];
   for (const entry of pathReports) {
@@ -1478,7 +1594,12 @@ async function main() {
     summary: {
       conclusion: 'AgentSmith GA release aggregate passed.',
       operator_paths: deploymentPaths.map((entry) => entry.operator_path).sort(),
-      product_smoke_flows: productSmokeSummary.covered_flows
+      post_deploy_product_smoke: {
+        report_digest: productSmokeSummary.report_digest,
+        schema: productSmokeSummary.schema,
+        producer: productSmokeSummary.producer,
+        canonical_smoke_ids: productSmokeSummary.canonical_smoke_ids
+      }
     },
     blockers: []
   };
