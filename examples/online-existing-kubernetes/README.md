@@ -78,13 +78,21 @@ verdict.
 bash scripts/operator-release.sh --operator-inputs "$PKG" --run
 ```
 
-For an apply manifest, the package run writes path-level evidence here:
+For an apply manifest, a successful package run writes path-level evidence to
+the package internal output for the later GA aggregate. A package run does not
+write `ga-release-report.json`, does not issue `formal_verdict`, and does not
+replace AgentSmith product readiness or post-deploy product smoke evidence.
 
-- `$PKG/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json`
-- `$PKG/.release-kit-internal/online-use-existing/deployment-path/deployment-path-finalizer-manifest.json`
-- `$PKG/.release-kit-internal/online-use-existing/deployment-path/source-evidence/`
+After all four package runs and product-side reports are available, use the
+final GA facade:
 
-These files are the deployment-path handoff for the later GA aggregate. A
-package run does not write `ga-release-report.json`, does not issue
-`formal_verdict`, and does not replace AgentSmith product readiness or
-post-deploy product smoke evidence.
+```bash
+bash scripts/operator-release.sh --ga-report \
+  --operator-inputs <online-use-existing-pkg> \
+  --operator-inputs <online-install-substrates-pkg> \
+  --operator-inputs <airgap-use-existing-pkg> \
+  --operator-inputs <airgap-install-substrates-pkg> \
+  --product-readiness-report <json> \
+  --post-deploy-product-smoke-report <json> \
+  --output-dir <dir>
+```

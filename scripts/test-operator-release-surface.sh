@@ -2379,8 +2379,14 @@ if grep -Eq '\.release-kit-internal/.*/deployment-path-report[.]json' "$runbooks
 fi
 grep -q -- '--operator-inputs' "$example_readme" ||
   fail "online existing Kubernetes example must use package-driven --operator-inputs"
-grep -q 'deployment-path-report.json' "$example_readme" ||
-  fail "online existing Kubernetes example must document finalized deployment-path handoff"
+grep -q -- '--ga-report' "$example_readme" ||
+  fail "online existing Kubernetes example must document package-driven --ga-report final facade"
+if grep -Eq '\.release-kit-internal/.*/deployment-path-report[.]json' "$example_readme"; then
+  fail "online existing Kubernetes example must not expose internal deployment-path-report.json package paths"
+fi
+if grep -Fq -- '--deployment-path-report' "$example_readme"; then
+  fail "online existing Kubernetes example must not expose internal --deployment-path-report copy path"
+fi
 if grep -Eq 'bash scripts/operator-release[.]sh (online|airgap|airgap-bundle)\b' "$root_readme"; then
   fail "root README must not present legacy positional operator-release commands"
 fi
