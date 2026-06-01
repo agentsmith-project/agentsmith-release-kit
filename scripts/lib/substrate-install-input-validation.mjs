@@ -108,6 +108,14 @@ export function validateSubstrateInstallInputs(value, targetProfile, options = {
       requiredSubstrateSource: 'kit_installed'
     }
   );
+  const substrateTruthInstallationId = requireInstallationId(
+    truth.installation_id,
+    `${label}.substrate_truth.installation_id`,
+    fail
+  );
+  if (substrateTruthInstallationId !== installationId) {
+    fail(`${label}.substrate_truth.installation_id must match ${label}.installation_id`);
+  }
 
   return {
     inputs,

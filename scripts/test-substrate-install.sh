@@ -3,7 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
-TARGET_PROFILE="existing_kubernetes/kit_installed/online"
+ONLINE_TARGET_PROFILE="existing_kubernetes/kit_installed/online"
+AIRGAP_TARGET_PROFILE="existing_kubernetes/kit_installed/airgap"
+TARGET_PROFILE="$ONLINE_TARGET_PROFILE"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 VALID_TEMPLATE="$ROOT_DIR/tests/fixtures/deploy-template-package.valid.json"
 
@@ -75,8 +77,9 @@ NODE
 write_fixture_set() {
   local dir="$1"
   local mutation="${2:-valid}"
+  local profile="${3:-$TARGET_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$dir" "$TARGET_PROFILE" "$mutation" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$dir" "$profile" "$mutation" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -211,6 +214,9 @@ const substrateTruth = {
     }
   }
 };
+if (mutation === 'installation_id_mismatch') {
+  substrateTruth.installation_id = 'other-installation';
+}
 
 const manifest = {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
@@ -632,13 +638,14 @@ assert_kubectl_no_apply() {
 run_install() {
   local fixture_dir="$1"
   local output_dir="$2"
+  local target_profile="${SUBSTRATE_INSTALL_TARGET_PROFILE:-$TARGET_PROFILE}"
   shift 2
 
   FAKE_KUBECTL_LOG="$KUBECTL_LOG" FAKE_KUBECTL_GET_MODE="${FAKE_KUBECTL_GET_MODE:-not-found}" \
     bash "$ROOT_DIR/scripts/verify-release.sh" --substrate-install \
       --release-contract "$VALID_CONTRACT" \
       --deploy-template-package "$VALID_TEMPLATE" \
-      --target-profile "$TARGET_PROFILE" \
+      --target-profile "$target_profile" \
       --substrate-pack-manifest "$fixture_dir/substrate-pack-manifest.json" \
       --substrate-install-inputs "$fixture_dir/substrate-install-inputs.json" \
       --target-prerequisites "$fixture_dir/target-prerequisites.json" \
@@ -653,12 +660,13 @@ assert_install_report() {
   local truth_file="$2"
   local expected_mode="$3"
   local expected_operator_run_id="${4:-}"
+  local expected_target_profile="${5:-$TARGET_PROFILE}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$truth_file" "$expected_mode" "$expected_operator_run_id" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$truth_file" "$expected_mode" "$expected_operator_run_id" "$expected_target_profile" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-const [reportFile, truthFile, expectedMode, expectedOperatorRunId] = process.argv.slice(2);
+const [reportFile, truthFile, expectedMode, expectedOperatorRunId, expectedTargetProfile] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const truth = JSON.parse(fs.readFileSync(truthFile, 'utf8'));
 const truthDigest = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(truthFile)).digest('hex')}`;
@@ -679,7 +687,7 @@ if (report.readiness !== false || report.status !== 'pass') {
 if (report.mode !== expectedMode) {
   throw new Error(`unexpected substrate install mode: ${report.mode}`);
 }
-if (report.target_profile?.value !== 'existing_kubernetes/kit_installed/online') {
+if (report.target_profile?.value !== expectedTargetProfile) {
   throw new Error('unexpected substrate install target profile');
 }
 if (!report.release_contract_digest?.startsWith('sha256:')) {
@@ -699,7 +707,7 @@ for (const field of ['input_sha256', 'release_contract_digest', 'deploy_template
     throw new Error(`missing substrate pack manifest digest field: ${field}`);
   }
 }
-if (packManifest.target_profile !== 'existing_kubernetes/kit_installed/online') {
+if (packManifest.target_profile !== expectedTargetProfile) {
   throw new Error('substrate pack manifest binding must include target profile');
 }
 if (installInputs?.schema_version !== 'agentsmith.substrate-install-inputs/v1') {
@@ -723,7 +731,7 @@ if (!targetPrerequisites.input_sha256?.startsWith('sha256:')) {
   throw new Error('missing target prerequisites input digest field');
 }
 if (
-  targetPrerequisites.target_profile !== 'existing_kubernetes/kit_installed/online' ||
+  targetPrerequisites.target_profile !== expectedTargetProfile ||
   targetPrerequisites.namespace !== 'agentsmith'
 ) {
   throw new Error('target prerequisites binding must include target profile and namespace');
@@ -781,8 +789,14 @@ if (expectedMode === 'apply') {
 if (truth.schema_version !== 'agentsmith.substrate-connection.truth/v1') {
   throw new Error('unexpected substrate truth schema');
 }
+if (`${truth.target_cluster}/${truth.substrate_source}/${truth.distribution}` !== expectedTargetProfile) {
+  throw new Error('substrate truth target profile did not match expected profile');
+}
 if (truth.installed_by !== 'agentsmith-release-kit') {
   throw new Error('substrate truth must keep release-kit installed_by marker');
+}
+if (truth.installation_id !== 'kit-install-10001') {
+  throw new Error('substrate truth must keep fixture installation_id');
 }
 if (/plain-credential|Bearer\s+|AKIA|PRIVATE KEY|kubeconfig/i.test(serialized)) {
   throw new Error('substrate install outputs leaked raw secret-looking material');
@@ -801,6 +815,17 @@ if run_install "$valid_dir" "$TMP_DIR/out-missing-confirm" \
 fi
 assert_kubectl_not_called
 pass "apply mode without explicit substrate install confirmation rejected"
+
+installation_id_mismatch_dir="$TMP_DIR/installation-id-mismatch"
+write_fixture_set "$installation_id_mismatch_dir" installation_id_mismatch
+reset_kubectl_log
+if run_install "$installation_id_mismatch_dir" "$TMP_DIR/out-installation-id-mismatch" >"$TMP_DIR/installation-id-mismatch.out" 2>&1; then
+  fail "substrate truth installation_id mismatch should fail"
+fi
+grep -Fq "substrate_install_inputs.substrate_truth.installation_id must match substrate_install_inputs.installation_id" "$TMP_DIR/installation-id-mismatch.out" || \
+  fail "installation_id mismatch failure message did not explain structural binding"
+assert_kubectl_not_called
+pass "substrate truth installation_id mismatch rejected before kubectl"
 
 cluster_scoped_dir="$TMP_DIR/cluster-scoped"
 write_fixture_set "$cluster_scoped_dir" cluster_scoped_manifest
@@ -1096,6 +1121,17 @@ grep -Eq '^apply .*--dry-run=server' "$KUBECTL_LOG" || \
   fail "server-dry-run substrate install did not pass --dry-run=server"
 assert_install_report "$dry_run_output/substrate-install-report.json" "$dry_run_output/substrate-truth.json" server-dry-run
 pass "server-dry-run writes diagnostic substrate install report and truth"
+
+airgap_dir="$TMP_DIR/airgap-valid"
+write_fixture_set "$airgap_dir" valid "$AIRGAP_TARGET_PROFILE"
+airgap_dry_run_output="$TMP_DIR/out-airgap-dry-run"
+reset_kubectl_log
+SUBSTRATE_INSTALL_TARGET_PROFILE="$AIRGAP_TARGET_PROFILE" run_install "$airgap_dir" "$airgap_dry_run_output" >/dev/null
+grep -q '^get configmaps ' "$KUBECTL_LOG" || fail "airgap collision guard did not use canonical ConfigMap resource"
+grep -Eq '^apply .*--dry-run=server' "$KUBECTL_LOG" || \
+  fail "airgap server-dry-run substrate install did not pass --dry-run=server"
+assert_install_report "$airgap_dry_run_output/substrate-install-report.json" "$airgap_dry_run_output/substrate-truth.json" server-dry-run "" "$AIRGAP_TARGET_PROFILE"
+pass "airgap server-dry-run writes diagnostic substrate install report and truth"
 
 apply_output="$TMP_DIR/out-apply"
 install_digest="$(install_parameters_digest "$valid_dir/substrate-install-inputs.json")"

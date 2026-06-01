@@ -81,13 +81,15 @@ command.
 Default PR/push CI follows the quick/core path only:
 `verify-release.sh --quick`, `test-inputs.sh`, `test-template-package.sh`,
 `test-render.sh`, `test-render-check.sh`, and
-`test-operator-release-surface.sh`. Maintainer diagnostics such as adoption
-aggregation, operator signoff intake, airgap image load, substrate install,
-substrate routability, and release-engineering intake are manual
-`workflow_dispatch` checks. They
-are useful while changing those producers, but they are not default operator
-quick-path evidence and still do not issue deploy, package, or release
-readiness.
+`test-operator-release-surface.sh`, `test-substrate-install.sh`,
+`test-deployment-path-report.sh`, and `test-ga-release.sh`.
+`test-substrate-install.sh` stays in this default path because it uses local
+fixtures and fake kubectl, including online plus low-cost airgap producer
+coverage. Maintainer diagnostics such as adoption aggregation, operator signoff
+intake, airgap image load, substrate routability, and release-engineering intake
+are manual `workflow_dispatch` checks. They are useful while changing those
+producers, but they are not default operator quick-path evidence and still do
+not issue deploy, package, or release readiness.
 
 For a concrete real Kubernetes plus existing substrates online example, copy
 and edit `examples/online-existing-kubernetes/`. It demonstrates the
