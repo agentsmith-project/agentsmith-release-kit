@@ -16,9 +16,10 @@ Operator-inputs intake:
 
 Operator-inputs run:
   Add --run to execute the current minimal orchestration slice. This currently
-  supports only online/use_existing with mode apply: it runs the existing
-  online-deployment-gate producer and then the internal deployment-path
-  finalizer to write path-level evidence. Other intake-valid paths fail fast.
+  supports online/use_existing and online/install_substrates with mode apply.
+  install_substrates runs substrate-install, then online-deployment-gate bound
+  to the installer output substrate truth, then the internal deployment-path
+  finalizer. Airgap paths and server-dry-run modes fail fast.
   No ga-release-report.json, GA verdict, or release readiness is issued.
 
 Legacy positional flows are maintainer/internal diagnostics only; see

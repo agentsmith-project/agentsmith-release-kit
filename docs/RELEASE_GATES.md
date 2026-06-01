@@ -57,12 +57,14 @@ and next producer argv. The plan is not GA evidence, not release readiness, and
 does not write `readiness` or `formal_verdict`.
 
 `bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run`
-currently executes only `online/use_existing` with `mode: apply`. The runner
-validates the plan digest and absolute refs, runs the existing
-`online-deployment-gate` producer, then calls the existing internal
-`--deployment-path` finalizer to write path-level evidence. It does not write
-`ga-release-report.json` and does not issue a GA verdict. Other intake-valid
-paths fail fast in this slice.
+currently executes `online/use_existing` and `online/install_substrates` with
+`mode: apply`. The runner validates the plan digest and absolute refs.
+`online/use_existing` runs the existing `online-deployment-gate` producer.
+`online/install_substrates` first runs substrate-install, then runs the online
+gate bound to the installer output substrate truth. Both online paths call the
+existing internal `--deployment-path` finalizer to write path-level evidence.
+It does not write `ga-release-report.json` and does not issue a GA verdict.
+Airgap paths still fail fast in this slice.
 
 The intake rejects unknown fields, path escapes, missing path-specific inputs,
 missing install confirmation, airgap paths without an airgap bundle, internal
@@ -102,8 +104,9 @@ diagnostic:
 `kit_provided` validates kit-supplied substrate pack/truth inputs and related
 focused evidence only; it is not substrate installation. `install_substrates`
 is not implemented by the old positional/transitional operator facade. Use
-`--operator-inputs` for install_substrates intake. Installer execution remains
-a later orchestration slice; the existing separate substrate-install producer
+`--operator-inputs` for install_substrates intake. The online install path now
+runs substrate-install before the online gate, then uses installer output truth
+for path-level evidence only; the existing separate substrate-install producer
 and deployment-path finalizer stay maintainer/internal building blocks.
 `installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
 It is not installer proof and does not mean release-kit created databases,

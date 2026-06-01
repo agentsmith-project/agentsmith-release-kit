@@ -1393,6 +1393,9 @@ function optionalPlanString(value) {
 
 function buildInternalExpected({ manifest, config, outputRoot, mode }) {
   const outputBase = deploymentPathOutputBase(outputRoot, manifest.deployment_path);
+  const substrateInstallOutputDir = config.installSubstrates
+    ? path.join(outputBase, 'substrate-install')
+    : null;
   return {
     schema_version: INTERNAL_EXPECTED_SCHEMA,
     deployment_path: manifest.deployment_path,
@@ -1401,10 +1404,22 @@ function buildInternalExpected({ manifest, config, outputRoot, mode }) {
     context: Object.hasOwn(manifest, 'context') ? manifest.context : null,
     mode,
     operator_run_id: manifest.deploy_confirmation?.operator_run_id ?? null,
+    install: config.installSubstrates
+      ? {
+          operator_run_id: manifest.install_confirmation.operator_run_id,
+          install_parameters_sha256: manifest.install_confirmation.install_parameters_sha256
+        }
+      : null,
     output_dirs: {
+      substrate_install: substrateInstallOutputDir,
       online_deployment_gate:
         config.producer === 'online' ? path.join(outputBase, 'online-deployment-gate') : null,
       deployment_path: path.join(outputBase, 'deployment-path')
+    },
+    generated_refs: {
+      substrate_truth: substrateInstallOutputDir
+        ? path.join(substrateInstallOutputDir, 'substrate-truth.json')
+        : null
     },
     smoke: {
       timeout: optionalPlanString(manifest.timeout),
@@ -1438,7 +1453,15 @@ function addApplyRuntimeArgs({ argv, refs, manifest, targetProfile, mode, includ
   argv.push('--confirm-apply', targetProfile, '--operator-run-id', manifest.deploy_confirmation.operator_run_id);
 }
 
-function addCommonDeploymentArgs({ argv, refs, manifest, targetProfile, outputDir, mode }) {
+function addCommonDeploymentArgs({
+  argv,
+  refs,
+  manifest,
+  targetProfile,
+  outputDir,
+  mode,
+  substrateTruthPath
+}) {
   argv.push(
     '--release-contract',
     refPath(refs, 'release_contract'),
@@ -1451,7 +1474,7 @@ function addCommonDeploymentArgs({ argv, refs, manifest, targetProfile, outputDi
     '--render-values',
     refPath(refs, 'render_values'),
     '--substrate-truth',
-    refPath(refs, 'substrate_truth'),
+    substrateTruthPath ?? refPath(refs, 'substrate_truth'),
     '--target-prerequisites',
     refPath(refs, 'target_prerequisites'),
     '--namespace',
@@ -1468,6 +1491,8 @@ function addCommonDeploymentArgs({ argv, refs, manifest, targetProfile, outputDi
 
 function buildProducerArgv({ manifest, refs, config, outputRoot, mode }) {
   const outputBase = deploymentPathOutputBase(outputRoot, manifest.deployment_path);
+  const substrateInstallOutputDir = path.join(outputBase, 'substrate-install');
+  const generatedSubstrateTruth = path.join(substrateInstallOutputDir, 'substrate-truth.json');
   const steps = [];
 
   if (config.installSubstrates) {
@@ -1490,7 +1515,7 @@ function buildProducerArgv({ manifest, refs, config, outputRoot, mode }) {
       '--namespace',
       manifest.namespace,
       '--output-dir',
-      path.join(outputBase, 'substrate-install'),
+      substrateInstallOutputDir,
       '--mode',
       'apply'
     ];
@@ -1522,7 +1547,8 @@ function buildProducerArgv({ manifest, refs, config, outputRoot, mode }) {
       manifest,
       targetProfile: config.targetProfile,
       outputDir: path.join(outputBase, 'online-deployment-gate'),
-      mode
+      mode,
+      substrateTruthPath: config.installSubstrates ? generatedSubstrateTruth : undefined
     });
     if (config.installSubstrates) {
       argv.push('--substrate-pack-manifest', refPath(refs, 'substrate_pack_manifest'));

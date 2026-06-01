@@ -625,6 +625,17 @@ function assertArgvPaths(argv, label) {
     }
     assertAbsolute(value, `${label} ${flag}`);
     if (existingArgPathFlags.has(flag)) {
+      if (
+        flag === '--substrate-truth' &&
+        deploymentPath === 'online/install_substrates' &&
+        label === 'producer online-deployment-gate'
+      ) {
+        const generatedTruth = plan._internal?.expected?.generated_refs?.substrate_truth;
+        if (value !== generatedTruth) {
+          throw new Error('online install producer argv must use generated installer substrate truth');
+        }
+        continue;
+      }
       assertAccessiblePath(value, `${label} ${flag}`);
     }
     index += 1;
@@ -811,6 +822,24 @@ for (const step of plan.producer_argv) {
     }
     if (argValue(step.argv, '--context', 'substrate-install') !== 'operator-inputs-context') {
       throw new Error('substrate-install plan must pass operator-inputs context');
+    }
+  }
+  if (deploymentPath === 'online/install_substrates' && step.name === 'online-deployment-gate') {
+    const generatedTruth = plan._internal?.expected?.generated_refs?.substrate_truth;
+    if (!generatedTruth || !path.isAbsolute(generatedTruth)) {
+      throw new Error('online install plan must model generated substrate truth as an absolute path');
+    }
+    if (generatedTruth !== path.join(
+      plan._internal.expected.output_dirs.substrate_install,
+      'substrate-truth.json'
+    )) {
+      throw new Error('generated substrate truth must live under substrate-install output dir');
+    }
+    if (argValue(step.argv, '--substrate-truth', 'online-deployment-gate') !== generatedTruth) {
+      throw new Error('online install gate must use installer output substrate truth');
+    }
+    if (generatedTruth === plan.input_refs.substrate_truth.absolute_path) {
+      throw new Error('online install gate must not use package-local substrate truth');
     }
   }
 }

@@ -7,8 +7,9 @@ function usage() {
   node scripts/run-operator-inputs.mjs --operator-inputs <dir-or-json>
 
 Runs the current minimal operator-inputs orchestration slice. Only
-online/use_existing with mode apply is executed; other valid intake plans fail
-fast. This writes path-level deployment evidence only, not ga-release-report.json.`;
+online/use_existing and online/install_substrates with mode apply are executed;
+airgap paths and server-dry-run modes fail fast. This writes path-level
+deployment evidence only, not ga-release-report.json.`;
 }
 
 function readArgValue(argv, index, arg) {
@@ -66,6 +67,9 @@ try {
   console.log(`operator-inputs plan written: ${planPath}`);
 
   const result = await runOperatorInputsPlan({ planPath });
+  if (result.substrateInstallReportPath) {
+    console.log(`operator-inputs substrate install report: ${result.substrateInstallReportPath}`);
+  }
   console.log(`operator-inputs producer report: ${result.producerReportPath}`);
   console.log(`operator-inputs deployment-path report: ${result.deploymentPathReport}`);
   console.log('operator-inputs run wrote path-level evidence only; no GA verdict was issued.');

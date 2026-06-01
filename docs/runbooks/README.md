@@ -31,10 +31,13 @@ internal next-step plan: it is not runtime evidence, not a final one-command GA
 flow, and not deploy, package, or release readiness. Post-deploy smoke reports
 are produced after runtime checks and are not accepted as package inputs.
 
-With `--run`, the current slice executes only `online/use_existing` packages
-whose manifest sets `mode: apply`. It runs the existing online focused producer
-chain and internally finalizes the deployment path report under
-`.release-kit-internal/online-use-existing/deployment-path/`. It does not create
+With `--run`, the current slice executes `online/use_existing` and
+`online/install_substrates` packages whose manifest sets `mode: apply`.
+`online/use_existing` runs the existing online focused producer chain.
+`online/install_substrates` first runs substrate-install, then runs the online
+deployment gate bound to the installer output substrate truth. Both paths
+internally finalize a deployment path report under `.release-kit-internal/`.
+Airgap paths still fail fast. This slice does not create
 `ga-release-report.json`, and it does not issue release readiness.
 
 Final release closure is the final `ga-release-report.json` after finalized
@@ -52,7 +55,9 @@ This table is the operator-facing package matrix. It is not a formal release
 verdict, package readiness, operator readiness, or GA signoff.
 
 `install_substrates` needs namespace-scoped installer producer/finalizer
-evidence plus an explicit installer confirmation. It is not a cloud substrate
+evidence, required `kubectl` and `context` inputs, a package-local routability
+probe, and an explicit installer confirmation. The installer output substrate
+truth drives the subsequent deployment gate. It is not a cloud substrate
 provisioner.
 `installed_by` stays a provenance marker, not installer proof; it does not mean
 release-kit created databases, buckets, OIDC realms, or other substrate
@@ -61,7 +66,7 @@ resources.
 | `deployment_path` | Package must include | Current intake result |
 | --- | --- | --- |
 | `online/use_existing` | Common release/template/render/substrate/prerequisite files, namespace, optional package-local `kubectl`. | Validates the package and writes the internal plan. With `--run` and `mode: apply`, also writes path-level deployment evidence through the existing online producer and deployment-path finalizer. |
-| `online/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, package-local `routability_probe`, and explicit install confirmation. | Validates installer inputs and writes the internal plan for installer plus online focused producer steps. `--run` fails fast in this slice. |
+| `online/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, package-local `routability_probe`, and explicit install confirmation. | Validates installer inputs and writes the internal plan for installer plus online focused producer steps. With `--run` and `mode: apply`, runs substrate-install before the online deployment gate; the installer output substrate truth drives that gate, then the deployment-path finalizer writes path-level evidence. |
 | `airgap/use_existing` | Common files plus `airgap_bundle` and explicit `airgap_bundle_manifest` inside that bundle. | Validates the already assembled bundle reference and writes the internal plan for the airgap consume/deployment producer path. `--run` fails fast in this slice. |
 | `airgap/install_substrates` | Common files plus substrate pack manifest, substrate install inputs, required `kubectl` and `context` inputs, explicit install confirmation, `airgap_bundle`, and explicit `airgap_bundle_manifest` inside that bundle. | Validates installer and bundle references and writes the internal plan for installer plus airgap consume/deployment producer steps. `--run` fails fast in this slice. |
 

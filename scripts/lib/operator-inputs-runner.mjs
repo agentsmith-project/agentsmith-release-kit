@@ -7,9 +7,17 @@ import { fileURLToPath } from 'node:url';
 const PLAN_SCHEMA = 'agentsmith.operator-inputs-plan/v1';
 const PLAN_SCOPE = 'operator_inputs_intake_only';
 const INTERNAL_EXPECTED_SCHEMA = 'agentsmith.operator-inputs-plan-internal/v1';
-const SUPPORTED_DEPLOYMENT_PATH = 'online/use_existing';
 const SUPPORTED_MODE = 'apply';
-const SUPPORTED_TARGET_PROFILE = 'existing_kubernetes/external_declared/online';
+const ONLINE_USE_EXISTING_PATH = 'online/use_existing';
+const ONLINE_INSTALL_SUBSTRATES_PATH = 'online/install_substrates';
+const SUPPORTED_DEPLOYMENT_PATHS = new Set([
+  ONLINE_USE_EXISTING_PATH,
+  ONLINE_INSTALL_SUBSTRATES_PATH
+]);
+const TARGET_PROFILE_BY_DEPLOYMENT_PATH = new Map([
+  [ONLINE_USE_EXISTING_PATH, 'existing_kubernetes/external_declared/online'],
+  [ONLINE_INSTALL_SUBSTRATES_PATH, 'existing_kubernetes/kit_installed/online']
+]);
 const PLAN_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const INTERNAL_DIR = '.release-kit-internal';
@@ -19,7 +27,7 @@ const DEPLOYMENT_PATH_REPORT_FILE = 'deployment-path-report.json';
 const DEPLOYMENT_PATH_FINALIZER_MANIFEST = 'deployment-path-finalizer-manifest.json';
 const DEPLOYMENT_PATH_SOURCE_EVIDENCE_DIR = 'source-evidence';
 
-const REQUIRED_INPUT_REFS = [
+const COMMON_INPUT_REFS = [
   'release_contract',
   'deploy_template_package',
   'deploy_template_archive',
@@ -27,9 +35,18 @@ const REQUIRED_INPUT_REFS = [
   'substrate_truth',
   'target_prerequisites'
 ];
-const OPTIONAL_INPUT_REFS = ['kubectl'];
-const SUPPORTED_INPUT_REFS = new Set([...REQUIRED_INPUT_REFS, ...OPTIONAL_INPUT_REFS]);
-const PRODUCER_REQUIRED_VALUE_FLAGS = new Set([
+const INSTALL_INPUT_REFS = [
+  'substrate_pack_manifest',
+  'substrate_install_inputs',
+  'kubectl',
+  'routability_probe'
+];
+const SUPPORTED_INPUT_REFS = new Set([
+  ...COMMON_INPUT_REFS,
+  ...INSTALL_INPUT_REFS,
+  'kubectl'
+]);
+const ONLINE_GATE_REQUIRED_VALUE_FLAGS = new Set([
   '--release-contract',
   '--deploy-template-package',
   '--archive',
@@ -43,20 +60,35 @@ const PRODUCER_REQUIRED_VALUE_FLAGS = new Set([
   '--confirm-apply',
   '--operator-run-id'
 ]);
-const PRODUCER_OPTIONAL_VALUE_FLAGS = new Set([
+const ONLINE_GATE_OPTIONAL_VALUE_FLAGS = new Set([
   '--context',
   '--kubectl',
   '--timeout',
   '--smoke-url',
   '--expected-status',
-  '--timeout-ms'
+  '--timeout-ms',
+  '--substrate-pack-manifest',
+  '--routability-probe'
 ]);
-const PRODUCER_BOOLEAN_FLAGS = new Set(['--allow-http', '--allow-localhost']);
-const PRODUCER_VALUE_FLAGS = new Set([
-  ...PRODUCER_REQUIRED_VALUE_FLAGS,
-  ...PRODUCER_OPTIONAL_VALUE_FLAGS
+const ONLINE_GATE_BOOLEAN_FLAGS = new Set(['--allow-http', '--allow-localhost']);
+const SUBSTRATE_INSTALL_REQUIRED_VALUE_FLAGS = new Set([
+  '--release-contract',
+  '--deploy-template-package',
+  '--target-profile',
+  '--substrate-pack-manifest',
+  '--substrate-install-inputs',
+  '--target-prerequisites',
+  '--namespace',
+  '--output-dir',
+  '--mode',
+  '--context',
+  '--kubectl',
+  '--confirm-substrate-install',
+  '--confirm-install-parameters',
+  '--operator-run-id'
 ]);
-const PRODUCER_ALLOWED_FLAGS = new Set([...PRODUCER_VALUE_FLAGS, ...PRODUCER_BOOLEAN_FLAGS]);
+const SUBSTRATE_INSTALL_OPTIONAL_VALUE_FLAGS = new Set();
+const SUBSTRATE_INSTALL_BOOLEAN_FLAGS = new Set();
 
 class OperatorInputsRunnerError extends Error {
   constructor(message, exitCode = 1) {
@@ -296,9 +328,14 @@ async function cleanupDeploymentPathOutputs(outputDir) {
   });
 }
 
-function expectedOutputDirs(internalRoot) {
-  const outputBase = path.join(internalRoot, 'online-use-existing');
+function deploymentPathOutputSlug(deploymentPath) {
+  return deploymentPath.replace(/[/_]+/g, '-');
+}
+
+function expectedOutputDirs(internalRoot, deploymentPath) {
+  const outputBase = path.join(internalRoot, deploymentPathOutputSlug(deploymentPath));
   return {
+    substrateInstall: path.join(outputBase, 'substrate-install'),
     onlineDeploymentGate: path.join(outputBase, 'online-deployment-gate'),
     deploymentPath: path.join(outputBase, 'deployment-path')
   };
@@ -364,6 +401,45 @@ async function validatePlanEnvelope(plan) {
   };
 }
 
+function isInstallSubstratesPath(deploymentPath) {
+  return deploymentPath === ONLINE_INSTALL_SUBSTRATES_PATH;
+}
+
+function inputRefsForDeploymentPath(deploymentPath) {
+  const required = [...COMMON_INPUT_REFS];
+  const optional = [];
+  if (isInstallSubstratesPath(deploymentPath)) {
+    required.push(...INSTALL_INPUT_REFS);
+  } else {
+    optional.push('kubectl');
+  }
+  return {
+    required,
+    allowed: new Set([...required, ...optional])
+  };
+}
+
+async function validateFileRef(refs, key) {
+  const ref = requireObject(refs[key], `plan.input_refs.${key}`);
+  if (ref.kind !== 'file') {
+    fail(`plan.input_refs.${key} ref type must be file`);
+  }
+  const absolutePath = await requireFile(ref.absolute_path, `plan.input_refs.${key}.absolute_path`);
+  const canonicalPath = await realpathForExisting(
+    absolutePath,
+    `plan.input_refs.${key}.absolute_path`
+  );
+  if (absolutePath !== canonicalPath) {
+    fail(`plan.input_refs.${key}.absolute_path must be canonical`);
+  }
+  const actual = await fileDigest(canonicalPath, `plan.input_refs.${key}`);
+  if (requireDigest(ref.sha256, `plan.input_refs.${key}.sha256`) !== actual) {
+    fail(`input ref digest changed after plan generation: ${key}`);
+  }
+  ref.absolute_path = canonicalPath;
+  return ref;
+}
+
 async function validatePackageRefs(plan) {
   const packageInfo = requireObject(plan.package, 'plan.package');
   const manifestPath = await requireFile(packageInfo.manifest_path, 'plan.package.manifest_path');
@@ -389,48 +465,22 @@ async function validatePackageRefs(plan) {
   );
 
   const refs = requireObject(plan.input_refs, 'plan.input_refs');
+  const expectedRefs = inputRefsForDeploymentPath(plan.deployment_path);
   for (const key of Object.keys(refs)) {
     if (!SUPPORTED_INPUT_REFS.has(key)) {
       fail(`operator-inputs --run does not support input ref: ${key}`);
     }
+    if (!expectedRefs.allowed.has(key)) {
+      fail(`operator-inputs --run does not support input ref for ${plan.deployment_path}: ${key}`);
+    }
   }
-  for (const key of REQUIRED_INPUT_REFS) {
-    const ref = requireObject(refs[key], `plan.input_refs.${key}`);
-    if (ref.kind !== 'file') {
-      fail(`plan.input_refs.${key} ref type must be file`);
+  for (const key of expectedRefs.required) {
+    if (!refs[key]) {
+      fail(`missing required input ref for ${plan.deployment_path}: ${key}`);
     }
-    const absolutePath = await requireFile(ref.absolute_path, `plan.input_refs.${key}.absolute_path`);
-    const canonicalPath = await realpathForExisting(
-      absolutePath,
-      `plan.input_refs.${key}.absolute_path`
-    );
-    if (absolutePath !== canonicalPath) {
-      fail(`plan.input_refs.${key}.absolute_path must be canonical`);
-    }
-    const actual = await fileDigest(canonicalPath, `plan.input_refs.${key}`);
-    if (requireDigest(ref.sha256, `plan.input_refs.${key}.sha256`) !== actual) {
-      fail(`input ref digest changed after plan generation: ${key}`);
-    }
-    ref.absolute_path = canonicalPath;
   }
-  if (refs.kubectl) {
-    const ref = requireObject(refs.kubectl, 'plan.input_refs.kubectl');
-    if (ref.kind !== 'file') {
-      fail('plan.input_refs.kubectl ref type must be file');
-    }
-    const absolutePath = await requireFile(ref.absolute_path, 'plan.input_refs.kubectl.absolute_path');
-    const canonicalPath = await realpathForExisting(
-      absolutePath,
-      'plan.input_refs.kubectl.absolute_path'
-    );
-    if (absolutePath !== canonicalPath) {
-      fail('plan.input_refs.kubectl.absolute_path must be canonical');
-    }
-    const actual = await fileDigest(canonicalPath, 'plan.input_refs.kubectl');
-    if (requireDigest(ref.sha256, 'plan.input_refs.kubectl.sha256') !== actual) {
-      fail('input ref digest changed after plan generation: kubectl');
-    }
-    ref.absolute_path = canonicalPath;
+  for (const key of Object.keys(refs)) {
+    await validateFileRef(refs, key);
   }
   return {
     refs,
@@ -438,7 +488,18 @@ async function validatePackageRefs(plan) {
   };
 }
 
-function parseProducerFlags(argv, label) {
+function producerFlagSpec({ requiredValueFlags, optionalValueFlags, booleanFlags }) {
+  const valueFlags = new Set([...requiredValueFlags, ...optionalValueFlags]);
+  return {
+    requiredValueFlags,
+    optionalValueFlags,
+    booleanFlags,
+    valueFlags,
+    allowedFlags: new Set([...valueFlags, ...booleanFlags])
+  };
+}
+
+function parseProducerFlags(argv, label, spec) {
   const values = new Map();
   const booleans = new Set();
 
@@ -447,11 +508,11 @@ function parseProducerFlags(argv, label) {
     if (typeof flag !== 'string' || !flag.startsWith('--')) {
       fail(`${label} producer argv contains unexpected positional argument: ${flag}`);
     }
-    if (!PRODUCER_ALLOWED_FLAGS.has(flag)) {
+    if (!spec.allowedFlags.has(flag)) {
       fail(`${label} producer argv contains unsupported flag: ${flag}`);
     }
 
-    if (PRODUCER_VALUE_FLAGS.has(flag)) {
+    if (spec.valueFlags.has(flag)) {
       if (values.has(flag)) {
         fail(`${label} producer argv contains duplicate flag: ${flag}`);
       }
@@ -470,7 +531,7 @@ function parseProducerFlags(argv, label) {
     booleans.add(flag);
   }
 
-  for (const flag of PRODUCER_REQUIRED_VALUE_FLAGS) {
+  for (const flag of spec.requiredValueFlags) {
     if (!values.has(flag)) {
       fail(`${label} producer argv must include ${flag}`);
     }
@@ -534,18 +595,27 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
   if (expected.schema_version !== INTERNAL_EXPECTED_SCHEMA) {
     fail(`plan._internal.expected.schema_version must be ${INTERNAL_EXPECTED_SCHEMA}`);
   }
-  if (expected.deployment_path !== SUPPORTED_DEPLOYMENT_PATH) {
-    fail(`plan._internal.expected.deployment_path must be ${SUPPORTED_DEPLOYMENT_PATH}`);
+  if (!SUPPORTED_DEPLOYMENT_PATHS.has(expected.deployment_path)) {
+    fail('plan._internal.expected.deployment_path must be a supported online operator-inputs run path');
   }
-  if (expected.target_profile !== SUPPORTED_TARGET_PROFILE) {
-    fail(`plan._internal.expected.target_profile must be ${SUPPORTED_TARGET_PROFILE}`);
+  const expectedTargetProfile = TARGET_PROFILE_BY_DEPLOYMENT_PATH.get(expected.deployment_path);
+  if (expected.target_profile !== expectedTargetProfile) {
+    fail(`plan._internal.expected.target_profile must be ${expectedTargetProfile}`);
   }
   if (expected.mode !== SUPPORTED_MODE) {
     fail(`plan._internal.expected.mode must be ${SUPPORTED_MODE}`);
   }
 
   const outputDirs = requireObject(expected.output_dirs, 'plan._internal.expected.output_dirs');
-  const canonicalOutputDirs = expectedOutputDirs(internalRoot);
+  const canonicalOutputDirs = expectedOutputDirs(internalRoot, expected.deployment_path);
+  const installExpected = isInstallSubstratesPath(expected.deployment_path);
+  if (installExpected) {
+    if (outputDirs.substrate_install !== canonicalOutputDirs.substrateInstall) {
+      fail('plan._internal.expected.output_dirs.substrate_install must be the internal expected dir');
+    }
+  } else if (outputDirs.substrate_install !== null && outputDirs.substrate_install !== undefined) {
+    fail('plan._internal.expected.output_dirs.substrate_install must be null for use_existing');
+  }
   if (outputDirs.online_deployment_gate !== canonicalOutputDirs.onlineDeploymentGate) {
     fail('plan._internal.expected.output_dirs.online_deployment_gate must be the internal expected dir');
   }
@@ -560,6 +630,33 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
     expected.operator_run_id,
     'plan._internal.expected.operator_run_id'
   );
+  const generatedRefs = requireObject(
+    expected.generated_refs,
+    'plan._internal.expected.generated_refs'
+  );
+  const expectedGeneratedSubstrateTruth = installExpected
+    ? path.join(canonicalOutputDirs.substrateInstall, 'substrate-truth.json')
+    : null;
+  if (generatedRefs.substrate_truth !== expectedGeneratedSubstrateTruth) {
+    fail('plan._internal.expected.generated_refs.substrate_truth must point to installer output truth for install paths');
+  }
+
+  let expectedInstall;
+  if (installExpected) {
+    expectedInstall = requireObject(expected.install, 'plan._internal.expected.install');
+    expectedInstall = {
+      operatorRunId: requireString(
+        expectedInstall.operator_run_id,
+        'plan._internal.expected.install.operator_run_id'
+      ),
+      installParametersSha256: requireDigest(
+        expectedInstall.install_parameters_sha256,
+        'plan._internal.expected.install.install_parameters_sha256'
+      )
+    };
+  } else if (expected.install !== null && expected.install !== undefined) {
+    fail('plan._internal.expected.install must be null for use_existing');
+  }
   const expectedSmoke = {
     timeout: optionalExpectedString(smoke.timeout, 'plan._internal.expected.smoke.timeout'),
     smokeUrl: optionalExpectedString(smoke.smoke_url, 'plan._internal.expected.smoke.smoke_url'),
@@ -607,6 +704,30 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
   ) {
     fail('plan._internal.expected.operator_run_id must match operator-inputs manifest');
   }
+  if (installExpected) {
+    const installConfirmation = requireObject(
+      operatorManifest.install_confirmation,
+      'operator-inputs manifest.install_confirmation'
+    );
+    if (
+      requireString(
+        installConfirmation.operator_run_id,
+        'operator-inputs manifest.install_confirmation.operator_run_id'
+      ) !== expectedInstall.operatorRunId
+    ) {
+      fail('plan._internal.expected.install.operator_run_id must match operator-inputs manifest');
+    }
+    if (
+      requireDigest(
+        installConfirmation.install_parameters_sha256,
+        'operator-inputs manifest.install_confirmation.install_parameters_sha256'
+      ) !== expectedInstall.installParametersSha256
+    ) {
+      fail('plan._internal.expected.install.install_parameters_sha256 must match operator-inputs manifest');
+    }
+  } else if (Object.hasOwn(operatorManifest, 'install_confirmation')) {
+    fail('operator-inputs manifest.install_confirmation is accepted only for install_substrates run paths');
+  }
   if (
     optionalManifestString(operatorManifest, 'timeout', 'operator-inputs manifest.timeout') !==
     expectedSmoke.timeout
@@ -639,6 +760,10 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
     namespace,
     context,
     operatorRunId,
+    install: expectedInstall,
+    generatedRefs: {
+      substrateTruth: expectedGeneratedSubstrateTruth
+    },
     outputDirs: canonicalOutputDirs,
     smoke: expectedSmoke
   };
@@ -668,18 +793,85 @@ async function validateFacadeArgv(plan) {
 }
 
 function validateUnsupportedScope(plan) {
-  if (plan.deployment_path !== SUPPORTED_DEPLOYMENT_PATH || plan.mode !== SUPPORTED_MODE) {
+  if (!SUPPORTED_DEPLOYMENT_PATHS.has(plan.deployment_path) || plan.mode !== SUPPORTED_MODE) {
     fail(
-      `operator-inputs --run currently supports only ${SUPPORTED_DEPLOYMENT_PATH} with mode ${SUPPORTED_MODE}`
+      `operator-inputs --run currently supports only ${ONLINE_USE_EXISTING_PATH} or ${ONLINE_INSTALL_SUBSTRATES_PATH} with mode ${SUPPORTED_MODE}`
     );
   }
 }
 
-async function validateProducerStep(plan, refs, expected) {
-  if (!Array.isArray(plan.producer_argv) || plan.producer_argv.length !== 1) {
-    fail('operator-inputs --run currently supports exactly one producer step');
+function validateSubstrateInstallStep(step, refs, expected) {
+  if (step.name !== 'substrate-install') {
+    fail(`operator-inputs --run install path first producer must be substrate-install, got: ${step.name}`);
   }
-  const step = requireObject(plan.producer_argv[0], 'plan.producer_argv[0]');
+  const argv = step.argv;
+  if (!Array.isArray(argv) || argv.length < 4) {
+    fail('substrate-install producer argv is invalid');
+  }
+  if (argv[0] !== 'bash' || argv[1] !== VERIFY_RELEASE_SCRIPT || argv[2] !== '--substrate-install') {
+    fail('substrate-install producer argv must call verify-release.sh --substrate-install');
+  }
+
+  const parsed = parseProducerFlags(
+    argv,
+    step.name,
+    producerFlagSpec({
+      requiredValueFlags: SUBSTRATE_INSTALL_REQUIRED_VALUE_FLAGS,
+      optionalValueFlags: SUBSTRATE_INSTALL_OPTIONAL_VALUE_FLAGS,
+      booleanFlags: SUBSTRATE_INSTALL_BOOLEAN_FLAGS
+    })
+  );
+  assertBoundValue(parsed, '--release-contract', refs.release_contract.absolute_path, step.name);
+  assertBoundValue(
+    parsed,
+    '--deploy-template-package',
+    refs.deploy_template_package.absolute_path,
+    step.name
+  );
+  assertBoundValue(parsed, '--target-profile', expected.targetProfile, step.name);
+  assertBoundValue(
+    parsed,
+    '--substrate-pack-manifest',
+    refs.substrate_pack_manifest.absolute_path,
+    step.name
+  );
+  assertBoundValue(
+    parsed,
+    '--substrate-install-inputs',
+    refs.substrate_install_inputs.absolute_path,
+    step.name
+  );
+  assertBoundValue(
+    parsed,
+    '--target-prerequisites',
+    refs.target_prerequisites.absolute_path,
+    step.name
+  );
+  assertBoundValue(parsed, '--namespace', expected.namespace, step.name);
+  assertBoundValue(parsed, '--output-dir', expected.outputDirs.substrateInstall, step.name);
+  assertBoundValue(parsed, '--mode', expected.mode, step.name);
+  assertBoundValue(parsed, '--context', expected.context, step.name);
+  assertBoundValue(parsed, '--kubectl', refs.kubectl.absolute_path, step.name);
+  assertBoundValue(parsed, '--confirm-substrate-install', expected.targetProfile, step.name);
+  assertBoundValue(
+    parsed,
+    '--confirm-install-parameters',
+    expected.install.installParametersSha256,
+    step.name
+  );
+  assertBoundValue(parsed, '--operator-run-id', expected.install.operatorRunId, step.name);
+
+  const outputDir = requireAbsolutePath(parsed.value('--output-dir'), 'substrate-install output dir');
+
+  return {
+    step,
+    outputDir,
+    reportPath: path.join(outputDir, 'substrate-install-report.json'),
+    truthPath: expected.generatedRefs.substrateTruth
+  };
+}
+
+function validateOnlineDeploymentGateStep(step, refs, expected) {
   if (step.name !== 'online-deployment-gate') {
     fail(`operator-inputs --run does not support producer step: ${step.name}`);
   }
@@ -691,7 +883,15 @@ async function validateProducerStep(plan, refs, expected) {
     fail('online-deployment-gate producer argv must call verify-release.sh --online-deployment-gate');
   }
 
-  const parsed = parseProducerFlags(argv, step.name);
+  const parsed = parseProducerFlags(
+    argv,
+    step.name,
+    producerFlagSpec({
+      requiredValueFlags: ONLINE_GATE_REQUIRED_VALUE_FLAGS,
+      optionalValueFlags: ONLINE_GATE_OPTIONAL_VALUE_FLAGS,
+      booleanFlags: ONLINE_GATE_BOOLEAN_FLAGS
+    })
+  );
   assertBoundValue(parsed, '--release-contract', refs.release_contract.absolute_path, step.name);
   assertBoundValue(
     parsed,
@@ -701,7 +901,12 @@ async function validateProducerStep(plan, refs, expected) {
   );
   assertBoundValue(parsed, '--archive', refs.deploy_template_archive.absolute_path, step.name);
   assertBoundValue(parsed, '--render-values', refs.render_values.absolute_path, step.name);
-  assertBoundValue(parsed, '--substrate-truth', refs.substrate_truth.absolute_path, step.name);
+  assertBoundValue(
+    parsed,
+    '--substrate-truth',
+    expected.generatedRefs.substrateTruth ?? refs.substrate_truth.absolute_path,
+    step.name
+  );
   assertBoundValue(
     parsed,
     '--target-prerequisites',
@@ -722,6 +927,23 @@ async function validateProducerStep(plan, refs, expected) {
   assertOptionalBoundValue(parsed, '--timeout-ms', expected.smoke.timeoutMs, step.name);
   assertOptionalBoundBoolean(parsed, '--allow-http', expected.smoke.allowHttp, step.name);
   assertOptionalBoundBoolean(parsed, '--allow-localhost', expected.smoke.allowLocalhost, step.name);
+  if (isInstallSubstratesPath(expected.deploymentPath)) {
+    assertBoundValue(
+      parsed,
+      '--substrate-pack-manifest',
+      refs.substrate_pack_manifest.absolute_path,
+      step.name
+    );
+    assertBoundValue(
+      parsed,
+      '--routability-probe',
+      refs.routability_probe.absolute_path,
+      step.name
+    );
+  } else {
+    assertOptionalBoundValue(parsed, '--substrate-pack-manifest', undefined, step.name);
+    assertOptionalBoundValue(parsed, '--routability-probe', undefined, step.name);
+  }
 
   const outputDir = requireAbsolutePath(
     parsed.value('--output-dir'),
@@ -732,6 +954,39 @@ async function validateProducerStep(plan, refs, expected) {
     step,
     outputDir,
     reportPath: path.join(outputDir, 'online-deployment-gate-report.json')
+  };
+}
+
+function validateProducerSteps(plan, refs, expected) {
+  if (!Array.isArray(plan.producer_argv)) {
+    fail('plan.producer_argv must be an array');
+  }
+
+  if (isInstallSubstratesPath(expected.deploymentPath)) {
+    if (plan.producer_argv.length !== 2) {
+      fail('operator-inputs --run install path requires exactly two producer steps');
+    }
+    const substrateInstallStep = requireObject(plan.producer_argv[0], 'plan.producer_argv[0]');
+    const onlineGateStep = requireObject(plan.producer_argv[1], 'plan.producer_argv[1]');
+    if (substrateInstallStep.name !== 'substrate-install' || onlineGateStep.name !== 'online-deployment-gate') {
+      fail('operator-inputs --run install path producer order must be substrate-install then online-deployment-gate');
+    }
+    return {
+      substrateInstall: validateSubstrateInstallStep(substrateInstallStep, refs, expected),
+      onlineDeploymentGate: validateOnlineDeploymentGateStep(onlineGateStep, refs, expected)
+    };
+  }
+
+  if (plan.producer_argv.length !== 1) {
+    fail('operator-inputs --run use_existing path requires exactly one producer step');
+  }
+  return {
+    substrateInstall: undefined,
+    onlineDeploymentGate: validateOnlineDeploymentGateStep(
+      requireObject(plan.producer_argv[0], 'plan.producer_argv[0]'),
+      refs,
+      expected
+    )
   };
 }
 
@@ -758,6 +1013,38 @@ async function requireGeneratedReport(file, label) {
     fail(`${label}.status must be pass`);
   }
   return object;
+}
+
+async function validateSubstrateInstallOutputs(producer, expected) {
+  const report = await requireGeneratedReport(producer.reportPath, 'substrate-install report');
+  const outputSubstrateTruthDigest = requireDigest(
+    report.output_substrate_truth_digest,
+    'substrate-install report.output_substrate_truth_digest'
+  );
+  const generatedTruthDigest = await fileDigest(
+    producer.truthPath,
+    'substrate-install generated substrate truth'
+  );
+  if (outputSubstrateTruthDigest !== generatedTruthDigest) {
+    fail('substrate-install generated substrate truth digest must match substrate-install report.output_substrate_truth_digest');
+  }
+  if (
+    Object.hasOwn(report, 'substrate_truth_digest') &&
+    requireDigest(report.substrate_truth_digest, 'substrate-install report.substrate_truth_digest') !==
+      generatedTruthDigest
+  ) {
+    fail('substrate-install report.substrate_truth_digest must match generated substrate truth digest');
+  }
+  if (report.mode !== expected.mode) {
+    fail('substrate-install report.mode must match operator-inputs mode');
+  }
+  if (
+    requireString(report.operator_run_id, 'substrate-install report.operator_run_id') !==
+    expected.install.operatorRunId
+  ) {
+    fail('substrate-install report.operator_run_id must match install confirmation operator_run_id');
+  }
+  return report;
 }
 
 export async function runOperatorInputsPlan({ planPath } = {}) {
@@ -788,6 +1075,17 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
     targetDir: path.dirname(expected.outputDirs.onlineDeploymentGate),
     label: 'operator-inputs deployment output base'
   });
+  if (isInstallSubstratesPath(expected.deploymentPath)) {
+    expected.outputDirs.substrateInstall = await ensureDirectoryInsideInternalRoot({
+      internalRoot: envelope.internalRoot,
+      targetDir: expected.outputDirs.substrateInstall,
+      label: 'substrate-install output dir'
+    });
+    expected.generatedRefs.substrateTruth = path.join(
+      expected.outputDirs.substrateInstall,
+      'substrate-truth.json'
+    );
+  }
   expected.outputDirs.onlineDeploymentGate = await ensureDirectoryInsideInternalRoot({
     internalRoot: envelope.internalRoot,
     targetDir: expected.outputDirs.onlineDeploymentGate,
@@ -799,27 +1097,52 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
     label: 'deployment-path output dir'
   });
   await cleanupDeploymentPathOutputs(expected.outputDirs.deploymentPath);
-  const producer = await validateProducerStep(plan, refs, expected);
+  const producers = validateProducerSteps(plan, refs, expected);
 
-  runCommand(producer.step.argv, 'operator-inputs producer online-deployment-gate');
-  await requireGeneratedReport(producer.reportPath, 'online-deployment-gate report');
+  let substrateInstallReportPath;
+  if (producers.substrateInstall) {
+    runCommand(producers.substrateInstall.step.argv, 'operator-inputs producer substrate-install');
+    await validateSubstrateInstallOutputs(producers.substrateInstall, expected);
+    substrateInstallReportPath = producers.substrateInstall.reportPath;
+  }
+
+  runCommand(
+    producers.onlineDeploymentGate.step.argv,
+    'operator-inputs producer online-deployment-gate'
+  );
+  await requireGeneratedReport(
+    producers.onlineDeploymentGate.reportPath,
+    'online-deployment-gate report'
+  );
 
   const finalizerArgv = [
     'bash',
     VERIFY_RELEASE_SCRIPT,
     '--deployment-path',
     '--operator-path',
-    SUPPORTED_DEPLOYMENT_PATH,
+    expected.deploymentPath,
     '--release-contract',
     refs.release_contract.absolute_path,
     '--deploy-template-package',
     refs.deploy_template_package.absolute_path,
     '--online-deployment-gate-report',
-    producer.reportPath,
-    '--output-dir',
-    expected.outputDirs.deploymentPath
+    producers.onlineDeploymentGate.reportPath
   ];
-  runCommand(finalizerArgv, 'operator-inputs deployment-path finalizer');
+  if (producers.substrateInstall) {
+    finalizerArgv.push(
+      '--substrate-install-report',
+      producers.substrateInstall.reportPath,
+      '--confirm-install-substrates',
+      expected.install.operatorRunId
+    );
+  }
+  finalizerArgv.push('--output-dir', expected.outputDirs.deploymentPath);
+  try {
+    runCommand(finalizerArgv, 'operator-inputs deployment-path finalizer');
+  } catch (error) {
+    await cleanupDeploymentPathOutputs(expected.outputDirs.deploymentPath);
+    throw error;
+  }
 
   const deploymentPathReport = path.join(expected.outputDirs.deploymentPath, DEPLOYMENT_PATH_REPORT_FILE);
   const finalizerManifest = path.join(
@@ -831,7 +1154,9 @@ export async function runOperatorInputsPlan({ planPath } = {}) {
 
   return {
     planPath: canonicalPlanPath,
-    producerReportPath: producer.reportPath,
+    producerReportPath: producers.onlineDeploymentGate.reportPath,
+    onlineDeploymentGateReportPath: producers.onlineDeploymentGate.reportPath,
+    substrateInstallReportPath,
     deploymentPathReport,
     finalizerManifest,
     sourceEvidenceDir: path.join(

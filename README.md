@@ -85,19 +85,22 @@ plan is internal only: it is not GA evidence, not release readiness, and does
 not write `formal_verdict`. Post-deploy smoke reports are runtime evidence and
 are not operator-inputs.
 
-With `--run`, the current orchestration slice supports only
-`online/use_existing` with `mode: apply`. It runs the existing online focused
-producer chain and then internally calls the deployment-path finalizer, writing
-path-level evidence under
-`.release-kit-internal/online-use-existing/deployment-path/`. It does not write
-`ga-release-report.json`; the final release-facing result is still the
-repo-local GA aggregate after all finalized deployment path reports and required
-AgentSmith product-side reports are supplied.
+With `--run`, the current orchestration slice supports `online/use_existing`
+and `online/install_substrates` with `mode: apply`. `online/use_existing` runs
+the existing online focused producer chain. `online/install_substrates` first
+runs substrate-install, then runs the online gate bound to the installer output
+substrate truth. Both paths internally call the deployment-path finalizer and
+write path-level evidence under `.release-kit-internal/`. Airgap paths still
+fail fast. This slice does not write `ga-release-report.json`; the final
+release-facing result is still the repo-local GA aggregate after all finalized
+deployment path reports and required AgentSmith product-side reports are
+supplied.
 
-For `install_substrates`, the package can name namespace-scoped installer
-inputs plus an explicit install confirmation. That path is still a
-release-kit installer producer/finalizer evidence flow; it is not cloud
-provisioning for clusters, databases, buckets, IAM, networks, or OIDC realms.
+For `install_substrates`, the package must provide namespace-scoped installer
+inputs, `kubectl` and `context` inputs, a package-local routability probe, and
+an explicit install confirmation. That path is still a release-kit installer
+producer/finalizer evidence flow; it is not cloud provisioning for clusters,
+databases, buckets, IAM, networks, or OIDC realms.
 
 Maintainer/internal diagnostics still expose the old positional surface:
 `online use_existing`, `online kit_provided`, `airgap use_existing`, and
