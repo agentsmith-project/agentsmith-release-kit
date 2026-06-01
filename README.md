@@ -125,8 +125,12 @@ Those focused producer diagnostics use machine profile axes internally:
 declared substrate connection truth, and related routability/materiality
 evidence. It does not install databases, buckets, OIDC realms, or other
 substrates. `install_substrates` requires an explicit report from the separate
-`--substrate-install` producer plus an installer confirmation flag; without
-that evidence the path fails fast.
+`--substrate-install` producer only when maintainers run focused diagnostics
+directly. The package-driven `operator-release.sh --operator-inputs <pkg> --run`
+path creates that namespace-scoped installer report internally for
+`online/install_substrates`, binds the installer output truth into the online
+gate, and finalizes path-level evidence. Airgap `install_substrates` run
+orchestration is still not implemented.
 `installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
 It is not installer proof and does not mean release-kit created databases,
 buckets, OIDC realms, or other substrate resources.
