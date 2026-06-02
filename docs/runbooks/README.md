@@ -97,8 +97,9 @@ Copy/pasteable package skeletons are available under `examples/`:
 - `examples/airgap-install-substrates/`: `airgap/install_substrates`
 
 Each example stages one package for `bash scripts/operator-release.sh
---operator-inputs <pkg>`. Install-substrate examples include the
-`install_parameters_sha256` calculation command that matches
+--operator-inputs <pkg>`. Install-substrate examples use
+`confirm_current_install_parameters: true`; intake computes and prints
+`install_parameters_sha256` for audit, then `--run` passes it internally to
 `verify-substrate-install`.
 
 ### Airgap Tool Contract

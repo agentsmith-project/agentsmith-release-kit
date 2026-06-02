@@ -218,6 +218,12 @@ const AIRGAP_DEPLOYMENT_GATE_BOOLEAN_FLAGS = new Set([
   '--allow-localhost',
   '--allow-installed-substrate-truth'
 ]);
+const INSTALL_CONFIRMATION_FIELDS = new Set([
+  'confirmed',
+  'confirm_current_install_parameters',
+  'install_parameters_sha256',
+  'operator_run_id'
+]);
 
 class OperatorInputsRunnerError extends Error {
   constructor(message, exitCode = 1) {
@@ -1379,6 +1385,47 @@ function optionalManifestScalarString(manifest, key) {
   return String(manifest[key]);
 }
 
+function validateInstallConfirmationBinding({ confirmation, expectedInstall }) {
+  for (const key of Object.keys(confirmation)) {
+    if (!INSTALL_CONFIRMATION_FIELDS.has(key)) {
+      fail(`unknown operator-inputs manifest.install_confirmation field: ${key}`);
+    }
+  }
+  if (confirmation.confirmed !== true) {
+    fail('operator-inputs manifest.install_confirmation.confirmed must be true');
+  }
+  if (
+    requireString(
+      confirmation.operator_run_id,
+      'operator-inputs manifest.install_confirmation.operator_run_id'
+    ) !== expectedInstall.operatorRunId
+  ) {
+    fail('plan._internal.expected.install.operator_run_id must match operator-inputs manifest');
+  }
+
+  const hasCurrentConfirmation = Object.hasOwn(
+    confirmation,
+    'confirm_current_install_parameters'
+  );
+  if (
+    hasCurrentConfirmation &&
+    confirmation.confirm_current_install_parameters !== true
+  ) {
+    fail('operator-inputs manifest.install_confirmation.confirm_current_install_parameters must be true');
+  }
+  if (Object.hasOwn(confirmation, 'install_parameters_sha256')) {
+    const legacyDigest = requireDigest(
+      confirmation.install_parameters_sha256,
+      'operator-inputs manifest.install_confirmation.install_parameters_sha256'
+    );
+    if (legacyDigest !== expectedInstall.installParametersSha256) {
+      fail('operator-inputs manifest.install_confirmation.install_parameters_sha256 must match plan expected install parameters sha256');
+    }
+  } else if (!hasCurrentConfirmation) {
+    fail('operator-inputs manifest.install_confirmation.confirm_current_install_parameters must be true');
+  }
+}
+
 function validateInternalExpected(plan, internalRoot, operatorManifest) {
   const internal = requireObject(plan._internal, 'plan._internal');
   const expected = requireObject(internal.expected, 'plan._internal.expected');
@@ -1534,22 +1581,7 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
       operatorManifest.install_confirmation,
       'operator-inputs manifest.install_confirmation'
     );
-    if (
-      requireString(
-        installConfirmation.operator_run_id,
-        'operator-inputs manifest.install_confirmation.operator_run_id'
-      ) !== expectedInstall.operatorRunId
-    ) {
-      fail('plan._internal.expected.install.operator_run_id must match operator-inputs manifest');
-    }
-    if (
-      requireDigest(
-        installConfirmation.install_parameters_sha256,
-        'operator-inputs manifest.install_confirmation.install_parameters_sha256'
-      ) !== expectedInstall.installParametersSha256
-    ) {
-      fail('plan._internal.expected.install.install_parameters_sha256 must match operator-inputs manifest');
-    }
+    validateInstallConfirmationBinding({ confirmation: installConfirmation, expectedInstall });
   } else if (Object.hasOwn(operatorManifest, 'install_confirmation')) {
     fail('operator-inputs manifest.install_confirmation is accepted only for install_substrates run paths');
   }

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -15,9 +14,13 @@ import {
 } from './lib/substrate-truth-validation.mjs';
 import {
   SUBSTRATE_INSTALL_INPUTS_SCHEMA,
-  validateSubstrateInstallInputs,
-  validateSubstrateResourceList
+  validateSubstrateInstallInputs
 } from './lib/substrate-install-input-validation.mjs';
+import {
+  digestBuffer,
+  digestText,
+  resolveSubstrateInstallParameters
+} from './lib/substrate-install-parameters.mjs';
 import {
   formatResourceRef,
   imageRefsFromSubstratePackManifest,
@@ -272,43 +275,6 @@ function validateArgs(args) {
   if (args.operatorRunId) {
     cliFail('--operator-run-id is only accepted with --mode apply');
   }
-}
-
-function digestBuffer(buffer) {
-  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
-}
-
-function digestText(value) {
-  return digestBuffer(Buffer.from(value));
-}
-
-function canonicalApplyResourceListBytes(resources) {
-  return Buffer.from(`${JSON.stringify(
-    {
-      apiVersion: 'v1',
-      kind: 'List',
-      items: resources
-    },
-    null,
-    2
-  )}\n`);
-}
-
-function installParametersDigest({
-  installInputDigest,
-  resourceListDigest,
-  applyResourceListDigest,
-  effectiveNamespace
-}) {
-  return digestText(
-    [
-      'agentsmith.substrate-install-parameters/v1',
-      `substrate_install_inputs=${installInputDigest}`,
-      `resource_list=${resourceListDigest}`,
-      `apply_resource_list=${applyResourceListDigest}`,
-      `effective_namespace=${effectiveNamespace}`
-    ].join('\n')
-  );
 }
 
 async function readJson(file, label) {
@@ -665,32 +631,6 @@ async function runKubectlApply(args, applyResourceListBytes) {
   }
 }
 
-async function loadInstallResources(installInput, installSummary) {
-  if (installSummary.resources) {
-    const applyResourceListBytes = canonicalApplyResourceListBytes(installSummary.resources);
-    return {
-      resources: installSummary.resources,
-      resourceListDigest: digestBuffer(applyResourceListBytes),
-      resourceSource: 'inline'
-    };
-  }
-  const resourceListFile = path.join(
-    path.dirname(installInput.file),
-    installSummary.resourceListPath
-  );
-  const resourceListInput = await readJson(resourceListFile, 'substrate install resource list');
-  return {
-    resources: validateSubstrateResourceList(resourceListInput.value, {
-      fail,
-      label: 'substrate_resource_list',
-      raw: resourceListInput.raw
-    }),
-    resourceListDigest: resourceListInput.inputDigest,
-    resourceSource: 'resource_list_path',
-    resourceListPath: installSummary.resourceListPath
-  };
-}
-
 async function writeJsonWithDigest(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const tempFile = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
@@ -841,16 +781,14 @@ async function main() {
       raw: installInput.raw
     }
   );
-  const resourceListBinding = await loadInstallResources(installInput, installSummary);
-  const applyResourceListBytes = canonicalApplyResourceListBytes(resourceListBinding.resources);
-  resourceListBinding.applyResourceListDigest = digestBuffer(applyResourceListBytes);
-  resourceListBinding.effectiveNamespace = args.namespace;
-  resourceListBinding.installParametersDigest = installParametersDigest({
-    installInputDigest: installInput.inputDigest,
-    resourceListDigest: resourceListBinding.resourceListDigest,
-    applyResourceListDigest: resourceListBinding.applyResourceListDigest,
-    effectiveNamespace: resourceListBinding.effectiveNamespace
+  const resourceListBinding = await resolveSubstrateInstallParameters({
+    installInput,
+    installSummary,
+    namespace: args.namespace,
+    readJson,
+    fail
   });
+  const { applyResourceListBytes } = resourceListBinding;
   if (
     args.mode === 'apply' &&
     args.confirmInstallParameters !== resourceListBinding.installParametersDigest

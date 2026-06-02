@@ -757,10 +757,14 @@ const manifest = {
   routability_probe: 'tools/routability-probe',
   install_confirmation: {
     confirmed: true,
-    install_parameters_sha256: installParametersSha256,
+    confirm_current_install_parameters: true,
     operator_run_id: 'operator-inputs-install-1001'
   }
 };
+
+if (installParametersSha256) {
+  manifest.install_confirmation.install_parameters_sha256 = installParametersSha256;
+}
 
 if (mode === 'apply') {
   Object.assign(manifest, {
@@ -824,9 +828,9 @@ prepare_online_install_package() {
   write_fake_kubectl "$package_dir/tools/kubectl"
   write_fake_routability_probe "$package_dir/tools/routability-probe"
 
-  local install_parameters_sha256
+  local install_parameters_sha256=""
   if [[ "$install_digest_mode" == "valid" ]]; then
-    install_parameters_sha256="$(install_parameters_digest "$package_dir/substrate-install-inputs.json" agentsmith)"
+    install_parameters_sha256=""
   else
     install_parameters_sha256="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   fi
@@ -1186,10 +1190,14 @@ const manifest = {
   context: 'operator-inputs-context',
   install_confirmation: {
     confirmed: true,
-    install_parameters_sha256: installParametersSha256,
+    confirm_current_install_parameters: true,
     operator_run_id: 'operator-inputs-install-1001'
   }
 };
+
+if (installParametersSha256) {
+  manifest.install_confirmation.install_parameters_sha256 = installParametersSha256;
+}
 
 if (mode === 'apply') {
   Object.assign(manifest, {
@@ -1278,9 +1286,9 @@ prepare_airgap_install_package() {
   write_fake_airgap_archive_probe "$package_dir/tools/archive-probe"
   write_fake_airgap_image_loader "$package_dir/tools/image-loader"
 
-  local install_parameters_sha256
+  local install_parameters_sha256=""
   if [[ "$install_digest_mode" == "valid" ]]; then
-    install_parameters_sha256="$(install_parameters_digest "$package_dir/bundle/operator-inputs/substrate-install-inputs.json" agentsmith)"
+    install_parameters_sha256=""
   else
     install_parameters_sha256="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   fi
@@ -1393,7 +1401,7 @@ writeJson(path.join(packageDir, 'operator-inputs.json'), {
   image_loader: 'tools/image-loader',
   install_confirmation: {
     confirmed: true,
-    install_parameters_sha256: `sha256:${'a'.repeat(64)}`,
+    confirm_current_install_parameters: true,
     operator_run_id: 'operator-inputs-install-1001'
   },
   deploy_confirmation: {
@@ -2537,7 +2545,7 @@ pass "operator-inputs airgap path requires smoke_url and clears stale finalizer 
 
 wrong_install_digest_package="$TMP_DIR/wrong-install-digest"
 prepare_online_install_package "$wrong_install_digest_package" apply /ok wrong
-expect_fail_matching wrong_install_digest 'confirm-install-parameters must match the substrate install parameters sha256' \
+expect_fail_matching wrong_install_digest 'install_confirmation.install_parameters_sha256 must match computed install parameters sha256' \
   run_operator_inputs "$wrong_install_digest_package" wrong-install-digest
 [[ ! -e "$wrong_install_digest_package/.release-kit-internal/online-install-substrates/online-deployment-gate/online-deployment-gate-report.json" ]] ||
   fail "wrong install confirmation digest must stop before online gate"
@@ -2546,7 +2554,7 @@ pass "operator-inputs --run stops before gate/finalizer on wrong install confirm
 
 wrong_airgap_install_digest_package="$TMP_DIR/wrong-airgap-install-digest"
 prepare_airgap_install_package "$wrong_airgap_install_digest_package" apply /ok wrong
-expect_fail_matching wrong_airgap_install_digest 'confirm-install-parameters must match the substrate install parameters sha256' \
+expect_fail_matching wrong_airgap_install_digest 'install_confirmation.install_parameters_sha256 must match computed install parameters sha256' \
   run_airgap_operator_inputs "$wrong_airgap_install_digest_package" wrong-airgap-install-digest
 [[ ! -e "$wrong_airgap_install_digest_package/.release-kit-internal/airgap-install-substrates/airgap-deployment-gate/airgap-deployment-gate-report.json" ]] ||
   fail "wrong airgap install confirmation digest must stop before airgap gate"
@@ -2768,14 +2776,12 @@ write_truth "$tampered_manifest_path_package/alternate/substrate-truth.json" "$K
 write_prerequisites "$tampered_manifest_path_package/alternate/target-prerequisites.json" "$KIT_ONLINE_TARGET_PROFILE"
 write_substrate_install_materials "$tampered_manifest_path_package/alternate" "$KIT_ONLINE_TARGET_PROFILE"
 write_fake_routability_probe "$tampered_manifest_path_package/tools/routability-probe"
-alternate_install_parameters_sha256="$(install_parameters_digest "$tampered_manifest_path_package/alternate/substrate-install-inputs.json" agentsmith)"
 "$NODE_BIN" --input-type=module - \
   "$tampered_manifest_path_package/alternate-operator-inputs.json" \
-  "http://127.0.0.1:$SERVER_PORT/ok" \
-  "$alternate_install_parameters_sha256" <<'NODE'
+  "http://127.0.0.1:$SERVER_PORT/ok" <<'NODE'
 import fs from 'node:fs';
 
-const [output, smokeUrl, installParametersSha256] = process.argv.slice(2);
+const [output, smokeUrl] = process.argv.slice(2);
 const manifest = {
   schema_version: 'agentsmith.operator-inputs/v1',
   operator_inputs_version: 1,
@@ -2794,7 +2800,7 @@ const manifest = {
   routability_probe: 'tools/routability-probe',
   install_confirmation: {
     confirmed: true,
-    install_parameters_sha256: installParametersSha256,
+    confirm_current_install_parameters: true,
     operator_run_id: 'operator-inputs-alt-install-1001'
   },
   deploy_confirmation: {

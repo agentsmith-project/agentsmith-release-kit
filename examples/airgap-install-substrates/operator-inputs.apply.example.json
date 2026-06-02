@@ -23,7 +23,7 @@
   "timeout_ms": 60000,
   "install_confirmation": {
     "confirmed": true,
-    "install_parameters_sha256": "sha256:9502588d9bf2d9cc8f7542e7257a34fcf6c326c10cb1b2b156db82c7183dedfd",
+    "confirm_current_install_parameters": true,
     "operator_run_id": "operator-airgap-install-20260523-001"
   },
   "deploy_confirmation": {

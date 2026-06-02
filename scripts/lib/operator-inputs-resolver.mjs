@@ -4,6 +4,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { validateSubstrateInstallInputs } from './substrate-install-input-validation.mjs';
+import { resolveSubstrateInstallParameters } from './substrate-install-parameters.mjs';
+
 const MANIFEST_FILE = 'operator-inputs.json';
 const PLAN_FILE = 'operator-inputs-plan.json';
 const INTERNAL_DIR = '.release-kit-internal';
@@ -114,6 +117,12 @@ const SMOKE_MODIFIER_FIELDS = [
   'allow_http',
   'allow_localhost'
 ];
+const INSTALL_CONFIRMATION_FIELDS = new Set([
+  'confirmed',
+  'confirm_current_install_parameters',
+  'install_parameters_sha256',
+  'operator_run_id'
+]);
 const APPLY_RUNTIME_FIELDS = [
   'timeout',
   'smoke_url',
@@ -270,8 +279,12 @@ async function readJson(file, label) {
   const { buffer, sha256 } = await readFileDigest(file, label);
   try {
     return {
+      file,
+      buffer,
       value: JSON.parse(buffer.toString('utf8')),
-      sha256
+      raw: buffer.toString('utf8'),
+      sha256,
+      inputDigest: sha256
     };
   } catch (error) {
     fail(`invalid JSON in ${label}: ${error.message}`);
@@ -771,16 +784,55 @@ function validateConfirmation(value, label, fields) {
   }
 }
 
+function validateInstallConfirmation(value, label) {
+  const confirmation = assertAllowedKeys(value, INSTALL_CONFIRMATION_FIELDS, label);
+  if (!Object.hasOwn(confirmation, 'confirmed')) {
+    fail(`missing ${label}.confirmed`);
+  }
+  if (confirmation.confirmed !== true) {
+    fail(`${label}.confirmed must be true`);
+  }
+  if (!Object.hasOwn(confirmation, 'operator_run_id')) {
+    fail(`missing ${label}.operator_run_id`);
+  }
+  if (
+    typeof confirmation.operator_run_id !== 'string' ||
+    !OPERATOR_RUN_ID_RE.test(confirmation.operator_run_id)
+  ) {
+    fail(`${label}.operator_run_id must be a safe operator run id`);
+  }
+
+  const hasCurrentConfirmation = Object.hasOwn(
+    confirmation,
+    'confirm_current_install_parameters'
+  );
+  if (
+    hasCurrentConfirmation &&
+    confirmation.confirm_current_install_parameters !== true
+  ) {
+    fail(`${label}.confirm_current_install_parameters must be true`);
+  }
+  if (
+    Object.hasOwn(confirmation, 'install_parameters_sha256') &&
+    (typeof confirmation.install_parameters_sha256 !== 'string' ||
+      !DIGEST_RE.test(confirmation.install_parameters_sha256))
+  ) {
+    fail(`${label}.install_parameters_sha256 must be a sha256 digest`);
+  }
+  if (
+    !hasCurrentConfirmation &&
+    !Object.hasOwn(confirmation, 'install_parameters_sha256')
+  ) {
+    fail(`${label}.confirm_current_install_parameters must be true`);
+  }
+}
+
 function validateConfirmations({ manifest, config, mode }) {
   if (config.installSubstrates) {
     if (!Object.hasOwn(manifest, 'install_confirmation')) {
       fail('install_substrates deployment_path requires install_confirmation');
     }
-    validateConfirmation(manifest.install_confirmation, 'install_confirmation', [
-      { name: 'confirmed', type: 'boolean' },
-      { name: 'install_parameters_sha256', type: 'digest' },
-      { name: 'operator_run_id', type: 'run_id' }
-    ]);
+    validateInstallConfirmation(manifest.install_confirmation, 'install_confirmation');
   } else if (Object.hasOwn(manifest, 'install_confirmation')) {
     fail('install_confirmation is accepted only for install_substrates deployment_path');
   }
@@ -1528,7 +1580,46 @@ function optionalPlanString(value) {
   return value === undefined ? null : String(value);
 }
 
-function buildInternalExpected({ manifest, config, outputRoot, mode }) {
+function installParametersSha256(installParameters) {
+  return installParameters?.installParametersDigest ?? null;
+}
+
+async function resolveInstallParameters({ manifest, refs, config }) {
+  if (!config.installSubstrates) {
+    return null;
+  }
+
+  const installInput = await readJson(
+    refs.substrate_install_inputs.absolute_path,
+    'substrate_install_inputs'
+  );
+  const installSummary = validateSubstrateInstallInputs(
+    installInput.value,
+    targetProfileObject(config.targetProfile),
+    {
+      fail,
+      raw: installInput.raw
+    }
+  );
+  const installParameters = await resolveSubstrateInstallParameters({
+    installInput,
+    installSummary,
+    namespace: manifest.namespace,
+    readJson,
+    fail
+  });
+
+  const legacyDigest = manifest.install_confirmation.install_parameters_sha256;
+  if (
+    legacyDigest !== undefined &&
+    legacyDigest !== installParameters.installParametersDigest
+  ) {
+    fail('install_confirmation.install_parameters_sha256 must match computed install parameters sha256');
+  }
+  return installParameters;
+}
+
+function buildInternalExpected({ manifest, config, outputRoot, mode, installParameters }) {
   const outputBase = deploymentPathOutputBase(outputRoot, manifest.deployment_path);
   const substrateInstallOutputDir = config.installSubstrates
     ? path.join(outputBase, 'substrate-install')
@@ -1548,7 +1639,7 @@ function buildInternalExpected({ manifest, config, outputRoot, mode }) {
     install: config.installSubstrates
       ? {
           operator_run_id: manifest.install_confirmation.operator_run_id,
-          install_parameters_sha256: manifest.install_confirmation.install_parameters_sha256
+          install_parameters_sha256: installParametersSha256(installParameters)
         }
       : null,
     output_dirs: {
@@ -1716,7 +1807,15 @@ function addCommonAirgapArgs({
   });
 }
 
-function buildProducerArgv({ manifest, refs, config, outputRoot, mode, airgapBundleComponents }) {
+function buildProducerArgv({
+  manifest,
+  refs,
+  config,
+  outputRoot,
+  mode,
+  airgapBundleComponents,
+  installParameters
+}) {
   const outputBase = deploymentPathOutputBase(outputRoot, manifest.deployment_path);
   const substrateInstallOutputDir = path.join(outputBase, 'substrate-install');
   const generatedSubstrateTruth = path.join(substrateInstallOutputDir, 'substrate-truth.json');
@@ -1756,7 +1855,7 @@ function buildProducerArgv({ manifest, refs, config, outputRoot, mode, airgapBun
       '--confirm-substrate-install',
       config.targetProfile,
       '--confirm-install-parameters',
-      manifest.install_confirmation.install_parameters_sha256,
+      installParametersSha256(installParameters),
       '--operator-run-id',
       manifest.install_confirmation.operator_run_id
     );
@@ -1924,19 +2023,22 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
       })
     : runtimeOutputRoot;
   const planPath = path.join(planOutputDir, PLAN_FILE);
+  const installParameters = await resolveInstallParameters({ manifest, refs, config });
+  const internalExpected = buildInternalExpected({
+    manifest,
+    config,
+    outputRoot: runtimeOutputRoot,
+    mode,
+    installParameters
+  });
   const producerArgv = buildProducerArgv({
     manifest,
     refs,
     config,
     outputRoot: runtimeOutputRoot,
     mode,
-    airgapBundleComponents
-  });
-  const internalExpected = buildInternalExpected({
-    manifest,
-    config,
-    outputRoot: runtimeOutputRoot,
-    mode
+    airgapBundleComponents,
+    installParameters
   });
   const plan = {
     schema_version: PLAN_SCHEMA,

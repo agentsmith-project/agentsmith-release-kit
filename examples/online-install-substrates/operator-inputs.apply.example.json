@@ -16,7 +16,7 @@
   "routability_probe": "tools/routability-probe",
   "install_confirmation": {
     "confirmed": true,
-    "install_parameters_sha256": "sha256:a07281f40abf260a4f7f014e15edd6b5854dc639a319252b6b5c8770339e6b66",
+    "confirm_current_install_parameters": true,
     "operator_run_id": "operator-install-20260523-001"
   },
   "deploy_confirmation": {

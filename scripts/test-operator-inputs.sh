@@ -147,6 +147,102 @@ function writeAirgapBundleManifest(profileValue, components) {
   );
 }
 
+function writeSubstrateInstallInputs(profileValue) {
+  const profile = targetProfileObject(profileValue);
+  const installationId = `operator-inputs-${profile.distribution}-install`;
+  const serviceReachability = {
+    status: 'declared_reachable',
+    proof: 'operator-inputs fixture proof'
+  };
+  const substrateTruth = {
+    schema_version: 'agentsmith.substrate-connection.truth/v1',
+    target_cluster: profile.target_cluster,
+    substrate_source: profile.substrate_source,
+    distribution: profile.distribution,
+    declared_at: '2026-05-23T12:00:00.000Z',
+    declared_by: 'release-operator@example.com',
+    installed_by: 'agentsmith-release-kit',
+    release_kit_version: '0.1.0',
+    installation_id: installationId,
+    services: {
+      postgresql: {
+        host: 'postgresql.agentsmith.svc',
+        port: 5432,
+        database: 'agentsmith',
+        credential_secret_ref: 'secretRef:agentsmith/postgresql-app',
+        admin_secret_ref: 'secretRef:agentsmith/postgresql-admin',
+        sslmode: 'verify-full',
+        reachability: serviceReachability,
+        extensions: {
+          pgvector: {
+            status: 'installed',
+            version: '0.7.4'
+          }
+        }
+      },
+      mongodb: {
+        host: 'mongodb.agentsmith.svc',
+        port: 27017,
+        credential_secret_ref: 'secretRef:agentsmith/mongodb-app',
+        tls: { mode: 'verify-full' },
+        reachability: serviceReachability
+      },
+      redis: {
+        host: 'redis.agentsmith.svc',
+        port: 6379,
+        credential_secret_ref: 'secretRef:agentsmith/redis-app',
+        tls: { mode: 'verify-full' },
+        reachability: serviceReachability
+      },
+      object_storage: {
+        url: 'https://objects.agentsmith.example.com',
+        bucket: 'agentsmith-release-artifacts',
+        region: 'us-west-2',
+        credential_secret_ref: 'secretRef:agentsmith/object-storage-app',
+        tls: { mode: 'https' },
+        reachability: serviceReachability
+      },
+      oidc: {
+        issuer_url: 'https://oidc.agentsmith.example.com/realms/agentsmith',
+        client_id: 'agentsmith-web',
+        client_secret_ref: 'secretRef:agentsmith/oidc-client',
+        tls: { mode: 'https' },
+        reachability: serviceReachability
+      }
+    }
+  };
+  const installInputs = {
+    schema_version: 'agentsmith.substrate-install-inputs/v1',
+    target_profile: profileValue,
+    installation_id: installationId,
+    substrate_truth: substrateTruth,
+    resources: [
+      {
+        apiVersion: 'v1',
+        kind: 'ConfigMap',
+        metadata: {
+          name: `agentsmith-${profile.distribution}-substrate-endpoints`,
+          namespace: 'agentsmith',
+          labels: {
+            'app.kubernetes.io/managed-by': 'agentsmith-release-kit'
+          },
+          annotations: {
+            'agentsmith.io/managed-by': 'agentsmith-release-kit',
+            'agentsmith.io/installation-id': installationId
+          }
+        },
+        data: {
+          postgresql_host: 'postgresql.agentsmith.svc'
+        }
+      }
+    ]
+  };
+  fs.writeFileSync(
+    path.join(packageRoot, 'substrate-install-inputs.json'),
+    `${JSON.stringify(installInputs, null, 2)}\n`
+  );
+}
+
 const manifest = {
   schema_version: 'agentsmith.operator-inputs/v1',
   operator_inputs_version: 1,
@@ -175,6 +271,14 @@ if (mode === 'apply') {
   manifest.expected_status = 200;
   manifest.timeout = '120s';
   manifest.timeout_ms = 5000;
+}
+
+if (installsSubstrates) {
+  writeSubstrateInstallInputs(
+    deploymentPath.startsWith('airgap/')
+      ? 'existing_kubernetes/kit_installed/airgap'
+      : 'existing_kubernetes/kit_installed/online'
+  );
 }
 
 if (deploymentPath.startsWith('airgap/')) {
@@ -248,7 +352,7 @@ if (installsSubstrates) {
   }
   manifest.install_confirmation = {
     confirmed: true,
-    install_parameters_sha256: `sha256:${'a'.repeat(64)}`,
+    confirm_current_install_parameters: true,
     operator_run_id: 'operator-inputs-install-1001'
   };
 }
@@ -475,6 +579,10 @@ switch (caseName) {
     break;
   case 'missing_install_confirmation':
     delete manifest.install_confirmation;
+    break;
+  case 'missing_current_install_confirmation':
+    delete manifest.install_confirmation.confirm_current_install_parameters;
+    delete manifest.install_confirmation.install_parameters_sha256;
     break;
   case 'missing_kubectl':
     delete manifest.kubectl;
@@ -967,6 +1075,17 @@ if (replay.status !== 0) {
 for (const step of plan.producer_argv) {
   assertArgvPaths(step.argv, `producer ${step.name}`);
   if (step.name === 'substrate-install') {
+    const expectedInstallHash =
+      plan._internal?.expected?.install?.install_parameters_sha256;
+    if (!/^sha256:[0-9a-f]{64}$/.test(expectedInstallHash || '')) {
+      throw new Error('install path plan must expose computed install_parameters_sha256');
+    }
+    if (
+      argValue(step.argv, '--confirm-install-parameters', 'substrate-install') !==
+      expectedInstallHash
+    ) {
+      throw new Error('substrate-install plan must use computed install_parameters_sha256');
+    }
     if (step.argv.includes('--substrate-truth')) {
       throw new Error('substrate-install plan must not pass substrate_truth');
     }
@@ -1245,6 +1364,12 @@ copy_valid_package "$base_install" "$missing_install_dir"
 mutate_manifest "$missing_install_dir" missing_install_confirmation
 expect_fail missing_install_confirmation \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_install_dir"
+
+missing_current_install_dir="$TMP_DIR/invalid-missing-current-install-confirmation"
+copy_valid_package "$base_install" "$missing_current_install_dir"
+mutate_manifest "$missing_current_install_dir" missing_current_install_confirmation
+expect_fail_matching missing_current_install_confirmation 'install_confirmation.confirm_current_install_parameters must be true' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_current_install_dir"
 
 missing_routability_dir="$TMP_DIR/invalid-missing-routability-probe"
 copy_valid_package "$base_install" "$missing_routability_dir"

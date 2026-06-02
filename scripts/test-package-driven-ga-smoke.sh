@@ -58,9 +58,7 @@ prepare_package_online_install_substrates() {
   write_fake_kubectl "$package_dir/tools/kubectl"
   write_fake_routability_probe "$package_dir/tools/routability-probe"
 
-  local install_parameters_sha256
-  install_parameters_sha256="$(install_parameters_digest "$package_dir/substrate-install-inputs.json" agentsmith)"
-  write_online_install_operator_inputs "$package_dir" apply "$install_parameters_sha256" /ok
+  write_online_install_operator_inputs "$package_dir" apply "" /ok
 }
 
 prepare_package_airgap_use_existing() {
@@ -112,11 +110,7 @@ prepare_package_airgap_install_substrates() {
   write_fake_airgap_archive_probe "$package_dir/tools/archive-probe"
   write_fake_airgap_image_loader "$package_dir/tools/image-loader"
 
-  local install_parameters_sha256
-  install_parameters_sha256="$(
-    install_parameters_digest "$package_dir/bundle/operator-inputs/substrate-install-inputs.json" agentsmith
-  )"
-  write_airgap_install_operator_inputs "$package_dir" apply "$install_parameters_sha256" /ok
+  write_airgap_install_operator_inputs "$package_dir" apply "" /ok
 }
 
 assert_no_formal_ga_verdict_outputs() {

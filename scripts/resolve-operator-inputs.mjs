@@ -57,6 +57,14 @@ function parseArgs(argv) {
   return parsed;
 }
 
+function printInstallParametersSha256(plan) {
+  const installParametersSha256 =
+    plan._internal?.expected?.install?.install_parameters_sha256;
+  if (installParametersSha256) {
+    console.log(`operator-inputs install_parameters_sha256: ${installParametersSha256}`);
+  }
+}
+
 try {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -71,6 +79,7 @@ try {
     console.log(JSON.stringify(plan, null, 2));
   } else {
     console.log(`operator-inputs plan written: ${planPath}`);
+    printInstallParametersSha256(plan);
     console.log('operator-inputs intake only; no GA verdict or release readiness was issued.');
   }
 } catch (error) {

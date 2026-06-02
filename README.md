@@ -911,7 +911,8 @@ Copy-pasteable package-driven operator input templates are available in
 
 They are minimal package skeletons for
 `operator-release.sh --operator-inputs`. Install-substrate examples include
-the `install_parameters_sha256` calculation command. Airgap examples keep
+`confirm_current_install_parameters: true`; intake prints the computed
+`install_parameters_sha256` for audit. Airgap examples keep
 release/material inputs bundle-local while package-local executables such as
 `kubectl`, `archive_probe`, and `image_loader` live outside the bundle.
 
