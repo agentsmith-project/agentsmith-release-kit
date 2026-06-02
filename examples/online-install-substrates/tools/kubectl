@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 set -eu
-exec kubectl "$@"
-
+echo "replace tools/kubectl with the operator-approved kubectl wrapper/binary" >&2
+exit 2
