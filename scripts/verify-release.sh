@@ -7,16 +7,15 @@ NODE_BIN="${NODE:-node}"
 usage() {
   cat <<'USAGE'
 Usage:
-  # Operator-facing v0 facade:
-  #   bash scripts/operator-release.sh online use_existing ...
-  #   bash scripts/operator-release.sh online kit_provided ...
-  #   bash scripts/operator-release.sh airgap use_existing ...
-  #   bash scripts/operator-release.sh airgap kit_provided ...
-  #   bash scripts/operator-release.sh airgap-bundle use_existing ...
-  #   bash scripts/operator-release.sh airgap-bundle kit_provided ...
-  # install_substrates is not implemented by the operator facade; use the
-  # separate --substrate-install producer report for deployment-path finalization.
-  # verify-release.sh remains the producer catalog and focused diagnostic entry.
+  # Operator main path:
+  #   prepare one operator-inputs package per deployment path
+  #   bash scripts/operator-release.sh --operator-inputs <package-or-json> --run
+  #   bash scripts/operator-release.sh --ga-report ... --output-dir <dir>
+  #   read the final ga-release-report.json
+  # verify-release.sh remains the maintainer/internal producer catalog and
+  # focused diagnostic entry. Legacy positional operator-release surfaces,
+  # adoption, signoff intake, release-engineering intake, and deployment-path
+  # finalization are maintainer/internal references, not operator runbook steps.
   bash scripts/verify-release.sh --quick
   bash scripts/verify-release.sh --inputs --release-contract <json> --deploy-template-package <json> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir>
   bash scripts/verify-release.sh --template-package --release-contract <json> --deploy-template-package <json> --archive <tgz> --output-dir <dir>
@@ -71,7 +70,7 @@ Bootstrap status:
   --airgap-bundle-render-check renders an already assembled airgap bundle offline and runs rendered manifest image inventory check only; it is not package, offline install, deploy, registry, apply, smoke, or release readiness.
   --airgap-deployment-gate runs the airgap focused chain for existing Kubernetes external-declared or kit-installed airgap targets only; kit-installed adds substrate-pack-check but not substrate installation. It is not package, offline install, registry mirror, operator signoff, or release readiness.
   --airgap-consume-rehearsal discovers bundle components from an already assembled bundle, then runs bundle-check plus the airgap focused chain; --rehearsal-label is operator-provided label-only metadata and does not change the target profile or prove kind; it is not package, offline install, registry mirror, operator signoff, deploy, or release readiness.
-  --airgap-adoption aggregates already generated matching airgap-bundle and confirmed-apply airgap operator summaries for repo-local use_existing or kit_provided adoption preparation only; kit airgap binds substrate pack and substrate-pack-check truth, but this is not deploy, package, operator signoff, operator verdict, full release gate, or release readiness.
+  --airgap-adoption aggregates already generated matching airgap-bundle and confirmed-apply airgap operator summaries for repo-local use_existing or kit_provided adoption preparation only; kit airgap binds substrate pack and substrate-pack-check truth, but this is not deploy, package, operator signoff, operator verdict, final GA aggregate, or release readiness.
   --substrate-pack-check checks only a kit-installed substrate pack manifest and matching substrate truth for existing Kubernetes online/airgap targets; it is not substrate installation, deploy, package, or release readiness.
   --substrate-routability checks only existing Kubernetes / kit-installed / online substrate endpoint routability through an operator pod-network probe; it is not substrate installation, deploy, package, or release readiness.
   --substrate-install installs only namespace-scoped kit substrate resources from a validated JSON resource list and writes substrate install report/truth; server-dry-run is diagnostic only and apply report/truth are producer evidence, not release readiness.
@@ -80,7 +79,7 @@ Bootstrap status:
   --smoke checks one route status after a bound rollout report only; it is not release readiness.
   --online-deployment-gate runs the online focused chain in order only for existing Kubernetes external-declared online and kit-installed online targets; kit-installed online requires --substrate-pack-manifest and --routability-probe. Optional evidence output is a validated focused envelope for external-declared online or kit-installed online, not release readiness.
   --online-deployment-gate evidence args are accepted only with --mode apply.
-  --online-adoption aggregates already generated confirmed-apply online/use_existing and online/kit_provided focused reports/evidence roots for repo-local adoption preparation only; it is not deploy, package, operator signoff, full release gate, or release readiness.
+  --online-adoption aggregates already generated confirmed-apply online/use_existing and online/kit_provided focused reports/evidence roots for repo-local adoption preparation only; it is not deploy, package, operator signoff, final GA aggregate, or release readiness.
   --release-engineering-gate-intake is maintainer-only for explicit GA or compliance trigger work; it consumes the focused online adoption report plus focused airgap/use_existing and airgap/kit_provided adoption reports, writes readiness=false and formal_verdict=not_issued only, and is not deploy, package, offline, operator verdict, or release readiness.
   --deployment-path is a maintainer/internal only finalizer for --ga-release input preparation; it consumes already passed focused producer reports, writes deployment-path-report.json plus a sibling finalizer manifest/source-evidence files, does not rerun producers, and is not operator-facing or release readiness.
   --ga-release is the release-kit final GA aggregate; it consumes finalized deployment path reports and AgentSmith product-side reports, writes ga-release-report.json with formal_verdict=issued on pass, and does not rerun producers.

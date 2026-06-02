@@ -12,19 +12,23 @@ do not edit `agentsmith`, `agentsmith-fs-control-plane`, `mbos-sandbox-v1`, or
 any other sibling repo unless the user explicitly gives a separate task for
 that repository.
 
-## Bootstrap Status
+## Current Status
 
-Current status is bootstrap-focused, not release-ready. The repository has
-identity and boundary docs plus focused diagnostics for inputs,
-template-package, render, render-check, image-map, registry presence, airgap
-bundle manifest checking, apply, rollout, smoke, online focused chain
-orchestration, airgap consume rehearsal, airgap adoption aggregation,
-deployment path report finalization, evidence, and target-preflight.
+Current status is package-driven operator orchestration plus focused
+diagnostics and a final GA aggregate report. The operator path prepares
+`operator-inputs`, runs `bash scripts/operator-release.sh --operator-inputs
+<pkg> --run` for path-level evidence, then uses
+`bash scripts/operator-release.sh --ga-report` to write
+`ga-release-report.json` with `formal_verdict=issued` when the required path
+evidence and AgentSmith product-side reports pass.
 
-These diagnostics produce `readiness: false` evidence. The repository still
-does not have full deploy readiness, package readiness, registry mirror
-execution, airgap install execution, rollback automation, or a full release
-gate.
+Focused diagnostics still exist for inputs, template-package, render,
+render-check, image-map, registry presence, airgap bundle manifest checking,
+apply, rollout, smoke, online focused chain orchestration, airgap consume
+rehearsal, airgap adoption aggregation, deployment path report finalization,
+evidence, and target-preflight. These diagnostics produce `readiness: false`
+evidence and are not operator runbook steps unless the package-driven facade
+invokes them.
 
 ## Scope
 

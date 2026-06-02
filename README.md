@@ -1,14 +1,13 @@
 # AgentSmith Release Kit
 
-Status: bootstrap-focused producers plus GA aggregate gate.
+Status: package-driven operator facade plus focused producers and GA aggregate
+report.
 
-This repository is the future deploy and package execution home for
-AgentSmith releases. It is intentionally small at bootstrap time: repo
-identity, boundary documents, handoff guidance, and focused diagnostics. It
-contains package-driven operator intake/run orchestration, path-level evidence
-producers, focused diagnostics, operator runbooks, scoped runbook acceptance
-binding, and GA aggregate verification, but does not contain full deploy
-tooling yet.
+This repository is the deploy/package evidence home for AgentSmith releases.
+It keeps the operator path small: prepare `operator-inputs`, run the
+`operator-release.sh` facade, and finish with `ga-release-report.json`.
+Maintainer/internal producer diagnostics remain available for evidence
+plumbing and troubleshooting, but they are not the operator copy-paste path.
 
 ## Canonical Identity
 
@@ -60,8 +59,13 @@ AgentSmith Release Kit does not own:
 
 The operator-facing path is a single package-driven facade:
 
+1. Prepare one `operator-inputs` package for the selected deployment path.
+2. Execute the package with the operator facade.
+3. Repeat for each required path.
+4. Generate the final GA report from the four package paths plus AgentSmith
+   product-side reports.
+
 ```bash
-bash scripts/operator-release.sh --operator-inputs <dir-or-json>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 bash scripts/operator-release.sh --ga-report \
   --operator-inputs <online-use-existing-pkg> \
@@ -72,6 +76,9 @@ bash scripts/operator-release.sh --ga-report \
   --post-deploy-product-smoke-report <json> \
   --output-dir <dir>
 ```
+
+Run the same `--operator-inputs <dir-or-json>` command without `--run` only
+when you want package validation before execution.
 
 The package contains one `operator-inputs.json` for one selected deployment
 path. It is not a four-path manifest. The four accepted `deployment_path`
@@ -132,51 +139,11 @@ These paths are still release-kit installer producer/finalizer evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
 
-Maintainer/internal diagnostics still expose the old positional surface:
-`online use_existing`, `online kit_provided`, `airgap use_existing`, and
-`airgap kit_provided`. These commands are compatibility wrappers around
-focused producer diagnostics. They are not the operator main path, not a
-formal release verdict, not package readiness, not operator readiness, and not
-GA signoff. They map to existing-Kubernetes machine profiles:
-`existing_kubernetes/external_declared/online`,
-`existing_kubernetes/external_declared/airgap`,
-`existing_kubernetes/kit_installed/online`, and
-`existing_kubernetes/kit_installed/airgap`.
-
-Those focused producer diagnostics use machine profile axes internally:
-
-- `target_cluster`: package-driven release paths use `existing_kubernetes`;
-  `kind_rehearsal` is accepted only where a local or CI rehearsal diagnostic
-  explicitly supports it.
-- `substrate_source`: `external_declared` or `kit_installed`.
-- `distribution`: `online` or `airgap`.
-
-`kit_provided` is the legacy/internal positional compatibility name for focused
-diagnostics. It means the kit validates a supplied substrate pack manifest,
-declared substrate connection truth, and related routability/materiality
-evidence. It does not install databases, buckets, OIDC realms, or other
-substrates, and it is not a GA operator model. Operator-facing packages use
-`install_substrates`.
-`install_substrates` requires an explicit report from the separate
-`--substrate-install` producer only when maintainers run focused diagnostics
-directly. The package-driven `operator-release.sh --operator-inputs <pkg> --run`
-path creates that namespace-scoped installer report internally for
-the online install package path plus the matching airgap install package path,
-binds the installer output truth into the deployment gate, and finalizes
-path-level evidence. `airgap/use_existing` now finalizes
-path-level evidence from an already assembled bundle with package-local
-`kubectl`, explicit `context`, and bundle-local release/template components.
-The airgap install package path uses the same installer report internally and
-does not write generated truth back into the input bundle.
-`installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
-It is not installer proof and does not mean release-kit created databases,
-buckets, OIDC realms, or other substrate resources.
-
-`kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input. It
-is not a release profile, user deployment prerequisite, package-driven release
-target, or replacement for real Kubernetes evidence. Removed old input names
-and synonym axes such as `local-kind`, `existing-cluster`, `real-k8s`, `kind`,
-or `cluster` fail fast.
+Maintainer/internal references, including legacy positional surfaces,
+adoption aggregation, operator signoff intake, release-engineering intake, and
+deployment-path finalization, are documented under Maintainer/Internal
+Diagnostics. They are not the operator main path, not package readiness, not
+operator readiness, and not a separate GA signoff surface.
 
 For `airgap`, operators must provide all required tools, templates, artifacts,
 and images from inside the target network. Airgap flow must not download from
@@ -189,10 +156,9 @@ tool/digest contract, not proof of network isolation.
 
 ## Current Verification
 
-Operator package intake and run path:
+Operator package runbook:
 
 ```bash
-bash scripts/operator-release.sh --operator-inputs <dir-or-json>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 bash scripts/operator-release.sh --ga-report \
   --operator-inputs <online-use-existing-pkg> \
@@ -204,10 +170,12 @@ bash scripts/operator-release.sh --ga-report \
   --output-dir <dir>
 ```
 
-This package-driven path writes finalized deployment-path handoff evidence for
-the release captain/finalizer when `--run` executes an apply manifest. It does
-not issue a formal GA verdict. Formal success or failure is issued only by
-`--ga-report`, which writes the final `ga-release-report.json`.
+Use `--operator-inputs <dir-or-json>` without `--run` only for package
+validation. The package-driven `--run` path writes finalized deployment-path
+handoff evidence for the release captain/finalizer when it executes an apply
+manifest. It does not issue a formal GA verdict. Formal release success or
+failure is issued only by `--ga-report`, which writes the final
+`ga-release-report.json`.
 
 ### Maintainer/Internal Diagnostics
 
@@ -230,6 +198,22 @@ operator runbook acceptance is a separate focused check that binds the
 legacy positional path, existing-Kubernetes airgap machine profile, surface report,
 evidence root, and safe runbook path/digest without adding identity,
 signature, verdict, or readiness semantics.
+Legacy `kit_provided` is an internal compatibility alias for focused
+diagnostics; it is not a GA operator `deployment_path`. `online/kit_provided`
+and `airgap/kit_provided` map to the kit-supplied producer diagnostics only.
+`install_substrates` requires an explicit report from the separate
+`--substrate-install` producer only when maintainers run focused diagnostics
+directly. The package-driven
+`operator-release.sh --operator-inputs <pkg> --run` path creates that
+namespace-scoped installer report internally for the online install package
+path plus the matching airgap install package path, binds the installer output
+truth into the deployment gate, and finalizes path-level evidence.
+`installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
+It is not installer proof and does not mean release-kit created databases,
+buckets, OIDC realms, or other substrate resources.
+`kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input. It
+is not a release profile, user deployment prerequisite, package-driven release
+target, or replacement for real Kubernetes evidence.
 `--airgap-adoption` aggregates matching generated airgap-bundle and
 confirmed-apply airgap surfaces for `use_existing` or `kit_provided`
 repo-local adoption preparation only. For kit airgap it binds the bundle
@@ -991,7 +975,7 @@ reuses `--evidence`, requires both paths to bind the same release id, git sha,
 release contract raw digest, and release contract subject digest, and writes
 only `online-adoption-report.json` with digest/provenance/coverage summaries.
 The report keeps `readiness: false`; this is not deploy, package, operator
-signoff, AgentSmith product-flow, full release gate, or release readiness.
+signoff, AgentSmith product-flow, final GA aggregate, or release readiness.
 
 Release engineering gate intake focused diagnostic:
 
