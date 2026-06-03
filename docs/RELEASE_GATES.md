@@ -1118,8 +1118,9 @@ Inputs containing `readiness: true`, `release_verdict`, `operator_verdict`,
 The generated `release-engineering-gate-intake-report.json` uses `schema:
 agentsmith.release-engineering-gate-intake/v1`, `scope:
 release_engineering_gate_candidate_intake_only`, `readiness: false`, `status:
-pass`, and `formal_verdict: not_issued`. It lists blocking gaps for a future
-formal operator verdict plus offline/package/release readiness. It is not an
+pass`, and `formal_verdict: not_issued`. It lists missing inputs for the final
+`--ga-release` aggregate, including package-driven path evidence, airgap
+offline path evidence, and AgentSmith product-side reports. It is not an
 operator verdict, evidence-envelope output, offline package readiness, deploy
 readiness, release readiness, registry mirror action, rollback flow, cloud
 provisioning flow, product flow, backend-real check, or AgentSmith handoff.

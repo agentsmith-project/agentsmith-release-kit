@@ -307,17 +307,18 @@ are present, release identity/digest/provenance bindings agree with the
 release contract, focused producer reports are not used as adoption inputs, and
 no input already contains readiness or verdict fields. It writes
 `release-engineering-gate-intake-report.json` with `readiness=false` and
-`formal_verdict=not_issued`, and lists future formal operator verdict plus
-offline/package/release readiness as blocking gaps. It is not accepted by
-evidence intake and is not deploy/package/release readiness.
+`formal_verdict=not_issued`, and lists the missing inputs for the final
+`--ga-release` aggregate. It is not accepted by evidence intake and is not
+deploy/package/release readiness.
 
 ### Current Notes
 
-Pre-GA release contracts may declare the four existing-Kubernetes operator
-choice mappings plus `kind_rehearsal/kit_installed/online` only as
-rehearsal-only input, but none may be marked required. Keep every
-`target_profiles[].required` value `false`; `required: true` fails fast because
-release-kit does not yet have full deploy/package evidence for every path.
+Legacy release contract intake may declare the four existing-Kubernetes
+diagnostic profile tuples plus `kind_rehearsal/kit_installed/online` only as
+focused input, but none may be marked required. Keep every
+`target_profiles[].required` value `false`; package-driven operator paths and
+the final `--ga-release` aggregate consume finalized path evidence instead of
+using release-contract profile `required` flags as an operator verdict.
 
 For image-map, online targets may omit `--target-registry` to use source
 digest refs directly. Airgap targets require

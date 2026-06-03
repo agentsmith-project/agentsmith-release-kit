@@ -433,10 +433,10 @@ const requiredQuadrants = [
   'airgap/kit_provided'
 ];
 const requiredGaps = new Set([
-  'formal_operator_verdict',
-  'offline_install_readiness',
-  'package_readiness',
-  'release_readiness'
+  'final_ga_aggregate',
+  'package_driven_path_evidence',
+  'airgap_offline_path_evidence',
+  'agentsmith_product_reports'
 ]);
 
 if (report.schema !== 'agentsmith.release-engineering-gate-intake/v1') {
@@ -487,6 +487,9 @@ for (const gap of report.blocking_gaps || []) {
   if (gap.status !== 'not_issued' || gap.blocking !== true) {
     throw new Error(`blocking gap must be not issued and blocking: ${gap.gap}`);
   }
+}
+if (JSON.stringify(report.blocking_gaps || []).includes('formal_operator_verdict')) {
+  throw new Error('intake report must not imply a separate formal operator verdict');
 }
 if (JSON.stringify(report).includes('"readiness":true')) {
   throw new Error('intake report must not contain readiness=true');

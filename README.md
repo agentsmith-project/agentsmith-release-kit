@@ -240,10 +240,11 @@ requires the four legacy positional diagnostics (`online/use_existing`,
 release identity and release contract digest/provenance, and writes
 `release-engineering-gate-intake-report.json` with `readiness: false`,
 `scope: release_engineering_gate_candidate_intake_only`, `status: pass`, and
-`formal_verdict: not_issued`. The report lists blocking gaps for a future
-formal operator verdict plus offline/package/release readiness; it is not an
-evidence envelope output, operator verdict, package readiness, or release
-readiness.
+`formal_verdict: not_issued`. The report lists the missing inputs that still
+belong to the final `--ga-release` aggregate, including package-driven path
+evidence, airgap offline path evidence, and AgentSmith product-side reports; it
+is not an evidence envelope output, operator verdict, package readiness, or
+release readiness.
 `verify-release.sh` remains the producer catalog and maintainer/focused
 diagnostic entry.
 

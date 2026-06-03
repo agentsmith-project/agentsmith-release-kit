@@ -1097,22 +1097,22 @@ async function main(argv) {
     },
     blocking_gaps: [
       {
-        gap: 'formal_operator_verdict',
+        gap: 'final_ga_aggregate',
         status: 'not_issued',
         blocking: true
       },
       {
-        gap: 'offline_install_readiness',
+        gap: 'package_driven_path_evidence',
         status: 'not_issued',
         blocking: true
       },
       {
-        gap: 'package_readiness',
+        gap: 'airgap_offline_path_evidence',
         status: 'not_issued',
         blocking: true
       },
       {
-        gap: 'release_readiness',
+        gap: 'agentsmith_product_reports',
         status: 'not_issued',
         blocking: true
       }

@@ -207,6 +207,11 @@ reject_scan \
   "${doc_policy_paths[@]}"
 
 reject_scan \
+  "stale formal operator verdict gap wording found" \
+  'future formal operator verdict|formal_operator_verdict|does not yet have full deploy/package evidence' \
+  "${doc_policy_paths[@]}" scripts/verify-release-engineering-gate-intake.mjs
+
+reject_scan \
   "operator release choice wording found" \
   'operator release choices?' \
   "${doc_policy_paths[@]}"

@@ -74,8 +74,8 @@ airgap adoption reports, requires the four online/airgap use-existing/kit-provid
 operator choices, and writes `release-engineering-gate-intake-report.json`
 with `readiness: false`, `status: pass`, and `formal_verdict: not_issued`.
 This maintainer-only path is for explicit GA or compliance trigger work; it
-lists future formal operator verdict plus offline/package/release readiness as
-blocking gaps and is not release readiness.
+lists the missing inputs for the final `--ga-release` aggregate and is not
+release readiness.
 
 ## Development Principles
 
