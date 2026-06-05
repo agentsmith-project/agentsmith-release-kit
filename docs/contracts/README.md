@@ -98,7 +98,7 @@ rendered manifest directory; it does not consume AgentSmith source paths or
 declare release readiness. It binds Deployment, StatefulSet, DaemonSet,
 ReplicaSet, Job, CronJob, and Pod `containers` and `initContainers` images to
 `deploy_image_inventory` by exact image ref or digest, rejects non-canonical
-pre-GA target profile names, and writes `render-report.json` with
+non-GA target profile names, and writes `render-report.json` with
 `readiness: false` and `scope: render_check_image_inventory_only`. The report
 must not include AgentSmith product-flow fields, `verdict`, or
 `release_verdict`.
@@ -112,9 +112,9 @@ existing Kubernetes canonical profiles as CLI targets:
 `existing_kubernetes/kit_installed/online`, and
 `existing_kubernetes/kit_installed/airgap`.
 `kind_rehearsal/kit_installed/online` is rehearsal-only accepted input and out
-of scope for image-map CLI. Only accepted pre-GA profile tuples are accepted in
+of scope for image-map CLI. Only GA-supported profile tuples are accepted in
 `release_contract.target_profiles`; the kind tuple is not an operator choice,
-and non-canonical pre-GA target names and synonym axes fail fast. It requires
+and non-GA target names and synonym axes fail fast. It requires
 airgap runs to provide
 `--target-registry <registry-host[/namespace]>`. Every inventory image must be
 digest-pinned with a matching `digest` field, and duplicate ids, images, or
@@ -192,7 +192,7 @@ archive sha256. Component paths and image artifact paths must be POSIX-style
 relative paths under the bundle root, and sha256 values must match the
 referenced files. The release contract must declare the selected airgap target
 profile in `target_profiles`, each target profile entry must carry
-`required: false` during pre-GA, and
+`required: false` for this GA bundle intake, and
 `support_level` is rejected. The bundle manifest accepts only the documented
 top-level, `bindings`, `components`, `image_artifact_declarations`,
 `payload_artifacts`, `operator_prerequisites`, and `substrate` fields. Image
@@ -399,8 +399,8 @@ aligned. Kit-installed airgap evidence must also include
 `substrate_pack_manifest` component plus
 `bindings.substrate_pack_manifest_sha256`. The old two-file and old
 three-file airgap output values are rejected.
-`deploy-result.json#substrate` is future reserved and is not accepted during
-pre-GA. Render, rollout, and smoke reports remain individual focused diagnostic
+`deploy-result.json#substrate` is reserved outside the current GA evidence
+contract. Render, rollout, and smoke reports remain individual focused diagnostic
 files, but their combinations are not accepted release-kit evidence envelope
 outputs. `airgap-bundle-load-plan-report.json` and
 `airgap-bundle-render-check-report.json` are also not accepted release-kit
@@ -430,7 +430,7 @@ The current `--target-preflight` validator is a focused substrate plus target
 prerequisites intake diagnostic only. It accepts
 `agentsmith.substrate-connection.truth/v1` and
 `agentsmith.target-prerequisites.truth/v1`, rejects Docker substrate truth and
-non-canonical pre-GA target names, and binds both documents to the supplied
+non-GA target names, and binds both documents to the supplied
 `target_cluster/substrate_source/distribution` tuple. It writes
 `target-preflight-report.json` with `schema:
 agentsmith.target-preflight-report/v1`, `readiness: false`, and `scope:

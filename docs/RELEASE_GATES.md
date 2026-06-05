@@ -275,14 +275,14 @@ supplied by the release contract. This is still a focused diagnostic with
 Every `release_contract.target_profiles` entry must declare
 `required: boolean`; `support_level` is not accepted as a replacement. Duplicate
 `target_cluster/substrate_source/distribution` tuples are rejected. Every entry
-must use an accepted pre-GA profile tuple:
+must use an accepted GA profile tuple:
 `existing_kubernetes/external_declared/online`,
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`,
 `existing_kubernetes/kit_installed/airgap`, or
 `kind_rehearsal/kit_installed/online`. Only the four existing-Kubernetes tuples
 map to the operator choice surface; this is not a formal verdict/readiness
-claim. The kind tuple is rehearsal-only accepted input. During pre-GA every
+claim. The kind tuple is rehearsal-only accepted input. During this GA cut every
 entry must use
 `required: false`; any `required: true` target fails fast.
 
@@ -365,7 +365,7 @@ bound to the release inventory. It does not log in to a registry, pull, push,
 mirror, or check registry presence.
 
 The template language is scalar placeholder replacement only. It has no
-conditionals, loops, includes, Helm, Kustomize, or non-canonical pre-GA target
+conditionals, loops, includes, Helm, Kustomize, or non-GA target
 names. Supported placeholder roots are `values`, `images`, `target`,
 `substrate`, and `release`;
 examples are `${{ values.namespace }}`, `${{ images.agentsmith_app.image }}`,
@@ -377,7 +377,7 @@ After rendering, workload images in Deployment, StatefulSet, DaemonSet,
 ReplicaSet, Job, CronJob, Pod, and List manifests must be digest-pinned and
 must match `release_contract.deploy_image_inventory` by exact image ref or
 digest. Unknown images, tag-only image refs, digest drift, secret-looking
-rendered payloads, local/source paths, non-canonical pre-GA target profile names
+rendered payloads, local/source paths, non-GA target profile names
 such as `local-kind`, and synonym axes such as `kind` or `cluster` are rejected.
 
 The generated `manifest-render-report.json` must keep `readiness: false`,
@@ -404,7 +404,7 @@ DaemonSet, ReplicaSet, Job, CronJob, and Pod workload images under
 `containers` and `initContainers`. Every discovered workload image must be
 digest-pinned and must match `release_contract.deploy_image_inventory` by exact
 image ref or digest. It rejects unknown images, tag-only image refs, digest
-drift, non-canonical pre-GA target names such as `local-kind`, synonym axes,
+drift, non-GA target names such as `local-kind`, synonym axes,
 manifest path escapes, external symlinks, and obvious plaintext credential or
 kubeconfig payloads.
 
@@ -434,8 +434,8 @@ call Kubernetes, or claim deploy, package, or release readiness.
 `existing_kubernetes/kit_installed/online`, and
 `existing_kubernetes/kit_installed/airgap`.
 `kind_rehearsal/kit_installed/online` is rehearsal-only accepted input and out
-of scope for image-map CLI. Only accepted pre-GA profile tuples are accepted in
-`release_contract.target_profiles`; non-canonical pre-GA names and synonym
+of scope for image-map CLI. Only GA-supported profile tuples are accepted in
+`release_contract.target_profiles`; non-GA names and synonym
 axes fail fast. The selected target profile must exist in the release
 contract. Every inventory item must have unique `id`, `image`, and `digest`
 values; each image must be digest-pinned and its `@sha256` suffix must match
@@ -465,7 +465,7 @@ it as a normal digest-bound mapping. Render and airgap archive diagnostics carry
 that id through their existing image placeholder adoption and image artifact
 declaration rules. This is not a dedicated runner runtime gate and does not
 cover AgentSmith runner runtime, backend-real validation, or release readiness.
-During pre-GA, stale six-image required-id inputs, obsolete
+During the GA cut, stale six-image required-id inputs, obsolete
 `${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale
 runner-name aliases such as `agent-task-runner` or `agentsmith-codex-runner`
 are not supported success or compatibility paths; they are limited to fail-fast
@@ -590,7 +590,7 @@ presence, or claim offline install, deploy, package, or release readiness.
 `--airgap-bundle-check` accepts
 `existing_kubernetes/external_declared/airgap` and
 `existing_kubernetes/kit_installed/airgap`. Online, kind rehearsal,
-non-canonical pre-GA target names, and synonym axes fail fast. The image-map
+non-GA target names, and synonym axes fail fast. The image-map
 must be a passing airgap `agentsmith.image-map/v1` report with `scope:
 image_map_only`, `readiness: false`, `mirror_required: true`, a target
 registry, and `action: mirror_required` on every mapping. The bundle check
@@ -604,7 +604,7 @@ bundle check release readiness.
 
 The release contract `target_profiles` value must be an array and must declare
 the selected airgap target profile. Every target profile tuple must be accepted
-for pre-GA intake, every entry must carry `required: false` during pre-GA, and
+for this GA bundle intake, every entry must carry `required: false`, and
 `support_level` is rejected. The kit-installed airgap check validates only
 bundle manifest/component/digest binding; it does not deploy substrates.
 
@@ -665,7 +665,7 @@ This focused guard exercises `bash scripts/verify-release.sh
 and first reuses the existing `--airgap-bundle-check` validator. It accepts
 `existing_kubernetes/external_declared/airgap` and
 `existing_kubernetes/kit_installed/airgap`; online, kind rehearsal,
-non-canonical pre-GA target names, and synonym axes fail fast.
+non-GA target names, and synonym axes fail fast.
 It does not call Docker, skopeo, oras, kubectl, curl, or wget, does not log in
 to a registry, pull, push, mirror, load/import images, apply manifests, deploy,
 or smoke.
@@ -709,7 +709,7 @@ reuses `--airgap-image-archive-check`, so the existing bundle-check and archive
 materiality semantics must pass before any loader call. It accepts only
 `existing_kubernetes/external_declared/airgap` and
 `existing_kubernetes/kit_installed/airgap`; online, kind rehearsal,
-non-canonical pre-GA target names, and synonym axes fail fast.
+non-GA target names, and synonym axes fail fast.
 
 The diagnostic requires both `--archive-probe <executable>` and
 `--image-loader <executable>`. The loader is operator-provided and is invoked
@@ -745,7 +745,7 @@ This focused guard exercises `bash scripts/verify-release.sh
 --bundle-load-plan`. It consumes an already assembled airgap bundle and first
 reuses the existing `--airgap-bundle-check` validator. It accepts only
 `existing_kubernetes/external_declared/airgap`; online, kind rehearsal,
-`kit_installed`, non-canonical pre-GA target names, and synonym axes fail fast
+`kit_installed`, non-GA target names, and synonym axes fail fast
 before self-check.
 
 The load plan rechecks that the image-map is a passing airgap mirror plan with
@@ -785,7 +785,7 @@ image-map, bundle manifest, render values, and substrate truth must all be
 local files inside the bundle root. It accepts only
 `existing_kubernetes/external_declared/airgap` and
 `existing_kubernetes/kit_installed/airgap`; online, kind rehearsal,
-non-canonical pre-GA target names, and synonym axes fail fast.
+non-GA target names, and synonym axes fail fast.
 
 The diagnostic first reuses `--airgap-bundle-check`, then reuses `--render`
 with the bundle-local airgap image-map, then reuses `--render-check` against
@@ -900,7 +900,7 @@ claim deploy or release readiness.
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`, and
 `existing_kubernetes/kit_installed/airgap`. `kind_rehearsal`, aliases such as
-`offline`, non-canonical pre-GA names, and synonym axes fail fast.
+`offline`, non-GA names, and synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--kubeconfig`, `--context`, `--kubectl`, and `--forbidden-source-root`.
@@ -939,7 +939,7 @@ claim deploy or release readiness.
 `existing_kubernetes/external_declared/airgap`,
 `existing_kubernetes/kit_installed/online`, and
 `existing_kubernetes/kit_installed/airgap`. `kind_rehearsal`, aliases such as
-`offline`, non-canonical pre-GA names, and synonym axes fail fast.
+`offline`, non-GA names, and synonym axes fail fast.
 Required inputs are `--release-contract`, `--rendered-manifests`,
 `--target-profile`, `--namespace`, and `--output-dir`. Optional inputs are
 `--timeout` (default `120s`), `--kubeconfig`, `--context`, `--kubectl`, and
@@ -1230,13 +1230,13 @@ the explicit `release_kit_output` mapping, `evidence.release_kit_version`
 plain semver check against `release_contract.min_release_kit_version`,
 release-kit provenance, subject file digests, subject path safety,
 output-specific semantics, and redaction/source scans for the envelope and
-subject files. It rejects non-canonical pre-GA target names, synonym axes,
+subject files. It rejects non-GA target names, synonym axes,
 AgentSmith product-flow fields, local provenance URIs, absolute paths, `..`
 escapes, symlinks, hardlinks, and obvious secret payloads.
 Accepted `release_kit_output` values are `image-map.json`,
 `online-deployment-gate-report.json`, and `airgap_bundle_check`;
 `AgentSmith product flow aggregate` is rejected. `deploy-result.json#substrate`
-is future reserved and is rejected during pre-GA until there is a current
+is reserved outside the current GA evidence contract until there is a current
 producer and schema to revalidate. The image-map output is rechecked for
 `agentsmith.image-map/v1`, `scope: image_map_only`, `readiness: false`,
 `status: pass`, release/target binding, and digest-pinned mappings against
@@ -1333,7 +1333,7 @@ package, or release readiness.
 The only accepted target profiles are
 `existing_kubernetes/kit_installed/online` and
 `existing_kubernetes/kit_installed/airgap`. `external_declared`,
-`kind_rehearsal`, non-canonical pre-GA names such as `local-kind`,
+`kind_rehearsal`, non-GA names such as `local-kind`,
 `existing-cluster`, `real-k8s`, and synonym axes such as `cluster` or
 `offline` fail fast.
 
@@ -1455,7 +1455,7 @@ or build an airgap bundle.
 The accepted truth schemas are
 `agentsmith.substrate-connection.truth/v1` and
 `agentsmith.target-prerequisites.truth/v1`. Docker substrate truth,
-non-canonical pre-GA target names such as `local-kind`, `existing-cluster`,
+non-GA target names such as `local-kind`, `existing-cluster`,
 `real-k8s`, and synonym axes such as `kind` or `cluster` are rejected. The
 supported focused profiles for this diagnostic are the accepted
 target-preflight intake profiles:

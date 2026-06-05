@@ -1,10 +1,10 @@
 # Development Guide
 
-Status: bootstrap + GA aggregate gate.
+Status: package-driven GA operator facade plus final aggregate gate.
 
 ## Local Setup
 
-No package manager setup is required for the bootstrap skeleton.
+No package manager setup is required for the repo-local shell script toolchain.
 
 Default focused closure:
 
@@ -84,7 +84,7 @@ final `--ga-release` aggregate and is not release readiness.
 
 ## Inputs
 
-Future implementation must consume only explicit inputs:
+Current GA implementation consumes only explicit inputs:
 
 - AgentSmith release contract.
 - AgentSmith deploy template package.
@@ -148,7 +148,7 @@ with roots `values`, `images`, `target`, `substrate`, and `release`, such as
 `${{ values.namespace }}` or
 `${{ images.web.image }}`; unknown placeholders fail fast. It rejects archive
 path escapes, symlinks, hardlinks, non-canonical target profile tuples,
-pre-GA target profile names, secret-looking rendered payloads, local source
+non-GA target profile names, secret-looking rendered payloads, local source
 paths, and workload images that are not digest-pinned entries in
 `deploy_image_inventory`. It does not call
 `kubectl`, apply or dry-run manifests, roll out workloads, smoke a cluster,
@@ -161,7 +161,7 @@ already-rendered manifests directory, and an explicit target profile. Its
 `render-report.json` must keep `readiness: false` and
 `scope: render_check_image_inventory_only`; it checks digest-pinned workload
 images against `deploy_image_inventory` and rejects non-canonical target
-profile tuples, pre-GA target profile names, path escapes, external symlinks,
+profile tuples, non-GA target profile names, path escapes, external symlinks,
 and obvious plaintext credential or kubeconfig payloads. It does not render
 templates, apply resources, roll out workloads, smoke a cluster, package
 artifacts, or claim deploy or release readiness.
@@ -180,7 +180,7 @@ rehearsal-only accepted input for focused intake/coverage. It is not a release
 profile, release target, or user deployment prerequisite, and it is out of
 scope for image-map CLI. `release_contract.target_profiles` is limited to the
 four existing-Kubernetes operator choice mappings plus this rehearsal-only
-accepted input; non-canonical pre-GA names and synonym axes fail fast.
+accepted input; non-GA names and synonym axes fail fast.
 Standalone image-map enforces the release contract's embedded deploy template
 package `required_image_ids` exact-set closure against `deploy_image_inventory`
 ids.
@@ -198,7 +198,7 @@ image_map_only`; it does not log in to a registry, pull, push, mirror, build an
 airgap bundle, import images into kind, call Kubernetes, or claim deploy,
 package, or release readiness.
 
-During pre-GA, stale six-image required-id inputs, obsolete
+During the GA cut, stale six-image required-id inputs, obsolete
 `${{ values.MANAGED_RUNNER_IMAGE }}` template placeholders, and stale
 runner-name aliases such as `agent-task-runner` or `agentsmith-codex-runner`
 are not supported success or compatibility paths. They may appear only as
@@ -435,7 +435,7 @@ directory, explicit target profile
 `existing_kubernetes/external_declared/<online|airgap>` or
 `existing_kubernetes/kit_installed/<online|airgap>`, namespace, and output
 directory. It rejects `kind_rehearsal`, aliases such as `offline`,
-non-canonical pre-GA names, and synonym axes. It first runs the
+non-GA names, and synonym axes. It first runs the
 render/check image inventory
 guard, then uses `kubectl` against the target API. Default mode is
 `server-dry-run`, which runs server-side dry-run apply. True apply requires
@@ -453,7 +453,7 @@ already-rendered manifests, explicit target profile
 `existing_kubernetes/external_declared/<online|airgap>` or
 `existing_kubernetes/kit_installed/<online|airgap>`, namespace, output
 directory, and optional Kubernetes client settings. It rejects
-`kind_rehearsal`, aliases such as `offline`, non-canonical pre-GA names, and
+`kind_rehearsal`, aliases such as `offline`, non-GA names, and
 synonym axes, and it rejects non-rollout workload kinds
 before rollout
 commands. It first runs the render/check image inventory guard, then runs
@@ -600,8 +600,8 @@ manifest `substrate_pack_manifest` component plus
 `bindings.substrate_pack_manifest_sha256`. `components: []`, dry-run online
 reports, old two-file or old three-file airgap values, and hand-written empty
 airgap sets are rejected.
-`deploy-result.json#substrate` is future reserved and is not accepted during
-pre-GA; do not preserve future/unimplemented output compatibility here. Render,
+`deploy-result.json#substrate` is reserved outside the current GA evidence
+contract; do not preserve future/unimplemented output compatibility here. Render,
 rollout, and smoke reports remain individual focused diagnostic files, but
 their combinations are not accepted release-kit evidence envelope outputs.
 `airgap-bundle-load-plan-report.json` and
@@ -685,7 +685,7 @@ inside the target network, but release-kit code must not create cloud resources.
 2. Keep changes inside this repo.
 3. Add focused checks before expanding behavior.
 4. Run the matching focused check for the changed slice.
-5. Run the quick gate for bootstrap boundary changes.
+5. Run the quick gate for release boundary changes.
 6. Claim final GA release readiness only from `--ga-release` after it consumes
    finalized deployment path reports plus AgentSmith product-side reports and
    writes `ga-release-report.json` with `formal_verdict=issued`.

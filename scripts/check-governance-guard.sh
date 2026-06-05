@@ -385,7 +385,12 @@ require_text docs/RELEASE_GATES.md "map to the operator choice surface"
 require_text docs/RELEASE_GATES.md 'kit-provided pack/truth identity marker / provenance marker'
 require_text docs/RELEASE_GATES.md 'removal target: release-kit v1.0.0 GA cut'
 require_text docs/RELEASE_GATES.md "rehearsal-only accepted input"
-require_text docs/contracts/README.md "Only accepted pre-GA profile tuples are accepted"
+require_text docs/contracts/README.md "Only GA-supported profile tuples are accepted"
+
+reject_scan \
+  "active docs must not use pre-GA stage wording" \
+  'pre-GA|pre GA|Future implementation|bootstrap skeleton|not accepted during pre-GA' \
+  README.md DEVELOPMENT.md docs/RELEASE_GATES.md docs/runbooks/README.md docs/contracts/README.md AGENTS.md
 require_text docs/contracts/README.md "not an operator choice"
 require_text docs/contracts/README.md '`installed_by` stays a provenance'
 require_text DEVELOPMENT.md "There is intentionally no"
