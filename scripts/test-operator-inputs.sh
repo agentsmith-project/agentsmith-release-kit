@@ -1193,6 +1193,22 @@ assert_no_path_evidence() {
     fail "unexpected source-evidence remained for $package_dir"
 }
 
+remove_manifest_fields() {
+  local package_dir="$1"
+  shift
+
+  "$NODE_BIN" --input-type=module - "$package_dir/operator-inputs.json" "$@" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestFile, ...fields] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+for (const field of fields) {
+  delete manifest[field];
+}
+fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
 valid_paths=(
   online/use_existing
   online/install_substrates
@@ -1244,6 +1260,47 @@ base_online="$TMP_DIR/base-online"
 mkdir -p "$base_online"
 write_package_files "$base_online"
 write_manifest "$base_online" online/use_existing
+
+doctor_missing_dir="$TMP_DIR/doctor-missing-online"
+copy_valid_package "$base_online" "$doctor_missing_dir"
+remove_manifest_fields "$doctor_missing_dir" substrate_truth target_prerequisites
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_missing_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-missing.json"; then
+  fail "operator-inputs doctor should fail when required inputs are missing"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-missing.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.schema_version !== 'agentsmith.operator-inputs-doctor/v1') {
+  throw new Error('unexpected doctor schema');
+}
+if (report.status !== 'fail' || report.formal_verdict !== 'not_issued' || report.readiness !== false) {
+  throw new Error('doctor must fail without issuing readiness or formal verdict');
+}
+for (const field of ['substrate_truth', 'target_prerequisites']) {
+  if (!report.missing.includes(field)) {
+    throw new Error(`doctor missing list did not include ${field}`);
+  }
+}
+if (report.missing.length < 2) {
+  throw new Error('doctor must list multiple missing inputs');
+}
+NODE
+if bash "$ROOT_DIR/scripts/operator-release.sh" \
+  --operator-inputs "$doctor_missing_dir" \
+  --doctor >"$TMP_DIR/doctor-facade.out" 2>"$TMP_DIR/doctor-facade.err"; then
+  fail "operator facade doctor should fail when required inputs are missing"
+fi
+grep -Fq -- '- substrate_truth' "$TMP_DIR/doctor-facade.out" ||
+  fail "operator facade doctor did not list substrate_truth"
+grep -Fq -- '- target_prerequisites' "$TMP_DIR/doctor-facade.out" ||
+  fail "operator facade doctor did not list target_prerequisites"
+[[ ! -e "$doctor_missing_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
+  fail "operator-inputs doctor must not write an intake plan"
+pass "operator-inputs doctor lists multiple missing package inputs without writing a plan"
 
 missing_release_contract_run_dir="$TMP_DIR/run-missing-release-contract"
 copy_valid_package "$base_online" "$missing_release_contract_run_dir"

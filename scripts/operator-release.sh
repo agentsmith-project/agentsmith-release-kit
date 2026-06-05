@@ -8,7 +8,7 @@ REPORT_FILE="operator-release-surface-report.json"
 usage() {
   cat <<'USAGE'
 Usage:
-  bash scripts/operator-release.sh --operator-inputs <package-or-json> [--run]
+  bash scripts/operator-release.sh --operator-inputs <package-or-json> [--doctor|--run]
   bash scripts/operator-release.sh --ga-report \
     --operator-inputs <online-use-existing-package> \
     --operator-inputs <online-install-substrates-package> \
@@ -27,6 +27,7 @@ Operator facade:
 Operator-inputs intake:
   --operator-inputs validates one deployment-path input package and writes
   .release-kit-internal/operator-inputs-plan.json.
+  Add --doctor to list missing package inputs without executing the path.
 
 Operator-inputs run:
   Add --run to execute the current minimal orchestration slice. This currently
@@ -814,14 +815,18 @@ fi
 
 if [[ "${1:-}" == "--operator-inputs" ]]; then
   if [[ "$#" -ne 2 && "$#" -ne 3 ]]; then
-    fail "--operator-inputs accepts one directory or JSON manifest plus optional --run"
+    fail "--operator-inputs accepts one directory or JSON manifest plus optional --doctor or --run"
   fi
   if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
     fail "missing directory or JSON manifest for --operator-inputs"
   fi
   if [[ "$#" -eq 3 ]]; then
-    if [[ "${3:-}" != "--run" ]]; then
-      fail "--operator-inputs accepts only optional --run after the package or JSON manifest"
+    if [[ "${3:-}" != "--run" && "${3:-}" != "--doctor" ]]; then
+      fail "--operator-inputs accepts only optional --doctor or --run after the package or JSON manifest"
+    fi
+    if [[ "${3:-}" == "--doctor" ]]; then
+      "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$2" --doctor
+      exit 0
     fi
     "$NODE_BIN" "$ROOT_DIR/scripts/run-operator-inputs.mjs" --operator-inputs "$2"
     exit 0

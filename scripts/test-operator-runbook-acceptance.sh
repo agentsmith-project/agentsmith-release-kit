@@ -29,7 +29,7 @@ assert_operator_success_contract_docs() {
   local forbidden
 
   bash "$ROOT_DIR/scripts/operator-release.sh" --help >"$help_output"
-  grep -q -- '--operator-inputs <package-or-json> \[--run\]' "$help_output" ||
+  grep -q -- '--operator-inputs <package-or-json> \[--doctor|--run\]' "$help_output" ||
     fail "operator-release help must foreground the single --operator-inputs facade"
   grep -q -- 'Formal release success or failure' "$help_output" ||
     fail "operator-release help must name the formal success boundary"

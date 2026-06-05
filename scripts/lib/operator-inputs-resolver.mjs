@@ -863,8 +863,9 @@ function requiredInputsFor({ config, mode }) {
   };
 }
 
-function requireFields({ manifest, config, mode }) {
+function collectMissingRequiredInputs({ manifest, config, mode }) {
   const requiredInputs = requiredInputsFor({ config, mode });
+  const missing = [];
   for (const key of [
     ...requiredInputs.files,
     ...requiredInputs.dirs,
@@ -873,8 +874,50 @@ function requireFields({ manifest, config, mode }) {
     'namespace'
   ]) {
     if (!Object.hasOwn(manifest, key)) {
-      fail(`missing required operator-inputs field for ${manifest.deployment_path}: ${key}`);
+      missing.push(key);
     }
+  }
+  if (config.installSubstrates) {
+    if (!Object.hasOwn(manifest, 'install_confirmation')) {
+      missing.push('install_confirmation');
+    } else if (manifest.install_confirmation && typeof manifest.install_confirmation === 'object') {
+      if (!Object.hasOwn(manifest.install_confirmation, 'confirmed')) {
+        missing.push('install_confirmation.confirmed');
+      }
+      if (!Object.hasOwn(manifest.install_confirmation, 'operator_run_id')) {
+        missing.push('install_confirmation.operator_run_id');
+      }
+      if (
+        !Object.hasOwn(manifest.install_confirmation, 'confirm_current_install_parameters') &&
+        !Object.hasOwn(manifest.install_confirmation, 'install_parameters_sha256')
+      ) {
+        missing.push('install_confirmation.confirm_current_install_parameters');
+      }
+    }
+  }
+  if (mode === 'apply') {
+    if (!Object.hasOwn(manifest, 'deploy_confirmation')) {
+      missing.push('deploy_confirmation');
+    } else if (manifest.deploy_confirmation && typeof manifest.deploy_confirmation === 'object') {
+      if (!Object.hasOwn(manifest.deploy_confirmation, 'confirmed')) {
+        missing.push('deploy_confirmation.confirmed');
+      }
+      if (!Object.hasOwn(manifest.deploy_confirmation, 'operator_run_id')) {
+        missing.push('deploy_confirmation.operator_run_id');
+      }
+    }
+  }
+  return {
+    requiredInputs,
+    missing
+  };
+}
+
+function requireFields({ manifest, config, mode }) {
+  const { requiredInputs, missing } = collectMissingRequiredInputs({ manifest, config, mode });
+  const firstMissingTopLevel = missing.find((field) => !field.includes('.'));
+  if (firstMissingTopLevel) {
+    fail(`missing required operator-inputs field for ${manifest.deployment_path}: ${firstMissingTopLevel}`);
   }
   return requiredInputs;
 }
@@ -2078,6 +2121,56 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
     plan,
     planPath
   };
+}
+
+export async function diagnoseOperatorInputs({ inputPath } = {}) {
+  if (!inputPath) {
+    fail('--operator-inputs is required');
+  }
+  const { packageRoot, manifestPath } = await resolveManifestInput(inputPath);
+  const manifestRelativePath = packageRelativePath(packageRoot, manifestPath);
+  const { value: manifest, sha256: manifestSha256 } = await readJson(manifestPath, MANIFEST_FILE);
+  assertPlainObject(manifest, MANIFEST_FILE);
+  assertNoPostDeploySmokeReport(manifest);
+  validateTopLevelFields(manifest);
+  scanManifestForForbiddenContent(manifest, MANIFEST_FILE);
+  validateScalarFields(manifest);
+  const mode = validateSchemaAndPath(manifest);
+  validateSmokeRuntimeFields(manifest, mode);
+  validateSmokeUrlField(manifest);
+  validateUnsupportedInputs(manifest);
+  const config = DEPLOYMENT_PATH_CONFIG.get(manifest.deployment_path);
+  validatePathSpecificUnsupportedInputs({ manifest, config });
+  const { requiredInputs, missing } = collectMissingRequiredInputs({ manifest, config, mode });
+  const report = {
+    schema_version: 'agentsmith.operator-inputs-doctor/v1',
+    scope: 'operator_inputs_missing_input_diagnostic_only',
+    status: missing.length === 0 ? 'pass' : 'fail',
+    readiness: false,
+    formal_verdict: 'not_issued',
+    deployment_path: manifest.deployment_path,
+    mode,
+    package: {
+      manifest_path: manifestPath,
+      manifest_relative_path: manifestRelativePath,
+      manifest_sha256: manifestSha256
+    },
+    required: {
+      files: requiredInputs.files,
+      directories: requiredInputs.dirs,
+      executables: requiredInputs.commands,
+      scalar_fields: [...requiredInputs.scalars, 'namespace'],
+      confirmations: [
+        ...(config.installSubstrates ? ['install_confirmation'] : []),
+        ...(mode === 'apply' ? ['deploy_confirmation'] : [])
+      ]
+    },
+    missing,
+    next_action: missing.length === 0
+      ? 'Run bash scripts/operator-release.sh --operator-inputs <package-or-json> --run when ready to execute.'
+      : 'Update operator-inputs.json and package-local refs, then rerun doctor.'
+  };
+  return report;
 }
 
 export { MANIFEST_FILE, PLAN_FILE };

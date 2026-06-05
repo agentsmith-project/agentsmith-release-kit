@@ -36,6 +36,7 @@ produced after the runtime check; it is not an operator input package field.
 Use the single operator facade:
 
 ```bash
+bash scripts/operator-release.sh --operator-inputs <dir-or-json> --doctor
 bash scripts/operator-release.sh --operator-inputs <dir-or-json>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 bash scripts/operator-release.sh --ga-report \
@@ -48,12 +49,14 @@ bash scripts/operator-release.sh --ga-report \
   --output-dir <dir>
 ```
 
-The first command validates the package. Add `--run` only when the package is
-ready to execute the selected apply path. A passing `--run` produces path-level
-evidence for the release captain/finalizer to consume; do not treat
-intermediate files as the formal release verdict. After all four package runs
-and product-side reports are available, use `--ga-report` to write the final
-`ga-release-report.json`.
+The doctor command lists missing package inputs without executing the selected
+path or writing a plan. The plain `--operator-inputs` command validates the
+package and writes the internal plan. Add `--run` only when the package is
+ready to execute the selected apply path. A passing `--run` produces
+path-level evidence for the release captain/finalizer to consume; do not
+treat intermediate files as the formal release verdict. After all four package
+runs and product-side reports are available, use `--ga-report` to write the
+final `ga-release-report.json`.
 
 ### 4. What is the final report?
 
@@ -97,7 +100,8 @@ Copy/pasteable package skeletons are available under `examples/`:
 - `examples/airgap-install-substrates/`: `airgap/install_substrates`
 
 Each example stages one package for `bash scripts/operator-release.sh
---operator-inputs <pkg>`. Install-substrate examples use
+--operator-inputs <pkg>`. Run `--doctor` on the staged package to list missing
+refs before validation/execution. Install-substrate examples use
 `confirm_current_install_parameters: true`; intake computes and prints
 `install_parameters_sha256` for audit, then `--run` passes it internally to
 `verify-substrate-install`.

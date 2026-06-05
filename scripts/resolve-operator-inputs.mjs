@@ -1,14 +1,19 @@
 #!/usr/bin/env node
-import { resolveOperatorInputs } from './lib/operator-inputs-resolver.mjs';
+import {
+  diagnoseOperatorInputs,
+  resolveOperatorInputs
+} from './lib/operator-inputs-resolver.mjs';
 
 function usage() {
   return `Usage:
   node scripts/resolve-operator-inputs.mjs --operator-inputs <dir-or-json> [--output-dir <internal-dir>] [--stdout]
+  node scripts/resolve-operator-inputs.mjs --operator-inputs <dir-or-json> --doctor [--stdout]
 
 This is an internal/test helper for operator-inputs intake. It writes
 .release-kit-internal/operator-inputs-plan.json by default. Alternate output
-dirs must stay inside .release-kit-internal. The plan is not a GA verdict,
-release readiness report, or runtime evidence.`;
+dirs must stay inside .release-kit-internal. Doctor mode prints a missing input
+diagnostic only. Neither output is a GA verdict, release readiness report, or
+runtime evidence.`;
 }
 
 function readArgValue(argv, index, arg) {
@@ -21,6 +26,7 @@ function readArgValue(argv, index, arg) {
 
 function parseArgs(argv) {
   const parsed = {
+    doctor: false,
     stdout: false
   };
 
@@ -39,6 +45,9 @@ function parseArgs(argv) {
       case '--output-dir':
         parsed.outputDir = nextValue();
         break;
+      case '--doctor':
+        parsed.doctor = true;
+        break;
       case '--stdout':
         parsed.stdout = true;
         break;
@@ -53,6 +62,9 @@ function parseArgs(argv) {
 
   if (!parsed.help && !parsed.inputPath) {
     throw new Error('--operator-inputs is required');
+  }
+  if (parsed.doctor && parsed.outputDir) {
+    throw new Error('--output-dir is not accepted with --doctor');
   }
   return parsed;
 }
@@ -70,6 +82,22 @@ try {
   if (args.help) {
     console.log(usage());
     process.exit(0);
+  }
+  if (args.doctor) {
+    const report = await diagnoseOperatorInputs({ inputPath: args.inputPath });
+    if (args.stdout) {
+      console.log(JSON.stringify(report, null, 2));
+    } else if (report.status === 'pass') {
+      console.log(`operator-inputs doctor passed for ${report.deployment_path}`);
+      console.log(report.next_action);
+    } else {
+      console.log(`operator-inputs doctor found missing inputs for ${report.deployment_path}:`);
+      for (const field of report.missing) {
+        console.log(`- ${field}`);
+      }
+      console.log(report.next_action);
+    }
+    process.exit(report.status === 'pass' ? 0 : 1);
   }
   const { plan, planPath } = await resolveOperatorInputs({
     inputPath: args.inputPath,
