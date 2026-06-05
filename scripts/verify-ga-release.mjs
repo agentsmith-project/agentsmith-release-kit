@@ -32,6 +32,10 @@ const PRODUCT_READY_SCHEMA = 'agentsmith.product-readiness-report/v1';
 const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke-report/v1';
 const PRODUCT_SMOKE_PRODUCER = 'agentsmith-post-deploy-product-smoke';
 const PRODUCT_SMOKE_OWNER = 'agentsmith';
+const OPERATOR_INPUTS_MANIFEST_SCHEMA = 'agentsmith.operator-inputs/v1';
+const OPERATOR_INPUTS_MANIFEST_VERSION = 1;
+const OPERATOR_INPUTS_PLAN_SCHEMA = 'agentsmith.operator-inputs-plan/v1';
+const OPERATOR_INPUTS_PLAN_SCOPE = 'operator_inputs_intake_only';
 const PRODUCT_FLOWS_AGGREGATE_SCHEMA = 'agentsmith.unified-deploy.product-flows.aggregate/v1';
 const PRODUCT_FLOWS_AGGREGATE_PRODUCER = 'unified-deploy-product-flows';
 const PRODUCT_SMOKE_LEGACY_FIELDS = [
@@ -86,6 +90,8 @@ const RUNNER_REPO = 'github.com/agentsmith-project/agentsmith-runner';
 const LLMUP_REPO = 'github.com/agentsmith-project/llm-universal-proxy';
 const AFSCP_REPO = 'github.com/agentsmith-project/agentsmith-fs-control-plane';
 const ASBCP_REPO = 'github.com/agentsmith-project/agentsmith-sandbox-control-plane';
+const WINDOWS_DRIVE_RE = /^[A-Za-z]:[\\/]/;
+const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
 const REQUIRED_ARGS = [
   'releaseContract',
@@ -184,6 +190,7 @@ function usage() {
     --deployment-path-report <online/install_substrates/deployment-path-report.json> \\
     --deployment-path-report <airgap/use_existing/deployment-path-report.json> \\
     --deployment-path-report <airgap/install_substrates/deployment-path-report.json> \\
+    [--operator-inputs-plan <operator-inputs-plan.json> ...] \\
     --product-readiness-report <agentsmith/product-readiness-report.json> \\
     --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \\
     --output-dir <dir>
@@ -213,7 +220,10 @@ function readArgValue(argv, index, arg) {
 }
 
 function parseArgs(argv) {
-  const parsed = { deploymentPathReports: [] };
+  const parsed = {
+    deploymentPathReports: [],
+    operatorInputsPlans: []
+  };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -232,6 +242,9 @@ function parseArgs(argv) {
         break;
       case '--deployment-path-report':
         parsed.deploymentPathReports.push(nextValue());
+        break;
+      case '--operator-inputs-plan':
+        parsed.operatorInputsPlans.push(nextValue());
         break;
       case '--product-readiness-report':
         parsed.productReadinessReport = nextValue();
@@ -262,6 +275,12 @@ function parseArgs(argv) {
   }
   if (parsed.deploymentPathReports.length !== DEPLOYMENT_PATHS.size) {
     cliFail(`expected exactly ${DEPLOYMENT_PATHS.size} --deployment-path-report inputs`);
+  }
+  if (
+    parsed.operatorInputsPlans.length > 0 &&
+    parsed.operatorInputsPlans.length !== DEPLOYMENT_PATHS.size
+  ) {
+    cliFail(`expected exactly ${DEPLOYMENT_PATHS.size} --operator-inputs-plan inputs when provided`);
   }
   return parsed;
 }
@@ -429,6 +448,29 @@ function requireStringSet(value, label) {
     set.add(text);
   }
   return set;
+}
+
+function requireSafePackageRelativePath(value, label) {
+  const relative = requireString(value, label).replace(/\\/g, '/');
+  if (
+    path.posix.isAbsolute(relative) ||
+    WINDOWS_DRIVE_RE.test(relative) ||
+    URI_SCHEME_RE.test(relative)
+  ) {
+    fail(`${label} must be a package-relative path`);
+  }
+  const normalized = path.posix.normalize(relative);
+  if (
+    normalized !== relative ||
+    normalized === '.' ||
+    normalized === '..' ||
+    normalized.startsWith('../') ||
+    normalized === '.release-kit-internal' ||
+    normalized.startsWith('.release-kit-internal/')
+  ) {
+    fail(`${label} must be a safe package-relative path`);
+  }
+  return normalized;
 }
 
 function sameSet(left, right) {
@@ -2092,6 +2134,106 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
   };
 }
 
+async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPath) {
+  const plan = planInput.value;
+  requireSchema(plan, OPERATOR_INPUTS_PLAN_SCHEMA, 'operator-inputs plan');
+  if (requireString(plan.scope, 'operator_inputs_plan.scope') !== OPERATOR_INPUTS_PLAN_SCOPE) {
+    fail(`operator_inputs_plan.scope must be ${OPERATOR_INPUTS_PLAN_SCOPE}`);
+  }
+  requireStatusPass(plan, 'operator-inputs plan');
+  requireNoFormalVerdict(plan, 'operator-inputs plan');
+
+  const operatorPath = requireString(plan.deployment_path, 'operator_inputs_plan.deployment_path');
+  if (!DEPLOYMENT_PATHS.has(operatorPath)) {
+    fail(`unexpected operator-inputs deployment path: ${operatorPath}`);
+  }
+  const deploymentPath = deploymentPathByOperatorPath.get(operatorPath);
+  if (!deploymentPath) {
+    fail(`operator-inputs plan has no matching deployment path report: ${operatorPath}`);
+  }
+
+  const packageInfo = requireObject(plan.package, 'operator_inputs_plan.package');
+  const packageRoot = requireString(plan.operator_inputs_root, 'operator_inputs_plan.operator_inputs_root');
+  const manifestPath = requireString(packageInfo.manifest_path, 'operator_inputs_plan.package.manifest_path');
+  const manifestRelativePath = requireSafePackageRelativePath(
+    packageInfo.manifest_relative_path,
+    'operator_inputs_plan.package.manifest_relative_path'
+  );
+  if (path.resolve(packageRoot, manifestRelativePath) !== path.resolve(manifestPath)) {
+    fail(`operator_inputs_plan.package.manifest_relative_path must bind manifest_path for ${operatorPath}`);
+  }
+  const manifestDigest = requireDigest(
+    packageInfo.manifest_sha256,
+    'operator_inputs_plan.package.manifest_sha256'
+  );
+  const planDigest = requireDigest(plan.plan_sha256, 'operator_inputs_plan.plan_sha256');
+  const computedPlanDigest = canonicalDigest({ ...plan, plan_sha256: null });
+  if (planDigest !== computedPlanDigest) {
+    fail(`operator_inputs_plan.plan_sha256 must match canonical plan digest for ${operatorPath}`);
+  }
+
+  const manifestInput = await readJson(manifestPath, `operator-inputs manifest for ${operatorPath}`);
+  if (manifestInput.digest !== manifestDigest) {
+    fail(`operator-inputs manifest digest changed after plan generation for ${operatorPath}`);
+  }
+  requireSchema(manifestInput.value, OPERATOR_INPUTS_MANIFEST_SCHEMA, 'operator-inputs manifest');
+  if (
+    requireString(
+      manifestInput.value.deployment_path,
+      'operator_inputs_manifest.deployment_path'
+    ) !== operatorPath
+  ) {
+    fail(`operator-inputs manifest deployment_path must match plan for ${operatorPath}`);
+  }
+  if (manifestInput.value.operator_inputs_version !== OPERATOR_INPUTS_MANIFEST_VERSION) {
+    fail(`operator_inputs_manifest.operator_inputs_version must be ${OPERATOR_INPUTS_MANIFEST_VERSION}`);
+  }
+
+  return {
+    operator_path: operatorPath,
+    package_manifest: {
+      path: manifestRelativePath,
+      digest: manifestDigest,
+      schema: OPERATOR_INPUTS_MANIFEST_SCHEMA,
+      operator_inputs_version: OPERATOR_INPUTS_MANIFEST_VERSION
+    },
+    package_plan: {
+      digest: planDigest,
+      schema: OPERATOR_INPUTS_PLAN_SCHEMA,
+      scope: OPERATOR_INPUTS_PLAN_SCOPE
+    },
+    deployment_path_report: {
+      digest: deploymentPath.report_digest
+    }
+  };
+}
+
+async function validateOperatorInputsPlans(planInputs, deploymentPaths) {
+  if (planInputs.length === 0) {
+    return [];
+  }
+
+  const deploymentPathByOperatorPath = new Map(
+    deploymentPaths.map((entry) => [entry.operator_path, entry])
+  );
+  const packages = [];
+  const seenPaths = new Set();
+  for (const planInput of planInputs) {
+    const entry = await validateOperatorInputsPlan(planInput, deploymentPathByOperatorPath);
+    if (seenPaths.has(entry.operator_path)) {
+      fail(`duplicate operator-inputs plan: ${entry.operator_path}`);
+    }
+    seenPaths.add(entry.operator_path);
+    packages.push(entry);
+  }
+  for (const operatorPath of DEPLOYMENT_PATHS.keys()) {
+    if (!seenPaths.has(operatorPath)) {
+      fail(`missing operator-inputs plan: ${operatorPath}`);
+    }
+  }
+  return packages.sort((a, b) => a.operator_path.localeCompare(b.operator_path));
+}
+
 async function writeJson(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -2196,6 +2338,10 @@ async function main() {
   for (const file of args.deploymentPathReports) {
     pathReports.push(await readJson(file, 'deployment path report'));
   }
+  const operatorInputsPlans = [];
+  for (const file of args.operatorInputsPlans) {
+    operatorInputsPlans.push(await readJson(file, 'operator-inputs plan'));
+  }
 
   for (const input of [productReady, productSmoke, ...pathReports]) {
     scanReportForForbiddenContent({
@@ -2227,6 +2373,10 @@ async function main() {
       fail(`missing deployment path report: ${pathName}`);
     }
   }
+  const operatorInputsPackages = await validateOperatorInputsPlans(
+    operatorInputsPlans,
+    deploymentPaths
+  );
 
   const report = {
     schema: REPORT_SCHEMA,
@@ -2263,6 +2413,9 @@ async function main() {
         finalizer_manifest: entry.source_evidence_index.finalizer_manifest,
         source_evidence_files: entry.source_evidence_index.source_evidence_files
       })),
+      ...(operatorInputsPackages.length > 0 ? {
+        operator_inputs_packages: operatorInputsPackages
+      } : {}),
       product_readiness: productReadinessSummary.report_digest,
       post_deploy_product_smoke: productSmokeSummary.report_digest
     },

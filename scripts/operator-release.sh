@@ -667,6 +667,7 @@ async function resolvePackage({ resolveOperatorInputs, packageInput }) {
   return {
     deploymentPath,
     pathReport,
+    planPath: resolved.planPath,
     packageInput,
     releaseContract: plan.input_refs?.release_contract,
     deployTemplatePackage: plan.input_refs?.deploy_template_package
@@ -751,6 +752,12 @@ async function main() {
     verifyArgs.push(
       '--deployment-path-report',
       byDeploymentPath.get(deploymentPath).pathReport
+    );
+  }
+  for (const deploymentPath of REQUIRED_DEPLOYMENT_PATHS) {
+    verifyArgs.push(
+      '--operator-inputs-plan',
+      byDeploymentPath.get(deploymentPath).planPath
     );
   }
   verifyArgs.push(

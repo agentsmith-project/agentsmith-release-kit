@@ -282,12 +282,14 @@ NODE
 
 assert_ga_report() {
   local report_file="$1"
+  shift
 
-  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$@" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 
-const [reportFile] = process.argv.slice(2);
+const [reportFile, ...packageDirs] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const digest = (label) => `sha256:${crypto.createHash('sha256').update(label).digest('hex')}`;
 const expectedPaths = new Set([
@@ -313,6 +315,54 @@ if (actualPaths.size !== expectedPaths.size) {
 for (const expected of expectedPaths) {
   if (!actualPaths.has(expected)) {
     throw new Error(`GA report missing deployment path: ${expected}`);
+  }
+}
+if (packageDirs.length !== expectedPaths.size) {
+  throw new Error('package-driven GA assertion requires four operator-inputs package dirs');
+}
+const plansByPath = new Map(packageDirs.map((packageDir) => {
+  const plan = JSON.parse(fs.readFileSync(path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json'), 'utf8'));
+  return [plan.deployment_path, plan];
+}));
+const packageIndex = report.artifact_index?.operator_inputs_packages;
+if (!Array.isArray(packageIndex) || packageIndex.length !== expectedPaths.size) {
+  throw new Error('GA report artifact index must cover four operator-inputs packages');
+}
+const serializedPackageIndex = JSON.stringify(packageIndex);
+for (const packageDir of packageDirs) {
+  if (serializedPackageIndex.includes(packageDir)) {
+    throw new Error('GA report operator-inputs package index must not expose local package dirs');
+  }
+}
+if (serializedPackageIndex.includes('.release-kit-internal')) {
+  throw new Error('GA report operator-inputs package index must not expose internal output paths');
+}
+for (const entry of packageIndex) {
+  const plan = plansByPath.get(entry.operator_path);
+  if (!plan) {
+    throw new Error(`GA report operator-inputs package index has unexpected path: ${entry.operator_path}`);
+  }
+  if (entry.package_manifest?.path !== plan.package?.manifest_relative_path) {
+    throw new Error(`GA report operator-inputs manifest path mismatch: ${entry.operator_path}`);
+  }
+  if (entry.package_manifest?.schema !== 'agentsmith.operator-inputs/v1') {
+    throw new Error(`GA report operator-inputs manifest schema mismatch: ${entry.operator_path}`);
+  }
+  if (entry.package_manifest?.digest !== plan.package?.manifest_sha256) {
+    throw new Error(`GA report operator-inputs manifest digest mismatch: ${entry.operator_path}`);
+  }
+  if (entry.package_plan?.schema !== 'agentsmith.operator-inputs-plan/v1') {
+    throw new Error(`GA report operator-inputs plan schema mismatch: ${entry.operator_path}`);
+  }
+  if (entry.package_plan?.scope !== 'operator_inputs_intake_only') {
+    throw new Error(`GA report operator-inputs plan scope mismatch: ${entry.operator_path}`);
+  }
+  if (entry.package_plan?.digest !== plan.plan_sha256) {
+    throw new Error(`GA report operator-inputs plan digest mismatch: ${entry.operator_path}`);
+  }
+  const deploymentPathEntry = report.deployment_paths.find((pathEntry) => pathEntry.operator_path === entry.operator_path);
+  if (entry.deployment_path_report?.digest !== deploymentPathEntry?.report_digest) {
+    throw new Error(`GA report operator-inputs package index must bind deployment path report digest: ${entry.operator_path}`);
   }
 }
 const expectedSmokeIds = [
@@ -452,7 +502,12 @@ if grep -Fq '.release-kit-internal' "$TMP_DIR/ga-release.out"; then
   cat "$TMP_DIR/ga-release.out" >&2
   fail "operator GA facade success output exposed internal path evidence"
 fi
-assert_ga_report "$ga_output_dir/ga-release-report.json"
+assert_ga_report \
+  "$ga_output_dir/ga-release-report.json" \
+  "$online_package" \
+  "$online_install_package" \
+  "$airgap_package" \
+  "$airgap_install_package"
 
 seed_stale_ga_outputs() {
   local output_dir="$1"
