@@ -635,6 +635,37 @@ grep -Fq 'bash scripts/operator-release.sh --operator-inputs' "$TMP_DIR/ga-missi
   fail "missing path report failure did not point operator to rerun the package"
 assert_ga_failure_report "$missing_path_output" 'finalized path evidence is missing for online/use_existing'
 
+verifier_summary_failure_output="$TMP_DIR/ga-output-verifier-summary-failure"
+verifier_summary_failure_preload="$TMP_DIR/fail-child-ga-summary-write.mjs"
+seed_stale_ga_outputs "$verifier_summary_failure_output"
+cat >"$verifier_summary_failure_preload" <<'NODE'
+import fs from 'node:fs/promises';
+
+if (process.argv.some((arg) => String(arg).endsWith('verify-ga-release.mjs'))) {
+  const originalWriteFile = fs.writeFile;
+  fs.writeFile = async function writeFileWithInjectedChildSummaryFailure(file, ...args) {
+    if (String(file).includes('ga-release-summary.md')) {
+      throw new Error('injected child summary write failure');
+    }
+    return originalWriteFile.call(this, file, ...args);
+  };
+}
+NODE
+if NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--import=$verifier_summary_failure_preload" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
+    --operator-inputs "$online_package" \
+    --operator-inputs "$online_install_package" \
+    --operator-inputs "$airgap_package" \
+    --operator-inputs "$airgap_install_package" \
+    --product-readiness-report "$product_dir/product-readiness-report.json" \
+    --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
+    --output-dir "$verifier_summary_failure_output" >"$TMP_DIR/ga-verifier-summary-failure.out" 2>&1; then
+  fail "operator GA facade should fail when child verifier cannot write the summary"
+fi
+grep -Fq 'injected child summary write failure' "$TMP_DIR/ga-verifier-summary-failure.out" ||
+  fail "child verifier summary failure did not reach operator GA facade output"
+assert_ga_failure_report "$verifier_summary_failure_output" 'injected child summary write failure'
+
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --deployment-path-report "$online_package/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json" \
   --operator-inputs "$online_package" \

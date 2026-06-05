@@ -668,6 +668,27 @@ async function writeFailureOutputs(outputDir, error) {
   console.error(`FAIL: wrote ${REPORT_FILE} with formal_verdict=not_issued`);
 }
 
+async function finalReportExists(outputDir) {
+  try {
+    await fs.access(path.join(path.resolve(outputDir), REPORT_FILE));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function verifierExitError(result) {
+  const exitCode = result.status ?? 1;
+  const combinedOutput = `${result.stderr || ''}\n${result.stdout || ''}`;
+  const detail = combinedOutput
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find((line) => line !== '' && !line.startsWith('PASS:'));
+  const error = new Error(`GA verifier exited with code ${exitCode}${detail ? `: ${detail}` : ''}`);
+  error.exitCode = exitCode;
+  return error;
+}
+
 function rerunMessage(packageInput) {
   return `rerun the corresponding package: bash scripts/operator-release.sh --operator-inputs ${packageInput} --run`;
 }
@@ -839,6 +860,7 @@ async function main() {
     env: process.env
   });
   if (result.error) {
+    await writeFailureOutputs(args.outputDir, new Error(`cannot run GA verifier: ${result.error.message}`));
     fail(`cannot run GA verifier: ${result.error.message}`);
   }
   if (result.status !== 0) {
@@ -847,6 +869,9 @@ async function main() {
     }
     if (result.stderr) {
       process.stderr.write(result.stderr);
+    }
+    if (!(await finalReportExists(args.outputDir))) {
+      await writeFailureOutputs(args.outputDir, verifierExitError(result));
     }
     process.exit(result.status ?? 1);
   }
