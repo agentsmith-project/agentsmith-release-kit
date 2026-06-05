@@ -354,6 +354,8 @@ require_text README.md 'final `ga-release-report.json` issued by'
 require_text README.md 'release finalizer/captain'
 require_text README.md '`ga-evidence-index.json`, a derived archive index'
 require_text README.md "without issuing another verdict"
+require_text README.md '`ga-release-summary.md` is the human-readable view'
+require_text README.md 'Product runtime readiness classification'
 require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
 require_text README.md '`airgap/use_existing`'
@@ -365,6 +367,9 @@ require_text docs/runbooks/README.md "Formal release success or failure is repre
 require_text docs/runbooks/README.md '`ga-release-report.json` issued by the release finalizer/captain'
 require_text docs/runbooks/README.md 'write `ga-evidence-index.json` for release archive lookup'
 require_text docs/runbooks/README.md "does not issue another verdict"
+require_text docs/runbooks/README.md '`ga-release-summary.md` is the human-readable view'
+require_text docs/runbooks/README.md 'Product runtime readiness classification'
+require_text docs/runbooks/README.md 'adaptive wait intervals'
 require_text docs/runbooks/README.md "## Operator Package Matrix"
 require_text docs/runbooks/README.md "provenance marker, not installer"
 require_text docs/runbooks/README.md 'Maintainer/internal diagnostic details are outside this operator runbook'

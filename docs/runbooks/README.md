@@ -68,6 +68,10 @@ write `ga-evidence-index.json` for release archive lookup; it is derived from
 the final report and does not issue another verdict. On pass the index mirrors
 the Product Readiness runtime convergence policy and Files restore continuation
 evidence, plus post-deploy product smoke coverage.
+The sibling `ga-release-summary.md` is the human-readable view. It includes
+Product runtime readiness classification, the Files restore continuation
+runtime evidence path, and adaptive wait intervals; use it for quick review,
+then use `ga-release-report.json` for the formal pass/fail result.
 
 ### 4. What is the final report?
 
@@ -84,6 +88,10 @@ The sibling `ga-evidence-index.json` binds that source report digest to the
 archived path and product evidence for release captain review. Its
 `product_runtime_readiness` and `post_deploy_product_smoke_coverage` entries
 are archive lookup fields, not separate release verdicts.
+The sibling `ga-release-summary.md` repeats the Product runtime readiness
+classification, runtime evidence path, and adaptive wait intervals for quick
+review. It is derived from the same final report and is not a separate release
+verdict.
 
 ## Operator Package Matrix
 

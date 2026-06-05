@@ -152,6 +152,10 @@ Product Readiness `runtime_readiness` block, including the runtime
 pending/readiness convergence policy for Files, Agent Task sandbox, AFSCP
 workspace binding, and read export, and exposes post-deploy product smoke
 coverage for archive lookup.
+The sibling `ga-release-summary.md` is the human-readable view of the same
+final report. It shows Product runtime readiness classification, evidence
+path, and adaptive wait intervals so the runtime pending/readiness closure is
+visible without opening schema details; it is not a third verdict.
 The repository also provides a manual `ga-release-aggregate` GitHub workflow
 for release captains. It is `workflow_dispatch` only, downloads the seven
 already-produced operator/product artifact groups by repository, run id, and
