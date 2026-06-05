@@ -90,8 +90,7 @@ values are:
 - `airgap/install_substrates`
 
 The GA operator substrate choices are `use_existing` and
-`install_substrates`. Legacy `kit_provided` is an internal compatibility alias
-for focused diagnostics; it is not a GA operator `deployment_path`. removal target: release-kit v1.0.0 GA cut.
+`install_substrates`.
 
 Without `--run`, this slice validates the package, rejects internal producer
 vocabulary, secret-looking payloads, missing path-specific inputs, and path

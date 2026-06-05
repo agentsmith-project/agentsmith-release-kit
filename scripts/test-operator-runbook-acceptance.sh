@@ -25,6 +25,7 @@ assert_operator_success_contract_docs() {
   local runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
   local root_readme="$ROOT_DIR/README.md"
   local first_screen="$TMP_DIR/runbook-first-screen.md"
+  local root_first_screen="$TMP_DIR/root-readme-first-screen.md"
   local forbidden
 
   bash "$ROOT_DIR/scripts/operator-release.sh" --help >"$help_output"
@@ -67,6 +68,14 @@ assert_operator_success_contract_docs() {
     grep -q -- "$required" "$first_screen" ||
       fail "operator runbook first screen missing: $required"
   done
+
+  awk '
+    /^### Maintainer\/Internal Diagnostics$/ { exit }
+    { print }
+  ' "$root_readme" >"$root_first_screen"
+  if grep -Eiq 'kit_provided' "$root_first_screen"; then
+    fail "root README operator first screen must not expose legacy kit_provided"
+  fi
 
   grep -q -- 'The GA operator substrate choices are `use_existing` and' "$root_readme" ||
     fail "root README must name the GA operator substrate choices"

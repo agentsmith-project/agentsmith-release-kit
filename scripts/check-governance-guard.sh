@@ -285,10 +285,8 @@ require_text README.md 'final `ga-release-report.json` issued by'
 require_text README.md 'release finalizer/captain'
 require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
-require_text README.md '`online/kit_provided`'
 require_text README.md '`airgap/use_existing`'
 require_text README.md '`airgap/install_substrates`'
-require_text README.md '`airgap/kit_provided`'
 require_text README.md 'removal target: release-kit v1.0.0 GA cut'
 require_text README.md '`install_substrates` requires an explicit report from the separate'
 require_text README.md 'kit-provided pack/truth identity marker / provenance marker'
@@ -302,7 +300,7 @@ require_text docs/runbooks/README.md '`ga-release-report.json` issued by the rel
 require_text docs/runbooks/README.md "## Operator Package Matrix"
 require_text docs/runbooks/README.md "Airgap bundle packaging commands are packaging-side helpers"
 require_text docs/runbooks/README.md "not standalone operator choices"
-require_text docs/runbooks/README.md 'use `airgap/kit_provided` for the consume/deployment-focused path'
+require_text docs/runbooks/README.md 'package-driven `airgap/install_substrates` covers the GA consume/deploy path'
 require_text docs/runbooks/README.md 'removal target: release-kit v1.0.0 GA cut'
 require_text docs/runbooks/README.md "provenance marker, not installer"
 require_text docs/RELEASE_GATES.md "map to the operator choice surface"
