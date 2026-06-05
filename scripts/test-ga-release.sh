@@ -952,14 +952,15 @@ run_ga_release() {
 write_operator_inputs_plan_set() {
   local fixture_dir="$1"
   local plan_dir="$2"
-  local mutation="${3:-valid}"
+  local path_dir="$3"
+  local mutation="${4:-valid}"
 
-  "$NODE_BIN" --input-type=module - "$fixture_dir" "$plan_dir" "$mutation" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$fixture_dir" "$plan_dir" "$path_dir" "$mutation" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [fixtureDir, planDir, mutation] = process.argv.slice(2);
+const [fixtureDir, planDir, pathDir, mutation] = process.argv.slice(2);
 const deploymentPaths = [
   'online/use_existing',
   'online/install_substrates',
@@ -1014,6 +1015,10 @@ for (const operatorPath of deploymentPaths) {
   const manifestPath = path.join(packageRoot, 'operator-inputs.json');
   const releaseContractPath = path.join(packageRoot, 'release-contract.json');
   const deployTemplatePackagePath = path.join(packageRoot, 'deploy-template-package.json');
+  const deploymentPathOutputDir =
+    mutation === 'path-output-dir-drift' && operatorPath === 'online/use_existing'
+      ? path.resolve(planDir, 'wrong-output', slug(operatorPath))
+      : path.resolve(pathDir, slug(operatorPath));
 
   copyMaterial(path.join(fixtureDir, 'release-contract.json'), releaseContractPath);
   copyMaterial(path.join(fixtureDir, 'deploy-template-package.json'), deployTemplatePackagePath);
@@ -1054,6 +1059,15 @@ for (const operatorPath of deploymentPaths) {
         path: 'deploy-template-package.json',
         absolute_path: deployTemplatePackagePath,
         sha256: fileDigest(deployTemplatePackagePath)
+      }
+    },
+    _internal: {
+      expected: {
+        schema_version: 'agentsmith.operator-inputs-plan-internal/v1',
+        deployment_path: operatorPath,
+        output_dirs: {
+          deployment_path: deploymentPathOutputDir
+        }
       }
     },
     plan_sha256: null
@@ -2201,7 +2215,7 @@ NODE
 pass "valid GA aggregate consumes finalizer-generated path bundles"
 
 PLAN_DIR="$TMP_DIR/operator-input-plans-valid"
-write_operator_inputs_plan_set "$VALID_DIR" "$PLAN_DIR" valid
+write_operator_inputs_plan_set "$VALID_DIR" "$PLAN_DIR" "$PATH_DIR" valid
 run_ga_release_with_operator_plans "$VALID_DIR" "$PATH_DIR" "$PLAN_DIR" "$TMP_DIR/out-valid-with-operator-plans"
 
 "$NODE_BIN" --input-type=module - \
@@ -2243,7 +2257,7 @@ NODE
 pass "GA aggregate binds operator-inputs package release materials"
 
 STALE_PLAN_DIR="$TMP_DIR/operator-input-plans-stale-release-ref"
-write_operator_inputs_plan_set "$VALID_DIR" "$STALE_PLAN_DIR" stale-release-contract-ref
+write_operator_inputs_plan_set "$VALID_DIR" "$STALE_PLAN_DIR" "$PATH_DIR" stale-release-contract-ref
 if run_ga_release_with_operator_plans \
   "$VALID_DIR" \
   "$PATH_DIR" \
@@ -2254,6 +2268,20 @@ fi
 grep -Fq 'operator_inputs_plan.input_refs.release_contract.sha256 must match file digest for online/use_existing' \
   "$TMP_DIR/ga-stale-operator-plan-ref.out" ||
   fail "stale operator-inputs plan ref failure did not name release contract digest binding"
+
+DRIFT_PLAN_DIR="$TMP_DIR/operator-input-plans-path-output-drift"
+write_operator_inputs_plan_set "$VALID_DIR" "$DRIFT_PLAN_DIR" "$PATH_DIR" path-output-dir-drift
+if run_ga_release_with_operator_plans \
+  "$VALID_DIR" \
+  "$PATH_DIR" \
+  "$DRIFT_PLAN_DIR" \
+  "$TMP_DIR/out-operator-plan-path-output-drift" >"$TMP_DIR/ga-operator-plan-path-output-drift.out" 2>&1; then
+  fail "GA aggregate should reject operator-inputs plan whose expected path output dir does not match the deployment path report"
+fi
+grep -Fq 'operator_inputs_plan._internal.expected.output_dirs.deployment_path must match deployment path report directory for online/use_existing' \
+  "$TMP_DIR/ga-operator-plan-path-output-drift.out" ||
+  fail "operator-inputs plan output dir drift failure message did not explain blocker"
+pass "GA aggregate binds operator-inputs plan expected output dir to deployment path report"
 
 STALE_FAILURE_DIR="$TMP_DIR/stale-failure"
 STALE_OUTPUT_DIR="$TMP_DIR/out-stale-failure"

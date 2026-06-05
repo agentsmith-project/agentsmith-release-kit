@@ -38,6 +38,7 @@ const OPERATOR_INPUTS_MANIFEST_SCHEMA = 'agentsmith.operator-inputs/v1';
 const OPERATOR_INPUTS_MANIFEST_VERSION = 1;
 const OPERATOR_INPUTS_PLAN_SCHEMA = 'agentsmith.operator-inputs-plan/v1';
 const OPERATOR_INPUTS_PLAN_SCOPE = 'operator_inputs_intake_only';
+const OPERATOR_INPUTS_PLAN_INTERNAL_SCHEMA = 'agentsmith.operator-inputs-plan-internal/v1';
 const PRODUCT_FLOWS_AGGREGATE_SCHEMA = 'agentsmith.unified-deploy.product-flows.aggregate/v1';
 const PRODUCT_FLOWS_AGGREGATE_PRODUCER = 'unified-deploy-product-flows';
 const PRODUCT_SMOKE_LEGACY_FIELDS = [
@@ -2326,6 +2327,7 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
     operator_path: operatorPath,
     target_profile: report.target_profile.value,
     report_digest: reportDigest,
+    report_file: path.resolve(pathInput.file),
     steps: [...steps.keys()],
     source_evidence_index: materializedSourceEvidence.evidenceIndex,
     ...(airgapOffline ? { airgap_offline: airgapOffline } : {})
@@ -2395,6 +2397,39 @@ async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPat
   const deploymentPath = deploymentPathByOperatorPath.get(operatorPath);
   if (!deploymentPath) {
     fail(`operator-inputs plan has no matching deployment path report: ${operatorPath}`);
+  }
+
+  const internal = requireObject(plan._internal, 'operator_inputs_plan._internal');
+  const expected = requireObject(
+    internal.expected,
+    'operator_inputs_plan._internal.expected'
+  );
+  requireSchema(
+    expected,
+    OPERATOR_INPUTS_PLAN_INTERNAL_SCHEMA,
+    'operator_inputs_plan._internal.expected'
+  );
+  if (
+    requireString(
+      expected.deployment_path,
+      'operator_inputs_plan._internal.expected.deployment_path'
+    ) !== operatorPath
+  ) {
+    fail(`operator_inputs_plan._internal.expected.deployment_path must match deployment_path for ${operatorPath}`);
+  }
+  const expectedOutputDirs = requireObject(
+    expected.output_dirs,
+    'operator_inputs_plan._internal.expected.output_dirs'
+  );
+  const expectedDeploymentPathOutputDir = requireString(
+    expectedOutputDirs.deployment_path,
+    'operator_inputs_plan._internal.expected.output_dirs.deployment_path'
+  );
+  if (
+    path.resolve(expectedDeploymentPathOutputDir) !==
+    path.dirname(path.resolve(deploymentPath.report_file))
+  ) {
+    fail(`operator_inputs_plan._internal.expected.output_dirs.deployment_path must match deployment path report directory for ${operatorPath}`);
   }
 
   const packageInfo = requireObject(plan.package, 'operator_inputs_plan.package');
@@ -2745,6 +2780,9 @@ async function buildPassReport(args) {
     release,
     deployTemplateSummary
   );
+  const deploymentPathReportEntries = deploymentPaths
+    .map(({ report_file: _reportFile, ...entry }) => entry)
+    .sort((a, b) => a.operator_path.localeCompare(b.operator_path));
 
   return {
     schema: REPORT_SCHEMA,
@@ -2769,7 +2807,7 @@ async function buildPassReport(args) {
       ...release.images,
       runner_release_manifest: runnerReleaseManifest
     },
-    deployment_paths: deploymentPaths.sort((a, b) => a.operator_path.localeCompare(b.operator_path)),
+    deployment_paths: deploymentPathReportEntries,
     product_readiness: productReadinessSummary,
     post_deploy_product_smoke: {
       ...productSmokeSummary,
@@ -2782,7 +2820,7 @@ async function buildPassReport(args) {
         provenance: release.provenance
       },
       deploy_template_package: deployTemplateSummary,
-      deployment_paths: deploymentPaths.map((entry) => ({
+      deployment_paths: deploymentPathReportEntries.map((entry) => ({
         operator_path: entry.operator_path,
         digest: entry.report_digest,
         finalizer_manifest: entry.source_evidence_index.finalizer_manifest,
@@ -2796,7 +2834,7 @@ async function buildPassReport(args) {
     },
     summary: {
       conclusion: 'AgentSmith GA release aggregate passed.',
-      operator_paths: deploymentPaths.map((entry) => entry.operator_path).sort(),
+      operator_paths: deploymentPathReportEntries.map((entry) => entry.operator_path).sort(),
       post_deploy_product_smoke: {
         report_digest: productSmokeSummary.report_digest,
         schema: productSmokeSummary.schema,
