@@ -1849,6 +1849,14 @@ async function clearStaleFinalOutputs(outputDir) {
   await removeStaleOutputFile(path.join(outputDir, SUMMARY_FILE));
 }
 
+async function bestEffortRemoveOutputFile(file) {
+  try {
+    await fs.rm(file, { force: true });
+  } catch {
+    // Preserve the original output failure. Cleanup is best effort.
+  }
+}
+
 async function writeSummary(file, report) {
   const lines = [
     '# AgentSmith GA Release Summary',
@@ -1871,6 +1879,29 @@ async function writeSummary(file, report) {
     ''
   ];
   await fs.writeFile(file, `${lines.join('\n')}\n`, 'utf8');
+}
+
+async function writeFinalOutputs(outputDir, report) {
+  const stamp = `${process.pid}-${Date.now()}`;
+  const reportFile = path.join(outputDir, REPORT_FILE);
+  const summaryFile = path.join(outputDir, SUMMARY_FILE);
+  const reportTemp = path.join(outputDir, `.${REPORT_FILE}.${stamp}.tmp`);
+  const summaryTemp = path.join(outputDir, `.${SUMMARY_FILE}.${stamp}.tmp`);
+
+  try {
+    await writeJson(reportTemp, report);
+    await writeSummary(summaryTemp, report);
+    await fs.rename(summaryTemp, summaryFile);
+    await fs.rename(reportTemp, reportFile);
+  } catch (error) {
+    await Promise.all([
+      bestEffortRemoveOutputFile(reportFile),
+      bestEffortRemoveOutputFile(summaryFile),
+      bestEffortRemoveOutputFile(reportTemp),
+      bestEffortRemoveOutputFile(summaryTemp)
+    ]);
+    throw error;
+  }
 }
 
 async function main() {
@@ -1973,8 +2004,7 @@ async function main() {
     blockers: []
   };
 
-  await writeJson(path.join(outputDir, REPORT_FILE), report);
-  await writeSummary(path.join(outputDir, SUMMARY_FILE), report);
+  await writeFinalOutputs(outputDir, report);
   console.log(`PASS: wrote ${REPORT_FILE} (${canonicalDigest(report)})`);
 }
 

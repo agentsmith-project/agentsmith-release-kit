@@ -862,6 +862,24 @@ run_ga_release() {
     --output-dir "$output_dir"
 }
 
+run_ga_release_with_summary_write_failure() {
+  local fixture_dir="$1"
+  local path_dir="$2"
+  local output_dir="$3"
+  local preload_file="$4"
+
+  NODE_OPTIONS="--import $preload_file" bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
+    --release-contract "$fixture_dir/release-contract.json" \
+    --deploy-template-package "$fixture_dir/deploy-template-package.json" \
+    --deployment-path-report "$path_dir/online-use-existing/deployment-path-report.json" \
+    --deployment-path-report "$path_dir/online-install-substrates/deployment-path-report.json" \
+    --deployment-path-report "$path_dir/airgap-use-existing/deployment-path-report.json" \
+    --deployment-path-report "$path_dir/airgap-install-substrates/deployment-path-report.json" \
+    --product-readiness-report "$fixture_dir/product-readiness-report.json" \
+    --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-report.json" \
+    --output-dir "$output_dir"
+}
+
 run_ga_release_without_release_kit_provenance() {
   local fixture_dir="$1"
   local path_dir="$2"
@@ -1735,6 +1753,29 @@ if [[ -e "$STALE_OUTPUT_DIR/ga-release-summary.md" ]]; then
   fail "failed GA aggregate must remove stale ga-release-summary.md"
 fi
 pass "failed GA aggregate removes stale final report outputs"
+
+SUMMARY_FAILURE_OUTPUT_DIR="$TMP_DIR/out-summary-write-failure"
+SUMMARY_FAILURE_PRELOAD="$TMP_DIR/fail-summary-write.mjs"
+cat >"$SUMMARY_FAILURE_PRELOAD" <<'NODE'
+import fs from 'node:fs/promises';
+
+const originalWriteFile = fs.writeFile;
+fs.writeFile = async function writeFileWithInjectedSummaryFailure(file, ...args) {
+  if (String(file).includes('ga-release-summary.md')) {
+    throw new Error('injected summary write failure');
+  }
+  return originalWriteFile.call(this, file, ...args);
+};
+NODE
+if run_ga_release_with_summary_write_failure "$VALID_DIR" "$PATH_DIR" "$SUMMARY_FAILURE_OUTPUT_DIR" "$SUMMARY_FAILURE_PRELOAD" >"$TMP_DIR/ga-release-summary-write-failure.out" 2>&1; then
+  fail "GA aggregate with summary write failure should fail"
+fi
+grep -Fq "injected summary write failure" "$TMP_DIR/ga-release-summary-write-failure.out" || \
+  fail "summary write failure did not reach finalizer output"
+if [[ -e "$SUMMARY_FAILURE_OUTPUT_DIR/ga-release-report.json" ]]; then
+  fail "failed GA aggregate summary write must not leave ga-release-report.json"
+fi
+pass "failed GA aggregate summary write does not leave formal report"
 
 if run_ga_release_without_release_kit_provenance "$VALID_DIR" "$PATH_DIR" "$TMP_DIR/out-missing-release-kit-provenance" >"$TMP_DIR/ga-release-missing-release-kit-provenance.out" 2>&1; then
   fail "missing release-kit finalizer provenance should fail"
