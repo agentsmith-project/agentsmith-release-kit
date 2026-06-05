@@ -2397,6 +2397,7 @@ export async function initOperatorInputs({ deploymentPath, outputDir } = {}) {
     fail('operator-inputs init output dir must be a directory');
   }
   const manifestPath = path.join(requestedOutputDir, MANIFEST_FILE);
+  const readmePath = path.join(requestedOutputDir, PACKAGE_README_FILE);
   try {
     await fs.lstat(manifestPath);
     fail('operator-inputs init refuses to overwrite existing operator-inputs.json');
@@ -2409,10 +2410,7 @@ export async function initOperatorInputs({ deploymentPath, outputDir } = {}) {
     await fs.mkdir(path.join(requestedOutputDir, dir), { recursive: true });
   }
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  await fs.writeFile(
-    path.join(requestedOutputDir, PACKAGE_README_FILE),
-    packageReadmeForManifest(manifest)
-  );
+  await fs.writeFile(readmePath, packageReadmeForManifest(manifest));
   return {
     schema_version: 'agentsmith.operator-inputs-init/v1',
     scope: 'operator_inputs_package_scaffold_only',
@@ -2422,6 +2420,7 @@ export async function initOperatorInputs({ deploymentPath, outputDir } = {}) {
     deployment_path: deploymentPath,
     output_dir: requestedOutputDir,
     manifest_path: manifestPath,
+    readme_path: readmePath,
     created_dirs: skeletonDirsForManifest(manifest),
     created_files: [MANIFEST_FILE, PACKAGE_README_FILE],
     next_action: `Fill package-local refs and confirmations, then run bash scripts/operator-release.sh --operator-inputs ${requestedOutputDir} --doctor`

@@ -1233,6 +1233,8 @@ for deployment_path in "${valid_paths[@]}"; do
   bash "$ROOT_DIR/scripts/operator-release.sh" \
     --init-operator-inputs "$deployment_path" \
     --output-dir "$init_dir" >"$TMP_DIR/init-${deployment_path//\//-}.out"
+  grep -Fq "operator-inputs package README: $init_dir/README.md" "$TMP_DIR/init-${deployment_path//\//-}.out" ||
+    fail "operator-inputs init output must point to generated README: $deployment_path"
   "$NODE_BIN" --input-type=module - "$init_dir/operator-inputs.json" "$init_dir/README.md" "$deployment_path" <<'NODE'
 import fs from 'node:fs';
 

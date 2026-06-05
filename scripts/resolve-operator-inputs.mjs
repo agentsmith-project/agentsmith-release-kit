@@ -106,6 +106,7 @@ try {
       console.log(JSON.stringify(report, null, 2));
     } else {
       console.log(`operator-inputs package initialized: ${report.manifest_path}`);
+      console.log(`operator-inputs package README: ${report.readme_path}`);
       console.log(report.next_action);
       console.log('operator-inputs init only; no GA verdict or release readiness was issued.');
     }
