@@ -197,6 +197,7 @@ required_files=(
   OWNERS.md
   DEVELOPMENT.md
   docs/RELEASE_GATES.md
+  docs/maintainer-diagnostics.md
   docs/contracts/README.md
   docs/runbooks/README.md
   docs/adr/0001-bootstrap-boundary.md
@@ -226,6 +227,7 @@ doc_policy_paths=(
   README.md
   DEVELOPMENT.md
   docs/RELEASE_GATES.md
+  docs/maintainer-diagnostics.md
   docs/contracts/README.md
   docs/runbooks/README.md
   scripts/verify-release.sh
@@ -236,6 +238,7 @@ operator_substrate_surface_paths=(
   README.md
   DEVELOPMENT.md
   docs/RELEASE_GATES.md
+  docs/maintainer-diagnostics.md
   docs/runbooks/README.md
   docs/contracts/README.md
   scripts/operator-release.sh
@@ -266,6 +269,11 @@ reject_scan \
   "${doc_policy_paths[@]}"
 
 reject_operator_substrate_surface "${operator_substrate_surface_paths[@]}"
+
+reject_scan \
+  "operator runbook exposes maintainer/internal diagnostic tables" \
+  'Maintainer/Internal Diagnostics|Legacy Diagnostic Status|Machine profile mapping|operator-release-surface-report|airgap-bundle/kit_provided|online/kit_provided|airgap/kit_provided|kind_rehearsal/kit_installed|release-engineering-gate-intake|operator-signoff-intake' \
+  docs/runbooks/README.md
 
 require_text README.md "$EXPECTED_IDENTITY"
 require_text README.md "AgentSmith release contract"
@@ -304,11 +312,16 @@ require_text docs/runbooks/README.md '`ga-release-report.json` issued by the rel
 require_text docs/runbooks/README.md 'write `ga-evidence-index.json` for release archive lookup'
 require_text docs/runbooks/README.md "does not issue another verdict"
 require_text docs/runbooks/README.md "## Operator Package Matrix"
-require_text docs/runbooks/README.md "Airgap bundle packaging commands are packaging-side helpers"
-require_text docs/runbooks/README.md "not standalone operator choices"
-require_text docs/runbooks/README.md 'package-driven `airgap/install_substrates` covers the GA consume/deploy path'
-require_text docs/runbooks/README.md 'removal target: release-kit v1.0.0 GA cut'
 require_text docs/runbooks/README.md "provenance marker, not installer"
+require_text docs/runbooks/README.md 'Maintainer/internal diagnostic details are outside this operator runbook'
+require_text docs/runbooks/README.md 'docs/maintainer-diagnostics.md'
+require_text docs/maintainer-diagnostics.md "Airgap bundle packaging commands are packaging-side helpers"
+require_text docs/maintainer-diagnostics.md "not standalone operator choices"
+require_text docs/maintainer-diagnostics.md 'package-driven `airgap/install_substrates` covers the GA consume/deploy path'
+require_text docs/maintainer-diagnostics.md 'removal target: release-kit v1.0.0 GA cut'
+require_text docs/maintainer-diagnostics.md "provenance marker only"
+require_text docs/maintainer-diagnostics.md 'source.product_flows_path'
+require_text docs/maintainer-diagnostics.md 'deployment_target'
 require_text docs/RELEASE_GATES.md "map to the operator choice surface"
 require_text docs/RELEASE_GATES.md 'kit-provided pack/truth identity marker / provenance marker'
 require_text docs/RELEASE_GATES.md 'removal target: release-kit v1.0.0 GA cut'

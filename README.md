@@ -170,9 +170,9 @@ networks, or OIDC realms.
 
 Maintainer/internal references, including legacy positional surfaces,
 adoption aggregation, operator signoff intake, release-engineering intake, and
-deployment-path finalization, are documented under Maintainer/Internal
-Diagnostics. They are not the operator main path, not package readiness, not
-operator readiness, and not a separate GA signoff surface.
+deployment-path finalization, are documented in `docs/maintainer-diagnostics.md`
+and `docs/RELEASE_GATES.md`. They are not the operator main path, not package
+readiness, not operator readiness, and not a separate GA signoff surface.
 
 For `airgap`, operators must provide all required tools, templates, artifacts,
 and images from inside the target network. Airgap flow must not download from

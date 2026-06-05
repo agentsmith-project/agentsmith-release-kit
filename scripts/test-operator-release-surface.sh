@@ -2376,6 +2376,7 @@ expect_operator_fail unknown-strategy \
 root_readme="$ROOT_DIR/README.md"
 example_readme="$ROOT_DIR/examples/online-existing-kubernetes/README.md"
 runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
+maintainer_diagnostics="$ROOT_DIR/docs/maintainer-diagnostics.md"
 
 grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run' "$root_readme" ||
   fail "root README must document package-driven --operator-inputs --run main path"
@@ -2387,12 +2388,15 @@ grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --r
   fail "runbook README must document package-driven --operator-inputs --run main path"
 grep -q -- 'bash scripts/operator-release.sh --ga-report' "$runbooks_readme" ||
   fail "runbook README must document package-driven --ga-report final facade"
-grep -q 'removal target: release-kit v1.0.0 GA cut' "$runbooks_readme" ||
-  fail "runbook README must document kit_provided removal target"
-grep -q -- 'source.product_flows_path' "$runbooks_readme" ||
-  fail "runbook README must document canonical product smoke product-flow source binding"
-grep -q -- 'deployment_target' "$runbooks_readme" ||
-  fail "runbook README must document canonical product smoke deployment target binding"
+grep -q 'removal target: release-kit v1.0.0 GA cut' "$maintainer_diagnostics" ||
+  fail "maintainer diagnostics must document kit_provided removal target"
+grep -q -- 'source.product_flows_path' "$maintainer_diagnostics" ||
+  fail "maintainer diagnostics must document canonical product smoke product-flow source binding"
+grep -q -- 'deployment_target' "$maintainer_diagnostics" ||
+  fail "maintainer diagnostics must document canonical product smoke deployment target binding"
+if grep -Eq 'Legacy Diagnostic Status|Machine profile mapping|operator-release-surface-report|airgap-bundle/kit_provided|online/kit_provided|airgap/kit_provided|kind_rehearsal/kit_installed' "$runbooks_readme"; then
+  fail "runbook README must keep maintainer/internal diagnostic tables out of the operator path"
+fi
 if grep -Fq -- '--deployment-path-report' "$runbooks_readme"; then
   fail "runbook README must not expose internal --deployment-path-report copy path"
 fi
