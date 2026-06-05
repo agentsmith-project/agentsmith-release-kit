@@ -2977,6 +2977,8 @@ async function writeSummary(file, report) {
     }))
     .sort((left, right) => left.operatorPath.localeCompare(right.operatorPath))
     .map((entry) => `  - ${entry.operatorPath}: ${entry.digest} (target: ${entry.targetProfile})`);
+  const runtimeReadiness = report.product_readiness.runtime_readiness;
+  const filesRestoreRuntime = runtimeReadiness.files_restore_continuation;
   const lines = [
     '# AgentSmith GA Release Summary',
     '',
@@ -2990,6 +2992,9 @@ async function writeSummary(file, report) {
     ...report.deployment_paths.map((entry) => `- ${entry.operator_path}: ${entry.report_digest}`),
     '',
     `Product readiness: ${report.product_readiness.report_digest}`,
+    `Product runtime readiness: ${filesRestoreRuntime.classification} (${filesRestoreRuntime.outcome})`,
+    `Product runtime readiness evidence: ${filesRestoreRuntime.path}`,
+    `Product runtime readiness intervals: ${runtimeReadiness.observation_policy.interval_ms.join(', ')}`,
     `Post-deploy product smoke: ${report.post_deploy_product_smoke.report_digest}`,
     `Post-deploy product smoke reports: ${productSmokeReports.length}`,
     ...(coverage?.covered_distributions

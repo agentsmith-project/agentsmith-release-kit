@@ -2484,6 +2484,12 @@ NODE
 [[ -f "$TMP_DIR/out-valid/ga-evidence-index.json" ]] || fail "missing GA evidence index"
 grep -Fq "Post-deploy product smoke reports: 2" "$TMP_DIR/out-valid/ga-release-summary.md" || \
   fail "human summary must show post-deploy product smoke report count"
+grep -Fq "Product runtime readiness: runtime_flake (focused_gate_passed_after_runtime_readiness_marker)" "$TMP_DIR/out-valid/ga-release-summary.md" || \
+  fail "human summary must show product runtime readiness classification"
+grep -Fq "Product runtime readiness evidence: gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json" "$TMP_DIR/out-valid/ga-release-summary.md" || \
+  fail "human summary must show product runtime readiness evidence path"
+grep -Fq "Product runtime readiness intervals: 60000, 90000, 120000, 180000, 300000" "$TMP_DIR/out-valid/ga-release-summary.md" || \
+  fail "human summary must show adaptive runtime readiness intervals"
 grep -Fq "Post-deploy product smoke report details:" "$TMP_DIR/out-valid/ga-release-summary.md" || \
   fail "human summary must include post-deploy product smoke report details"
 grep -Fq -- "  - online/use_existing: " "$TMP_DIR/out-valid/ga-release-summary.md" || \
