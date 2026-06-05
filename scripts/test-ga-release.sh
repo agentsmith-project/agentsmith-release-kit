@@ -1490,6 +1490,10 @@ if (mutation === 'legacy-surrogate-shape') {
     success_path: 'provider_neutral_endpoint',
     oauth_provider: 'openai'
   };
+} else if (mutation === 'provider-neutral-top-level-oauth') {
+  report.smoke_results.provider_neutral_endpoint.oauth_provider = 'openai';
+} else if (mutation === 'agent-task-provider-specific-skill') {
+  report.smoke_results.agent_task_managed_runner.provider_specific_skill = 'openai-oauth-skill';
 } else if (mutation === 'absolute-product-flows-path') {
   report.source.product_flows_path = [
     '',
@@ -2816,6 +2820,8 @@ product_smoke_mutations=(
   missing-provider-neutral-proof
   wrong-provider-neutral-proof-success-path
   provider-neutral-proof-oauth
+  provider-neutral-top-level-oauth
+  agent-task-provider-specific-skill
 )
 for mutation in "${product_smoke_mutations[@]}"; do
   PRODUCT_SMOKE_DIR="$TMP_DIR/product-smoke-$mutation"
@@ -2929,6 +2935,12 @@ for mutation in "${product_smoke_mutations[@]}"; do
       ;;
     provider-neutral-proof-oauth)
       expected_message="post_deploy_product_smoke.smoke_results.provider_neutral_endpoint.proof contains unknown field: oauth_provider"
+      ;;
+    provider-neutral-top-level-oauth)
+      expected_message="post_deploy_product_smoke.smoke_results.provider_neutral_endpoint contains unknown field: oauth_provider"
+      ;;
+    agent-task-provider-specific-skill)
+      expected_message="post_deploy_product_smoke.smoke_results.agent_task_managed_runner contains unknown field: provider_specific_skill"
       ;;
     *)
       fail "missing expected message for product smoke mutation: $mutation"

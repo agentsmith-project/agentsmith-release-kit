@@ -120,6 +120,18 @@ const PRODUCT_SMOKE_PROVIDER_NEUTRAL_PROOF_KEYS = new Set([
   'credential_type',
   'success_path'
 ]);
+const PRODUCT_SMOKE_RESULT_KEYS = new Set([
+  'id',
+  'status',
+  'label',
+  'source_flow',
+  'source_evidence_path',
+  'source_evidence_sha256'
+]);
+const PRODUCT_SMOKE_PROVIDER_NEUTRAL_RESULT_KEYS = new Set([
+  ...PRODUCT_SMOKE_RESULT_KEYS,
+  'proof'
+]);
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
@@ -1776,6 +1788,13 @@ function validateProductSmoke(report, reportDigest, release) {
   let providerNeutralEndpointProof = null;
   for (const entry of productSmokeEntries(report.smoke_results)) {
     const spec = CANONICAL_PRODUCT_SMOKE_SPECS[entry.id];
+    rejectUnknownKeys(
+      entry.value,
+      entry.id === 'provider_neutral_endpoint'
+        ? PRODUCT_SMOKE_PROVIDER_NEUTRAL_RESULT_KEYS
+        : PRODUCT_SMOKE_RESULT_KEYS,
+      entry.label
+    );
     if (seenIds.has(entry.id)) {
       fail(`post-deploy product smoke duplicate canonical smoke id: ${entry.id}`);
     }
