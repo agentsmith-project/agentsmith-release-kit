@@ -51,6 +51,10 @@ Current post-push contract index:
   `artifact_index.operator_inputs_packages[].release_materials` binds each
   package-local release contract and deploy template package descriptor by safe
   relative path and sha256 digest; local absolute package paths are not exposed.
+  The managed runner entry must also carry runner release manifest provenance:
+  canonical manifest artifact URI, manifest subject sha256, and manifest
+  artifact sha256. The GA report exposes that as
+  `images.runner_release_manifest`.
 
 For package-driven operator runs, each
 `operator-release.sh --operator-inputs <pkg> --run` package still represents

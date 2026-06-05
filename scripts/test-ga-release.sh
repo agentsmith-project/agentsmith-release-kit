@@ -1375,6 +1375,13 @@ function inventory(id) {
 
 if (mutation === 'missing-runner-source-provenance') {
   delete inventory('managed_runner').source_provenance;
+} else if (mutation === 'missing-runner-release-manifest-digest') {
+  delete inventory('managed_runner').source_provenance.runner_release_manifest_subject_sha256;
+} else if (mutation === 'runner-release-manifest-uri-mismatch') {
+  inventory('managed_runner').source_provenance.runner_release_manifest_uri =
+    'gh-artifact://agentsmith-project/agentsmith-runner/runner-release-manifest/99999/runner-release-manifest.json';
+} else if (mutation === 'runner-release-manifest-digest-mismatch') {
+  inventory('managed_runner').source_provenance.runner_release_manifest_artifact_sha256 = `sha256:${'8'.repeat(64)}`;
 } else if (mutation === 'missing-dependency-source-provenance') {
   delete inventory('llmup').source_provenance;
 } else if (mutation === 'non-canonical-source-repo') {
@@ -2466,6 +2473,9 @@ pass "GA aggregate rejects non-GA release contract target profiles and stale pre
 
 source_provenance_cases=(
   "missing-runner-source-provenance|release_contract.deploy_image_inventory.managed_runner.source_provenance must be an object"
+  "missing-runner-release-manifest-digest|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_release_manifest_subject_sha256 is required"
+  "runner-release-manifest-uri-mismatch|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_release_manifest_uri run id must match release_contract.deploy_image_inventory.managed_runner.source_provenance.run_id"
+  "runner-release-manifest-digest-mismatch|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_release_manifest_artifact_sha256 must match release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_release_manifest_subject_sha256"
   "missing-dependency-source-provenance|release_contract.deploy_image_inventory.llmup.source_provenance must be an object"
   "non-canonical-source-repo|release_contract.deploy_image_inventory.afscp.source_provenance.normalized_remote must be canonical repo github.com/agentsmith-project/agentsmith-fs-control-plane"
   "missing-dependency-run-evidence|release_contract.deploy_image_inventory.llmup.source_provenance.run_id is required"

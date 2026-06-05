@@ -325,6 +325,8 @@ const plansByPath = new Map(packageDirs.map((packageDir) => {
   const plan = JSON.parse(fs.readFileSync(path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json'), 'utf8'));
   return [plan.deployment_path, plan];
 }));
+const firstPlan = plansByPath.values().next().value;
+const contract = JSON.parse(fs.readFileSync(firstPlan.input_refs.release_contract.absolute_path, 'utf8'));
 const packageIndex = report.artifact_index?.operator_inputs_packages;
 if (!Array.isArray(packageIndex) || packageIndex.length !== expectedPaths.size) {
   throw new Error('GA report artifact index must cover four operator-inputs packages');
@@ -377,6 +379,19 @@ for (const entry of packageIndex) {
   if (entry.deployment_path_report?.digest !== deploymentPathEntry?.report_digest) {
     throw new Error(`GA report operator-inputs package index must bind deployment path report digest: ${entry.operator_path}`);
   }
+}
+const runnerManifest = report.images?.runner_release_manifest;
+const runnerProvenance = contract.deploy_image_inventory
+  .find((entry) => entry.id === 'managed_runner')
+  ?.source_provenance;
+if (runnerManifest?.artifact_uri !== runnerProvenance?.runner_release_manifest_uri) {
+  throw new Error('GA report runner release manifest URI mismatch');
+}
+if (runnerManifest?.subject_sha256 !== runnerProvenance?.runner_release_manifest_subject_sha256) {
+  throw new Error('GA report runner release manifest subject digest mismatch');
+}
+if (runnerManifest?.artifact_sha256 !== runnerProvenance?.runner_release_manifest_artifact_sha256) {
+  throw new Error('GA report runner release manifest artifact digest mismatch');
 }
 const expectedSmokeIds = [
   'login_profile',

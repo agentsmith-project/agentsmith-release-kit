@@ -144,7 +144,10 @@
         "run_url": "https://github.com/agentsmith-project/agentsmith-runner/actions/runs/20001/attempts/1",
         "subject_name": "agentsmith-managed-runner-image",
         "artifact_uri": "gh-artifact://agentsmith-project/agentsmith-runner/20001/agentsmith-managed-runner-image.oci",
-        "artifact_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "artifact_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "runner_release_manifest_uri": "gh-artifact://agentsmith-project/agentsmith-runner/runner-release-manifest/20001/runner-release-manifest.json",
+        "runner_release_manifest_subject_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "runner_release_manifest_artifact_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       }
     }
   ],

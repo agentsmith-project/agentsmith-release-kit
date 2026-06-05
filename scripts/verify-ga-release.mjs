@@ -90,6 +90,8 @@ const RUNNER_REPO = 'github.com/agentsmith-project/agentsmith-runner';
 const LLMUP_REPO = 'github.com/agentsmith-project/llm-universal-proxy';
 const AFSCP_REPO = 'github.com/agentsmith-project/agentsmith-fs-control-plane';
 const ASBCP_REPO = 'github.com/agentsmith-project/agentsmith-sandbox-control-plane';
+const RUNNER_RELEASE_MANIFEST_URI_RE =
+  /^gh-artifact:\/\/agentsmith-project\/agentsmith-runner\/runner-release-manifest\/([0-9]+)\/runner-release-manifest\.json$/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:[\\/]/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
@@ -709,6 +711,9 @@ function validateImageSourceProvenance(image, expectedRepo) {
     runAttempt: provenance.run_attempt
   });
   const artifactUri = requireArtifactUri(image.source_provenance.artifact_uri, `${label}.artifact_uri`);
+  const runnerReleaseManifest = image.id === 'managed_runner'
+    ? validateRunnerReleaseManifestProvenance({ image, provenance, label })
+    : undefined;
   return {
     repo: expectedRepo,
     commit_sha: provenance.commit_sha,
@@ -726,14 +731,57 @@ function validateImageSourceProvenance(image, expectedRepo) {
       provenance.run_attempt,
       runUrl,
       artifactUri,
-      image.digest
+      image.digest,
+      ...(runnerReleaseManifest ? [
+        runnerReleaseManifest.artifact_uri,
+        runnerReleaseManifest.subject_sha256,
+        runnerReleaseManifest.artifact_sha256
+      ] : [])
     ].join(':'),
+    ...(runnerReleaseManifest ? { runner_release_manifest: runnerReleaseManifest } : {}),
     provenance: {
       ...provenance,
       tag: provenanceTag,
       run_url: runUrl,
-      artifact_uri: artifactUri
+      artifact_uri: artifactUri,
+      ...(runnerReleaseManifest ? { runner_release_manifest: runnerReleaseManifest } : {})
     }
+  };
+}
+
+function validateRunnerReleaseManifestProvenance({ image, provenance, label }) {
+  if (provenance.normalized_remote !== RUNNER_REPO) {
+    fail(`${label}.runner_release_manifest_uri is only valid for canonical repo ${RUNNER_REPO}`);
+  }
+  const manifestUri = requireArtifactUri(
+    image.source_provenance.runner_release_manifest_uri,
+    `${label}.runner_release_manifest_uri`
+  );
+  const match = manifestUri.match(RUNNER_RELEASE_MANIFEST_URI_RE);
+  if (!match) {
+    fail(`${label}.runner_release_manifest_uri must be the canonical runner release manifest artifact URI`);
+  }
+  if (match[1] !== provenance.run_id) {
+    fail(`${label}.runner_release_manifest_uri run id must match ${label}.run_id`);
+  }
+  const subjectSha = requireDigest(
+    image.source_provenance.runner_release_manifest_subject_sha256,
+    `${label}.runner_release_manifest_subject_sha256`
+  );
+  const artifactSha = requireDigest(
+    image.source_provenance.runner_release_manifest_artifact_sha256,
+    `${label}.runner_release_manifest_artifact_sha256`
+  );
+  if (artifactSha !== subjectSha) {
+    fail(`${label}.runner_release_manifest_artifact_sha256 must match ${label}.runner_release_manifest_subject_sha256`);
+  }
+  return {
+    artifact_uri: manifestUri,
+    subject_sha256: subjectSha,
+    artifact_sha256: artifactSha,
+    producer_repo: RUNNER_REPO,
+    run_id: provenance.run_id,
+    run_attempt: provenance.run_attempt
   };
 }
 
@@ -1067,8 +1115,16 @@ async function buildCanonicalRepos(release) {
         first.run_url,
         ...imageSummaries.map((summary) => summary.provenance.artifact_uri).sort(),
         ...imageSummaries.flatMap((summary) => summary.image_tags).sort(),
-        ...imageSummaries.flatMap((summary) => summary.image_digests).sort()
+        ...imageSummaries.flatMap((summary) => summary.image_digests).sort(),
+        ...imageSummaries.flatMap((summary) => summary.runner_release_manifest
+          ? [
+            summary.runner_release_manifest.artifact_uri,
+            summary.runner_release_manifest.subject_sha256,
+            summary.runner_release_manifest.artifact_sha256
+          ]
+          : []).sort()
       ].join(':'),
+      ...(first.runner_release_manifest ? { runner_release_manifest: first.runner_release_manifest } : {}),
       provenance: Object.fromEntries(
         imageSummaries.map((summary) => [summary.image_ids[0], summary.provenance])
       )
@@ -2551,6 +2607,10 @@ async function main() {
 
   const release = validateReleaseContract(contract.value, contract.digest);
   const canonicalRepos = await buildCanonicalRepos(release);
+  const runnerReleaseManifest = requireObject(
+    canonicalRepos.find((entry) => entry.repo === RUNNER_REPO)?.runner_release_manifest,
+    'canonical_repos.agentsmith-runner.runner_release_manifest'
+  );
   const deployTemplateSummary = validateDeployTemplatePackage(deployTemplate.value, contract.value, deployTemplate.digest);
   const productReadinessSummary = validateProductReadiness(productReady.value, productReady.digest, release);
   const productSmokeSummary = validateProductSmoke(productSmoke.value, productSmoke.digest, release);
@@ -2600,7 +2660,10 @@ async function main() {
         release.release_contract_digest
       ].join(':')
     },
-    images: release.images,
+    images: {
+      ...release.images,
+      runner_release_manifest: runnerReleaseManifest
+    },
     deployment_paths: deploymentPaths.sort((a, b) => a.operator_path.localeCompare(b.operator_path)),
     product_readiness: productReadinessSummary,
     post_deploy_product_smoke: {
