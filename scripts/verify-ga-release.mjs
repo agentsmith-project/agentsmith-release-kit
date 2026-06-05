@@ -105,6 +105,56 @@ const DEPLOYMENT_PATHS = sourceValidation.DEPLOYMENT_PATHS;
 
 const SOURCE_STEP_REPORTS = sourceValidation.FINALIZED_STEP_SOURCE_REPORTS;
 const DEPLOYMENT_GATE_BY_SOURCE = sourceValidation.DEPLOYMENT_GATE_BY_SOURCE;
+const GA_RELEASE_CONTRACT_TARGET_PROFILE_PREREQUISITE_KEYS = new Set([
+  'namespace',
+  'rbac',
+  'ingress',
+  'tls',
+  'storage_class',
+  'registry',
+  'pull_secret_ref'
+]);
+const GA_RELEASE_CONTRACT_TARGET_PROFILE_PREREQUISITES = new Map([
+  ['existing_kubernetes/external_declared/online', {
+    namespace: 'agentsmith',
+    rbac: 'namespace_admin',
+    ingress: 'operator_provided',
+    tls: 'required',
+    storage_class: 'operator_provided',
+    registry: 'ghcr_or_operator_mirror',
+    pull_secret_ref: 'operator_secret_ref'
+  }],
+  ['existing_kubernetes/kit_installed/online', {
+    namespace: 'agentsmith',
+    rbac: 'namespace_admin',
+    ingress: 'kit_installed',
+    tls: 'required',
+    storage_class: 'kit_installed',
+    registry: 'ghcr_or_operator_mirror',
+    pull_secret_ref: 'operator_secret_ref'
+  }],
+  ['existing_kubernetes/external_declared/airgap', {
+    namespace: 'agentsmith',
+    rbac: 'namespace_admin',
+    ingress: 'operator_provided',
+    tls: 'required',
+    storage_class: 'operator_provided',
+    registry: 'operator_mirror',
+    pull_secret_ref: 'operator_secret_ref'
+  }],
+  ['existing_kubernetes/kit_installed/airgap', {
+    namespace: 'agentsmith',
+    rbac: 'namespace_admin',
+    ingress: 'kit_installed',
+    tls: 'required',
+    storage_class: 'kit_installed',
+    registry: 'operator_mirror',
+    pull_secret_ref: 'operator_secret_ref'
+  }]
+]);
+const GA_RELEASE_CONTRACT_TARGET_PROFILE_TUPLES = [
+  ...new Set([...DEPLOYMENT_PATHS.values()].map((requirement) => requirement.targetProfile))
+];
 
 const canonicalProductSmokeSpec = (sourceFlow) => ({
   source_flow: sourceFlow,
@@ -759,6 +809,68 @@ function requireTargetProfile(profile, expected, label) {
   return value;
 }
 
+function releaseContractTargetProfileTuple(profile, label) {
+  const targetCluster = requireString(profile.target_cluster, `${label}.target_cluster`);
+  const substrateSource = requireString(profile.substrate_source, `${label}.substrate_source`);
+  const distribution = requireString(profile.distribution, `${label}.distribution`);
+  return `${targetCluster}/${substrateSource}/${distribution}`;
+}
+
+function validateReleaseContractTargetProfiles(contract) {
+  const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
+  const byTuple = new Map();
+  for (const [index, rawProfile] of profiles.entries()) {
+    const label = `release_contract.target_profiles[${index}]`;
+    const profile = requireObject(rawProfile, label);
+    const tuple = releaseContractTargetProfileTuple(profile, label);
+    if (byTuple.has(tuple)) {
+      fail(`release_contract.target_profiles contains duplicate target profile: ${tuple}`);
+    }
+    byTuple.set(tuple, profile);
+    if (tuple.startsWith('kind_rehearsal/')) {
+      fail(`release_contract.target_profiles must not include non-GA target profile ${tuple}`);
+    }
+    const expectedPrerequisites = GA_RELEASE_CONTRACT_TARGET_PROFILE_PREREQUISITES.get(tuple);
+    if (!expectedPrerequisites) {
+      fail(
+        `release_contract.target_profiles contains non-GA target profile ${tuple}; expected exact GA set: ${GA_RELEASE_CONTRACT_TARGET_PROFILE_TUPLES.join(', ')}`
+      );
+    }
+    if (typeof profile.required !== 'boolean') {
+      fail(`${label}.required must be a boolean`);
+    }
+    const prerequisites = requireObject(profile.prerequisites, `${label}.prerequisites`);
+    rejectUnknownKeys(
+      prerequisites,
+      GA_RELEASE_CONTRACT_TARGET_PROFILE_PREREQUISITE_KEYS,
+      `${label}.prerequisites`
+    );
+    for (const [key, value] of Object.entries(prerequisites)) {
+      if (value === 'kit_provided' || value === 'operator_or_kit_provided') {
+        fail(
+          `${label}.prerequisites.${key} must use GA install_substrates/kit_installed wording, not ${value}`
+        );
+      }
+    }
+    for (const [key, expectedValue] of Object.entries(expectedPrerequisites)) {
+      if (requireString(prerequisites[key], `${label}.prerequisites.${key}`) !== expectedValue) {
+        fail(`${label}.prerequisites.${key} must be ${expectedValue}`);
+      }
+    }
+  }
+
+  if (profiles.length !== GA_RELEASE_CONTRACT_TARGET_PROFILE_TUPLES.length) {
+    fail(
+      `release_contract.target_profiles must exactly cover GA target profiles: ${GA_RELEASE_CONTRACT_TARGET_PROFILE_TUPLES.join(', ')}`
+    );
+  }
+  for (const tuple of GA_RELEASE_CONTRACT_TARGET_PROFILE_TUPLES) {
+    if (!byTuple.has(tuple)) {
+      fail(`release_contract.target_profiles missing GA target profile: ${tuple}`);
+    }
+  }
+}
+
 function reportStepsByName(report, label) {
   const steps = requireArray(report.steps, `${label}.steps`);
   const byName = new Map();
@@ -805,6 +917,7 @@ function validateReleaseContract(contract, contractDigest) {
     runId: provenance.run_id,
     runAttempt: provenance.run_attempt
   });
+  validateReleaseContractTargetProfiles(contract);
 
   const inventory = requireArray(contract.deploy_image_inventory, 'release_contract.deploy_image_inventory')
     .map((entry, index) => validateImageRef(entry, `release_contract.deploy_image_inventory[${index}]`));

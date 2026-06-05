@@ -1172,6 +1172,50 @@ fs.writeFileSync(contractFile, `${JSON.stringify(contract, null, 2)}\n`);
 NODE
 }
 
+mutate_release_contract_target_profiles() {
+  local contract_file="$1"
+  local mutation="$2"
+
+  "$NODE_BIN" --input-type=module - "$contract_file" "$mutation" <<'NODE'
+import fs from 'node:fs';
+
+const [contractFile, mutation] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractFile, 'utf8'));
+
+if (mutation === 'kind-target-profile') {
+  contract.target_profiles.push({
+    target_cluster: 'kind_rehearsal',
+    substrate_source: 'kit_installed',
+    distribution: 'online',
+    required: false,
+    prerequisites: {
+      namespace: 'agentsmith',
+      rbac: 'local_admin',
+      ingress: 'local',
+      tls: 'optional',
+      storage_class: 'standard',
+      registry: 'local_kind_import',
+      pull_secret_ref: 'not_required'
+    }
+  });
+} else if (mutation === 'kit-provided-prerequisite') {
+  const profile = contract.target_profiles.find((entry) =>
+    entry.target_cluster === 'existing_kubernetes' &&
+    entry.substrate_source === 'kit_installed' &&
+    entry.distribution === 'online'
+  );
+  if (!profile) {
+    throw new Error('missing kit installed online target profile');
+  }
+  profile.prerequisites.ingress = 'kit_provided';
+} else {
+  throw new Error(`unknown release contract target profile mutation: ${mutation}`);
+}
+
+fs.writeFileSync(contractFile, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
 mutate_release_contract_source_provenance() {
   local contract_file="$1"
   local mutation="$2"
@@ -2198,6 +2242,23 @@ fi
 grep -Fq "release_contract.deploy_template_package.required_image_ids must exactly match release_contract.deploy_image_inventory ids" "$TMP_DIR/ga-release-image-closure.out" || \
   fail "release contract image closure failure message did not explain blocker"
 pass "GA aggregate rejects release contract required image closure drift"
+
+target_profile_cases=(
+  "kind-target-profile|release_contract.target_profiles must not include non-GA target profile kind_rehearsal/kit_installed/online"
+  "kit-provided-prerequisite|must use GA install_substrates/kit_installed wording, not kit_provided"
+)
+for target_profile_case in "${target_profile_cases[@]}"; do
+  IFS='|' read -r mutation expected_message <<< "$target_profile_case"
+  TARGET_PROFILE_DIR="$TMP_DIR/release-contract-target-profile-$mutation"
+  write_fixture_set "$TARGET_PROFILE_DIR" valid
+  mutate_release_contract_target_profiles "$TARGET_PROFILE_DIR/release-contract.json" "$mutation"
+  if run_ga_release "$TARGET_PROFILE_DIR" "$PATH_DIR" "$TMP_DIR/out-target-profile-$mutation" >"$TMP_DIR/ga-release-target-profile-$mutation.out" 2>&1; then
+    fail "release contract target profile $mutation should fail"
+  fi
+  grep -Fq "$expected_message" "$TMP_DIR/ga-release-target-profile-$mutation.out" || \
+    fail "release contract target profile $mutation failure message did not explain blocker"
+done
+pass "GA aggregate rejects non-GA release contract target profiles and stale prerequisites"
 
 source_provenance_cases=(
   "missing-runner-source-provenance|release_contract.deploy_image_inventory.managed_runner.source_provenance must be an object"

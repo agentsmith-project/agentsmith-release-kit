@@ -210,6 +210,21 @@
     },
     {
       "target_cluster": "existing_kubernetes",
+      "substrate_source": "kit_installed",
+      "distribution": "online",
+      "required": false,
+      "prerequisites": {
+        "namespace": "agentsmith",
+        "rbac": "namespace_admin",
+        "ingress": "kit_installed",
+        "tls": "required",
+        "storage_class": "kit_installed",
+        "registry": "ghcr_or_operator_mirror",
+        "pull_secret_ref": "operator_secret_ref"
+      }
+    },
+    {
+      "target_cluster": "existing_kubernetes",
       "substrate_source": "external_declared",
       "distribution": "airgap",
       "required": false,
@@ -224,36 +239,6 @@
       }
     },
     {
-      "target_cluster": "kind_rehearsal",
-      "substrate_source": "kit_installed",
-      "distribution": "online",
-      "required": false,
-      "prerequisites": {
-        "namespace": "agentsmith",
-        "rbac": "local_admin",
-        "ingress": "local",
-        "tls": "optional",
-        "storage_class": "standard",
-        "registry": "local_kind_import",
-        "pull_secret_ref": "not_required"
-      }
-    },
-    {
-      "target_cluster": "existing_kubernetes",
-      "substrate_source": "kit_installed",
-      "distribution": "online",
-      "required": false,
-      "prerequisites": {
-        "namespace": "agentsmith",
-        "rbac": "namespace_admin",
-        "ingress": "kit_provided",
-        "tls": "kit_provided",
-        "storage_class": "operator_provided",
-        "registry": "operator_or_kit_provided",
-        "pull_secret_ref": "operator_secret_ref"
-      }
-    },
-    {
       "target_cluster": "existing_kubernetes",
       "substrate_source": "kit_installed",
       "distribution": "airgap",
@@ -261,10 +246,10 @@
       "prerequisites": {
         "namespace": "agentsmith",
         "rbac": "namespace_admin",
-        "ingress": "kit_provided",
-        "tls": "kit_provided",
-        "storage_class": "operator_provided",
-        "registry": "operator_or_kit_provided",
+        "ingress": "kit_installed",
+        "tls": "required",
+        "storage_class": "kit_installed",
+        "registry": "operator_mirror",
         "pull_secret_ref": "operator_secret_ref"
       }
     }
