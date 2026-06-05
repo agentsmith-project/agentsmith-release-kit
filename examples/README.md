@@ -11,8 +11,7 @@ bash scripts/operator-release.sh --operator-inputs <staged-example-package> --ru
 
 Run `--init-operator-inputs` to create a fresh package skeleton, then copy or
 replace the example materials. Run `--doctor` to list missing package inputs
-before execution. Run the same command without `--doctor` or `--run` only when
-you want package validation before execution.
+before execution. Run `--run` only when the package is ready to execute.
 
 Available examples:
 

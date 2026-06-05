@@ -158,6 +158,18 @@ assert_operator_success_contract_docs() {
       fail "${example_readme#$ROOT_DIR/} must not document a single generic product smoke report for --ga-report"
     fi
   done
+  for example_readme in "$ROOT_DIR"/examples/README.md "$ROOT_DIR"/examples/*/README.md; do
+    while IFS= read -r line; do
+      if [[ "$line" == *'bash scripts/operator-release.sh --operator-inputs '* ]] &&
+        [[ "$line" != *' --doctor'* ]] &&
+        [[ "$line" != *' --run'* ]]; then
+        fail "${example_readme#$ROOT_DIR/} must use --doctor or --run for operator-inputs examples: $line"
+      fi
+    done <"$example_readme"
+    if grep -Fq 'without `--doctor` or `--run`' "$example_readme"; then
+      fail "${example_readme#$ROOT_DIR/} must not route operators to plain operator-inputs validation"
+    fi
+  done
   grep -q -- 'The focused producer catalog is no longer duplicated' "$root_readme" ||
     fail "root README must route maintainer diagnostics out of the operator first screen"
   grep -q -- 'docs/maintainer-diagnostics.md' "$root_readme" ||

@@ -35,10 +35,10 @@ editing the bundle-local install inputs and `namespace`. The operator-inputs
 intake computes `install_parameters_sha256`, prints it for audit, and passes
 it internally to the installer during `--run`.
 
-## Validate And Run
+## Doctor And Run
 
 ```bash
-bash scripts/operator-release.sh --operator-inputs "$PKG"
+bash scripts/operator-release.sh --operator-inputs "$PKG" --doctor
 bash scripts/operator-release.sh --operator-inputs "$PKG" --run
 ```
 

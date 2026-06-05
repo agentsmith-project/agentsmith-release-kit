@@ -28,13 +28,12 @@ archive, and image map. Update `airgap-bundle/airgap-bundle-manifest.json`
 component sha256 values after replacement. Replace package-local tools before
 `--run`.
 
-## Validate And Run
+## Doctor And Run
 
 ```bash
-bash scripts/operator-release.sh --operator-inputs "$PKG"
+bash scripts/operator-release.sh --operator-inputs "$PKG" --doctor
 bash scripts/operator-release.sh --operator-inputs "$PKG" --run
 ```
 
 The package run writes path-level evidence for the final GA facade. It does
 not issue `ga-release-report.json`.
-

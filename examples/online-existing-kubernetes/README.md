@@ -8,7 +8,7 @@ endpoints.
 The operator path is package-driven:
 
 ```bash
-bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir>
+bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir> --doctor
 bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir> --run
 ```
 
@@ -58,14 +58,14 @@ Edit `"$PKG/operator-inputs.json"` before apply:
 - Optional route smoke can add `smoke_url`, `expected_status`, `timeout`, and
   `timeout_ms`; keep them omitted when route smoke is not in scope.
 
-## Validate
+## Doctor
 
 ```bash
-bash scripts/operator-release.sh --operator-inputs "$PKG"
+bash scripts/operator-release.sh --operator-inputs "$PKG" --doctor
 ```
 
-This validates package intake and prepares the package for `--run`. It is not
-runtime evidence and does not issue a GA verdict.
+This lists missing package inputs without executing the selected path. It is
+not runtime evidence and does not issue a GA verdict.
 
 ## Apply
 
