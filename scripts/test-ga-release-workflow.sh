@@ -84,6 +84,8 @@ require_text "$WORKFLOW" '--product-readiness-report "$PRODUCT_READINESS_REPORT"
 require_text "$WORKFLOW" '--post-deploy-product-smoke-report "$POST_DEPLOY_PRODUCT_SMOKE_REPORT"'
 require_text "$WORKFLOW" "uses: actions/upload-artifact@v4"
 require_text "$WORKFLOW" "if: always()"
+require_text "$WORKFLOW" "Verify final GA report files"
+require_text "$WORKFLOW" "missing final GA output"
 require_text "$WORKFLOW" "ga-release-report.json"
 require_text "$WORKFLOW" "ga-release-summary.md"
 require_text "$WORKFLOW" "ga-evidence-index.json"

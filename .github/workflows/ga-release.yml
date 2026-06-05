@@ -199,6 +199,21 @@ jobs:
             printf '%s\n' 'GA report was written, but ga-release-summary.md was not produced.' >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Verify final GA report files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in \
+            .ga-release-output/ga-release-report.json \
+            .ga-release-output/ga-release-summary.md \
+            .ga-release-output/ga-evidence-index.json; do
+            if [[ ! -f "$file" ]]; then
+              printf 'error: missing final GA output %s\n' "$file" >&2
+              exit 1
+            fi
+          done
+
       - name: Upload final GA report
         if: always()
         uses: actions/upload-artifact@v4
