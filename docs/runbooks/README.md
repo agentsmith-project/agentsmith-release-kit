@@ -14,8 +14,8 @@ Pick exactly one deployment path per input package:
 - `airgap/use_existing`
 - `airgap/install_substrates`
 
-Use four packages when the release captain asks for all four GA inputs. Do not
-combine the four paths into one manifest. `use_existing` means the target
+Use four packages when all four GA inputs are required. Do not combine the four
+paths into one manifest. `use_existing` means the target
 environment already provides the required substrates. `install_substrates`
 means the path runs the namespace-scoped substrate installer with explicit
 confirmation; it is not cloud provisioning for clusters, managed databases,
@@ -56,13 +56,13 @@ The init command writes a package skeleton for one deployment path and refuses
 to overwrite an existing `operator-inputs.json`. The doctor command lists
 missing package inputs without executing the selected path. Add `--run` only
 when the package is ready to execute the selected apply path. A passing `--run`
-produces path-level evidence for the release captain/finalizer to consume; do
-not treat intermediate files as the formal release verdict. After all four
-package runs and product-side reports are available, use `--ga-report` to write
-the final `ga-release-report.json`.
-Release captains can also use the repository's manual
-`ga-release-aggregate` GitHub workflow to download already-produced artifacts
-and run this same final aggregate. That workflow is aggregate-only; it does
+produces path-level evidence for the final GA report; do not treat
+intermediate files as the formal release verdict. After all four package runs
+and product-side reports are available, use `--ga-report` to write the final
+`ga-release-report.json`.
+The repository's manual `ga-release-aggregate` GitHub workflow can also
+download already-produced artifacts and run this same final aggregate. That
+workflow is aggregate-only; it does
 not rerun package, product, deployment, or airgap producers. Both paths also
 write `ga-evidence-index.json` for release archive lookup; it is derived from
 the final report and does not issue another verdict. On pass the index mirrors
@@ -76,16 +76,16 @@ then use `ga-release-report.json` for the formal pass/fail result.
 ### 4. What is the final report?
 
 Formal release success or failure is represented only by the final
-`ga-release-report.json` issued by the release finalizer/captain through
-`operator-release.sh --ga-report`. The facade takes four package paths plus
-AgentSmith product-side reports and locates internal path evidence itself. Pass
+`ga-release-report.json` issued by `operator-release.sh --ga-report`. The
+facade takes four package paths plus AgentSmith product-side reports and
+locates internal path evidence itself. Pass
 post-deploy product smoke reports for at least one online target and one airgap
 target; the final report records that coverage under
 `post_deploy_product_smoke_coverage`.
 On pass the report has `formal_verdict=issued`; when blocked it replaces stale
 pass outputs with `status=fail`, `formal_verdict=not_issued`, and blockers.
 The sibling `ga-evidence-index.json` binds that source report digest to the
-archived path and product evidence for release captain review. Its
+archived path and product evidence for later review. Its
 `product_runtime_readiness` and `post_deploy_product_smoke_coverage` entries
 are archive lookup fields, not separate release verdicts.
 The sibling `ga-release-summary.md` repeats the Product runtime readiness

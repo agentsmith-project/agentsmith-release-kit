@@ -40,10 +40,13 @@ assert_operator_success_contract_docs() {
     fail "operator-release help must foreground the operator-inputs run command"
   grep -q -- 'Formal release success or failure' "$help_output" ||
     fail "operator-release help must name the formal success boundary"
-  grep -q -- 'ga-release-report.json issued by the release finalizer/captain' "$help_output" ||
+  grep -q -- 'final ga-release-report.json written by --ga-report' "$help_output" ||
     fail "operator-release help must point formal success to ga-release-report.json"
   if grep -q -- 'verify-release.sh' "$help_output"; then
     fail "operator-release help must not expose finalizer command details"
+  fi
+  if grep -Eiq 'release finalizer|release captain|finalizer/captain' "$help_output"; then
+    fail "operator-release help must not expose finalizer/captain roles"
   fi
   if grep -Eiq 'kit_provided|[.]release-kit-internal|operator-inputs-plan|docs/RELEASE_GATES[.]md|operator-release-surface-report|adoption report|candidate intake|release-engineering|operator-signoff|external_declared|kit_installed|existing_kubernetes|kind_rehearsal' "$help_output"; then
     fail "operator-release help must not expose legacy aliases, internal paths, machine profiles, or maintainer diagnostics"
@@ -68,6 +71,7 @@ assert_operator_success_contract_docs() {
     'deployment-path-report.json' \
     'internal plan' \
     'internal execution plan' \
+    'release finalizer|release captain|finalizer/captain' \
     'without `--run`' \
     'bash scripts/operator-release[.]sh --operator-inputs <dir-or-json>$'; do
     if grep -Eiq "$forbidden" "$first_screen"; then
@@ -107,6 +111,7 @@ assert_operator_success_contract_docs() {
     'kind_rehearsal' \
     'internal plan' \
     'internal execution plan' \
+    'release finalizer|release captain|finalizer/captain' \
     'without `--run`' \
     'bash scripts/operator-release[.]sh --operator-inputs <dir-or-json>$'; do
     if grep -Eiq "$forbidden" "$root_first_screen"; then
@@ -124,7 +129,8 @@ assert_operator_success_contract_docs() {
     'kit_provided' \
     'external_declared' \
     'kit_installed' \
-    'kind_rehearsal'; do
+    'kind_rehearsal' \
+    'release finalizer|release captain|finalizer/captain'; do
     if grep -Eiq "$forbidden" "$root_full"; then
       fail "root README must not duplicate the maintainer producer catalog: $forbidden"
     fi
@@ -140,11 +146,9 @@ assert_operator_success_contract_docs() {
   grep -q -- 'Formal release success' "$root_readme" ||
     fail "root README must name the formal GA success boundary"
   grep -q -- 'or failure is represented only by the' "$root_readme" ||
-    fail "root README must point formal success to the finalizer GA report"
+    fail "root README must point formal success to the GA report"
   grep -q -- 'final `ga-release-report.json` issued by' "$root_readme" ||
-    fail "root README must point formal success to the finalizer GA report"
-  grep -q -- 'release finalizer/captain' "$root_readme" ||
-    fail "root README must point formal success to the finalizer GA report"
+    fail "root README must point formal success to the GA report"
   grep -q -- 'formal_verdict=not_issued' "$root_readme" ||
     fail "root README must describe blocked GA aggregates as not_issued"
   grep -q -- 'formal_verdict=not_issued' "$first_screen" ||

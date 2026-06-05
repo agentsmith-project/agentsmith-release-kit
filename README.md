@@ -111,20 +111,18 @@ does not prefill explicit deploy/install confirmations.
 With `--run`, the current orchestration slice supports `online/use_existing`,
 `online/install_substrates`, `airgap/use_existing`, and
 `airgap/install_substrates` with `mode: apply`.
-`online/use_existing` runs the existing online focused producer chain.
+`online/use_existing` executes the selected online path.
 `online/install_substrates` first runs substrate-install, then runs the online
 gate bound to the installer output substrate truth. `airgap/use_existing` runs
 the existing airgap consume rehearsal, extracts only its nested bundle-check
-and airgap deployment-gate reports, then calls the deployment-path finalizer
+and airgap deployment-gate reports, then writes the finalized package evidence
 with bundle-local release contract/deploy package components. It requires
 package-local `kubectl`, explicit `context`, package-local archive/image load
 tools, and apply smoke inputs. The airgap install path runs substrate-install,
 then runs bundle-check plus airgap deployment-gate using bundle-local release
 materials and the installer output substrate truth. These paths record
-path-level evidence for the release captain/finalizer. Server-dry-run modes
-also fail fast. Formal release success or failure is represented only by the
-final `ga-release-report.json` issued by the release finalizer/captain after
-required path evidence and AgentSmith product-side reports are available.
+path-level evidence for the final GA report. Server-dry-run modes also fail
+fast. Formal release success or failure is represented only by the final `ga-release-report.json` issued by `--ga-report` after required path evidence and AgentSmith product-side reports are available.
 
 For `online/install_substrates`, the package must provide namespace-scoped
 installer inputs, `kubectl` and `context` inputs, a package-local routability
@@ -157,14 +155,14 @@ final report. It shows Product runtime readiness classification, evidence
 path, and adaptive wait intervals so the runtime pending/readiness closure is
 visible without opening schema details; it is not a third verdict.
 The repository also provides a manual `ga-release-aggregate` GitHub workflow
-for release captains. It is `workflow_dispatch` only, downloads the seven
+for final aggregation. It is `workflow_dispatch` only, downloads the seven
 already-produced operator/product artifact groups by repository, run id, and
 artifact name, runs the
 same `operator-release.sh --ga-report` facade, and uploads the final
 `ga-release-report.json`, `ga-release-summary.md`, and
 `ga-evidence-index.json`. It does not rerun product, deployment, airgap, or
 operator package producers.
-These paths are still release-kit installer producer/finalizer evidence flows;
+These paths are still release-kit installer and package evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
 
@@ -204,7 +202,7 @@ bash scripts/operator-release.sh --ga-report \
 Use `--init-operator-inputs` for a scaffolded package, use `--doctor` for a
 missing-input checklist, and add `--run` when the package is ready to execute.
 The package-driven `--run` path writes finalized deployment-path handoff
-evidence for the release captain/finalizer when it executes an apply manifest.
+evidence for the final GA report when it executes an apply manifest.
 It does not issue a formal GA verdict. Formal release success or failure is
 issued only by `--ga-report`, which writes the final `ga-release-report.json`.
 

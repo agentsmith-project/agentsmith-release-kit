@@ -39,10 +39,9 @@ Operator-inputs run:
   materials and package-local tools. Server-dry-run modes fail fast.
 
 Success boundary:
-  --run produces path-level evidence for the release captain/finalizer to
-  consume. Formal release success or failure is represented only by the final
-  ga-release-report.json issued by the release finalizer/captain after required
-  path evidence and AgentSmith product-side reports are available.
+  --run produces path-level evidence for the final GA report.
+  Formal release success or failure is represented only by the final ga-release-report.json written by --ga-report.
+  Required path evidence and AgentSmith product-side reports must already be available.
 
 Final GA report:
   --ga-report consumes four operator-inputs packages that have already been
