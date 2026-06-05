@@ -1961,11 +1961,17 @@ if (report.schema !== 'agentsmith.ga-release-report/v1') {
 if (report.status !== 'pass' || report.formal_verdict !== 'issued') {
   throw new Error('GA report did not issue pass verdict');
 }
+if (typeof report.generated_at !== 'string' || Number.isNaN(Date.parse(report.generated_at))) {
+  throw new Error('GA report must include an ISO generated_at timestamp');
+}
 if (evidenceIndex.schema !== 'agentsmith.ga-evidence-index/v1') {
   throw new Error('GA evidence index used an unexpected schema');
 }
 if (evidenceIndex.role !== 'derived_from_ga_release_report') {
   throw new Error('GA evidence index must be marked as derived from the GA report');
+}
+if (evidenceIndex.generated_at !== report.generated_at) {
+  throw new Error('GA evidence index generated_at must match the source report generated_at');
 }
 if (
   evidenceIndex.source_report?.path !== 'ga-release-report.json' ||

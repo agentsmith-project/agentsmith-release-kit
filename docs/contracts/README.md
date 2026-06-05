@@ -54,12 +54,14 @@ Current post-push contract index:
   The managed runner entry must also carry runner release manifest provenance:
   canonical manifest artifact URI, manifest subject sha256, and manifest
   artifact sha256. The GA report exposes that as
-  `images.runner_release_manifest`.
+  `images.runner_release_manifest`. Both pass and fail reports include
+  `generated_at` for release archive traceability.
 - `agentsmith.ga-evidence-index/v1`: derived archive index written next to the
   final GA report. It does not issue a verdict; `source_report` copies the
   final `ga-release-report.json` schema, status, formal_verdict, and canonical
-  digest, and `artifact_index` mirrors the final report evidence bindings for
-  release archive lookup.
+  digest, `generated_at` matches the source report timestamp, and
+  `artifact_index` mirrors the final report evidence bindings for release
+  archive lookup.
 
 For package-driven operator runs, each
 `operator-release.sh --operator-inputs <pkg> --run` package still represents

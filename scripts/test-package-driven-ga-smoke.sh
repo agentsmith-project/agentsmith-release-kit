@@ -391,9 +391,15 @@ if (report.status !== 'pass') {
 if (report.formal_verdict !== 'issued') {
   throw new Error(`unexpected GA formal_verdict: ${report.formal_verdict}`);
 }
+if (typeof report.generated_at !== 'string' || Number.isNaN(Date.parse(report.generated_at))) {
+  throw new Error('GA report must include an ISO generated_at timestamp');
+}
 const evidenceIndex = JSON.parse(fs.readFileSync(path.join(path.dirname(reportFile), 'ga-evidence-index.json'), 'utf8'));
 if (evidenceIndex.schema !== 'agentsmith.ga-evidence-index/v1') {
   throw new Error(`unexpected GA evidence index schema: ${evidenceIndex.schema}`);
+}
+if (evidenceIndex.generated_at !== report.generated_at) {
+  throw new Error('GA evidence index generated_at must match the source report generated_at');
 }
 if (
   evidenceIndex.source_report?.path !== 'ga-release-report.json' ||

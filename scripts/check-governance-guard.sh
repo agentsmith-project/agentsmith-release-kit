@@ -334,6 +334,7 @@ require_text docs/RELEASE_GATES.md '`ga-evidence-index.json` outputs'
 require_text docs/RELEASE_GATES.md "without issuing another verdict"
 require_text docs/contracts/README.md '`agentsmith.ga-evidence-index/v1`'
 require_text docs/contracts/README.md "It does not issue a verdict"
+require_text docs/contracts/README.md 'generated_at` matches the source report timestamp'
 require_text scripts/verify-release.sh "--ga-release is the release-kit final GA aggregate"
 require_text scripts/verify-release.sh "formal_verdict=issued"
 require_text scripts/verify-release.sh "does not rerun producers"

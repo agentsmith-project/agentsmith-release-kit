@@ -2750,6 +2750,7 @@ async function buildPassReport(args) {
     schema: REPORT_SCHEMA,
     status: 'pass',
     formal_verdict: 'issued',
+    generated_at: new Date().toISOString(),
     release: {
       release_id: release.release_id,
       git_sha: release.git_sha,
