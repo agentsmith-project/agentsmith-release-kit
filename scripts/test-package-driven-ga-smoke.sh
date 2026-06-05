@@ -167,6 +167,35 @@ scanDir(packageRoot);
 NODE
 }
 
+assert_ga_failure_report() {
+  local output_dir="$1"
+  local expected_message="$2"
+
+  "$NODE_BIN" --input-type=module - "$output_dir/ga-release-report.json" "$output_dir/ga-release-summary.md" "$expected_message" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile, summaryFile, expectedMessage] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const summary = fs.readFileSync(summaryFile, 'utf8');
+
+if (report.schema !== 'agentsmith.ga-release-report/v1') {
+  throw new Error(`unexpected failure report schema: ${report.schema}`);
+}
+if (report.status !== 'fail' || report.formal_verdict !== 'not_issued') {
+  throw new Error(`failure report must be non-verdict fail; got ${report.status}/${report.formal_verdict}`);
+}
+if (!Array.isArray(report.blockers) || report.blockers.length === 0) {
+  throw new Error('failure report must include blockers');
+}
+if (!report.blockers.some((entry) => String(entry.message || '').includes(expectedMessage))) {
+  throw new Error(`failure report blockers did not include: ${expectedMessage}`);
+}
+if (!summary.includes('Formal verdict: not_issued') || !summary.includes(expectedMessage)) {
+  throw new Error('failure summary must include not_issued verdict and blocker message');
+}
+NODE
+}
+
 write_product_reports() {
   local release_contract="$1"
   local output_dir="$2"
@@ -567,9 +596,7 @@ if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
 fi
 grep -Fq 'requires exactly 4 --operator-inputs packages' "$TMP_DIR/ga-missing-package.out" ||
   fail "missing package failure did not explain required package count"
-if [[ -e "$missing_package_output/ga-release-report.json" || -e "$missing_package_output/ga-release-summary.md" ]]; then
-  fail "operator GA facade missing package failure must remove stale final GA outputs"
-fi
+assert_ga_failure_report "$missing_package_output" 'requires exactly 4 --operator-inputs packages'
 
 duplicate_path_output="$TMP_DIR/ga-output-duplicate-path"
 seed_stale_ga_outputs "$duplicate_path_output"
@@ -585,9 +612,7 @@ if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
 fi
 grep -Fq 'duplicate deployment_path online/use_existing' "$TMP_DIR/ga-duplicate-path.out" ||
   fail "duplicate deployment_path failure did not explain duplicate package"
-if [[ -e "$duplicate_path_output/ga-release-report.json" || -e "$duplicate_path_output/ga-release-summary.md" ]]; then
-  fail "operator GA facade duplicate path failure must remove stale final GA outputs"
-fi
+assert_ga_failure_report "$duplicate_path_output" 'duplicate deployment_path online/use_existing'
 
 missing_report_package="$TMP_DIR/pkg-online-use-existing-missing-report"
 cp -R "$online_package" "$missing_report_package"
@@ -608,9 +633,7 @@ grep -Fq 'finalized path evidence is missing for online/use_existing' "$TMP_DIR/
   fail "missing path report failure did not name the affected deployment path"
 grep -Fq 'bash scripts/operator-release.sh --operator-inputs' "$TMP_DIR/ga-missing-path-report.out" ||
   fail "missing path report failure did not point operator to rerun the package"
-if [[ -e "$missing_path_output/ga-release-report.json" || -e "$missing_path_output/ga-release-summary.md" ]]; then
-  fail "operator GA facade missing path evidence failure must remove stale final GA outputs"
-fi
+assert_ga_failure_report "$missing_path_output" 'finalized path evidence is missing for online/use_existing'
 
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --deployment-path-report "$online_package/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json" \

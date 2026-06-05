@@ -53,6 +53,8 @@ Final GA report:
   --ga-report consumes four operator-inputs packages that have already been
   run with --operator-inputs <package> --run, locates the finalized path
   evidence from those packages, and writes the final ga-release-report.json.
+  A passing aggregate writes formal_verdict=issued; a blocked aggregate writes
+  status=fail, formal_verdict=not_issued, and blockers in that same report.
   Operators do not pass .release-kit-internal deployment-path report paths.
 USAGE
 }
@@ -621,6 +623,51 @@ async function clearStaleFinalOutputs(outputDir) {
   await removeStaleOutputFile(path.join(resolvedOutputDir, SUMMARY_FILE));
 }
 
+async function writeJson(file, value) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+async function writeFailureOutputs(outputDir, error) {
+  if (!outputDir) {
+    return;
+  }
+  const resolvedOutputDir = path.resolve(outputDir);
+  await clearStaleFinalOutputs(resolvedOutputDir);
+  const message = error instanceof Error ? error.message : String(error);
+  const report = {
+    schema: 'agentsmith.ga-release-report/v1',
+    status: 'fail',
+    formal_verdict: 'not_issued',
+    generated_at: new Date().toISOString(),
+    summary: {
+      conclusion: 'AgentSmith GA release aggregate blocked.'
+    },
+    blockers: [
+      {
+        message,
+        exit_code: error?.exitCode ?? 1
+      }
+    ]
+  };
+  await writeJson(path.join(resolvedOutputDir, REPORT_FILE), report);
+  await fs.writeFile(
+    path.join(resolvedOutputDir, SUMMARY_FILE),
+    [
+      '# AgentSmith GA Release Summary',
+      '',
+      `Status: ${report.status}`,
+      `Formal verdict: ${report.formal_verdict}`,
+      '',
+      'Blockers:',
+      `- ${message}`,
+      ''
+    ].join('\n'),
+    'utf8'
+  );
+  console.error(`FAIL: wrote ${REPORT_FILE} with formal_verdict=not_issued`);
+}
+
 function rerunMessage(packageInput) {
   return `rerun the corresponding package: bash scripts/operator-release.sh --operator-inputs ${packageInput} --run`;
 }
@@ -718,7 +765,7 @@ async function main() {
   } catch (error) {
     const outputDir = findOutputDirArg();
     if (outputDir) {
-      await clearStaleFinalOutputs(outputDir);
+      await writeFailureOutputs(outputDir, error);
     }
     throw error;
   }
@@ -728,58 +775,63 @@ async function main() {
   }
 
   await clearStaleFinalOutputs(args.outputDir);
+  let verifyArgs;
+  try {
+    const { resolveOperatorInputs } = await import(
+      pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-resolver.mjs')).href
+    );
+    const resolvedPackages = [];
+    const byDeploymentPath = new Map();
+    for (const packageInput of args.operatorInputs) {
+      const resolved = await resolvePackage({ resolveOperatorInputs, packageInput });
+      if (byDeploymentPath.has(resolved.deploymentPath)) {
+        fail(
+          `duplicate deployment_path ${resolved.deploymentPath}; provide one package for each of: ` +
+            REQUIRED_DEPLOYMENT_PATHS.join(', ')
+        );
+      }
+      byDeploymentPath.set(resolved.deploymentPath, resolved);
+      resolvedPackages.push(resolved);
+    }
 
-  const { resolveOperatorInputs } = await import(
-    pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-resolver.mjs')).href
-  );
-  const resolvedPackages = [];
-  const byDeploymentPath = new Map();
-  for (const packageInput of args.operatorInputs) {
-    const resolved = await resolvePackage({ resolveOperatorInputs, packageInput });
-    if (byDeploymentPath.has(resolved.deploymentPath)) {
-      fail(
-        `duplicate deployment_path ${resolved.deploymentPath}; provide one package for each of: ` +
-          REQUIRED_DEPLOYMENT_PATHS.join(', ')
+    for (const deploymentPath of REQUIRED_DEPLOYMENT_PATHS) {
+      if (!byDeploymentPath.has(deploymentPath)) {
+        fail(`missing operator-inputs package for deployment_path ${deploymentPath}`);
+      }
+    }
+
+    verifyArgs = [
+      path.join(rootDir, 'scripts/verify-release.sh'),
+      '--ga-release',
+      '--release-contract',
+      pickSharedRef(resolvedPackages, 'releaseContract'),
+      '--deploy-template-package',
+      pickSharedRef(resolvedPackages, 'deployTemplatePackage')
+    ];
+    for (const deploymentPath of REQUIRED_DEPLOYMENT_PATHS) {
+      verifyArgs.push(
+        '--deployment-path-report',
+        byDeploymentPath.get(deploymentPath).pathReport
       );
     }
-    byDeploymentPath.set(resolved.deploymentPath, resolved);
-    resolvedPackages.push(resolved);
-  }
-
-  for (const deploymentPath of REQUIRED_DEPLOYMENT_PATHS) {
-    if (!byDeploymentPath.has(deploymentPath)) {
-      fail(`missing operator-inputs package for deployment_path ${deploymentPath}`);
+    for (const deploymentPath of REQUIRED_DEPLOYMENT_PATHS) {
+      verifyArgs.push(
+        '--operator-inputs-plan',
+        byDeploymentPath.get(deploymentPath).planPath
+      );
     }
-  }
-
-  const verifyArgs = [
-    path.join(rootDir, 'scripts/verify-release.sh'),
-    '--ga-release',
-    '--release-contract',
-    pickSharedRef(resolvedPackages, 'releaseContract'),
-    '--deploy-template-package',
-    pickSharedRef(resolvedPackages, 'deployTemplatePackage')
-  ];
-  for (const deploymentPath of REQUIRED_DEPLOYMENT_PATHS) {
     verifyArgs.push(
-      '--deployment-path-report',
-      byDeploymentPath.get(deploymentPath).pathReport
+      '--product-readiness-report',
+      args.productReadinessReport,
+      '--post-deploy-product-smoke-report',
+      args.postDeployProductSmokeReport,
+      '--output-dir',
+      args.outputDir
     );
+  } catch (error) {
+    await writeFailureOutputs(args.outputDir, error);
+    throw error;
   }
-  for (const deploymentPath of REQUIRED_DEPLOYMENT_PATHS) {
-    verifyArgs.push(
-      '--operator-inputs-plan',
-      byDeploymentPath.get(deploymentPath).planPath
-    );
-  }
-  verifyArgs.push(
-    '--product-readiness-report',
-    args.productReadinessReport,
-    '--post-deploy-product-smoke-report',
-    args.postDeployProductSmokeReport,
-    '--output-dir',
-    args.outputDir
-  );
 
   const result = spawnSync('bash', verifyArgs, {
     cwd: rootDir,

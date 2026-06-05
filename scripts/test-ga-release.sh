@@ -18,6 +18,35 @@ pass() {
   echo "PASS: $*"
 }
 
+assert_ga_failure_report() {
+  local output_dir="$1"
+  local expected_message="$2"
+
+  "$NODE_BIN" --input-type=module - "$output_dir/ga-release-report.json" "$output_dir/ga-release-summary.md" "$expected_message" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile, summaryFile, expectedMessage] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const summary = fs.readFileSync(summaryFile, 'utf8');
+
+if (report.schema !== 'agentsmith.ga-release-report/v1') {
+  throw new Error(`unexpected failure report schema: ${report.schema}`);
+}
+if (report.status !== 'fail' || report.formal_verdict !== 'not_issued') {
+  throw new Error(`failure report must be non-verdict fail; got ${report.status}/${report.formal_verdict}`);
+}
+if (!Array.isArray(report.blockers) || report.blockers.length === 0) {
+  throw new Error('failure report must include blockers');
+}
+if (!report.blockers.some((entry) => String(entry.message || '').includes(expectedMessage))) {
+  throw new Error(`failure report blockers did not include: ${expectedMessage}`);
+}
+if (!summary.includes('Formal verdict: not_issued') || !summary.includes(expectedMessage)) {
+  throw new Error('failure summary must include not_issued verdict and blocker message');
+}
+NODE
+}
+
 write_fixture_set() {
   local dir="$1"
   local mutation="${2:-valid}"
@@ -2145,13 +2174,8 @@ mutate_product_report "$STALE_FAILURE_DIR/product-readiness-report.json" wrong-r
 if run_ga_release "$STALE_FAILURE_DIR" "$PATH_DIR" "$STALE_OUTPUT_DIR" >"$TMP_DIR/ga-release-stale-failure.out" 2>&1; then
   fail "GA aggregate with invalid product readiness should fail"
 fi
-if [[ -e "$STALE_OUTPUT_DIR/ga-release-report.json" ]]; then
-  fail "failed GA aggregate must remove stale ga-release-report.json"
-fi
-if [[ -e "$STALE_OUTPUT_DIR/ga-release-summary.md" ]]; then
-  fail "failed GA aggregate must remove stale ga-release-summary.md"
-fi
-pass "failed GA aggregate removes stale final report outputs"
+assert_ga_failure_report "$STALE_OUTPUT_DIR" "product_readiness_report.artifact_provenance.producer_repo must match product_readiness_report.artifact_provenance.normalized_remote"
+pass "failed GA aggregate replaces stale pass outputs with not-issued failure report"
 
 SUMMARY_FAILURE_OUTPUT_DIR="$TMP_DIR/out-summary-write-failure"
 SUMMARY_FAILURE_PRELOAD="$TMP_DIR/fail-summary-write.mjs"
@@ -2518,9 +2542,7 @@ if bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
 fi
 grep -Fq "expected exactly 4 --deployment-path-report inputs" "$TMP_DIR/ga-release-missing.out" || \
   fail "missing path report failure message did not explain blocker"
-if [[ -e "$MISSING_OUTPUT_DIR/ga-release-report.json" || -e "$MISSING_OUTPUT_DIR/ga-release-summary.md" ]]; then
-  fail "missing path report failure must remove stale final GA outputs"
-fi
+assert_ga_failure_report "$MISSING_OUTPUT_DIR" "expected exactly 4 --deployment-path-report inputs"
 pass "missing path report fails fast"
 
 NO_MANIFEST_DIR="$TMP_DIR/missing-manifest"

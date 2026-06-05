@@ -351,6 +351,20 @@ function findOutputDirArg(argv) {
   return undefined;
 }
 
+function findArgValue(argv, flag) {
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== flag) {
+      continue;
+    }
+    const value = argv[index + 1];
+    if (!value || value.trim() === '' || value.startsWith('--')) {
+      return undefined;
+    }
+    return value;
+  }
+  return undefined;
+}
+
 function digestBuffer(buffer) {
   return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
 }
@@ -2518,6 +2532,24 @@ async function bestEffortRemoveOutputFile(file) {
 }
 
 async function writeSummary(file, report) {
+  if (report.status === 'fail') {
+    const lines = [
+      '# AgentSmith GA Release Summary',
+      '',
+      `Status: ${report.status}`,
+      `Formal verdict: ${report.formal_verdict}`,
+      ...(report.release?.release_id ? [`Release: ${report.release.release_id}`] : []),
+      ...(report.release?.git_sha ? [`Git SHA: ${report.release.git_sha}`] : []),
+      ...(report.release?.release_contract_digest ? [`Release contract: ${report.release.release_contract_digest}`] : []),
+      '',
+      'Blockers:',
+      ...report.blockers.map((entry) => `- ${entry.message}`),
+      ''
+    ];
+    await fs.writeFile(file, `${lines.join('\n')}\n`, 'utf8');
+    return;
+  }
+
   const lines = [
     '# AgentSmith GA Release Summary',
     '',
@@ -2539,6 +2571,50 @@ async function writeSummary(file, report) {
     ''
   ];
   await fs.writeFile(file, `${lines.join('\n')}\n`, 'utf8');
+}
+
+async function readReleaseSummaryForFailure(releaseContractPath) {
+  if (!releaseContractPath) {
+    return undefined;
+  }
+  try {
+    const input = await readJson(releaseContractPath, 'release contract');
+    const value = input.value && typeof input.value === 'object' ? input.value : {};
+    return {
+      ...(typeof value.release_id === 'string' && value.release_id.trim() !== '' ? { release_id: value.release_id } : {}),
+      ...(typeof value.git_sha === 'string' && value.git_sha.trim() !== '' ? { git_sha: value.git_sha } : {}),
+      release_contract_digest: input.digest
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeFailureOutputs(outputDir, error, argsOrRawArgs) {
+  const releaseContractPath = Array.isArray(argsOrRawArgs)
+    ? findArgValue(argsOrRawArgs, '--release-contract')
+    : argsOrRawArgs?.releaseContract;
+  const release = await readReleaseSummaryForFailure(releaseContractPath);
+  const message = error instanceof Error ? error.message : String(error);
+  const report = {
+    schema: REPORT_SCHEMA,
+    status: 'fail',
+    formal_verdict: 'not_issued',
+    generated_at: new Date().toISOString(),
+    ...(release ? { release } : {}),
+    summary: {
+      conclusion: 'AgentSmith GA release aggregate blocked.'
+    },
+    blockers: [
+      {
+        message,
+        exit_code: error?.exitCode ?? 1
+      }
+    ]
+  };
+
+  await writeFinalOutputs(outputDir, report);
+  console.error(`FAIL: wrote ${REPORT_FILE} (${canonicalDigest(report)}) with formal_verdict=not_issued`);
 }
 
 async function writeFinalOutputs(outputDir, report) {
@@ -2564,26 +2640,7 @@ async function writeFinalOutputs(outputDir, report) {
   }
 }
 
-async function main() {
-  const rawArgs = process.argv.slice(2);
-  let args;
-  try {
-    args = parseArgs(rawArgs);
-  } catch (error) {
-    const outputDir = findOutputDirArg(rawArgs);
-    if (outputDir) {
-      await clearStaleFinalOutputs(outputDir);
-    }
-    throw error;
-  }
-  if (args.help) {
-    console.log(usage());
-    return;
-  }
-
-  const outputDir = path.resolve(args.outputDir);
-  await clearStaleFinalOutputs(outputDir);
-
+async function buildPassReport(args) {
   const contract = await readJson(args.releaseContract, 'release contract');
   const deployTemplate = await readJson(args.deployTemplatePackage, 'deploy template package');
   const productReady = await readJson(args.productReadinessReport, 'product readiness report');
@@ -2642,7 +2699,7 @@ async function main() {
     deployTemplateSummary
   );
 
-  const report = {
+  return {
     schema: REPORT_SCHEMA,
     status: 'pass',
     formal_verdict: 'issued',
@@ -2702,6 +2759,36 @@ async function main() {
     },
     blockers: []
   };
+}
+
+async function main() {
+  const rawArgs = process.argv.slice(2);
+  let args;
+  try {
+    args = parseArgs(rawArgs);
+  } catch (error) {
+    const outputDir = findOutputDirArg(rawArgs);
+    if (outputDir) {
+      await clearStaleFinalOutputs(outputDir);
+      await writeFailureOutputs(outputDir, error, rawArgs);
+    }
+    throw error;
+  }
+  if (args.help) {
+    console.log(usage());
+    return;
+  }
+
+  const outputDir = path.resolve(args.outputDir);
+  await clearStaleFinalOutputs(outputDir);
+
+  let report;
+  try {
+    report = await buildPassReport(args);
+  } catch (error) {
+    await writeFailureOutputs(outputDir, error, args);
+    throw error;
+  }
 
   await writeFinalOutputs(outputDir, report);
   console.log(`PASS: wrote ${REPORT_FILE} (${canonicalDigest(report)})`);

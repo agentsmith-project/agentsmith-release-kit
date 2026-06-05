@@ -68,6 +68,8 @@ Formal release success or failure is represented only by the final
 `ga-release-report.json` issued by the release finalizer/captain through
 `operator-release.sh --ga-report`. The facade takes four package paths plus
 AgentSmith product-side reports and locates internal path evidence itself.
+On pass the report has `formal_verdict=issued`; when blocked it replaces stale
+pass outputs with `status=fail`, `formal_verdict=not_issued`, and blockers.
 
 ## Operator Package Matrix
 

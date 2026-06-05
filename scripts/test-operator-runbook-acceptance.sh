@@ -92,6 +92,10 @@ assert_operator_success_contract_docs() {
     fail "root README must point formal success to the finalizer GA report"
   grep -q -- 'release finalizer/captain' "$root_readme" ||
     fail "root README must point formal success to the finalizer GA report"
+  grep -q -- 'formal_verdict=not_issued' "$root_readme" ||
+    fail "root README must describe blocked GA aggregates as not_issued"
+  grep -q -- 'formal_verdict=not_issued' "$first_screen" ||
+    fail "operator runbook first screen must describe blocked GA aggregates as not_issued"
   grep -q -- 'Legacy `kit_provided` is an internal compatibility alias' "$root_readme" ||
     fail "root README must mark kit_provided as legacy/internal"
   pass "operator success contract docs keep internal diagnostics out of the first screen"

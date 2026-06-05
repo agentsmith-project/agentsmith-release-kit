@@ -148,6 +148,8 @@ AgentSmith product readiness and post-deploy product smoke reports. The facade
 locates finalized path evidence inside each package and writes the final
 `ga-release-report.json`; operators do not pass `.release-kit-internal` path
 report files.
+A blocked final aggregate overwrites stale pass outputs with `status=fail`,
+`formal_verdict=not_issued`, and blockers in that same report.
 These paths are still release-kit installer producer/finalizer evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
@@ -1149,7 +1151,9 @@ post-deploy product smoke reports through the operator-facing
 `bash scripts/operator-release.sh --ga-report` facade. The maintainer/internal
 `bash scripts/verify-release.sh --ga-release` entry remains available for
 diagnostics. The aggregate writes `ga-release-report.json` with
-`formal_verdict=issued` only on pass and does not rerun producers.
+`formal_verdict=issued` on pass; blocked aggregates replace stale pass outputs
+with `status=fail`, `formal_verdict=not_issued`, and blockers. It does not
+rerun producers.
 The post-deploy product smoke input must be the AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
 agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,

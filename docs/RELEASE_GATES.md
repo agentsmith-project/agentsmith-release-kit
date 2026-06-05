@@ -120,7 +120,9 @@ readiness and post-deploy product smoke reports, to
 `bash scripts/operator-release.sh --ga-report`. The facade locates the
 finalized path reports inside those packages and calls the existing GA
 aggregate verifier. The only formal GA output in this smoke is
-`ga-release-report.json` with `status: pass` and `formal_verdict: issued`.
+`ga-release-report.json`: a passing aggregate has `status: pass` and
+`formal_verdict: issued`; blocked aggregate paths replace stale pass outputs
+with `status: fail`, `formal_verdict: not_issued`, and blockers.
 
 ## Operator Release Surface v0 Focused Guard
 
@@ -1555,9 +1557,10 @@ The GA release aggregate gate is the repo-local final verdict authority for
 online deploy, airgap package/deploy, operator runbooks, and
 deployment/package evidence. It consumes finalized deployment path reports,
 AgentSmith product readiness, and post-deploy product smoke reports. It writes
-`ga-release-report.json` with `status: pass` and `formal_verdict: issued` only
-on pass. It also writes a derived `ga-release-summary.md`; the JSON report is
-the gate evidence.
+`ga-release-report.json` with `status: pass` and `formal_verdict: issued` on
+pass, or `status: fail`, `formal_verdict: not_issued`, and blockers when the
+aggregate is blocked. It also writes a derived `ga-release-summary.md`; the
+JSON report is the gate evidence.
 
 The post-deploy product smoke input must be the AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
