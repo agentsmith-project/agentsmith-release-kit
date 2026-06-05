@@ -301,6 +301,25 @@ writeJson(path.join(outputDir, 'product-readiness-report.json'), {
   release_id: contract.release_id,
   git_sha: contract.git_sha,
   release_contract_digest: releaseContractDigest,
+  runtime_readiness: {
+    files_restore_continuation: {
+      path: 'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json',
+      sha256: digest('runtime-readiness-details'),
+      schema_version: 'agentsmith.runtime-readiness-details/v1',
+      theme: 'runtime_pending_readiness',
+      classification: 'runtime_flake',
+      outcome: 'focused_gate_passed_after_runtime_readiness_marker',
+      signals_count: 3,
+      call_summaries_count: 3
+    }
+  },
+  referenced_files: [
+    {
+      id: 'runtime_readiness_details',
+      path: 'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json',
+      sha256: digest('runtime-readiness-details')
+    }
+  ],
   artifact_provenance: provenance('product-readiness-report')
 });
 
@@ -390,6 +409,9 @@ if (report.status !== 'pass') {
 }
 if (report.formal_verdict !== 'issued') {
   throw new Error(`unexpected GA formal_verdict: ${report.formal_verdict}`);
+}
+if (report.product_readiness?.runtime_readiness?.files_restore_continuation?.classification !== 'runtime_flake') {
+  throw new Error('GA report product_readiness must archive runtime readiness classification');
 }
 if (typeof report.generated_at !== 'string' || Number.isNaN(Date.parse(report.generated_at))) {
   throw new Error('GA report must include an ISO generated_at timestamp');

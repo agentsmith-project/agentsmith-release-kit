@@ -31,6 +31,10 @@ const FINALIZER_MANIFEST_TOOL = 'verify-deployment-path-report';
 const FINALIZER_MODE = 'deployment_path_source_evidence_finalization';
 const AIRGAP_OFFLINE_PROOF_SCOPE = 'release_kit_package_local_bundle_local_digest_bound_inputs_only';
 const PRODUCT_READY_SCHEMA = 'agentsmith.product-readiness-report/v1';
+const PRODUCT_RUNTIME_READINESS_SCHEMA = 'agentsmith.runtime-readiness-details/v1';
+const PRODUCT_RUNTIME_READINESS_THEME = 'runtime_pending_readiness';
+const PRODUCT_RUNTIME_READINESS_DETAILS_PATH =
+  'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json';
 const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke-report/v1';
 const PRODUCT_SMOKE_PRODUCER = 'agentsmith-post-deploy-product-smoke';
 const PRODUCT_SMOKE_OWNER = 'agentsmith';
@@ -1223,6 +1227,106 @@ function commonReportChecks(report, label, release) {
   }
 }
 
+function validateProductRuntimeReadiness(report) {
+  const runtimeReadiness = requireObject(
+    report.runtime_readiness,
+    'product_readiness_report.runtime_readiness'
+  );
+  const filesRestore = requireObject(
+    runtimeReadiness.files_restore_continuation,
+    'product_readiness_report.runtime_readiness.files_restore_continuation'
+  );
+  const runtimePath = requirePortableRelativePath(
+    filesRestore.path,
+    'product_readiness_report.runtime_readiness.files_restore_continuation.path'
+  );
+  if (runtimePath !== PRODUCT_RUNTIME_READINESS_DETAILS_PATH) {
+    fail('product_readiness_report.runtime_readiness.files_restore_continuation.path must point to the Files restore continuation runtime readiness details');
+  }
+  const runtimeDigest = requireDigest(
+    filesRestore.sha256,
+    'product_readiness_report.runtime_readiness.files_restore_continuation.sha256'
+  );
+  if (
+    requireString(
+      filesRestore.schema_version,
+      'product_readiness_report.runtime_readiness.files_restore_continuation.schema_version'
+    ) !== PRODUCT_RUNTIME_READINESS_SCHEMA
+  ) {
+    fail(`product_readiness_report.runtime_readiness.files_restore_continuation.schema_version must be ${PRODUCT_RUNTIME_READINESS_SCHEMA}`);
+  }
+  if (
+    requireString(
+      filesRestore.theme,
+      'product_readiness_report.runtime_readiness.files_restore_continuation.theme'
+    ) !== PRODUCT_RUNTIME_READINESS_THEME
+  ) {
+    fail(`product_readiness_report.runtime_readiness.files_restore_continuation.theme must be ${PRODUCT_RUNTIME_READINESS_THEME}`);
+  }
+  const classification = requireString(
+    filesRestore.classification,
+    'product_readiness_report.runtime_readiness.files_restore_continuation.classification'
+  );
+  if (!['clean_pass', 'runtime_flake'].includes(classification)) {
+    fail('product_readiness_report.runtime_readiness.files_restore_continuation.classification must be clean_pass or runtime_flake for a passed product readiness report');
+  }
+  const outcome = requireString(
+    filesRestore.outcome,
+    'product_readiness_report.runtime_readiness.files_restore_continuation.outcome'
+  );
+  const signalsCount = requireInteger(
+    filesRestore.signals_count,
+    'product_readiness_report.runtime_readiness.files_restore_continuation.signals_count'
+  );
+  const callSummariesCount = requireInteger(
+    filesRestore.call_summaries_count,
+    'product_readiness_report.runtime_readiness.files_restore_continuation.call_summaries_count'
+  );
+  if (classification === 'runtime_flake' && callSummariesCount < 3) {
+    fail('product_readiness_report.runtime_readiness.files_restore_continuation.call_summaries_count must cover API, pod-manager, and ASBCP summaries for runtime_flake');
+  }
+
+  const referencedFiles = requireArray(
+    report.referenced_files,
+    'product_readiness_report.referenced_files'
+  );
+  const runtimeReference = referencedFiles
+    .map((entry, index) => requireObject(entry, `product_readiness_report.referenced_files[${index}]`))
+    .find((entry) => entry.id === 'runtime_readiness_details');
+  if (!runtimeReference) {
+    fail('product_readiness_report.referenced_files must include runtime_readiness_details');
+  }
+  if (
+    requirePortableRelativePath(
+      runtimeReference.path,
+      'product_readiness_report.referenced_files.runtime_readiness_details.path'
+    ) !== runtimePath
+  ) {
+    fail('product_readiness_report.referenced_files.runtime_readiness_details.path must match runtime readiness path');
+  }
+  if (
+    requireDigest(
+      runtimeReference.sha256,
+      'product_readiness_report.referenced_files.runtime_readiness_details.sha256'
+    ) !== runtimeDigest
+  ) {
+    fail('product_readiness_report.referenced_files.runtime_readiness_details.sha256 must match runtime readiness digest');
+  }
+
+  return {
+    files_restore_continuation: {
+      path: runtimePath,
+      sha256: runtimeDigest,
+      schema_version: PRODUCT_RUNTIME_READINESS_SCHEMA,
+      theme: PRODUCT_RUNTIME_READINESS_THEME,
+      classification,
+      outcome,
+      signals_count: signalsCount,
+      call_summaries_count: callSummariesCount
+    }
+  };
+}
+
 function validateProductReadiness(report, reportDigest, release) {
   requireSchema(report, PRODUCT_READY_SCHEMA, 'product readiness report');
   commonReportChecks(report, 'product readiness report', release);
@@ -1232,7 +1336,8 @@ function validateProductReadiness(report, reportDigest, release) {
     release,
     'product readiness'
   );
-  return { report_digest: reportDigest, provenance };
+  const runtimeReadiness = validateProductRuntimeReadiness(report);
+  return { report_digest: reportDigest, provenance, runtime_readiness: runtimeReadiness };
 }
 
 function productSmokeEntries(smokeResults) {

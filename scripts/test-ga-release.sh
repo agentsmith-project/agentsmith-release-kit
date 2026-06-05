@@ -819,6 +819,25 @@ writeJson(path.join(outDir, 'product-readiness-report.json'), {
   release_id: contract.release_id,
   git_sha: contract.git_sha,
   release_contract_digest: contractDigest,
+  runtime_readiness: {
+    files_restore_continuation: {
+      path: 'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json',
+      sha256: sha('runtime-readiness-details'),
+      schema_version: 'agentsmith.runtime-readiness-details/v1',
+      theme: 'runtime_pending_readiness',
+      classification: 'runtime_flake',
+      outcome: 'focused_gate_passed_after_runtime_readiness_marker',
+      signals_count: 3,
+      call_summaries_count: 3
+    }
+  },
+  referenced_files: [
+    {
+      id: 'runtime_readiness_details',
+      path: 'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json',
+      sha256: sha('runtime-readiness-details')
+    }
+  ],
   artifact_provenance: provenance('product-readiness-report')
 });
 
@@ -1221,6 +1240,8 @@ if (mutation === 'missing-provenance') {
 } else if (mutation === 'encoded-kubeconfig-artifact-uri') {
   report.artifact_provenance.artifact_uri =
     'artifact://agentsmith/product-readiness/10001/.kube%2Fconfig';
+} else if (mutation === 'missing-runtime-readiness') {
+  delete report.runtime_readiness;
 } else {
   throw new Error(`unknown product report mutation: ${mutation}`);
 }
@@ -1975,6 +1996,15 @@ if (report.schema !== 'agentsmith.ga-release-report/v1') {
 if (report.status !== 'pass' || report.formal_verdict !== 'issued') {
   throw new Error('GA report did not issue pass verdict');
 }
+if (report.product_readiness?.runtime_readiness?.files_restore_continuation?.classification !== 'runtime_flake') {
+  throw new Error('GA report product_readiness must archive runtime readiness classification');
+}
+if (
+  report.product_readiness.runtime_readiness.files_restore_continuation.path !==
+  'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json'
+) {
+  throw new Error('GA report product_readiness must archive runtime readiness evidence path');
+}
 if (typeof report.generated_at !== 'string' || Number.isNaN(Date.parse(report.generated_at))) {
   throw new Error('GA report must include an ISO generated_at timestamp');
 }
@@ -2308,6 +2338,17 @@ if run_ga_release "$STALE_FAILURE_DIR" "$PATH_DIR" "$STALE_OUTPUT_DIR" >"$TMP_DI
 fi
 assert_ga_failure_report "$STALE_OUTPUT_DIR" "product_readiness_report.artifact_provenance.producer_repo must match product_readiness_report.artifact_provenance.normalized_remote"
 pass "failed GA aggregate replaces stale pass outputs with not-issued failure report"
+
+MISSING_RUNTIME_READY_DIR="$TMP_DIR/missing-runtime-readiness"
+MISSING_RUNTIME_READY_OUTPUT_DIR="$TMP_DIR/out-missing-runtime-readiness"
+cp -R "$VALID_DIR" "$MISSING_RUNTIME_READY_DIR"
+mkdir -p "$MISSING_RUNTIME_READY_OUTPUT_DIR"
+mutate_product_report "$MISSING_RUNTIME_READY_DIR/product-readiness-report.json" missing-runtime-readiness
+if run_ga_release "$MISSING_RUNTIME_READY_DIR" "$PATH_DIR" "$MISSING_RUNTIME_READY_OUTPUT_DIR" >"$TMP_DIR/ga-release-missing-runtime-readiness.out" 2>&1; then
+  fail "GA aggregate with product readiness missing runtime readiness should fail"
+fi
+assert_ga_failure_report "$MISSING_RUNTIME_READY_OUTPUT_DIR" "product_readiness_report.runtime_readiness must be an object"
+pass "GA aggregate requires product runtime readiness evidence"
 
 SUMMARY_FAILURE_OUTPUT_DIR="$TMP_DIR/out-summary-write-failure"
 SUMMARY_FAILURE_PRELOAD="$TMP_DIR/fail-summary-write.mjs"
