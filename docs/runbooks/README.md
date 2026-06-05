@@ -40,7 +40,6 @@ Use the single operator facade:
 ```bash
 bash scripts/operator-release.sh --init-operator-inputs <deployment_path> --output-dir <dir>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --doctor
-bash scripts/operator-release.sh --operator-inputs <dir-or-json>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 bash scripts/operator-release.sh --ga-report \
   --operator-inputs <online-use-existing-pkg> \
@@ -54,13 +53,12 @@ bash scripts/operator-release.sh --ga-report \
 
 The init command writes a package skeleton for one deployment path and refuses
 to overwrite an existing `operator-inputs.json`. The doctor command lists
-missing package inputs without executing the selected path or writing a plan.
-The plain `--operator-inputs` command validates the package and writes the
-internal plan. Add `--run` only when the package is ready to execute the
-selected apply path. A passing `--run` produces path-level evidence for the
-release captain/finalizer to consume; do not treat intermediate files as the
-formal release verdict. After all four package runs and product-side reports
-are available, use `--ga-report` to write the final `ga-release-report.json`.
+missing package inputs without executing the selected path. Add `--run` only
+when the package is ready to execute the selected apply path. A passing `--run`
+produces path-level evidence for the release captain/finalizer to consume; do
+not treat intermediate files as the formal release verdict. After all four
+package runs and product-side reports are available, use `--ga-report` to write
+the final `ga-release-report.json`.
 Release captains can also use the repository's manual
 `ga-release-aggregate` GitHub workflow to download already-produced artifacts
 and run this same final aggregate. That workflow is aggregate-only; it does

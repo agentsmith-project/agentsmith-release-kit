@@ -9,7 +9,8 @@ usage() {
   cat <<'USAGE'
 Usage:
   bash scripts/operator-release.sh --init-operator-inputs <deployment_path> --output-dir <package-dir>
-  bash scripts/operator-release.sh --operator-inputs <package-or-json> [--doctor|--run]
+  bash scripts/operator-release.sh --operator-inputs <package-or-json> --doctor
+  bash scripts/operator-release.sh --operator-inputs <package-or-json> --run
   bash scripts/operator-release.sh --ga-report \
     --operator-inputs <online-use-existing-package> \
     --operator-inputs <online-install-substrates-package> \
@@ -25,14 +26,13 @@ Operator facade:
 
 Operator-inputs intake:
   --init-operator-inputs creates a package skeleton for one deployment_path.
-  --operator-inputs validates one deployment-path input package and prepares an
-  internal execution plan for --run.
   Add --doctor to list missing package inputs without executing the path.
+  Add --run when the package is ready to execute the selected path.
 
 Operator-inputs run:
-  Add --run to execute the current minimal orchestration slice. This currently
-  supports online/use_existing, online/install_substrates, airgap/use_existing,
-  and airgap/install_substrates with mode apply.
+  The current minimal orchestration slice supports online/use_existing,
+  online/install_substrates, airgap/use_existing, and
+  airgap/install_substrates with mode apply.
   install_substrates runs the namespace-scoped installer first and deploys with
   the installer output substrate truth. Airgap paths use bundle-local release
   materials and package-local tools. Server-dry-run modes fail fast.

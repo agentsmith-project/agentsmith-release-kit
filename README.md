@@ -81,9 +81,8 @@ bash scripts/operator-release.sh --ga-report \
 
 Run `--init-operator-inputs` when you want a scaffolded input package for one
 deployment path. Run `--doctor` when you want a missing-input checklist
-without executing or writing an intake plan. Run the same `--operator-inputs
-<dir-or-json>` command without `--run` only when you want package validation
-before execution.
+without executing the selected path. Add `--run` when the package is ready to
+execute the selected path.
 
 The package contains one `operator-inputs.json` for one selected deployment
 path. It is not a four-path manifest. The four accepted `deployment_path`
@@ -97,16 +96,11 @@ values are:
 The GA operator substrate choices are `use_existing` and
 `install_substrates`.
 
-Without `--run`, this slice validates the package, rejects internal producer
-vocabulary, secret-looking payloads, missing path-specific inputs, and path
-escapes, then prepares an internal execution plan for `--run`. That validation
-is not GA evidence, not release readiness, and does not write
-`formal_verdict`. Post-deploy smoke reports are runtime evidence and are not
-operator-inputs.
+Post-deploy smoke reports are runtime evidence and are not operator-inputs.
 
 With `--doctor`, the facade reports all currently missing package fields for
-the selected deployment path and exits without executing producers, issuing a
-verdict, or writing the internal plan.
+the selected deployment path and exits without executing producers or issuing a
+verdict.
 
 With `--init-operator-inputs <deployment_path> --output-dir <dir>`, the facade
 creates a skeleton package for one of the four GA deployment paths and refuses
@@ -200,12 +194,11 @@ bash scripts/operator-release.sh --ga-report \
 ```
 
 Use `--init-operator-inputs` for a scaffolded package, use `--doctor` for a
-missing-input checklist, and use `--operator-inputs <dir-or-json>` without
-`--run` only for package validation. The package-driven `--run` path writes
-finalized deployment-path handoff evidence for the release captain/finalizer
-when it executes an apply manifest. It does not issue a formal GA verdict.
-Formal release success or failure is issued only by `--ga-report`, which
-writes the final `ga-release-report.json`.
+missing-input checklist, and add `--run` when the package is ready to execute.
+The package-driven `--run` path writes finalized deployment-path handoff
+evidence for the release captain/finalizer when it executes an apply manifest.
+It does not issue a formal GA verdict. Formal release success or failure is
+issued only by `--ga-report`, which writes the final `ga-release-report.json`.
 
 ### Maintainer/Internal Diagnostics
 

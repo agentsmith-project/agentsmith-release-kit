@@ -32,8 +32,10 @@ assert_operator_success_contract_docs() {
   bash "$ROOT_DIR/scripts/operator-release.sh" --help >"$help_output"
   grep -q -- '--init-operator-inputs <deployment_path> --output-dir <package-dir>' "$help_output" ||
     fail "operator-release help must foreground operator-inputs init"
-  grep -q -- '--operator-inputs <package-or-json> \[--doctor|--run\]' "$help_output" ||
-    fail "operator-release help must foreground the single --operator-inputs facade"
+  grep -q -- '--operator-inputs <package-or-json> --doctor' "$help_output" ||
+    fail "operator-release help must foreground the operator-inputs doctor command"
+  grep -q -- '--operator-inputs <package-or-json> --run' "$help_output" ||
+    fail "operator-release help must foreground the operator-inputs run command"
   grep -q -- 'Formal release success or failure' "$help_output" ||
     fail "operator-release help must name the formal success boundary"
   grep -q -- 'ga-release-report.json issued by the release finalizer/captain' "$help_output" ||
@@ -47,6 +49,10 @@ assert_operator_success_contract_docs() {
   if grep -q -- 'No ga-release-report' "$help_output"; then
     fail "operator-release help must explain the phase boundary without bare ga-release-report negation"
   fi
+  if grep -Eiq 'internal execution plan|internal plan|without --run' "$help_output" ||
+    grep -Fq -- '--operator-inputs <package-or-json> [--doctor|--run]' "$help_output"; then
+    fail "operator-release help must not expose plain validation or internal plan concepts"
+  fi
 
   awk '
     /^## Operator Package Matrix$/ { exit }
@@ -57,7 +63,11 @@ assert_operator_success_contract_docs() {
     'adoption' \
     'candidate' \
     'kit_provided' \
-    'deployment-path-report.json'; do
+    'deployment-path-report.json' \
+    'internal plan' \
+    'internal execution plan' \
+    'without `--run`' \
+    'bash scripts/operator-release[.]sh --operator-inputs <dir-or-json>$'; do
     if grep -Eiq "$forbidden" "$first_screen"; then
       fail "operator runbook first screen must not present $forbidden as a success path"
     fi
@@ -92,7 +102,11 @@ assert_operator_success_contract_docs() {
     'external_declared' \
     'kit_installed' \
     'existing_kubernetes' \
-    'kind_rehearsal'; do
+    'kind_rehearsal' \
+    'internal plan' \
+    'internal execution plan' \
+    'without `--run`' \
+    'bash scripts/operator-release[.]sh --operator-inputs <dir-or-json>$'; do
     if grep -Eiq "$forbidden" "$root_first_screen"; then
       fail "root README operator first screen must not expose legacy aliases, internal paths, machine profiles, or maintainer diagnostics: $forbidden"
     fi
@@ -103,7 +117,7 @@ assert_operator_success_contract_docs() {
     'release-engineering-gate-intake' \
     'operator-signoff-intake' \
     'verify-release[.]sh[[:space:]]+--' \
-    'test-[a-z0-9-]+[.]sh' \
+    'test-[^[:space:]]+[.]sh' \
     '[.]release-kit-internal' \
     'kit_provided' \
     'external_declared' \
