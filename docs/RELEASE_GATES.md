@@ -1573,7 +1573,11 @@ aggregate is blocked. It also writes derived `ga-release-summary.md` and
 `ga-evidence-index.json` outputs. The JSON report is the gate evidence; the
 evidence index is an archive lookup that binds the source report digest to the
 deployment path evidence, product readiness, post-deploy product smoke, and
-blockers without issuing another verdict.
+blockers without issuing another verdict. On pass it mirrors
+`product_runtime_readiness`, including the runtime pending/readiness convergence
+policy and Files restore continuation evidence, and
+`post_deploy_product_smoke_coverage`, including canonical smoke ids, source
+evidence digests, deployment target, and deployment path binding.
 
 The post-deploy product smoke input must be the AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
@@ -1605,7 +1609,9 @@ safe relative paths plus digests in
 `artifact_index.operator_inputs_packages[].release_materials`.
 The sibling `ga-evidence-index.json` mirrors this `artifact_index` and records
 the source report schema, status, formal_verdict, and canonical digest for
-release archive consumption.
+release archive consumption. It also indexes Product Readiness runtime
+convergence evidence and post-deploy product smoke coverage as archive lookup
+data; the final `ga-release-report.json` remains the verdict.
 `scripts/test-package-driven-ga-smoke.sh` verifies that finalized path reports
 created by the four package-driven operator-inputs runs can be consumed
 directly by this aggregate without adding a package-level verdict or a

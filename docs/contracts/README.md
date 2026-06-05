@@ -61,7 +61,10 @@ Current post-push contract index:
   final `ga-release-report.json` schema, status, formal_verdict, and canonical
   digest, `generated_at` matches the source report timestamp, and
   `artifact_index` mirrors the final report evidence bindings for release
-  archive lookup.
+  archive lookup. On pass, `product_runtime_readiness` mirrors Product
+  Readiness runtime convergence policy and Files restore continuation evidence,
+  while `post_deploy_product_smoke_coverage` indexes canonical smoke ids,
+  source evidence digests, deployment target, and deployment path binding.
 
 For package-driven operator runs, each
 `operator-release.sh --operator-inputs <pkg> --run` package still represents

@@ -152,7 +152,11 @@ A blocked final aggregate overwrites stale pass outputs with `status=fail`,
 `formal_verdict=not_issued`, and blockers in that same report.
 It also writes `ga-evidence-index.json`, a derived archive index that binds
 the final report digest to the path evidence, product readiness, post-deploy
-smoke, and blockers without issuing another verdict.
+smoke, and blockers without issuing another verdict. The index mirrors the
+Product Readiness `runtime_readiness` block, including the runtime
+pending/readiness convergence policy for Files, Agent Task sandbox, AFSCP
+workspace binding, and read export, and exposes post-deploy product smoke
+coverage for archive lookup.
 The repository also provides a manual `ga-release-aggregate` GitHub workflow
 for release captains. It is `workflow_dispatch` only, downloads the six
 already-produced artifacts by repository, run id, and artifact name, runs the
@@ -1165,7 +1169,10 @@ diagnostics. The aggregate writes `ga-release-report.json` with
 with `status=fail`, `formal_verdict=not_issued`, and blockers. It does not
 rerun producers. It also writes the derived `ga-evidence-index.json` archive
 index, whose `source_report` binds the final report schema, status,
-formal_verdict, and canonical digest.
+formal_verdict, and canonical digest. On pass the index also mirrors
+`product_runtime_readiness` and `post_deploy_product_smoke_coverage` so release
+archive review can find runtime convergence policy, Files restore continuation
+evidence, and canonical product-smoke coverage without issuing another verdict.
 The post-deploy product smoke input must be the AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
 agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,
