@@ -128,6 +128,83 @@ jobs:
         run: |
           set -euo pipefail
 
+          write_workflow_failure_outputs() {
+            local message="$1"
+            local exit_code="${2:-1}"
+
+            mkdir -p .ga-release-output
+            node --input-type=module - ".ga-release-output" "$message" "$exit_code" <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const [outputDir, message, rawExitCode] = process.argv.slice(2);
+          const exitCode = Number.parseInt(rawExitCode, 10);
+          const generatedAt = new Date().toISOString();
+          const report = {
+            schema: 'agentsmith.ga-release-report/v1',
+            status: 'fail',
+            formal_verdict: 'not_issued',
+            generated_at: generatedAt,
+            summary: {
+              conclusion: 'AgentSmith GA release aggregate blocked before final report upload.'
+            },
+            blockers: [
+              {
+                message,
+                exit_code: Number.isFinite(exitCode) ? exitCode : 1
+              }
+            ]
+          };
+
+          function stableJson(value) {
+            if (Array.isArray(value)) return value.map(stableJson);
+            if (value && typeof value === 'object') {
+              return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableJson(value[key])]));
+            }
+            return value;
+          }
+
+          function canonicalDigest(value) {
+            return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+          }
+
+          const evidenceIndex = {
+            schema: 'agentsmith.ga-evidence-index/v1',
+            generated_at: generatedAt,
+            role: 'derived_from_ga_release_report',
+            source_report: {
+              path: 'ga-release-report.json',
+              schema: report.schema,
+              digest: canonicalDigest(report),
+              status: report.status,
+              formal_verdict: report.formal_verdict
+            },
+            artifact_index: null,
+            deployment_paths: [],
+            product_readiness: null,
+            post_deploy_product_smoke: null,
+            blockers: report.blockers
+          };
+
+          const summary = [
+            '# AgentSmith GA Release Summary',
+            '',
+            `Status: ${report.status}`,
+            `Formal verdict: ${report.formal_verdict}`,
+            '',
+            'Blockers:',
+            `- ${message}`,
+            ''
+          ].join('\n');
+
+          fs.mkdirSync(outputDir, { recursive: true });
+          fs.writeFileSync(path.join(outputDir, 'ga-release-report.json'), `${JSON.stringify(report, null, 2)}\n`);
+          fs.writeFileSync(path.join(outputDir, 'ga-release-summary.md'), summary);
+          fs.writeFileSync(path.join(outputDir, 'ga-evidence-index.json'), `${JSON.stringify(evidenceIndex, null, 2)}\n`);
+          NODE
+          }
+
           find_one_file() {
             local root="$1"
             local name="$2"
@@ -136,11 +213,14 @@ jobs:
 
             mapfile -t matches < <(find "$root" -type f -name "$name" | sort)
             if [[ "${#matches[@]}" -ne 1 ]]; then
-              printf 'error: expected exactly one %s named %s under %s, found %s\n' \
-                "$label" "$name" "$root" "${#matches[@]}" >&2
+              local message
+              message="$(printf 'expected exactly one %s named %s under %s, found %s' \
+                "$label" "$name" "$root" "${#matches[@]}")"
+              printf 'error: %s\n' "$message" >&2
               if [[ "${#matches[@]}" -gt 0 ]]; then
                 printf '%s\n' "${matches[@]}" >&2
               fi
+              write_workflow_failure_outputs "$message" 2
               exit 2
             fi
 
@@ -179,6 +259,7 @@ jobs:
           )"
 
           mkdir -p .ga-release-output
+          set +e
           bash scripts/operator-release.sh --ga-report \
             --operator-inputs "$ONLINE_USE_EXISTING_PACKAGE" \
             --operator-inputs "$ONLINE_INSTALL_SUBSTRATES_PACKAGE" \
@@ -187,6 +268,16 @@ jobs:
             --product-readiness-report "$PRODUCT_READINESS_REPORT" \
             --post-deploy-product-smoke-report "$POST_DEPLOY_PRODUCT_SMOKE_REPORT" \
             --output-dir .ga-release-output
+          aggregate_status="$?"
+          set -e
+          if [[ "$aggregate_status" -ne 0 ]]; then
+            if [[ ! -f .ga-release-output/ga-release-report.json ]]; then
+              write_workflow_failure_outputs \
+                "operator-release.sh --ga-report failed before writing ga-release-report.json" \
+                "$aggregate_status"
+            fi
+            exit "$aggregate_status"
+          fi
 
       - name: Publish GA summary
         if: always()
@@ -223,4 +314,4 @@ jobs:
             .ga-release-output/ga-release-report.json
             .ga-release-output/ga-release-summary.md
             .ga-release-output/ga-evidence-index.json
-          if-no-files-found: warn
+          if-no-files-found: error
