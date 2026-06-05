@@ -150,6 +150,12 @@ locates finalized path evidence inside each package and writes the final
 report files.
 A blocked final aggregate overwrites stale pass outputs with `status=fail`,
 `formal_verdict=not_issued`, and blockers in that same report.
+The repository also provides a manual `ga-release-aggregate` GitHub workflow
+for release captains. It is `workflow_dispatch` only, downloads the six
+already-produced artifacts by repository, run id, and artifact name, runs the
+same `operator-release.sh --ga-report` facade, and uploads the final
+`ga-release-report.json` plus `ga-release-summary.md`. It does not rerun
+product, deployment, airgap, or operator package producers.
 These paths are still release-kit installer producer/finalizer evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
@@ -1177,6 +1183,8 @@ or deploy readiness.
 `bash scripts/test-package-driven-ga-smoke.sh` is the lightweight default CI
 guard proving the four package-driven finalized path reports can be handed
 to the `--ga-report` facade.
+`bash scripts/test-ga-release-workflow.sh` is the lightweight default CI guard
+proving the manual GA workflow remains dispatch-only and aggregate-only.
 
 ## Handoff
 

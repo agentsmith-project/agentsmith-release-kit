@@ -1,0 +1,210 @@
+name: ga-release-aggregate
+
+on:
+  workflow_dispatch:
+    inputs:
+      operator_packages_repository:
+        description: Repository containing the four operator-inputs package artifacts.
+        required: true
+        default: agentsmith-project/agentsmith-release-kit
+        type: string
+      operator_packages_run_id:
+        description: Workflow run id that produced the four operator-inputs package artifacts.
+        required: true
+        type: string
+      product_reports_repository:
+        description: Repository containing AgentSmith product readiness and smoke artifacts.
+        required: true
+        default: agentsmith-project/agentsmith
+        type: string
+      product_reports_run_id:
+        description: Workflow run id that produced AgentSmith product readiness and smoke artifacts.
+        required: true
+        type: string
+      online_use_existing_artifact:
+        description: Artifact name for the online/use_existing operator-inputs package.
+        required: true
+        default: agentsmith-ga-online-use-existing-operator-inputs
+        type: string
+      online_install_substrates_artifact:
+        description: Artifact name for the online/install_substrates operator-inputs package.
+        required: true
+        default: agentsmith-ga-online-install-substrates-operator-inputs
+        type: string
+      airgap_use_existing_artifact:
+        description: Artifact name for the airgap/use_existing operator-inputs package.
+        required: true
+        default: agentsmith-ga-airgap-use-existing-operator-inputs
+        type: string
+      airgap_install_substrates_artifact:
+        description: Artifact name for the airgap/install_substrates operator-inputs package.
+        required: true
+        default: agentsmith-ga-airgap-install-substrates-operator-inputs
+        type: string
+      product_readiness_artifact:
+        description: Artifact name containing product-readiness-report.json.
+        required: true
+        default: agentsmith-product-readiness-report
+        type: string
+      post_deploy_product_smoke_artifact:
+        description: Artifact name containing post-deploy-product-smoke-report.json.
+        required: true
+        default: agentsmith-post-deploy-product-smoke-report
+        type: string
+      output_artifact_name:
+        description: Artifact name for the final GA report files.
+        required: true
+        default: agentsmith-ga-release-report
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  ga-release:
+    name: Final GA aggregate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download online/use_existing package
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
+          repository: ${{ inputs.operator_packages_repository }}
+          run-id: ${{ inputs.operator_packages_run_id }}
+          name: ${{ inputs.online_use_existing_artifact }}
+          path: ${{ runner.temp }}/ga-release-inputs/online-use-existing
+
+      - name: Download online/install_substrates package
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
+          repository: ${{ inputs.operator_packages_repository }}
+          run-id: ${{ inputs.operator_packages_run_id }}
+          name: ${{ inputs.online_install_substrates_artifact }}
+          path: ${{ runner.temp }}/ga-release-inputs/online-install-substrates
+
+      - name: Download airgap/use_existing package
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
+          repository: ${{ inputs.operator_packages_repository }}
+          run-id: ${{ inputs.operator_packages_run_id }}
+          name: ${{ inputs.airgap_use_existing_artifact }}
+          path: ${{ runner.temp }}/ga-release-inputs/airgap-use-existing
+
+      - name: Download airgap/install_substrates package
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
+          repository: ${{ inputs.operator_packages_repository }}
+          run-id: ${{ inputs.operator_packages_run_id }}
+          name: ${{ inputs.airgap_install_substrates_artifact }}
+          path: ${{ runner.temp }}/ga-release-inputs/airgap-install-substrates
+
+      - name: Download AgentSmith product readiness report
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
+          repository: ${{ inputs.product_reports_repository }}
+          run-id: ${{ inputs.product_reports_run_id }}
+          name: ${{ inputs.product_readiness_artifact }}
+          path: ${{ runner.temp }}/ga-release-inputs/product-readiness
+
+      - name: Download AgentSmith post-deploy product smoke report
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
+          repository: ${{ inputs.product_reports_repository }}
+          run-id: ${{ inputs.product_reports_run_id }}
+          name: ${{ inputs.post_deploy_product_smoke_artifact }}
+          path: ${{ runner.temp }}/ga-release-inputs/post-deploy-product-smoke
+
+      - name: Run final GA aggregate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          find_one_file() {
+            local root="$1"
+            local name="$2"
+            local label="$3"
+            local matches=()
+
+            mapfile -t matches < <(find "$root" -type f -name "$name" | sort)
+            if [[ "${#matches[@]}" -ne 1 ]]; then
+              printf 'error: expected exactly one %s named %s under %s, found %s\n' \
+                "$label" "$name" "$root" "${#matches[@]}" >&2
+              if [[ "${#matches[@]}" -gt 0 ]]; then
+                printf '%s\n' "${matches[@]}" >&2
+              fi
+              exit 2
+            fi
+
+            printf '%s\n' "${matches[0]}"
+          }
+
+          find_package_dir() {
+            local root="$1"
+            local label="$2"
+            dirname "$(find_one_file "$root" operator-inputs.json "$label")"
+          }
+
+          ONLINE_USE_EXISTING_PACKAGE="$(
+            find_package_dir "$RUNNER_TEMP/ga-release-inputs/online-use-existing" \
+              "online/use_existing operator-inputs package"
+          )"
+          ONLINE_INSTALL_SUBSTRATES_PACKAGE="$(
+            find_package_dir "$RUNNER_TEMP/ga-release-inputs/online-install-substrates" \
+              "online/install_substrates operator-inputs package"
+          )"
+          AIRGAP_USE_EXISTING_PACKAGE="$(
+            find_package_dir "$RUNNER_TEMP/ga-release-inputs/airgap-use-existing" \
+              "airgap/use_existing operator-inputs package"
+          )"
+          AIRGAP_INSTALL_SUBSTRATES_PACKAGE="$(
+            find_package_dir "$RUNNER_TEMP/ga-release-inputs/airgap-install-substrates" \
+              "airgap/install_substrates operator-inputs package"
+          )"
+          PRODUCT_READINESS_REPORT="$(
+            find_one_file "$RUNNER_TEMP/ga-release-inputs/product-readiness" \
+              product-readiness-report.json "AgentSmith product readiness report"
+          )"
+          POST_DEPLOY_PRODUCT_SMOKE_REPORT="$(
+            find_one_file "$RUNNER_TEMP/ga-release-inputs/post-deploy-product-smoke" \
+              post-deploy-product-smoke-report.json "AgentSmith post-deploy product smoke report"
+          )"
+
+          mkdir -p .ga-release-output
+          bash scripts/operator-release.sh --ga-report \
+            --operator-inputs "$ONLINE_USE_EXISTING_PACKAGE" \
+            --operator-inputs "$ONLINE_INSTALL_SUBSTRATES_PACKAGE" \
+            --operator-inputs "$AIRGAP_USE_EXISTING_PACKAGE" \
+            --operator-inputs "$AIRGAP_INSTALL_SUBSTRATES_PACKAGE" \
+            --product-readiness-report "$PRODUCT_READINESS_REPORT" \
+            --post-deploy-product-smoke-report "$POST_DEPLOY_PRODUCT_SMOKE_REPORT" \
+            --output-dir .ga-release-output
+
+      - name: Publish GA summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f .ga-release-output/ga-release-summary.md ]]; then
+            cat .ga-release-output/ga-release-summary.md >> "$GITHUB_STEP_SUMMARY"
+          elif [[ -f .ga-release-output/ga-release-report.json ]]; then
+            printf '%s\n' 'GA report was written, but ga-release-summary.md was not produced.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload final GA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.output_artifact_name }}
+          path: |
+            .ga-release-output/ga-release-report.json
+            .ga-release-output/ga-release-summary.md
+          if-no-files-found: warn

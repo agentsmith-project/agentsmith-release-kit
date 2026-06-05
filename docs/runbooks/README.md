@@ -61,6 +61,10 @@ selected apply path. A passing `--run` produces path-level evidence for the
 release captain/finalizer to consume; do not treat intermediate files as the
 formal release verdict. After all four package runs and product-side reports
 are available, use `--ga-report` to write the final `ga-release-report.json`.
+Release captains can also use the repository's manual
+`ga-release-aggregate` GitHub workflow to download already-produced artifacts
+and run this same final aggregate. That workflow is aggregate-only; it does
+not rerun package, product, deployment, or airgap producers.
 
 ### 4. What is the final report?
 

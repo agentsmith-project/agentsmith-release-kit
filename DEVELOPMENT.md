@@ -21,6 +21,7 @@ bash scripts/test-substrate-install.sh
 bash scripts/test-deployment-path-report.sh
 bash scripts/test-ga-release.sh
 bash scripts/test-package-driven-ga-smoke.sh
+bash scripts/test-ga-release-workflow.sh
 ```
 
 Maintainer diagnostics such as image-map, registry presence, airgap

@@ -168,7 +168,8 @@ assert_development_default_commands_are_slim() {
     'bash scripts/test-substrate-install.sh' \
     'bash scripts/test-deployment-path-report.sh' \
     'bash scripts/test-ga-release.sh' \
-    'bash scripts/test-package-driven-ga-smoke.sh'; do
+    'bash scripts/test-package-driven-ga-smoke.sh' \
+    'bash scripts/test-ga-release-workflow.sh'; do
     grep -Fq -- "$required" <<<"$default_block" || \
       fail "DEVELOPMENT.md default command block missing core command: $required"
   done
@@ -205,6 +206,7 @@ required_files=(
   scripts/verify-ga-release.mjs
   scripts/verify-deployment-path-report.mjs
   scripts/test-ga-release.sh
+  scripts/test-ga-release-workflow.sh
   scripts/test-deployment-path-report.sh
   scripts/check-governance-guard.sh
 )
@@ -400,7 +402,7 @@ reject_scan \
 
 reject_scan \
   "kind rehearsal prerequisite claim found" \
-  '(^|[^[:alnum:]_])kind(_rehearsal)?[[:space:]]+(is|as)[[:space:]]+(a[[:space:]]+)?(required|mandatory|prerequisite)|(^|[^[:alnum:]_])kind(_rehearsal)?[[:space:]]+(must|shall)[[:space:]]+|(^|[^[:alnum:]_])(required|mandatory)[[:space:]]+kind(_rehearsal)?([[:space:]]+cluster|[[:space:]]+target)?' \
+  '(^|[[:space:]`(])kind(_rehearsal)?[[:space:]]+(is|as)[[:space:]]+(a[[:space:]]+)?(required|mandatory|prerequisite)|(^|[[:space:]`(])kind(_rehearsal)?[[:space:]]+(must|shall)[[:space:]]+|(^|[[:space:]`(])(required|mandatory)[[:space:]]+kind(_rehearsal)?([[:space:]]+cluster|[[:space:]]+target)?' \
   "${scan_paths[@]}"
 
 reject_scan \

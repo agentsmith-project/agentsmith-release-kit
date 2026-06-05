@@ -124,6 +124,14 @@ aggregate verifier. The only formal GA output in this smoke is
 `formal_verdict: issued`; blocked aggregate paths replace stale pass outputs
 with `status: fail`, `formal_verdict: not_issued`, and blockers.
 
+`bash scripts/test-ga-release-workflow.sh` is the companion lightweight guard
+for the manual GitHub workflow. It asserts that `.github/workflows/ga-release.yml`
+is `workflow_dispatch` only, downloads exactly the four operator-inputs
+package artifacts plus the two AgentSmith product-side artifacts, runs the
+operator-facing `--ga-report` facade, uploads the final GA report files even
+when the aggregate is blocked, and does not rerun package or product
+producers.
+
 ## Operator Release Surface v0 Focused Guard
 
 Run:
@@ -1594,6 +1602,15 @@ safe relative paths plus digests in
 created by the four package-driven operator-inputs runs can be consumed
 directly by this aggregate without adding a package-level verdict or a
 four-path package manifest.
+
+Release captains can run the manual `ga-release-aggregate` GitHub workflow
+when the required artifacts already exist. The workflow inputs are the
+operator package artifact repository/run id, the AgentSmith product report
+artifact repository/run id, the six artifact names, and the output artifact
+name. For private cross-repository artifact reads, configure the
+`AGENTSMITH_ARTIFACT_READ_TOKEN` secret; otherwise the workflow falls back to
+`github.token`. The workflow still relies on the GA aggregate to validate
+provenance, digests, path coverage, and product report bindings.
 
 The GA aggregate also closes managed runner release provenance. The
 `managed_runner` deploy inventory source provenance must include the runner
