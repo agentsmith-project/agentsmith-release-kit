@@ -1625,8 +1625,8 @@ four-path package manifest.
 Release captains can run the manual `ga-release-aggregate` GitHub workflow
 when the required artifacts already exist. The workflow inputs are the
 operator package artifact repository/run id, the AgentSmith product report
-artifact repository/run id, the six artifact names, and the output artifact
-name. For private cross-repository artifact reads, configure the
+artifact repository/run id, the seven required input artifact names, and the
+output artifact name. For private cross-repository artifact reads, configure the
 `AGENTSMITH_ARTIFACT_READ_TOKEN` secret; otherwise the workflow falls back to
 `github.token`. The workflow still relies on the GA aggregate to validate
 provenance, digests, path coverage, and product report bindings.

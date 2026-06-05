@@ -98,11 +98,13 @@ require_text "$WORKFLOW" "ga-release-report.json"
 require_text "$WORKFLOW" "ga-release-summary.md"
 require_text "$WORKFLOW" "ga-evidence-index.json"
 require_text "$WORKFLOW" "if-no-files-found: error"
+require_text "$ROOT_DIR/docs/RELEASE_GATES.md" "seven required input artifact names"
 
 reject_text "$WORKFLOW" "bash scripts/verify-release.sh --ga-release"
 reject_text "$WORKFLOW" "operator-release.sh --operator-inputs"
 reject_text "$WORKFLOW" "--run"
 reject_text "$WORKFLOW" "if-no-files-found: warn"
+reject_text "$ROOT_DIR/docs/RELEASE_GATES.md" "the six artifact names"
 reject_regex "$WORKFLOW" '\b(target_cluster|substrate_source|external_declared|kit_installed|existing_kubernetes|kind_rehearsal|target_profile)\b|operator-release-surface-report|operator-inputs-plan|adoption report|candidate intake|release-engineering|operator-signoff|--deployment-path-report'
 
 require_text "$CI_WORKFLOW" "bash scripts/test-ga-release-workflow.sh"
