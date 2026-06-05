@@ -40,6 +40,7 @@ bash scripts/test-operator-inputs-orchestration.sh
 This focused guard exercises the new single-package intake:
 
 ```bash
+bash scripts/operator-release.sh --init-operator-inputs <deployment_path> --output-dir <dir>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --doctor
 bash scripts/operator-release.sh --operator-inputs <dir-or-json>
 ```
@@ -51,10 +52,13 @@ The manifest names exactly one `deployment_path`:
 - `airgap/use_existing`
 - `airgap/install_substrates`
 
-The resolver accepts a directory containing `operator-inputs.json` or a direct
-JSON manifest file. `--doctor` lists missing package inputs for the selected
-deployment path without executing producers or writing the internal plan.
-Without `--doctor` or `--run`, it writes only the internal
+`--init-operator-inputs` creates a skeleton package for exactly one of those
+deployment paths and refuses to overwrite an existing manifest. The resolver
+accepts a directory containing `operator-inputs.json` or a direct JSON
+manifest file. `--doctor` lists missing package inputs and missing
+package-local refs for the selected deployment path without executing
+producers or writing the internal plan. Without `--doctor` or `--run`, it
+writes only the internal
 `.release-kit-internal/operator-inputs-plan.json`, containing digest/path refs
 and next producer argv. The plan is not GA evidence, not release readiness, and
 does not write `readiness` or `formal_verdict`.

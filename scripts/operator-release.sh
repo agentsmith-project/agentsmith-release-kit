@@ -8,6 +8,7 @@ REPORT_FILE="operator-release-surface-report.json"
 usage() {
   cat <<'USAGE'
 Usage:
+  bash scripts/operator-release.sh --init-operator-inputs <deployment_path> --output-dir <package-dir>
   bash scripts/operator-release.sh --operator-inputs <package-or-json> [--doctor|--run]
   bash scripts/operator-release.sh --ga-report \
     --operator-inputs <online-use-existing-package> \
@@ -25,6 +26,7 @@ Operator facade:
   Operator packages use install_substrates.
 
 Operator-inputs intake:
+  --init-operator-inputs creates a package skeleton for one deployment_path.
   --operator-inputs validates one deployment-path input package and writes
   .release-kit-internal/operator-inputs-plan.json.
   Add --doctor to list missing package inputs without executing the path.
@@ -811,6 +813,27 @@ if [[ "${1:-}" == "--ga-report" ]]; then
   shift
   run_ga_report_facade "$@"
   exit 0
+fi
+
+if [[ "${1:-}" == "--init-operator-inputs" ]]; then
+  if [[ "$#" -ne 4 ]]; then
+    fail "--init-operator-inputs accepts <deployment_path> --output-dir <package-dir>"
+  fi
+  if [[ -z "${2:-}" || "${2:-}" == --* ]]; then
+    fail "missing deployment_path for --init-operator-inputs"
+  fi
+  if [[ "${3:-}" != "--output-dir" ]]; then
+    fail "--init-operator-inputs requires --output-dir <package-dir>"
+  fi
+  if [[ -z "${4:-}" || "${4:-}" == --* ]]; then
+    fail "missing package dir for --output-dir"
+  fi
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --init "$2" --output-dir "$4"
+  exit 0
+fi
+
+if [[ "${1:-}" == --init-operator-inputs=* ]]; then
+  fail "operator facade accepts --init-operator-inputs as a separate argument only"
 fi
 
 if [[ "${1:-}" == "--operator-inputs" ]]; then

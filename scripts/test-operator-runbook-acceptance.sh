@@ -29,6 +29,8 @@ assert_operator_success_contract_docs() {
   local forbidden
 
   bash "$ROOT_DIR/scripts/operator-release.sh" --help >"$help_output"
+  grep -q -- '--init-operator-inputs <deployment_path> --output-dir <package-dir>' "$help_output" ||
+    fail "operator-release help must foreground operator-inputs init"
   grep -q -- '--operator-inputs <package-or-json> \[--doctor|--run\]' "$help_output" ||
     fail "operator-release help must foreground the single --operator-inputs facade"
   grep -q -- 'Formal release success or failure' "$help_output" ||

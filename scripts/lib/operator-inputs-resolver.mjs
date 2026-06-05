@@ -913,6 +913,70 @@ function collectMissingRequiredInputs({ manifest, config, mode }) {
   };
 }
 
+async function collectMissingRequiredRefs({ manifest, baseDir, requiredInputs }) {
+  const missingRefs = [];
+
+  async function checkRef(field, kind) {
+    if (!Object.hasOwn(manifest, field)) {
+      return;
+    }
+    const rawValue = manifest[field];
+    if (typeof rawValue !== 'string' || rawValue.trim() === '') {
+      missingRefs.push({ field, kind, path: null, reason: `${field} must be a non-empty string` });
+      return;
+    }
+    let relativePath;
+    try {
+      relativePath = assertPackageRelativeInput(rawValue, field);
+    } catch (error) {
+      missingRefs.push({ field, kind, path: rawValue, reason: error.message });
+      return;
+    }
+    const requested = path.resolve(baseDir, relativePath);
+    let lstat;
+    try {
+      lstat = await fs.lstat(requested);
+    } catch {
+      missingRefs.push({ field, kind, path: relativePath, reason: `${kind} is missing` });
+      return;
+    }
+    if (lstat.isSymbolicLink()) {
+      missingRefs.push({ field, kind, path: relativePath, reason: 'ref must not be a symlink' });
+      return;
+    }
+    if (kind === 'file' && !lstat.isFile()) {
+      missingRefs.push({ field, kind, path: relativePath, reason: 'ref must point to a file' });
+      return;
+    }
+    if (kind === 'directory' && !lstat.isDirectory()) {
+      missingRefs.push({ field, kind, path: relativePath, reason: 'ref must point to a directory' });
+      return;
+    }
+    if (kind === 'executable') {
+      if (!lstat.isFile()) {
+        missingRefs.push({ field, kind, path: relativePath, reason: 'ref must point to a file' });
+        return;
+      }
+      try {
+        await fs.access(requested, fsConstants.X_OK);
+      } catch {
+        missingRefs.push({ field, kind, path: relativePath, reason: 'ref must be executable' });
+      }
+    }
+  }
+
+  for (const field of requiredInputs.files) {
+    await checkRef(field, 'file');
+  }
+  for (const field of requiredInputs.dirs) {
+    await checkRef(field, 'directory');
+  }
+  for (const field of requiredInputs.commands) {
+    await checkRef(field, 'executable');
+  }
+  return missingRefs;
+}
+
 function requireFields({ manifest, config, mode }) {
   const { requiredInputs, missing } = collectMissingRequiredInputs({ manifest, config, mode });
   const firstMissingTopLevel = missing.find((field) => !field.includes('.'));
@@ -2142,10 +2206,15 @@ export async function diagnoseOperatorInputs({ inputPath } = {}) {
   const config = DEPLOYMENT_PATH_CONFIG.get(manifest.deployment_path);
   validatePathSpecificUnsupportedInputs({ manifest, config });
   const { requiredInputs, missing } = collectMissingRequiredInputs({ manifest, config, mode });
+  const missingRefs = await collectMissingRequiredRefs({
+    manifest,
+    baseDir: packageRoot,
+    requiredInputs
+  });
   const report = {
     schema_version: 'agentsmith.operator-inputs-doctor/v1',
     scope: 'operator_inputs_missing_input_diagnostic_only',
-    status: missing.length === 0 ? 'pass' : 'fail',
+    status: missing.length === 0 && missingRefs.length === 0 ? 'pass' : 'fail',
     readiness: false,
     formal_verdict: 'not_issued',
     deployment_path: manifest.deployment_path,
@@ -2166,11 +2235,133 @@ export async function diagnoseOperatorInputs({ inputPath } = {}) {
       ]
     },
     missing,
-    next_action: missing.length === 0
+    missing_refs: missingRefs,
+    next_action: missing.length === 0 && missingRefs.length === 0
       ? 'Run bash scripts/operator-release.sh --operator-inputs <package-or-json> --run when ready to execute.'
       : 'Update operator-inputs.json and package-local refs, then rerun doctor.'
   };
   return report;
+}
+
+function skeletonManifestForDeploymentPath(deploymentPath) {
+  const config = DEPLOYMENT_PATH_CONFIG.get(deploymentPath);
+  if (!config) {
+    fail('deployment_path must be one of online/use_existing, online/install_substrates, airgap/use_existing, airgap/install_substrates');
+  }
+  const isAirgap = deploymentPath.startsWith('airgap/');
+  const manifest = {
+    schema_version: MANIFEST_SCHEMA,
+    operator_inputs_version: MANIFEST_OPERATOR_INPUTS_VERSION,
+    deployment_path: deploymentPath,
+    release_contract: isAirgap
+      ? 'airgap-bundle/components/release-contract.json'
+      : 'release-contract.json',
+    deploy_template_package: isAirgap
+      ? 'airgap-bundle/components/deploy-template-package.json'
+      : 'deploy-template-package.json',
+    deploy_template_archive: isAirgap
+      ? 'airgap-bundle/components/deploy-template-package.tgz'
+      : 'deploy-template-package.tgz',
+    render_values: isAirgap
+      ? 'airgap-bundle/operator-inputs/render-values.json'
+      : 'render-values.json',
+    target_prerequisites: isAirgap
+      ? 'airgap-bundle/operator-inputs/target-prerequisites.json'
+      : 'target-prerequisites.json',
+    namespace: 'agentsmith',
+    mode: 'apply'
+  };
+
+  if (!config.installSubstrates) {
+    manifest.substrate_truth = isAirgap
+      ? 'airgap-bundle/operator-inputs/substrate-truth.json'
+      : 'substrate-truth.json';
+  } else {
+    manifest.substrate_pack_manifest = isAirgap
+      ? 'airgap-bundle/components/substrate-pack-manifest.json'
+      : 'substrate-pack-manifest.json';
+    manifest.substrate_install_inputs = isAirgap
+      ? 'airgap-bundle/operator-inputs/substrate-install-inputs.json'
+      : 'substrate-install-inputs.json';
+  }
+
+  if (isAirgap) {
+    manifest.airgap_bundle = 'airgap-bundle';
+    manifest.airgap_bundle_manifest = 'airgap-bundle/airgap-bundle-manifest.json';
+    manifest.context = 'replace-with-kube-context';
+    manifest.kubectl = 'tools/kubectl';
+    manifest.archive_probe = 'tools/archive-probe';
+    manifest.image_loader = 'tools/image-loader';
+    manifest.smoke_url = 'https://agentsmith.example.com/healthz';
+    manifest.expected_status = 200;
+    manifest.timeout = '120s';
+    manifest.timeout_ms = 60000;
+  }
+
+  if (deploymentPath === 'online/install_substrates') {
+    manifest.context = 'replace-with-kube-context';
+    manifest.kubectl = 'tools/kubectl';
+    manifest.routability_probe = 'tools/routability-probe';
+  }
+
+  return manifest;
+}
+
+function skeletonDirsForManifest(manifest) {
+  const dirs = new Set();
+  dirs.add('.');
+  if (Object.hasOwn(manifest, 'kubectl')) {
+    dirs.add(path.posix.dirname(manifest.kubectl));
+  }
+  for (const field of ['archive_probe', 'image_loader', 'routability_probe']) {
+    if (Object.hasOwn(manifest, field)) {
+      dirs.add(path.posix.dirname(manifest[field]));
+    }
+  }
+  if (Object.hasOwn(manifest, 'airgap_bundle')) {
+    dirs.add(manifest.airgap_bundle);
+    dirs.add('airgap-bundle/components');
+    dirs.add('airgap-bundle/operator-inputs');
+  }
+  return [...dirs].filter((dir) => dir && dir !== '.');
+}
+
+export async function initOperatorInputs({ deploymentPath, outputDir } = {}) {
+  const manifest = skeletonManifestForDeploymentPath(assertString(deploymentPath, '--init deployment_path'));
+  const requestedOutputDir = path.resolve(assertString(outputDir, '--output-dir'));
+  await fs.mkdir(requestedOutputDir, { recursive: true });
+  const outputStat = await fs.lstat(requestedOutputDir);
+  if (outputStat.isSymbolicLink()) {
+    fail('operator-inputs init output dir must not be a symlink');
+  }
+  if (!outputStat.isDirectory()) {
+    fail('operator-inputs init output dir must be a directory');
+  }
+  const manifestPath = path.join(requestedOutputDir, MANIFEST_FILE);
+  try {
+    await fs.lstat(manifestPath);
+    fail('operator-inputs init refuses to overwrite existing operator-inputs.json');
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw error;
+    }
+  }
+  for (const dir of skeletonDirsForManifest(manifest)) {
+    await fs.mkdir(path.join(requestedOutputDir, dir), { recursive: true });
+  }
+  await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return {
+    schema_version: 'agentsmith.operator-inputs-init/v1',
+    scope: 'operator_inputs_package_scaffold_only',
+    status: 'pass',
+    readiness: false,
+    formal_verdict: 'not_issued',
+    deployment_path: deploymentPath,
+    output_dir: requestedOutputDir,
+    manifest_path: manifestPath,
+    created_dirs: skeletonDirsForManifest(manifest),
+    next_action: `Fill package-local refs and confirmations, then run bash scripts/operator-release.sh --operator-inputs ${requestedOutputDir} --doctor`
+  };
 }
 
 export { MANIFEST_FILE, PLAN_FILE };

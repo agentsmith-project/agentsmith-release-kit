@@ -66,6 +66,7 @@ The operator-facing path is a single package-driven facade:
    product-side reports.
 
 ```bash
+bash scripts/operator-release.sh --init-operator-inputs <deployment_path> --output-dir <dir>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --doctor
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 bash scripts/operator-release.sh --ga-report \
@@ -78,10 +79,11 @@ bash scripts/operator-release.sh --ga-report \
   --output-dir <dir>
 ```
 
-Run `--doctor` first when you want a missing-input checklist without executing
-or writing an intake plan. Run the same `--operator-inputs <dir-or-json>`
-command without `--run` only when you want package validation before
-execution.
+Run `--init-operator-inputs` when you want a scaffolded input package for one
+deployment path. Run `--doctor` when you want a missing-input checklist
+without executing or writing an intake plan. Run the same `--operator-inputs
+<dir-or-json>` command without `--run` only when you want package validation
+before execution.
 
 The package contains one `operator-inputs.json` for one selected deployment
 path. It is not a four-path manifest. The four accepted `deployment_path`
@@ -105,6 +107,11 @@ are not operator-inputs.
 With `--doctor`, the facade reports all currently missing package fields for
 the selected deployment path and exits without executing producers, issuing a
 verdict, or writing the internal plan.
+
+With `--init-operator-inputs <deployment_path> --output-dir <dir>`, the facade
+creates a skeleton package for one of the four GA deployment paths and refuses
+to overwrite an existing `operator-inputs.json`. The scaffold intentionally
+does not prefill explicit deploy/install confirmations.
 
 With `--run`, the current orchestration slice supports `online/use_existing`,
 `online/install_substrates`, `airgap/use_existing`, and
@@ -165,6 +172,7 @@ tool/digest contract, not proof of network isolation.
 Operator package runbook:
 
 ```bash
+bash scripts/operator-release.sh --init-operator-inputs <deployment_path> --output-dir <dir>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --doctor
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run
 bash scripts/operator-release.sh --ga-report \
@@ -177,12 +185,13 @@ bash scripts/operator-release.sh --ga-report \
   --output-dir <dir>
 ```
 
-Use `--doctor` for a missing-input checklist, and use `--operator-inputs
-<dir-or-json>` without `--run` only for package validation. The package-driven
-`--run` path writes finalized deployment-path handoff evidence for the release
-captain/finalizer when it executes an apply manifest. It does not issue a
-formal GA verdict. Formal release success or failure is issued only by
-`--ga-report`, which writes the final `ga-release-report.json`.
+Use `--init-operator-inputs` for a scaffolded package, use `--doctor` for a
+missing-input checklist, and use `--operator-inputs <dir-or-json>` without
+`--run` only for package validation. The package-driven `--run` path writes
+finalized deployment-path handoff evidence for the release captain/finalizer
+when it executes an apply manifest. It does not issue a formal GA verdict.
+Formal release success or failure is issued only by `--ga-report`, which
+writes the final `ga-release-report.json`.
 
 ### Maintainer/Internal Diagnostics
 

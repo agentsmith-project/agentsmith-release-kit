@@ -1228,6 +1228,84 @@ for deployment_path in "${valid_paths[@]}"; do
   pass "operator-release --operator-inputs accepts $deployment_path"
 done
 
+for deployment_path in "${valid_paths[@]}"; do
+  init_dir="$TMP_DIR/init-${deployment_path//\//-}"
+  bash "$ROOT_DIR/scripts/operator-release.sh" \
+    --init-operator-inputs "$deployment_path" \
+    --output-dir "$init_dir" >"$TMP_DIR/init-${deployment_path//\//-}.out"
+  "$NODE_BIN" --input-type=module - "$init_dir/operator-inputs.json" "$deployment_path" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestFile, deploymentPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+if (manifest.schema_version !== 'agentsmith.operator-inputs/v1') {
+  throw new Error('init manifest schema mismatch');
+}
+if (manifest.operator_inputs_version !== 1) {
+  throw new Error('init manifest version mismatch');
+}
+if (manifest.deployment_path !== deploymentPath) {
+  throw new Error('init manifest deployment_path mismatch');
+}
+if (manifest.deploy_confirmation !== undefined || manifest.install_confirmation !== undefined) {
+  throw new Error('init manifest must not prefill explicit confirmations');
+}
+if (deploymentPath.endsWith('/install_substrates') && manifest.substrate_truth !== undefined) {
+  throw new Error('init install_substrates manifest must not include substrate_truth');
+}
+if (deploymentPath.startsWith('airgap/') && manifest.airgap_bundle !== 'airgap-bundle') {
+  throw new Error('init airgap manifest must include airgap bundle refs');
+}
+NODE
+  if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+    --operator-inputs "$init_dir" \
+    --doctor \
+    --stdout >"$TMP_DIR/init-doctor-${deployment_path//\//-}.json"; then
+    fail "operator-inputs doctor should fail for scaffold-only init package: $deployment_path"
+  fi
+  "$NODE_BIN" --input-type=module - "$TMP_DIR/init-doctor-${deployment_path//\//-}.json" "$deployment_path" <<'NODE'
+import fs from 'node:fs';
+
+const [doctorFile, deploymentPath] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(doctorFile, 'utf8'));
+if (report.schema_version !== 'agentsmith.operator-inputs-doctor/v1') {
+  throw new Error('init doctor schema mismatch');
+}
+if (report.status !== 'fail' || report.readiness !== false || report.formal_verdict !== 'not_issued') {
+  throw new Error('init doctor must fail without readiness or formal verdict');
+}
+if (!report.missing.includes('deploy_confirmation')) {
+  throw new Error('init doctor must require explicit deploy_confirmation');
+}
+if (deploymentPath.endsWith('/install_substrates') && !report.missing.includes('install_confirmation')) {
+  throw new Error('init doctor must require explicit install_confirmation');
+}
+const missingRefFields = new Set(report.missing_refs.map((entry) => entry.field));
+for (const field of ['release_contract', 'deploy_template_package', 'deploy_template_archive']) {
+  if (!missingRefFields.has(field)) {
+    throw new Error(`init doctor missing refs did not include ${field}`);
+  }
+}
+NODE
+  if bash "$ROOT_DIR/scripts/operator-release.sh" \
+    --init-operator-inputs "$deployment_path" \
+    --output-dir "$init_dir" >"$TMP_DIR/init-overwrite.out" 2>"$TMP_DIR/init-overwrite.err"; then
+    fail "operator-inputs init should refuse to overwrite existing manifest: $deployment_path"
+  fi
+  grep -Fq 'refuses to overwrite existing operator-inputs.json' "$TMP_DIR/init-overwrite.err" ||
+    fail "operator-inputs init overwrite failure did not explain blocker"
+  pass "operator-release --init-operator-inputs scaffolds $deployment_path"
+done
+
+if bash "$ROOT_DIR/scripts/operator-release.sh" \
+  --init-operator-inputs existing_kubernetes/kit_installed/online \
+  --output-dir "$TMP_DIR/init-machine-profile" >"$TMP_DIR/init-machine-profile.out" 2>"$TMP_DIR/init-machine-profile.err"; then
+  fail "operator-inputs init should reject machine target profile vocabulary"
+fi
+grep -Fq 'deployment_path must be one of online/use_existing' "$TMP_DIR/init-machine-profile.err" ||
+  fail "operator-inputs init machine profile failure did not explain deployment_path choices"
+pass "operator-release --init-operator-inputs rejects machine profile vocabulary"
+
 direct_package="$TMP_DIR/direct-json"
 mkdir -p "$direct_package"
 write_package_files "$direct_package"

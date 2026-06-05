@@ -4,13 +4,15 @@ Copy one directory per GA operator path, replace placeholder release artifacts
 and environment values, then run the package-driven facade.
 
 ```bash
+bash scripts/operator-release.sh --init-operator-inputs <deployment_path> --output-dir <staged-example-package>
 bash scripts/operator-release.sh --operator-inputs <staged-example-package> --doctor
 bash scripts/operator-release.sh --operator-inputs <staged-example-package> --run
 ```
 
-Run `--doctor` to list missing package inputs before execution. Run the same
-command without `--doctor` or `--run` only when you want package validation
-before execution.
+Run `--init-operator-inputs` to create a fresh package skeleton, then copy or
+replace the example materials. Run `--doctor` to list missing package inputs
+before execution. Run the same command without `--doctor` or `--run` only when
+you want package validation before execution.
 
 Available examples:
 
