@@ -1286,6 +1286,12 @@ if (mutation === 'missing-provenance') {
   delete report.runtime_readiness;
 } else if (mutation === 'missing-runtime-observation-policy') {
   delete report.runtime_readiness.observation_policy;
+} else if (mutation === 'runtime-clean-pass-with-signals') {
+  report.runtime_readiness.files_restore_continuation.classification = 'clean_pass';
+  report.runtime_readiness.files_restore_continuation.outcome = 'focused_gate_passed';
+} else if (mutation === 'runtime-flake-missing-call-summary-coverage') {
+  report.runtime_readiness.files_restore_continuation.signals_count = 1;
+  report.runtime_readiness.files_restore_continuation.call_summaries_count = 1;
 } else {
   throw new Error(`unknown product report mutation: ${mutation}`);
 }
@@ -2467,6 +2473,28 @@ if run_ga_release "$MISSING_RUNTIME_POLICY_DIR" "$PATH_DIR" "$MISSING_RUNTIME_PO
 fi
 assert_ga_failure_report "$MISSING_RUNTIME_POLICY_OUTPUT_DIR" "product_readiness_report.runtime_readiness.observation_policy must be an object"
 pass "GA aggregate requires product runtime readiness observation policy"
+
+RUNTIME_CLEAN_PASS_SIGNAL_DIR="$TMP_DIR/runtime-clean-pass-with-signals"
+RUNTIME_CLEAN_PASS_SIGNAL_OUTPUT_DIR="$TMP_DIR/out-runtime-clean-pass-with-signals"
+cp -R "$VALID_DIR" "$RUNTIME_CLEAN_PASS_SIGNAL_DIR"
+mkdir -p "$RUNTIME_CLEAN_PASS_SIGNAL_OUTPUT_DIR"
+mutate_product_report "$RUNTIME_CLEAN_PASS_SIGNAL_DIR/product-readiness-report.json" runtime-clean-pass-with-signals
+if run_ga_release "$RUNTIME_CLEAN_PASS_SIGNAL_DIR" "$PATH_DIR" "$RUNTIME_CLEAN_PASS_SIGNAL_OUTPUT_DIR" >"$TMP_DIR/ga-release-runtime-clean-pass-with-signals.out" 2>&1; then
+  fail "GA aggregate with runtime readiness signals labeled clean pass should fail"
+fi
+assert_ga_failure_report "$RUNTIME_CLEAN_PASS_SIGNAL_OUTPUT_DIR" "product_readiness_report.runtime_readiness.files_restore_continuation.classification clean_pass must not include runtime readiness signals or call summaries"
+pass "GA aggregate rejects runtime readiness signals labeled clean pass"
+
+RUNTIME_FLAKE_INCOMPLETE_DIR="$TMP_DIR/runtime-flake-missing-call-summary-coverage"
+RUNTIME_FLAKE_INCOMPLETE_OUTPUT_DIR="$TMP_DIR/out-runtime-flake-missing-call-summary-coverage"
+cp -R "$VALID_DIR" "$RUNTIME_FLAKE_INCOMPLETE_DIR"
+mkdir -p "$RUNTIME_FLAKE_INCOMPLETE_OUTPUT_DIR"
+mutate_product_report "$RUNTIME_FLAKE_INCOMPLETE_DIR/product-readiness-report.json" runtime-flake-missing-call-summary-coverage
+if run_ga_release "$RUNTIME_FLAKE_INCOMPLETE_DIR" "$PATH_DIR" "$RUNTIME_FLAKE_INCOMPLETE_OUTPUT_DIR" >"$TMP_DIR/ga-release-runtime-flake-missing-call-summary-coverage.out" 2>&1; then
+  fail "GA aggregate with incomplete runtime flake call summary coverage should fail"
+fi
+assert_ga_failure_report "$RUNTIME_FLAKE_INCOMPLETE_OUTPUT_DIR" "product_readiness_report.runtime_readiness.files_restore_continuation.classification runtime_flake must cover API, pod-manager, and ASBCP call summaries"
+pass "GA aggregate requires runtime flake call summary coverage"
 
 SUMMARY_FAILURE_OUTPUT_DIR="$TMP_DIR/out-summary-write-failure"
 SUMMARY_FAILURE_PRELOAD="$TMP_DIR/fail-summary-write.mjs"

@@ -1438,8 +1438,11 @@ function validateProductRuntimeReadiness(report) {
     filesRestore.call_summaries_count,
     'product_readiness_report.runtime_readiness.files_restore_continuation.call_summaries_count'
   );
-  if (classification === 'runtime_flake' && callSummariesCount < 3) {
-    fail('product_readiness_report.runtime_readiness.files_restore_continuation.call_summaries_count must cover API, pod-manager, and ASBCP summaries for runtime_flake');
+  if (classification === 'clean_pass' && (signalsCount !== 0 || callSummariesCount !== 0)) {
+    fail('product_readiness_report.runtime_readiness.files_restore_continuation.classification clean_pass must not include runtime readiness signals or call summaries');
+  }
+  if (classification === 'runtime_flake' && (signalsCount < 3 || callSummariesCount < 3)) {
+    fail('product_readiness_report.runtime_readiness.files_restore_continuation.classification runtime_flake must cover API, pod-manager, and ASBCP call summaries');
   }
 
   const referencedFiles = requireArray(
