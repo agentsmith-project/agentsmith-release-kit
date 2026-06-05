@@ -430,6 +430,7 @@ import { pathToFileURL } from 'node:url';
 const rootDir = process.argv[2];
 const argv = process.argv.slice(3);
 const REPORT_FILE = 'ga-release-report.json';
+const SUMMARY_FILE = 'ga-release-summary.md';
 const PATH_REPORT_FILE = 'deployment-path-report.json';
 const FINALIZER_MANIFEST_FILE = 'deployment-path-finalizer-manifest.json';
 const SOURCE_EVIDENCE_DIR = 'source-evidence';
@@ -575,6 +576,23 @@ function requireString(value, label) {
   return value;
 }
 
+async function removeStaleOutputFile(file) {
+  try {
+    await fs.rm(file, { force: true });
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+      return;
+    }
+    fail(`cannot remove stale GA output ${path.basename(file)}: ${error.message}`);
+  }
+}
+
+async function clearStaleFinalOutputs(outputDir) {
+  const resolvedOutputDir = path.resolve(outputDir);
+  await removeStaleOutputFile(path.join(resolvedOutputDir, REPORT_FILE));
+  await removeStaleOutputFile(path.join(resolvedOutputDir, SUMMARY_FILE));
+}
+
 function rerunMessage(packageInput) {
   return `rerun the corresponding package: bash scripts/operator-release.sh --operator-inputs ${packageInput} --run`;
 }
@@ -670,6 +688,8 @@ async function main() {
     console.log(usage());
     return;
   }
+
+  await clearStaleFinalOutputs(args.outputDir);
 
   const { resolveOperatorInputs } = await import(
     pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-resolver.mjs')).href

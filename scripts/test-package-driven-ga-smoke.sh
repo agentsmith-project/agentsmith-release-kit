@@ -407,6 +407,14 @@ if grep -Fq '.release-kit-internal' "$TMP_DIR/ga-release.out"; then
 fi
 assert_ga_report "$ga_output_dir/ga-release-report.json"
 
+seed_stale_ga_outputs() {
+  local output_dir="$1"
+
+  mkdir -p "$output_dir"
+  cp "$ga_output_dir/ga-release-report.json" "$output_dir/ga-release-report.json"
+  cp "$ga_output_dir/ga-release-summary.md" "$output_dir/ga-release-summary.md"
+}
+
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --operator-inputs "$online_package" \
   --operator-inputs "$online_install_package" \
@@ -419,6 +427,8 @@ fi
 grep -Fq 'requires exactly 4 --operator-inputs packages' "$TMP_DIR/ga-missing-package.out" ||
   fail "missing package failure did not explain required package count"
 
+duplicate_path_output="$TMP_DIR/ga-output-duplicate-path"
+seed_stale_ga_outputs "$duplicate_path_output"
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --operator-inputs "$online_package" \
   --operator-inputs "$online_package" \
@@ -426,15 +436,20 @@ if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --operator-inputs "$airgap_install_package" \
   --product-readiness-report "$product_dir/product-readiness-report.json" \
   --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
-  --output-dir "$TMP_DIR/ga-output-duplicate-path" >"$TMP_DIR/ga-duplicate-path.out" 2>&1; then
+  --output-dir "$duplicate_path_output" >"$TMP_DIR/ga-duplicate-path.out" 2>&1; then
   fail "operator GA facade should fail on duplicate deployment_path packages"
 fi
 grep -Fq 'duplicate deployment_path online/use_existing' "$TMP_DIR/ga-duplicate-path.out" ||
   fail "duplicate deployment_path failure did not explain duplicate package"
+if [[ -e "$duplicate_path_output/ga-release-report.json" || -e "$duplicate_path_output/ga-release-summary.md" ]]; then
+  fail "operator GA facade duplicate path failure must remove stale final GA outputs"
+fi
 
 missing_report_package="$TMP_DIR/pkg-online-use-existing-missing-report"
 cp -R "$online_package" "$missing_report_package"
 rm "$missing_report_package/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json"
+missing_path_output="$TMP_DIR/ga-output-missing-path-report"
+seed_stale_ga_outputs "$missing_path_output"
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --operator-inputs "$missing_report_package" \
   --operator-inputs "$online_install_package" \
@@ -442,13 +457,16 @@ if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --operator-inputs "$airgap_install_package" \
   --product-readiness-report "$product_dir/product-readiness-report.json" \
   --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
-  --output-dir "$TMP_DIR/ga-output-missing-path-report" >"$TMP_DIR/ga-missing-path-report.out" 2>&1; then
+  --output-dir "$missing_path_output" >"$TMP_DIR/ga-missing-path-report.out" 2>&1; then
   fail "operator GA facade should fail when finalized path report is missing"
 fi
 grep -Fq 'finalized path evidence is missing for online/use_existing' "$TMP_DIR/ga-missing-path-report.out" ||
   fail "missing path report failure did not name the affected deployment path"
 grep -Fq 'bash scripts/operator-release.sh --operator-inputs' "$TMP_DIR/ga-missing-path-report.out" ||
   fail "missing path report failure did not point operator to rerun the package"
+if [[ -e "$missing_path_output/ga-release-report.json" || -e "$missing_path_output/ga-release-summary.md" ]]; then
+  fail "operator GA facade missing path evidence failure must remove stale final GA outputs"
+fi
 
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --deployment-path-report "$online_package/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json" \
