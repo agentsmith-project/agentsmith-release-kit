@@ -1833,6 +1833,22 @@ async function writeJson(file, value) {
   await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+async function removeStaleOutputFile(file) {
+  try {
+    await fs.rm(file, { force: true });
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') {
+      return;
+    }
+    fail(`cannot remove stale GA output ${path.basename(file)}: ${error.message}`);
+  }
+}
+
+async function clearStaleFinalOutputs(outputDir) {
+  await removeStaleOutputFile(path.join(outputDir, REPORT_FILE));
+  await removeStaleOutputFile(path.join(outputDir, SUMMARY_FILE));
+}
+
 async function writeSummary(file, report) {
   const lines = [
     '# AgentSmith GA Release Summary',
@@ -1863,6 +1879,9 @@ async function main() {
     console.log(usage());
     return;
   }
+
+  const outputDir = path.resolve(args.outputDir);
+  await clearStaleFinalOutputs(outputDir);
 
   const contract = await readJson(args.releaseContract, 'release contract');
   const deployTemplate = await readJson(args.deployTemplatePackage, 'deploy template package');
@@ -1954,7 +1973,6 @@ async function main() {
     blockers: []
   };
 
-  const outputDir = path.resolve(args.outputDir);
   await writeJson(path.join(outputDir, REPORT_FILE), report);
   await writeSummary(path.join(outputDir, SUMMARY_FILE), report);
   console.log(`PASS: wrote ${REPORT_FILE} (${canonicalDigest(report)})`);

@@ -1718,6 +1718,24 @@ NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
 pass "valid GA aggregate consumes finalizer-generated path bundles"
 
+STALE_FAILURE_DIR="$TMP_DIR/stale-failure"
+STALE_OUTPUT_DIR="$TMP_DIR/out-stale-failure"
+cp -R "$VALID_DIR" "$STALE_FAILURE_DIR"
+mkdir -p "$STALE_OUTPUT_DIR"
+cp "$TMP_DIR/out-valid/ga-release-report.json" "$STALE_OUTPUT_DIR/ga-release-report.json"
+cp "$TMP_DIR/out-valid/ga-release-summary.md" "$STALE_OUTPUT_DIR/ga-release-summary.md"
+mutate_product_report "$STALE_FAILURE_DIR/product-readiness-report.json" wrong-repo
+if run_ga_release "$STALE_FAILURE_DIR" "$PATH_DIR" "$STALE_OUTPUT_DIR" >"$TMP_DIR/ga-release-stale-failure.out" 2>&1; then
+  fail "GA aggregate with invalid product readiness should fail"
+fi
+if [[ -e "$STALE_OUTPUT_DIR/ga-release-report.json" ]]; then
+  fail "failed GA aggregate must remove stale ga-release-report.json"
+fi
+if [[ -e "$STALE_OUTPUT_DIR/ga-release-summary.md" ]]; then
+  fail "failed GA aggregate must remove stale ga-release-summary.md"
+fi
+pass "failed GA aggregate removes stale final report outputs"
+
 if run_ga_release_without_release_kit_provenance "$VALID_DIR" "$PATH_DIR" "$TMP_DIR/out-missing-release-kit-provenance" >"$TMP_DIR/ga-release-missing-release-kit-provenance.out" 2>&1; then
   fail "missing release-kit finalizer provenance should fail"
 fi
