@@ -1233,11 +1233,12 @@ for deployment_path in "${valid_paths[@]}"; do
   bash "$ROOT_DIR/scripts/operator-release.sh" \
     --init-operator-inputs "$deployment_path" \
     --output-dir "$init_dir" >"$TMP_DIR/init-${deployment_path//\//-}.out"
-  "$NODE_BIN" --input-type=module - "$init_dir/operator-inputs.json" "$deployment_path" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$init_dir/operator-inputs.json" "$init_dir/README.md" "$deployment_path" <<'NODE'
 import fs from 'node:fs';
 
-const [manifestFile, deploymentPath] = process.argv.slice(2);
+const [manifestFile, readmeFile, deploymentPath] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+const readme = fs.readFileSync(readmeFile, 'utf8');
 if (manifest.schema_version !== 'agentsmith.operator-inputs/v1') {
   throw new Error('init manifest schema mismatch');
 }
@@ -1255,6 +1256,27 @@ if (deploymentPath.endsWith('/install_substrates') && manifest.substrate_truth !
 }
 if (deploymentPath.startsWith('airgap/') && manifest.airgap_bundle !== 'airgap-bundle') {
   throw new Error('init airgap manifest must include airgap bundle refs');
+}
+if (!readme.includes(`Deployment path: \`${deploymentPath}\``)) {
+  throw new Error('init package README must identify the selected deployment path');
+}
+if (!readme.includes('bash scripts/operator-release.sh --operator-inputs <this-package> --doctor')) {
+  throw new Error('init package README must show the doctor command');
+}
+if (!readme.includes('bash scripts/operator-release.sh --ga-report')) {
+  throw new Error('init package README must show the final GA report command');
+}
+if (!readme.includes('ga-release-report.json')) {
+  throw new Error('init package README must point to ga-release-report.json');
+}
+if (deploymentPath.endsWith('/install_substrates') && !readme.includes('namespace-scoped installer')) {
+  throw new Error('install_substrates README must explain the installer boundary');
+}
+if (deploymentPath.startsWith('airgap/') && !readme.includes('airgap-bundle/')) {
+  throw new Error('airgap README must explain bundle-local materials');
+}
+if (/[.]release-kit-internal|operator-inputs-plan|operator-release-surface-report|adoption report|candidate intake|release-engineering|operator-signoff|--target-profile|verify-release[.]sh|target_cluster|substrate_source|external_declared|kit_installed|existing_kubernetes|kind_rehearsal/u.test(readme)) {
+  throw new Error('init package README must not expose internal release-kit vocabulary');
 }
 NODE
   if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \

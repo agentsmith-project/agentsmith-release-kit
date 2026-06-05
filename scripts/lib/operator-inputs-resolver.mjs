@@ -8,6 +8,7 @@ import { validateSubstrateInstallInputs } from './substrate-install-input-valida
 import { resolveSubstrateInstallParameters } from './substrate-install-parameters.mjs';
 
 const MANIFEST_FILE = 'operator-inputs.json';
+const PACKAGE_README_FILE = 'README.md';
 const PLAN_FILE = 'operator-inputs-plan.json';
 const INTERNAL_DIR = '.release-kit-internal';
 const MANIFEST_SCHEMA = 'agentsmith.operator-inputs/v1';
@@ -2326,6 +2327,64 @@ function skeletonDirsForManifest(manifest) {
   return [...dirs].filter((dir) => dir && dir !== '.');
 }
 
+function packageReadmeForManifest(manifest) {
+  const deploymentPath = manifest.deployment_path;
+  const installNote = deploymentPath.endsWith('/install_substrates')
+    ? [
+      '- Fill install_confirmation only after checking the namespace-scoped installer inputs.',
+      '- Keep substrate_truth out of this package; the run uses installer-generated truth.'
+    ]
+    : [
+      '- Fill substrate_truth with the operator-declared substrate connection truth.'
+    ];
+  const airgapNote = deploymentPath.startsWith('airgap/')
+    ? [
+      '- Keep release materials and bundle manifest under airgap-bundle/.',
+      '- Provide package-local kubectl, archive_probe, and image_loader executables before run.'
+    ]
+    : [];
+
+  return `${[
+    '# AgentSmith Operator Inputs',
+    '',
+    `Deployment path: \`${deploymentPath}\``,
+    '',
+    '## Fill This Package',
+    '',
+    '- Replace package-local refs with the real release contract, deploy template package, render values, and target prerequisites.',
+    ...installNote,
+    ...airgapNote,
+    '- Add deploy_confirmation only when this package is ready to execute.',
+    '- Keep secrets as references, not raw secret values.',
+    '',
+    '## Check And Run',
+    '',
+    '```bash',
+    'bash scripts/operator-release.sh --operator-inputs <this-package> --doctor',
+    'bash scripts/operator-release.sh --operator-inputs <this-package> --run',
+    '```',
+    '',
+    '## Final Report',
+    '',
+    'A package run produces path-level evidence only. The formal GA result is written later by:',
+    '',
+    '```bash',
+    'bash scripts/operator-release.sh --ga-report \\',
+    '  --operator-inputs <online-use-existing-pkg> \\',
+    '  --operator-inputs <online-install-substrates-pkg> \\',
+    '  --operator-inputs <airgap-use-existing-pkg> \\',
+    '  --operator-inputs <airgap-install-substrates-pkg> \\',
+    '  --product-readiness-report <json> \\',
+    '  --post-deploy-product-smoke-report <online-json> \\',
+    '  --post-deploy-product-smoke-report <airgap-json> \\',
+    '  --output-dir <dir>',
+    '```',
+    '',
+    'Success or failure is shown in ga-release-report.json.',
+    ''
+  ].join('\n')}\n`;
+}
+
 export async function initOperatorInputs({ deploymentPath, outputDir } = {}) {
   const manifest = skeletonManifestForDeploymentPath(assertString(deploymentPath, '--init deployment_path'));
   const requestedOutputDir = path.resolve(assertString(outputDir, '--output-dir'));
@@ -2350,6 +2409,10 @@ export async function initOperatorInputs({ deploymentPath, outputDir } = {}) {
     await fs.mkdir(path.join(requestedOutputDir, dir), { recursive: true });
   }
   await fs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await fs.writeFile(
+    path.join(requestedOutputDir, PACKAGE_README_FILE),
+    packageReadmeForManifest(manifest)
+  );
   return {
     schema_version: 'agentsmith.operator-inputs-init/v1',
     scope: 'operator_inputs_package_scaffold_only',
@@ -2360,6 +2423,7 @@ export async function initOperatorInputs({ deploymentPath, outputDir } = {}) {
     output_dir: requestedOutputDir,
     manifest_path: manifestPath,
     created_dirs: skeletonDirsForManifest(manifest),
+    created_files: [MANIFEST_FILE, PACKAGE_README_FILE],
     next_action: `Fill package-local refs and confirmations, then run bash scripts/operator-release.sh --operator-inputs ${requestedOutputDir} --doctor`
   };
 }
