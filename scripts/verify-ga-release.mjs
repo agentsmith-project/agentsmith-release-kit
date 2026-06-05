@@ -111,6 +111,13 @@ const PRODUCT_SMOKE_FILE_BINDING_KEYS = new Set([
   'path',
   'sha256'
 ]);
+const PRODUCT_SMOKE_PROVIDER_NEUTRAL_PROOF_KEYS = new Set([
+  'endpoint_type',
+  'provider_family',
+  'upstream_protocol',
+  'credential_type',
+  'success_path'
+]);
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
@@ -1687,6 +1694,43 @@ function validateProductSmokeDeploymentTarget(value) {
   };
 }
 
+function validateProductSmokeProviderNeutralProof(value, label) {
+  const proof = requireObject(value.proof, `${label}.proof`);
+  rejectUnknownKeys(proof, PRODUCT_SMOKE_PROVIDER_NEUTRAL_PROOF_KEYS, `${label}.proof`);
+  requireEquals(
+    requireString(proof.endpoint_type, `${label}.proof.endpoint_type`),
+    'custom',
+    `${label}.proof.endpoint_type`
+  );
+  requireEquals(
+    requireString(proof.provider_family, `${label}.proof.provider_family`),
+    'custom',
+    `${label}.proof.provider_family`
+  );
+  requireEquals(
+    requireString(proof.upstream_protocol, `${label}.proof.upstream_protocol`),
+    'openai_chat_completions',
+    `${label}.proof.upstream_protocol`
+  );
+  requireEquals(
+    requireString(proof.credential_type, `${label}.proof.credential_type`),
+    'api_key',
+    `${label}.proof.credential_type`
+  );
+  requireEquals(
+    requireString(proof.success_path, `${label}.proof.success_path`),
+    'provider_neutral_endpoint',
+    `${label}.proof.success_path`
+  );
+  return {
+    endpoint_type: proof.endpoint_type,
+    provider_family: proof.provider_family,
+    upstream_protocol: proof.upstream_protocol,
+    credential_type: proof.credential_type,
+    success_path: proof.success_path
+  };
+}
+
 function validateProductSmoke(report, reportDigest, release) {
   const schemaVersion = requireProductSmokeSchemaVersion(report);
   rejectProductSmokeLegacyFields(report);
@@ -1718,6 +1762,7 @@ function validateProductSmoke(report, reportDigest, release) {
   const seenIds = new Set();
   const sourceEvidencePaths = {};
   const sourceEvidenceDigests = {};
+  let providerNeutralEndpointProof = null;
   for (const entry of productSmokeEntries(report.smoke_results)) {
     const spec = CANONICAL_PRODUCT_SMOKE_SPECS[entry.id];
     if (seenIds.has(entry.id)) {
@@ -1753,6 +1798,9 @@ function validateProductSmoke(report, reportDigest, release) {
       entry.value.source_evidence_sha256,
       `${entry.label}.source_evidence_sha256`
     );
+    if (entry.id === 'provider_neutral_endpoint') {
+      providerNeutralEndpointProof = validateProductSmokeProviderNeutralProof(entry.value, entry.label);
+    }
     sourceEvidencePaths[entry.id] = sourceEvidencePath;
     sourceEvidenceDigests[entry.id] = sourceEvidenceDigest;
   }
@@ -1760,6 +1808,9 @@ function validateProductSmoke(report, reportDigest, release) {
     if (!seenIds.has(id)) {
       fail(`post-deploy product smoke missing canonical smoke id: ${id}`);
     }
+  }
+  if (!providerNeutralEndpointProof) {
+    fail('post_deploy_product_smoke.smoke_results.provider_neutral_endpoint.proof must be present');
   }
 
   return {
@@ -1777,7 +1828,8 @@ function validateProductSmoke(report, reportDigest, release) {
     ),
     source_evidence_sha256: Object.fromEntries(
       Object.entries(sourceEvidenceDigests).sort(([left], [right]) => left.localeCompare(right))
-    )
+    ),
+    provider_neutral_endpoint_proof: providerNeutralEndpointProof
   };
 }
 
@@ -2934,6 +2986,7 @@ function buildEvidenceIndex(report) {
         canonical_smoke_ids: productSmoke.canonical_smoke_ids ?? [],
         source_evidence_paths: productSmoke.source_evidence_paths ?? {},
         source_evidence_sha256: productSmoke.source_evidence_sha256 ?? {},
+        provider_neutral_endpoint_proof: productSmoke.provider_neutral_endpoint_proof ?? null,
         source: productSmoke.source ?? null,
         deployment_target: productSmoke.deployment_target ?? null,
         deployment_path_binding: productSmoke.deployment_path_binding ?? null

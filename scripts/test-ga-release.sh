@@ -764,6 +764,13 @@ function provenance(subjectName) {
 }
 
 function canonicalSmokeResults() {
+  const providerNeutralEndpointProof = {
+    endpoint_type: 'custom',
+    provider_family: 'custom',
+    upstream_protocol: 'openai_chat_completions',
+    credential_type: 'api_key',
+    success_path: 'provider_neutral_endpoint'
+  };
   const specs = [
     { id: 'login_profile', source_flow: 'login_profile', label: 'login/profile' },
     { id: 'workspace_project', source_flow: 'workspace_project', label: 'workspace/project' },
@@ -781,7 +788,8 @@ function canonicalSmokeResults() {
       label: spec.label,
       source_flow: spec.source_flow,
       source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`,
-      source_evidence_sha256: sha(`product-smoke:${spec.source_flow}`)
+      source_evidence_sha256: sha(`product-smoke:${spec.source_flow}`),
+      ...(spec.id === 'provider_neutral_endpoint' ? { proof: providerNeutralEndpointProof } : {})
     }
   ]));
 }
@@ -1423,6 +1431,19 @@ if (mutation === 'legacy-surrogate-shape') {
 } else if (mutation === 'wrong-source-evidence-path') {
   report.smoke_results.provider_neutral_endpoint.source_evidence_path =
     'unified-deploy/product-flows/provider_neutral_endpoint.json';
+} else if (mutation === 'missing-provider-neutral-proof') {
+  delete report.smoke_results.provider_neutral_endpoint.proof;
+} else if (mutation === 'wrong-provider-neutral-proof-success-path') {
+  report.smoke_results.provider_neutral_endpoint.proof.success_path = 'provider_specific_saas';
+} else if (mutation === 'provider-neutral-proof-oauth') {
+  report.smoke_results.provider_neutral_endpoint.proof = {
+    endpoint_type: 'custom',
+    provider_family: 'custom',
+    upstream_protocol: 'openai_chat_completions',
+    credential_type: 'api_key',
+    success_path: 'provider_neutral_endpoint',
+    oauth_provider: 'openai'
+  };
 } else if (mutation === 'absolute-product-flows-path') {
   report.source.product_flows_path = [
     '',
@@ -2113,6 +2134,7 @@ const expectedSmokeCoverageIndex = {
   canonical_smoke_ids: report.post_deploy_product_smoke.canonical_smoke_ids,
   source_evidence_paths: report.post_deploy_product_smoke.source_evidence_paths,
   source_evidence_sha256: report.post_deploy_product_smoke.source_evidence_sha256,
+  provider_neutral_endpoint_proof: report.post_deploy_product_smoke.provider_neutral_endpoint_proof,
   source: report.post_deploy_product_smoke.source,
   deployment_target: report.post_deploy_product_smoke.deployment_target,
   deployment_path_binding: report.post_deploy_product_smoke.deployment_path_binding
@@ -2287,6 +2309,13 @@ const expectedSourceEvidenceDigests = {
   audit: sha('product-smoke:audit'),
   usage: sha('product-smoke:usage')
 };
+const expectedProviderNeutralEndpointProof = {
+  endpoint_type: 'custom',
+  provider_family: 'custom',
+  upstream_protocol: 'openai_chat_completions',
+  credential_type: 'api_key',
+  success_path: 'provider_neutral_endpoint'
+};
 if (smoke?.schema !== 'agentsmith.post-deploy-product-smoke-report/v1') {
   throw new Error('GA report did not bind canonical product smoke schema');
 }
@@ -2360,6 +2389,12 @@ for (const id of expectedSmokeIds) {
   if (smoke?.source_evidence_sha256?.[id] !== expectedSourceEvidenceDigests[id]) {
     throw new Error(`GA report did not bind source evidence digest for product smoke id: ${id}`);
   }
+}
+if (
+  JSON.stringify(smoke?.provider_neutral_endpoint_proof) !==
+  JSON.stringify(expectedProviderNeutralEndpointProof)
+) {
+  throw new Error('GA report did not bind provider-neutral endpoint proof');
 }
 if (Object.hasOwn(report.summary || {}, 'product_smoke_flows')) {
   throw new Error('GA report must not expose covered_flows as product smoke truth');
@@ -2665,6 +2700,9 @@ product_smoke_mutations=(
   wrong-entry-id
   wrong-source-flow
   wrong-source-evidence-path
+  missing-provider-neutral-proof
+  wrong-provider-neutral-proof-success-path
+  provider-neutral-proof-oauth
 )
 for mutation in "${product_smoke_mutations[@]}"; do
   PRODUCT_SMOKE_DIR="$TMP_DIR/product-smoke-$mutation"
@@ -2763,6 +2801,15 @@ for mutation in "${product_smoke_mutations[@]}"; do
       ;;
     wrong-source-evidence-path)
       expected_message="post_deploy_product_smoke.smoke_results.provider_neutral_endpoint.source_evidence_path must be unified-deploy/product-flows/chat_via_llmup.json"
+      ;;
+    missing-provider-neutral-proof)
+      expected_message="post_deploy_product_smoke.smoke_results.provider_neutral_endpoint.proof must be an object"
+      ;;
+    wrong-provider-neutral-proof-success-path)
+      expected_message="post_deploy_product_smoke.smoke_results.provider_neutral_endpoint.proof.success_path must be provider_neutral_endpoint"
+      ;;
+    provider-neutral-proof-oauth)
+      expected_message="post_deploy_product_smoke.smoke_results.provider_neutral_endpoint.proof contains unknown field: oauth_provider"
       ;;
     *)
       fail "missing expected message for product smoke mutation: $mutation"

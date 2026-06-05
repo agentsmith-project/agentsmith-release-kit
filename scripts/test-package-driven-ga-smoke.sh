@@ -268,6 +268,13 @@ function provenance(subjectName) {
 }
 
 function canonicalSmokeResults() {
+  const providerNeutralEndpointProof = {
+    endpoint_type: 'custom',
+    provider_family: 'custom',
+    upstream_protocol: 'openai_chat_completions',
+    credential_type: 'api_key',
+    success_path: 'provider_neutral_endpoint'
+  };
   const specs = [
     { id: 'login_profile', source_flow: 'login_profile', label: 'login/profile' },
     { id: 'workspace_project', source_flow: 'workspace_project', label: 'workspace/project' },
@@ -285,7 +292,8 @@ function canonicalSmokeResults() {
       label: spec.label,
       source_flow: spec.source_flow,
       source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`,
-      source_evidence_sha256: digest(`product-smoke:${spec.source_flow}`)
+      source_evidence_sha256: digest(`product-smoke:${spec.source_flow}`),
+      ...(spec.id === 'provider_neutral_endpoint' ? { proof: providerNeutralEndpointProof } : {})
     }
   ]));
 }
@@ -503,6 +511,7 @@ const expectedSmokeCoverageIndex = {
   canonical_smoke_ids: report.post_deploy_product_smoke.canonical_smoke_ids,
   source_evidence_paths: report.post_deploy_product_smoke.source_evidence_paths,
   source_evidence_sha256: report.post_deploy_product_smoke.source_evidence_sha256,
+  provider_neutral_endpoint_proof: report.post_deploy_product_smoke.provider_neutral_endpoint_proof,
   source: report.post_deploy_product_smoke.source,
   deployment_target: report.post_deploy_product_smoke.deployment_target,
   deployment_path_binding: report.post_deploy_product_smoke.deployment_path_binding
@@ -690,10 +699,23 @@ const expectedSmokeDigests = Object.fromEntries([
   ['audit', 'audit'],
   ['usage', 'usage']
 ].map(([id, sourceFlow]) => [id, digest(`product-smoke:${sourceFlow}`)]));
+const expectedProviderNeutralEndpointProof = {
+  endpoint_type: 'custom',
+  provider_family: 'custom',
+  upstream_protocol: 'openai_chat_completions',
+  credential_type: 'api_key',
+  success_path: 'provider_neutral_endpoint'
+};
 for (const id of expectedSmokeIds) {
   if (report.post_deploy_product_smoke?.source_evidence_sha256?.[id] !== expectedSmokeDigests[id]) {
     throw new Error(`GA report must bind product smoke source evidence digest: ${id}`);
   }
+}
+if (
+  JSON.stringify(report.post_deploy_product_smoke?.provider_neutral_endpoint_proof) !==
+  JSON.stringify(expectedProviderNeutralEndpointProof)
+) {
+  throw new Error('GA report must bind provider-neutral endpoint proof');
 }
 NODE
 }
