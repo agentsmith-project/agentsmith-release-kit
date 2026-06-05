@@ -708,7 +708,8 @@ function canonicalSmokeResults() {
       status: 'passed',
       label: spec.label,
       source_flow: spec.source_flow,
-      source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`
+      source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`,
+      source_evidence_sha256: sha(`product-smoke:${spec.source_flow}`)
     }
   ]));
 }
@@ -1074,6 +1075,10 @@ if (mutation === 'legacy-surrogate-shape') {
   delete report.smoke_results.usage;
 } else if (mutation === 'missing-source-evidence-path') {
   delete report.smoke_results.files.source_evidence_path;
+} else if (mutation === 'missing-source-evidence-sha256') {
+  delete report.smoke_results.files.source_evidence_sha256;
+} else if (mutation === 'malformed-source-evidence-sha256') {
+  report.smoke_results.files.source_evidence_sha256 = 'sha256:not-a-digest';
 } else if (mutation === 'wrong-entry-id') {
   report.smoke_results.files.id = 'workspace_project';
 } else if (mutation === 'wrong-source-flow') {
@@ -1618,6 +1623,7 @@ const releaseContractBytes = fs.readFileSync(process.argv[3]);
 const releaseContract = JSON.parse(releaseContractBytes.toString('utf8'));
 const releaseContractDigest =
   `sha256:${crypto.createHash('sha256').update(releaseContractBytes).digest('hex')}`;
+const sha = (label) => `sha256:${crypto.createHash('sha256').update(label).digest('hex')}`;
 if (report.schema !== 'agentsmith.ga-release-report/v1') {
   throw new Error('unexpected schema');
 }
@@ -1697,6 +1703,15 @@ const expectedSourceEvidencePaths = {
   audit: 'unified-deploy/product-flows/audit.json',
   usage: 'unified-deploy/product-flows/usage.json'
 };
+const expectedSourceEvidenceDigests = {
+  login_profile: sha('product-smoke:login_profile'),
+  workspace_project: sha('product-smoke:workspace_project'),
+  provider_neutral_endpoint: sha('product-smoke:chat_via_llmup'),
+  agent_task_managed_runner: sha('product-smoke:agent_task_managed_runner'),
+  files: sha('product-smoke:files'),
+  audit: sha('product-smoke:audit'),
+  usage: sha('product-smoke:usage')
+};
 if (smoke?.schema !== 'agentsmith.post-deploy-product-smoke-report/v1') {
   throw new Error('GA report did not bind canonical product smoke schema');
 }
@@ -1727,6 +1742,9 @@ if (JSON.stringify(smoke?.canonical_smoke_ids) !== JSON.stringify(expectedSmokeI
 for (const id of expectedSmokeIds) {
   if (smoke?.source_evidence_paths?.[id] !== expectedSourceEvidencePaths[id]) {
     throw new Error(`GA report did not bind source evidence path for product smoke id: ${id}`);
+  }
+  if (smoke?.source_evidence_sha256?.[id] !== expectedSourceEvidenceDigests[id]) {
+    throw new Error(`GA report did not bind source evidence digest for product smoke id: ${id}`);
   }
 }
 if (Object.hasOwn(report.summary || {}, 'product_smoke_flows')) {
@@ -1878,6 +1896,8 @@ product_smoke_mutations=(
   release-contract-nested-legacy-field
   missing-canonical-smoke
   missing-source-evidence-path
+  missing-source-evidence-sha256
+  malformed-source-evidence-sha256
   wrong-entry-id
   wrong-source-flow
   wrong-source-evidence-path
@@ -1928,6 +1948,12 @@ for mutation in "${product_smoke_mutations[@]}"; do
       ;;
     missing-source-evidence-path)
       expected_message="post_deploy_product_smoke.smoke_results.files.source_evidence_path is required"
+      ;;
+    missing-source-evidence-sha256)
+      expected_message="post_deploy_product_smoke.smoke_results.files.source_evidence_sha256 is required"
+      ;;
+    malformed-source-evidence-sha256)
+      expected_message="post_deploy_product_smoke.smoke_results.files.source_evidence_sha256 must be a sha256 digest"
       ;;
     wrong-entry-id)
       expected_message="post_deploy_product_smoke.smoke_results.files.id must be files"

@@ -1002,6 +1002,7 @@ function validateProductSmoke(report, reportDigest, release) {
   const expectedIds = new Set(REQUIRED_PRODUCT_SMOKE_IDS);
   const seenIds = new Set();
   const sourceEvidencePaths = {};
+  const sourceEvidenceDigests = {};
   for (const entry of productSmokeEntries(report.smoke_results)) {
     const spec = CANONICAL_PRODUCT_SMOKE_SPECS[entry.id];
     if (seenIds.has(entry.id)) {
@@ -1033,7 +1034,12 @@ function validateProductSmoke(report, reportDigest, release) {
       spec.source_evidence_path,
       `${entry.label}.source_evidence_path`
     );
+    const sourceEvidenceDigest = requireDigest(
+      entry.value.source_evidence_sha256,
+      `${entry.label}.source_evidence_sha256`
+    );
     sourceEvidencePaths[entry.id] = sourceEvidencePath;
+    sourceEvidenceDigests[entry.id] = sourceEvidenceDigest;
   }
   for (const id of REQUIRED_PRODUCT_SMOKE_IDS) {
     if (!seenIds.has(id)) {
@@ -1051,6 +1057,9 @@ function validateProductSmoke(report, reportDigest, release) {
     canonical_smoke_ids: [...REQUIRED_PRODUCT_SMOKE_IDS],
     source_evidence_paths: Object.fromEntries(
       Object.entries(sourceEvidencePaths).sort(([left], [right]) => left.localeCompare(right))
+    ),
+    source_evidence_sha256: Object.fromEntries(
+      Object.entries(sourceEvidenceDigests).sort(([left], [right]) => left.localeCompare(right))
     )
   };
 }

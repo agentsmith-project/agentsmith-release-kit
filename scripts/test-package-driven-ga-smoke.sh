@@ -216,7 +216,8 @@ function canonicalSmokeResults() {
       status: 'passed',
       label: spec.label,
       source_flow: spec.source_flow,
-      source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`
+      source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`,
+      source_evidence_sha256: digest(`product-smoke:${spec.source_flow}`)
     }
   ]));
 }
@@ -268,10 +269,12 @@ assert_ga_report() {
   local report_file="$1"
 
   "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 
 const [reportFile] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const digest = (label) => `sha256:${crypto.createHash('sha256').update(label).digest('hex')}`;
 const expectedPaths = new Set([
   'online/use_existing',
   'online/install_substrates',
@@ -326,6 +329,20 @@ if (report.post_deploy_product_smoke?.release_contract?.path !== 'release-contra
 }
 if (JSON.stringify(report.post_deploy_product_smoke?.canonical_smoke_ids) !== JSON.stringify(expectedSmokeIds)) {
   throw new Error('GA report must bind canonical product smoke ids');
+}
+const expectedSmokeDigests = Object.fromEntries([
+  ['login_profile', 'login_profile'],
+  ['workspace_project', 'workspace_project'],
+  ['provider_neutral_endpoint', 'chat_via_llmup'],
+  ['agent_task_managed_runner', 'agent_task_managed_runner'],
+  ['files', 'files'],
+  ['audit', 'audit'],
+  ['usage', 'usage']
+].map(([id, sourceFlow]) => [id, digest(`product-smoke:${sourceFlow}`)]));
+for (const id of expectedSmokeIds) {
+  if (report.post_deploy_product_smoke?.source_evidence_sha256?.[id] !== expectedSmokeDigests[id]) {
+    throw new Error(`GA report must bind product smoke source evidence digest: ${id}`);
+  }
 }
 NODE
 }
