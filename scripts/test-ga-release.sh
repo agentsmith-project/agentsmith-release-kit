@@ -681,6 +681,7 @@ function provenance(subjectName) {
     workflow_name: 'GA',
     run_id: '10001',
     run_attempt: '1',
+    run_url: 'https://github.com/agentsmith-project/agentsmith/actions/runs/10001/attempts/1',
     job: subjectName,
     artifact_uri: `gh-artifact://agentsmith/${subjectName}/10001/${subjectName}.json`,
     artifact_sha256: sha(`${subjectName}:artifact`),
@@ -974,6 +975,11 @@ if (mutation === 'missing-provenance') {
   report.artifact_provenance.commit_sha = `${'9'.repeat(40)}`;
 } else if (mutation === 'non-iso-generated-at') {
   report.artifact_provenance.generated_at = 'not-an-iso-timestamp';
+} else if (mutation === 'missing-run-url') {
+  delete report.artifact_provenance.run_url;
+} else if (mutation === 'run-url-mismatch') {
+  report.artifact_provenance.run_url =
+    'https://github.com/agentsmith-project/agentsmith/actions/runs/99999/attempts/1';
 } else if (mutation === 'missing-artifact-binding') {
   delete report.artifact_provenance.subject_sha256;
   delete report.artifact_provenance.artifact_sha256;
@@ -1933,6 +1939,8 @@ product_provenance_mutations=(
   wrong-repo
   wrong-sha
   non-iso-generated-at
+  missing-run-url
+  run-url-mismatch
   missing-artifact-binding
   encoded-home-artifact-uri
   encoded-tmp-artifact-uri
@@ -1970,6 +1978,12 @@ for report_case in "${product_report_cases[@]}"; do
         ;;
       non-iso-generated-at)
         expected_message="$provenance_label.generated_at must be an ISO timestamp"
+        ;;
+      missing-run-url)
+        expected_message="$provenance_label.run_url is required"
+        ;;
+      run-url-mismatch)
+        expected_message="$provenance_label.run_url run id must match $provenance_label.run_id"
         ;;
       missing-artifact-binding)
         expected_message="$provenance_label must include subject_sha256, artifact_sha256, or artifact_uri"

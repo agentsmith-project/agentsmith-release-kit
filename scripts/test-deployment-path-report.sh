@@ -908,6 +908,7 @@ function provenance(subjectName) {
     workflow_name: 'GA',
     run_id: '10001',
     run_attempt: '1',
+    run_url: 'https://github.com/agentsmith-project/agentsmith/actions/runs/10001/attempts/1',
     job: subjectName,
     artifact_uri: `gh-artifact://agentsmith/${subjectName}/10001/${subjectName}.json`,
     artifact_sha256: sha(`${subjectName}:artifact`),
@@ -935,7 +936,8 @@ function canonicalSmokeResults() {
       status: 'passed',
       label: spec.label,
       source_flow: spec.source_flow,
-      source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`
+      source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`,
+      source_evidence_sha256: sha(`product-smoke:${spec.source_flow}`)
     }
   ]));
 }
@@ -964,10 +966,24 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
   generated_at: '2026-05-31T12:00:00.000Z',
   source: {
     product_flows_path: 'unified-deploy/product-flows/product-flows-aggregate.json',
+    product_flows_sha256: sha('post-deploy-product-smoke:product-flows'),
     aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
     aggregate_producer: 'unified-deploy-product-flows',
     aggregate_generated_at: '2026-05-31T12:00:00.000Z',
     aggregate_command: 'focused fixture'
+  },
+  deployment_target: {
+    profile: 'existing_kubernetes/external_declared/online',
+    public_base_url: 'https://agentsmith.example.com',
+    api_base_url: 'https://agentsmith.example.com/api/v1',
+    site_env: {
+      path: 'unified-deploy/site.env',
+      sha256: sha('post-deploy-product-smoke:site-env')
+    },
+    substrate_truth: {
+      path: 'unified-deploy/substrate-truth.json',
+      sha256: sha('post-deploy-product-smoke:substrate-truth')
+    }
   },
   smoke_results: canonicalSmokeResults(),
   failures: [],

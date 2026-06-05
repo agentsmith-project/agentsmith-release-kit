@@ -672,6 +672,11 @@ function requireProductArtifactProvenance(provenance, label, release, reportLabe
   ) {
     fail(`${reportLabel} provenance must match AgentSmith repo and git sha`);
   }
+  const runUrl = requireGithubActionsRunUrl(value.run_url, `${label}.run_url`, {
+    expectedRepo: AGENTSMITH_REPO,
+    runId: provenanceSummary.run_id,
+    runAttempt: provenanceSummary.run_attempt
+  });
 
   const artifactUri = value.artifact_uri === undefined
     ? undefined
@@ -689,6 +694,7 @@ function requireProductArtifactProvenance(provenance, label, release, reportLabe
     ...provenanceSummary,
     schema_version: schema,
     provenance_kind: kind,
+    run_url: runUrl,
     artifact_uri: artifactUri,
     generated_at: generatedAt
   };

@@ -193,8 +193,9 @@ function provenance(subjectName) {
     subject_sha256: digest(`package-driven-ga-smoke:${subjectName}:subject`),
     artifact_sha256: digest(`package-driven-ga-smoke:${subjectName}:artifact`),
     artifact_uri: `gh-artifact://agentsmith/package-driven-ga-smoke/${subjectName}.json`,
-    run_id: 'package-driven-ga-smoke-1001',
+    run_id: '10001',
     run_attempt: '1',
+    run_url: 'https://github.com/agentsmith-project/agentsmith/actions/runs/10001/attempts/1',
     generated_at: '2026-05-31T12:00:00.000Z'
   };
 }
