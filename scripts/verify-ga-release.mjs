@@ -32,6 +32,8 @@ const PRODUCT_READY_SCHEMA = 'agentsmith.product-readiness-report/v1';
 const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke-report/v1';
 const PRODUCT_SMOKE_PRODUCER = 'agentsmith-post-deploy-product-smoke';
 const PRODUCT_SMOKE_OWNER = 'agentsmith';
+const PRODUCT_FLOWS_AGGREGATE_SCHEMA = 'agentsmith.unified-deploy.product-flows.aggregate/v1';
+const PRODUCT_FLOWS_AGGREGATE_PRODUCER = 'unified-deploy-product-flows';
 const PRODUCT_SMOKE_LEGACY_FIELDS = [
   'covered_flows',
   'artifact_provenance',
@@ -44,6 +46,14 @@ const PRODUCT_SMOKE_RELEASE_CONTRACT_KEYS = new Set([
   'input_sha256',
   'release_id',
   'git_sha'
+]);
+const PRODUCT_SMOKE_SOURCE_KEYS = new Set([
+  'product_flows_path',
+  'product_flows_sha256',
+  'aggregate_schema_version',
+  'aggregate_producer',
+  'aggregate_generated_at',
+  'aggregate_command'
 ]);
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
@@ -974,10 +984,60 @@ function validateProductSmokeReleaseContract(value, release) {
   };
 }
 
+function validateProductSmokeSource(value) {
+  const source = requireObject(value, 'post_deploy_product_smoke.source');
+  rejectUnknownKeys(source, PRODUCT_SMOKE_SOURCE_KEYS, 'post_deploy_product_smoke.source');
+  const productFlowsPath = requirePortableRelativePath(
+    source.product_flows_path,
+    'post_deploy_product_smoke.source.product_flows_path'
+  );
+  const productFlowsSha256 = requireDigest(
+    source.product_flows_sha256,
+    'post_deploy_product_smoke.source.product_flows_sha256'
+  );
+  const aggregateSchemaVersion = requireString(
+    source.aggregate_schema_version,
+    'post_deploy_product_smoke.source.aggregate_schema_version'
+  );
+  requireEquals(
+    aggregateSchemaVersion,
+    PRODUCT_FLOWS_AGGREGATE_SCHEMA,
+    'post_deploy_product_smoke.source.aggregate_schema_version'
+  );
+  const aggregateProducer = requireString(
+    source.aggregate_producer,
+    'post_deploy_product_smoke.source.aggregate_producer'
+  );
+  requireEquals(
+    aggregateProducer,
+    PRODUCT_FLOWS_AGGREGATE_PRODUCER,
+    'post_deploy_product_smoke.source.aggregate_producer'
+  );
+  const aggregateGeneratedAt = source.aggregate_generated_at === undefined
+    ? undefined
+    : requireIsoTimestamp(
+      source.aggregate_generated_at,
+      'post_deploy_product_smoke.source.aggregate_generated_at'
+    );
+  const aggregateCommand = optionalString(
+    source.aggregate_command,
+    'post_deploy_product_smoke.source.aggregate_command'
+  );
+  return {
+    product_flows_path: productFlowsPath,
+    product_flows_sha256: productFlowsSha256,
+    aggregate_schema_version: aggregateSchemaVersion,
+    aggregate_producer: aggregateProducer,
+    ...(aggregateGeneratedAt ? { aggregate_generated_at: aggregateGeneratedAt } : {}),
+    ...(aggregateCommand ? { aggregate_command: aggregateCommand } : {})
+  };
+}
+
 function validateProductSmoke(report, reportDigest, release) {
   const schemaVersion = requireProductSmokeSchemaVersion(report);
   rejectProductSmokeLegacyFields(report);
   const releaseContract = validateProductSmokeReleaseContract(report.release_contract, release);
+  const source = validateProductSmokeSource(report.source);
   requireEquals(
     requireString(report.producer, 'post_deploy_product_smoke.producer'),
     PRODUCT_SMOKE_PRODUCER,
@@ -1054,6 +1114,7 @@ function validateProductSmoke(report, reportDigest, release) {
     owner: report.owner,
     repo: report.repo,
     release_contract: releaseContract,
+    source,
     canonical_smoke_ids: [...REQUIRED_PRODUCT_SMOKE_IDS],
     source_evidence_paths: Object.fromEntries(
       Object.entries(sourceEvidencePaths).sort(([left], [right]) => left.localeCompare(right))

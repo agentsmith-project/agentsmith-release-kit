@@ -251,6 +251,7 @@ writeJson(path.join(outputDir, 'post-deploy-product-smoke-report.json'), {
   generated_at: '2026-05-31T12:00:00.000Z',
   source: {
     product_flows_path: 'unified-deploy/product-flows/product-flows-aggregate.json',
+    product_flows_sha256: digest('post-deploy-product-smoke:product-flows'),
     aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
     aggregate_producer: 'unified-deploy-product-flows',
     aggregate_generated_at: '2026-05-31T12:00:00.000Z',
@@ -329,6 +330,12 @@ if (report.post_deploy_product_smoke?.release_contract?.path !== 'release-contra
 }
 if (JSON.stringify(report.post_deploy_product_smoke?.canonical_smoke_ids) !== JSON.stringify(expectedSmokeIds)) {
   throw new Error('GA report must bind canonical product smoke ids');
+}
+if (report.post_deploy_product_smoke?.source?.product_flows_path !== 'unified-deploy/product-flows/product-flows-aggregate.json') {
+  throw new Error('GA report must bind product smoke aggregate path');
+}
+if (report.post_deploy_product_smoke?.source?.product_flows_sha256 !== digest('post-deploy-product-smoke:product-flows')) {
+  throw new Error('GA report must bind product smoke aggregate digest');
 }
 const expectedSmokeDigests = Object.fromEntries([
   ['login_profile', 'login_profile'],

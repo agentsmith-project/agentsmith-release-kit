@@ -765,6 +765,7 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
   generated_at: '2026-05-31T12:00:00.000Z',
   source: {
     product_flows_path: 'unified-deploy/product-flows/product-flows-aggregate.json',
+    product_flows_sha256: sha('post-deploy-product-smoke:product-flows'),
     aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
     aggregate_producer: 'unified-deploy-product-flows',
     aggregate_generated_at: '2026-05-31T12:00:00.000Z',
@@ -1071,6 +1072,16 @@ if (mutation === 'legacy-surrogate-shape') {
   report.release_contract.path = 'reports\\release-contract.json';
 } else if (mutation === 'release-contract-nested-legacy-field') {
   report.release_contract.release_contract_digest = report.release_contract.input_sha256;
+} else if (mutation === 'missing-product-flows-source') {
+  delete report.source;
+} else if (mutation === 'missing-product-flows-sha256') {
+  delete report.source.product_flows_sha256;
+} else if (mutation === 'malformed-product-flows-sha256') {
+  report.source.product_flows_sha256 = 'sha256:not-a-digest';
+} else if (mutation === 'wrong-product-flows-schema') {
+  report.source.aggregate_schema_version = 'agentsmith.unified-deploy.product-flows.aggregate/v0';
+} else if (mutation === 'wrong-product-flows-producer') {
+  report.source.aggregate_producer = 'release-kit-product-flows';
 } else if (mutation === 'missing-canonical-smoke') {
   delete report.smoke_results.usage;
 } else if (mutation === 'missing-source-evidence-path') {
@@ -1739,6 +1750,18 @@ if (
 if (JSON.stringify(smoke?.canonical_smoke_ids) !== JSON.stringify(expectedSmokeIds)) {
   throw new Error('GA report did not bind canonical product smoke ids');
 }
+if (smoke?.source?.product_flows_path !== 'unified-deploy/product-flows/product-flows-aggregate.json') {
+  throw new Error('GA report did not bind product smoke aggregate path');
+}
+if (smoke?.source?.product_flows_sha256 !== sha('post-deploy-product-smoke:product-flows')) {
+  throw new Error('GA report did not bind product smoke aggregate digest');
+}
+if (smoke?.source?.aggregate_schema_version !== 'agentsmith.unified-deploy.product-flows.aggregate/v1') {
+  throw new Error('GA report did not bind product smoke aggregate schema');
+}
+if (smoke?.source?.aggregate_producer !== 'unified-deploy-product-flows') {
+  throw new Error('GA report did not bind product smoke aggregate producer');
+}
 for (const id of expectedSmokeIds) {
   if (smoke?.source_evidence_paths?.[id] !== expectedSourceEvidencePaths[id]) {
     throw new Error(`GA report did not bind source evidence path for product smoke id: ${id}`);
@@ -1894,6 +1917,11 @@ product_smoke_mutations=(
   release-contract-parent-escape-path
   release-contract-backslash-path
   release-contract-nested-legacy-field
+  missing-product-flows-source
+  missing-product-flows-sha256
+  malformed-product-flows-sha256
+  wrong-product-flows-schema
+  wrong-product-flows-producer
   missing-canonical-smoke
   missing-source-evidence-path
   missing-source-evidence-sha256
@@ -1942,6 +1970,21 @@ for mutation in "${product_smoke_mutations[@]}"; do
       ;;
     release-contract-nested-legacy-field)
       expected_message="post_deploy_product_smoke.release_contract contains unknown field: release_contract_digest"
+      ;;
+    missing-product-flows-source)
+      expected_message="post_deploy_product_smoke.source must be an object"
+      ;;
+    missing-product-flows-sha256)
+      expected_message="post_deploy_product_smoke.source.product_flows_sha256 is required"
+      ;;
+    malformed-product-flows-sha256)
+      expected_message="post_deploy_product_smoke.source.product_flows_sha256 must be a sha256 digest"
+      ;;
+    wrong-product-flows-schema)
+      expected_message="post_deploy_product_smoke.source.aggregate_schema_version must be agentsmith.unified-deploy.product-flows.aggregate/v1"
+      ;;
+    wrong-product-flows-producer)
+      expected_message="post_deploy_product_smoke.source.aggregate_producer must be unified-deploy-product-flows"
       ;;
     missing-canonical-smoke)
       expected_message="post-deploy product smoke missing canonical smoke id: usage"
