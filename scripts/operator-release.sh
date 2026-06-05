@@ -631,6 +631,14 @@ async function writeJson(file, value) {
   await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+async function bestEffortRemoveOutputFile(file) {
+  try {
+    await fs.rm(file, { force: true });
+  } catch {
+    // Preserve the original output failure. Cleanup is best effort.
+  }
+}
+
 function stableJson(value) {
   if (Array.isArray(value)) {
     return value.map(stableJson);
@@ -669,12 +677,32 @@ function buildFailureEvidenceIndex(report) {
   };
 }
 
+function failureSummary(report, message) {
+  return [
+    '# AgentSmith GA Release Summary',
+    '',
+    `Status: ${report.status}`,
+    `Formal verdict: ${report.formal_verdict}`,
+    '',
+    'Blockers:',
+    `- ${message}`,
+    ''
+  ].join('\n');
+}
+
 async function writeFailureOutputs(outputDir, error) {
   if (!outputDir) {
     return;
   }
   const resolvedOutputDir = path.resolve(outputDir);
   await clearStaleFinalOutputs(resolvedOutputDir);
+  const stamp = `${process.pid}-${Date.now()}`;
+  const reportFile = path.join(resolvedOutputDir, REPORT_FILE);
+  const summaryFile = path.join(resolvedOutputDir, SUMMARY_FILE);
+  const evidenceIndexFile = path.join(resolvedOutputDir, EVIDENCE_INDEX_FILE);
+  const reportTemp = path.join(resolvedOutputDir, `.${REPORT_FILE}.${stamp}.tmp`);
+  const summaryTemp = path.join(resolvedOutputDir, `.${SUMMARY_FILE}.${stamp}.tmp`);
+  const evidenceIndexTemp = path.join(resolvedOutputDir, `.${EVIDENCE_INDEX_FILE}.${stamp}.tmp`);
   const message = error instanceof Error ? error.message : String(error);
   const report = {
     schema: 'agentsmith.ga-release-report/v1',
@@ -691,22 +719,24 @@ async function writeFailureOutputs(outputDir, error) {
       }
     ]
   };
-  await writeJson(path.join(resolvedOutputDir, REPORT_FILE), report);
-  await writeJson(path.join(resolvedOutputDir, EVIDENCE_INDEX_FILE), buildFailureEvidenceIndex(report));
-  await fs.writeFile(
-    path.join(resolvedOutputDir, SUMMARY_FILE),
-    [
-      '# AgentSmith GA Release Summary',
-      '',
-      `Status: ${report.status}`,
-      `Formal verdict: ${report.formal_verdict}`,
-      '',
-      'Blockers:',
-      `- ${message}`,
-      ''
-    ].join('\n'),
-    'utf8'
-  );
+  try {
+    await writeJson(reportTemp, report);
+    await writeJson(evidenceIndexTemp, buildFailureEvidenceIndex(report));
+    await fs.writeFile(summaryTemp, failureSummary(report, message), 'utf8');
+    await fs.rename(summaryTemp, summaryFile);
+    await fs.rename(evidenceIndexTemp, evidenceIndexFile);
+    await fs.rename(reportTemp, reportFile);
+  } catch (outputError) {
+    await Promise.all([
+      bestEffortRemoveOutputFile(reportFile),
+      bestEffortRemoveOutputFile(summaryFile),
+      bestEffortRemoveOutputFile(evidenceIndexFile),
+      bestEffortRemoveOutputFile(reportTemp),
+      bestEffortRemoveOutputFile(summaryTemp),
+      bestEffortRemoveOutputFile(evidenceIndexTemp)
+    ]);
+    throw outputError;
+  }
   console.error(`FAIL: wrote ${REPORT_FILE} with formal_verdict=not_issued`);
 }
 

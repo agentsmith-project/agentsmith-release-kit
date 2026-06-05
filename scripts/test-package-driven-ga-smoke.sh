@@ -677,6 +677,38 @@ grep -Fq 'requires exactly 4 --operator-inputs packages' "$TMP_DIR/ga-missing-pa
   fail "missing package failure did not explain required package count"
 assert_ga_failure_report "$missing_package_output" 'requires exactly 4 --operator-inputs packages'
 
+missing_package_summary_failure_output="$TMP_DIR/ga-output-missing-package-summary-failure"
+missing_package_summary_failure_preload="$TMP_DIR/fail-facade-ga-summary-write.mjs"
+seed_stale_ga_outputs "$missing_package_summary_failure_output"
+cat >"$missing_package_summary_failure_preload" <<'NODE'
+import fs from 'node:fs/promises';
+
+const originalWriteFile = fs.writeFile;
+fs.writeFile = async function writeFileWithInjectedFacadeSummaryFailure(file, ...args) {
+  if (String(file).includes('ga-release-summary.md')) {
+    throw new Error('injected facade summary write failure');
+  }
+  return originalWriteFile.call(this, file, ...args);
+};
+NODE
+if NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--import=$missing_package_summary_failure_preload" \
+  bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
+    --operator-inputs "$online_package" \
+    --operator-inputs "$online_install_package" \
+    --operator-inputs "$airgap_package" \
+    --product-readiness-report "$product_dir/product-readiness-report.json" \
+    --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
+    --output-dir "$missing_package_summary_failure_output" >"$TMP_DIR/ga-missing-package-summary-failure.out" 2>&1; then
+  fail "operator GA facade should fail when its own failure summary cannot be written"
+fi
+grep -Fq 'injected facade summary write failure' "$TMP_DIR/ga-missing-package-summary-failure.out" ||
+  fail "facade summary write failure did not reach operator GA facade output"
+for final_output in ga-release-report.json ga-release-summary.md ga-evidence-index.json; do
+  if [[ -e "$missing_package_summary_failure_output/$final_output" ]]; then
+    fail "facade failure summary write must not leave $final_output"
+  fi
+done
+
 duplicate_path_output="$TMP_DIR/ga-output-duplicate-path"
 seed_stale_ga_outputs "$duplicate_path_output"
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
