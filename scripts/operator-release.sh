@@ -20,28 +20,22 @@ Usage:
     --output-dir <dir>
 
 Operator facade:
-  This is the only operator-facing release-kit entry. Legacy positional flows
-  are maintainer/internal diagnostics only; see docs/RELEASE_GATES.md.
-  kit_provided is a maintainer/internal compatibility alias only; removal target: release-kit v1.0.0 GA cut.
-  Operator packages use install_substrates.
+  Use this facade for the GA operator path: prepare operator-inputs, run the
+  selected package, and finish with --ga-report.
 
 Operator-inputs intake:
   --init-operator-inputs creates a package skeleton for one deployment_path.
-  --operator-inputs validates one deployment-path input package and writes
-  .release-kit-internal/operator-inputs-plan.json.
+  --operator-inputs validates one deployment-path input package and prepares an
+  internal execution plan for --run.
   Add --doctor to list missing package inputs without executing the path.
 
 Operator-inputs run:
   Add --run to execute the current minimal orchestration slice. This currently
   supports online/use_existing, online/install_substrates, airgap/use_existing,
   and airgap/install_substrates with mode apply.
-  install_substrates runs substrate-install, then online-deployment-gate bound
-  to the installer output substrate truth for online, or bundle-check plus
-  airgap-deployment-gate bound to that truth for airgap, then the internal
-  deployment-path finalizer. Install packages do not provide substrate_truth.
-  airgap/use_existing runs airgap-consume-rehearsal, extracts the
-  nested bundle-check and deployment-gate reports, then runs the internal
-  deployment-path finalizer. Server-dry-run modes fail fast.
+  install_substrates runs the namespace-scoped installer first and deploys with
+  the installer output substrate truth. Airgap paths use bundle-local release
+  materials and package-local tools. Server-dry-run modes fail fast.
 
 Success boundary:
   --run produces path-level evidence for the release captain/finalizer to
@@ -55,7 +49,7 @@ Final GA report:
   evidence from those packages, and writes the final ga-release-report.json.
   A passing aggregate writes formal_verdict=issued; a blocked aggregate writes
   status=fail, formal_verdict=not_issued, and blockers in that same report.
-  Operators do not pass .release-kit-internal deployment-path report paths.
+  Operators do not pass internal deployment path report paths.
 USAGE
 }
 

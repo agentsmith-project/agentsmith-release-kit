@@ -40,6 +40,9 @@ assert_operator_success_contract_docs() {
   if grep -q -- 'verify-release.sh' "$help_output"; then
     fail "operator-release help must not expose finalizer command details"
   fi
+  if grep -Eiq 'kit_provided|[.]release-kit-internal|operator-inputs-plan|docs/RELEASE_GATES[.]md|operator-release-surface-report|adoption report|candidate intake|release-engineering|operator-signoff|external_declared|kit_installed|existing_kubernetes|kind_rehearsal' "$help_output"; then
+    fail "operator-release help must not expose legacy aliases, internal paths, machine profiles, or maintainer diagnostics"
+  fi
   if grep -q -- 'No ga-release-report' "$help_output"; then
     fail "operator-release help must explain the phase boundary without bare ga-release-report negation"
   fi

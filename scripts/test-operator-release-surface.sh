@@ -1271,12 +1271,10 @@ grep -q -- '--operator-inputs <package-or-json>' "$help_output" ||
   fail "operator-release help must foreground --operator-inputs"
 grep -q -- '--ga-report' "$help_output" ||
   fail "operator-release help must document final GA report facade"
-grep -q 'maintainer/internal diagnostics only; see' "$help_output" ||
-  fail "operator-release help must demote legacy positional diagnostics"
-grep -q 'removal target: release-kit v1.0.0 GA cut' "$help_output" ||
-  fail "operator-release help must document kit_provided removal target"
-if grep -Eq 'external_declared|kit_installed|existing_kubernetes|kind_rehearsal|operator-release[.]sh (online|airgap|airgap-bundle)' "$help_output"; then
-  fail "operator-release help must not expose machine profile mappings or positional examples"
+grep -q 'Use this facade for the GA operator path' "$help_output" ||
+  fail "operator-release help must keep operator path wording"
+if grep -Eq 'kit_provided|[.]release-kit-internal|operator-inputs-plan|docs/RELEASE_GATES[.]md|operator-release-surface-report|adoption report|candidate intake|release-engineering|operator-signoff|external_declared|kit_installed|existing_kubernetes|kind_rehearsal|operator-release[.]sh (online|airgap|airgap-bundle)' "$help_output"; then
+  fail "operator-release help must not expose legacy aliases, internal paths, machine profiles, or maintainer diagnostics"
 fi
 pass "operator-release help keeps operator-facing surface minimal"
 
