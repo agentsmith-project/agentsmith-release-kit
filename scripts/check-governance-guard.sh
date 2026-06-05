@@ -179,6 +179,12 @@ assert_development_default_commands_are_slim() {
     printf '%s\n' "$default_block" | grep -En -- "$forbidden" >&2
     fail "DEVELOPMENT.md default command block must not include maintainer-only diagnostics"
   fi
+
+  forbidden='test-(inputs|template-package|render|render-check)[.]sh'
+  if grep -Eq -- "$forbidden" <<<"$default_block"; then
+    printf '%s\n' "$default_block" | grep -En -- "$forbidden" >&2
+    fail "DEVELOPMENT.md default command block must not include source-boundary producer diagnostics"
+  fi
 }
 
 assert_root_readme_operator_surface_slim() {

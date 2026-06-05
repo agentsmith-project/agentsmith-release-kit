@@ -10,10 +10,6 @@ Default focused closure:
 
 ```bash
 bash scripts/verify-release.sh --quick
-bash scripts/test-inputs.sh
-bash scripts/test-template-package.sh
-bash scripts/test-render.sh
-bash scripts/test-render-check.sh
 bash scripts/test-operator-inputs.sh
 bash scripts/test-operator-inputs-orchestration.sh
 bash scripts/test-operator-release-surface.sh
@@ -25,11 +21,12 @@ bash scripts/test-ga-release-workflow.sh
 ```
 
 Maintainer diagnostics such as image-map, registry presence, airgap
-bundle/load/render, adoption aggregation, operator signoff intake, evidence,
-target-preflight, apply, rollout, and route-smoke checks are manual
-`workflow_dispatch` or targeted checks named in `docs/RELEASE_GATES.md`. They
-are not the default local command list and do not issue deployment, package,
-operator, or release readiness verdicts.
+bundle/load/render, contract intake, template-package intake, render,
+render-check, adoption aggregation, operator signoff intake, evidence,
+target-preflight, apply, rollout, and route-smoke checks are CI/source-boundary
+guards, manual `workflow_dispatch`, or targeted checks named in
+`docs/RELEASE_GATES.md`. They are not the default local command list and do not
+issue deployment, package, operator, or release readiness verdicts.
 
 There is intentionally no `package.json` in this repository.
 
