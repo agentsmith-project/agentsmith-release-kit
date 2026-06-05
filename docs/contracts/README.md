@@ -1,9 +1,9 @@
 # Contracts
 
-Status: bootstrap placeholder.
+Status: GA contract index.
 
-This directory is the future home for release-kit-owned contract documents and
-schemas.
+This directory documents release-kit-owned contract reports, schema boundaries,
+and compatibility diagnostics used by the package-driven GA release flow.
 
 The release kit consumes AgentSmith release contract artifacts and AgentSmith
 deploy template packages. It must not copy AgentSmith product contracts or
@@ -21,7 +21,7 @@ matches. The release kit consumes the dynamic image closure from the AgentSmith
 release contract; current fixtures/examples include `managed_runner`, a
 digest-bound inventory image supplied by the release contract.
 
-Current post-push contract index:
+Current contract index:
 
 - `agentsmith.deployment-path-report/v1`: internal finalized deployment path
   evidence for one supported operator path. It binds release/template digests,
