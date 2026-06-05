@@ -2035,6 +2035,12 @@ if (
 ) {
   throw new Error('GA evidence index must expose canonical repo provenance/freshness entries');
 }
+if (
+  JSON.stringify(stableJson(evidenceIndex.product_runtime_readiness)) !==
+  JSON.stringify(stableJson(report.product_readiness.runtime_readiness))
+) {
+  throw new Error('GA evidence index must expose product runtime readiness evidence');
+}
 if (!Array.isArray(evidenceIndex.deployment_paths) || evidenceIndex.deployment_paths.length !== 4) {
   throw new Error('GA evidence index must archive four deployment path evidence entries');
 }

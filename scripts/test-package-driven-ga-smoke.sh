@@ -441,6 +441,12 @@ if (
   throw new Error('GA evidence index must expose canonical repo provenance/freshness entries');
 }
 if (
+  JSON.stringify(stableJson(evidenceIndex.product_runtime_readiness)) !==
+  JSON.stringify(stableJson(report.product_readiness.runtime_readiness))
+) {
+  throw new Error('GA evidence index must expose product runtime readiness evidence');
+}
+if (
   JSON.stringify(stableJson(report.artifact_index?.canonical_repos)) !==
   JSON.stringify(stableJson(report.canonical_repos))
 ) {

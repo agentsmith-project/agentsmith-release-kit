@@ -2767,6 +2767,7 @@ function buildEvidenceIndex(report) {
     : Array.isArray(report.canonical_repos)
       ? report.canonical_repos
       : [];
+  const productRuntimeReadiness = report.product_readiness?.runtime_readiness ?? null;
   const indexedDeploymentPaths = Array.isArray(artifactIndex?.deployment_paths)
     ? artifactIndex.deployment_paths.map((entry) => ({
         operator_path: entry.operator_path,
@@ -2798,6 +2799,7 @@ function buildEvidenceIndex(report) {
     ...(canonicalRepos.length > 0 ? { canonical_repos: canonicalRepos } : {}),
     deployment_paths: indexedDeploymentPaths.length > 0 ? indexedDeploymentPaths : reportDeploymentPaths,
     product_readiness: artifactIndex?.product_readiness ?? report.product_readiness?.report_digest ?? null,
+    ...(productRuntimeReadiness ? { product_runtime_readiness: productRuntimeReadiness } : {}),
     post_deploy_product_smoke:
       artifactIndex?.post_deploy_product_smoke ?? report.post_deploy_product_smoke?.report_digest ?? null,
     blockers: Array.isArray(report.blockers) ? report.blockers : []
