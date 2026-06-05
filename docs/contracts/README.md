@@ -36,8 +36,9 @@ Current contract index:
 - `agentsmith.ga-release-report/v1`: repo-local GA aggregate report. It
   consumes exactly the four finalized deployment path reports plus required
   AgentSmith product-side reports and is the only repo-local output here that
-  may issue `formal_verdict: issued`. The post-deploy product smoke input must
-  be the AgentSmith canonical report with `schema_version:
+  may issue `formal_verdict: issued`. The post-deploy product smoke inputs
+  must include at least one online target and one airgap target, and each must
+  be an AgentSmith canonical report with `schema_version:
   agentsmith.post-deploy-product-smoke-report/v1`, `producer:
   agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,
   input_sha256, release_id, git_sha }`; `input_sha256`, `release_id`, and

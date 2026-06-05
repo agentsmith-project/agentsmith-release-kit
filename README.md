@@ -75,7 +75,8 @@ bash scripts/operator-release.sh --ga-report \
   --operator-inputs <airgap-use-existing-pkg> \
   --operator-inputs <airgap-install-substrates-pkg> \
   --product-readiness-report <json> \
-  --post-deploy-product-smoke-report <json> \
+  --post-deploy-product-smoke-report <online-json> \
+  --post-deploy-product-smoke-report <airgap-json> \
   --output-dir <dir>
 ```
 
@@ -137,7 +138,8 @@ and does not require `routability_probe` or bundle/package `substrate_truth`.
 
 After the four packages have been run, the operator-facing final step is
 `operator-release.sh --ga-report` with those four package paths plus the
-AgentSmith product readiness and post-deploy product smoke reports. The facade
+AgentSmith product readiness and post-deploy product smoke reports. Provide at
+least one online and one airgap post-deploy product smoke report. The facade
 locates finalized path evidence inside each package and writes the final
 `ga-release-report.json`; operators pass package paths, not internal evidence
 paths.
@@ -151,8 +153,9 @@ pending/readiness convergence policy for Files, Agent Task sandbox, AFSCP
 workspace binding, and read export, and exposes post-deploy product smoke
 coverage for archive lookup.
 The repository also provides a manual `ga-release-aggregate` GitHub workflow
-for release captains. It is `workflow_dispatch` only, downloads the six
-already-produced artifacts by repository, run id, and artifact name, runs the
+for release captains. It is `workflow_dispatch` only, downloads the seven
+already-produced operator/product artifact groups by repository, run id, and
+artifact name, runs the
 same `operator-release.sh --ga-report` facade, and uploads the final
 `ga-release-report.json`, `ga-release-summary.md`, and
 `ga-evidence-index.json`. It does not rerun product, deployment, airgap, or
@@ -189,7 +192,8 @@ bash scripts/operator-release.sh --ga-report \
   --operator-inputs <airgap-use-existing-pkg> \
   --operator-inputs <airgap-install-substrates-pkg> \
   --product-readiness-report <json> \
-  --post-deploy-product-smoke-report <json> \
+  --post-deploy-product-smoke-report <online-json> \
+  --post-deploy-product-smoke-report <airgap-json> \
   --output-dir <dir>
 ```
 

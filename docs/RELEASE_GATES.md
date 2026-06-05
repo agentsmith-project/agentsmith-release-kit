@@ -1544,7 +1544,8 @@ bash scripts/operator-release.sh --ga-report \
   --operator-inputs <airgap-use-existing-package> \
   --operator-inputs <airgap-install-substrates-package> \
   --product-readiness-report <agentsmith/product-readiness-report.json> \
-  --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/online-post-deploy-product-smoke-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/airgap-post-deploy-product-smoke-report.json> \
   --output-dir <dir>
 ```
 
@@ -1560,14 +1561,16 @@ bash scripts/verify-release.sh --ga-release \
   --deployment-path-report <airgap/use_existing/deployment-path-report.json> \
   --deployment-path-report <airgap/install_substrates/deployment-path-report.json> \
   --product-readiness-report <agentsmith/product-readiness-report.json> \
-  --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/online-post-deploy-product-smoke-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/airgap-post-deploy-product-smoke-report.json> \
   --output-dir <dir>
 ```
 
 The GA release aggregate gate is the repo-local final verdict authority for
 online deploy, airgap package/deploy, operator runbooks, and
 deployment/package evidence. It consumes finalized deployment path reports,
-AgentSmith product readiness, and post-deploy product smoke reports. It writes
+AgentSmith product readiness, and post-deploy product smoke reports covering at
+least one online target and one airgap target. It writes
 `ga-release-report.json` with `status: pass` and `formal_verdict: issued` on
 pass, or `status: fail`, `formal_verdict: not_issued`, and blockers when the
 aggregate is blocked. It also writes derived `ga-release-summary.md` and
@@ -1577,10 +1580,11 @@ deployment path evidence, product readiness, post-deploy product smoke, and
 blockers without issuing another verdict. On pass it mirrors
 `product_runtime_readiness`, including the runtime pending/readiness convergence
 policy and Files restore continuation evidence, and
-`post_deploy_product_smoke_coverage`, including canonical smoke ids, source
-evidence digests, deployment target, and deployment path binding.
+`post_deploy_product_smoke_coverage`, including the required online/airgap
+distributions, canonical smoke ids, source evidence digests, deployment targets,
+and deployment path bindings. Missing either distribution fails fast.
 
-The post-deploy product smoke input must be the AgentSmith canonical report:
+Each post-deploy product smoke input must be an AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
 agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,
 input_sha256, release_id, git_sha }`. Its `input_sha256`, `release_id`, and

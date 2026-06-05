@@ -61,13 +61,14 @@ for input in \
   airgap_use_existing_artifact \
   airgap_install_substrates_artifact \
   product_readiness_artifact \
-  post_deploy_product_smoke_artifact \
+  online_post_deploy_product_smoke_artifact \
+  airgap_post_deploy_product_smoke_artifact \
   output_artifact_name; do
   require_text "$WORKFLOW" "$input:"
 done
 
 download_count="$(grep -Fc "uses: actions/download-artifact@v4" "$WORKFLOW")"
-[[ "$download_count" -eq 6 ]] || fail "ga-release workflow must download exactly 6 required input artifacts"
+[[ "$download_count" -eq 7 ]] || fail "ga-release workflow must download exactly 7 required input artifacts"
 
 require_text "$WORKFLOW" "secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token"
 require_text "$WORKFLOW" "find_one_file"
@@ -79,13 +80,16 @@ require_text "$WORKFLOW" "operator-release.sh --ga-report failed before writing 
 require_text "$WORKFLOW" "operator-inputs.json"
 require_text "$WORKFLOW" "product-readiness-report.json"
 require_text "$WORKFLOW" "post-deploy-product-smoke-report.json"
+require_text "$WORKFLOW" "AgentSmith online post-deploy product smoke report"
+require_text "$WORKFLOW" "AgentSmith airgap post-deploy product smoke report"
 require_text "$WORKFLOW" "bash scripts/operator-release.sh --ga-report"
 require_text "$WORKFLOW" '--operator-inputs "$ONLINE_USE_EXISTING_PACKAGE"'
 require_text "$WORKFLOW" '--operator-inputs "$ONLINE_INSTALL_SUBSTRATES_PACKAGE"'
 require_text "$WORKFLOW" '--operator-inputs "$AIRGAP_USE_EXISTING_PACKAGE"'
 require_text "$WORKFLOW" '--operator-inputs "$AIRGAP_INSTALL_SUBSTRATES_PACKAGE"'
 require_text "$WORKFLOW" '--product-readiness-report "$PRODUCT_READINESS_REPORT"'
-require_text "$WORKFLOW" '--post-deploy-product-smoke-report "$POST_DEPLOY_PRODUCT_SMOKE_REPORT"'
+require_text "$WORKFLOW" '--post-deploy-product-smoke-report "$ONLINE_POST_DEPLOY_PRODUCT_SMOKE_REPORT"'
+require_text "$WORKFLOW" '--post-deploy-product-smoke-report "$AIRGAP_POST_DEPLOY_PRODUCT_SMOKE_REPORT"'
 require_text "$WORKFLOW" "uses: actions/upload-artifact@v4"
 require_text "$WORKFLOW" "if: always()"
 require_text "$WORKFLOW" "Verify final GA report files"

@@ -71,6 +71,7 @@ const PRODUCT_RUNTIME_READINESS_DETAILS_PATH =
 const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke-report/v1';
 const PRODUCT_SMOKE_PRODUCER = 'agentsmith-post-deploy-product-smoke';
 const PRODUCT_SMOKE_OWNER = 'agentsmith';
+const REQUIRED_PRODUCT_SMOKE_DISTRIBUTIONS = ['online', 'airgap'];
 const OPERATOR_INPUTS_MANIFEST_SCHEMA = 'agentsmith.operator-inputs/v1';
 const OPERATOR_INPUTS_MANIFEST_VERSION = 1;
 const OPERATOR_INPUTS_PLAN_SCHEMA = 'agentsmith.operator-inputs-plan/v1';
@@ -148,7 +149,6 @@ const REQUIRED_ARGS = [
   'releaseContract',
   'deployTemplatePackage',
   'productReadinessReport',
-  'postDeployProductSmokeReport',
   'outputDir'
 ];
 
@@ -293,7 +293,8 @@ function usage() {
     --deployment-path-report <airgap/install_substrates/deployment-path-report.json> \\
     [--operator-inputs-plan <operator-inputs-plan.json> ...] \\
     --product-readiness-report <agentsmith/product-readiness-report.json> \\
-    --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \\
+    --post-deploy-product-smoke-report <agentsmith/online-post-deploy-product-smoke-report.json> \\
+    --post-deploy-product-smoke-report <agentsmith/airgap-post-deploy-product-smoke-report.json> \\
     --output-dir <dir>
 
 This is the release-kit final GA aggregate. It consumes finalized path reports
@@ -323,7 +324,8 @@ function readArgValue(argv, index, arg) {
 function parseArgs(argv) {
   const parsed = {
     deploymentPathReports: [],
-    operatorInputsPlans: []
+    operatorInputsPlans: [],
+    postDeployProductSmokeReports: []
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -351,7 +353,7 @@ function parseArgs(argv) {
         parsed.productReadinessReport = nextValue();
         break;
       case '--post-deploy-product-smoke-report':
-        parsed.postDeployProductSmokeReport = nextValue();
+        parsed.postDeployProductSmokeReports.push(nextValue());
         break;
       case '--output-dir':
         parsed.outputDir = nextValue();
@@ -376,6 +378,9 @@ function parseArgs(argv) {
   }
   if (parsed.deploymentPathReports.length !== DEPLOYMENT_PATHS.size) {
     cliFail(`expected exactly ${DEPLOYMENT_PATHS.size} --deployment-path-report inputs`);
+  }
+  if (parsed.postDeployProductSmokeReports.length === 0) {
+    cliFail('missing required --post-deploy-product-smoke-report');
   }
   if (
     parsed.operatorInputsPlans.length > 0 &&
@@ -1842,7 +1847,54 @@ function validateProductSmokeDeploymentPathBinding(productSmokeSummary, deployme
   return {
     operator_path: matchingPath.operator_path,
     target_profile: matchingPath.target_profile,
+    distribution: matchingPath.operator_path.split('/')[0],
     deployment_path_report_digest: matchingPath.report_digest
+  };
+}
+
+function validateProductSmokeCoverage(productSmokeSummaries, deploymentPaths) {
+  const reports = productSmokeSummaries.map((summary) => ({
+    ...summary,
+    deployment_path_binding: validateProductSmokeDeploymentPathBinding(summary, deploymentPaths)
+  }));
+  const byDistribution = new Map();
+  for (const report of reports) {
+    const distribution = report.deployment_path_binding.distribution;
+    if (!byDistribution.has(distribution)) {
+      byDistribution.set(distribution, []);
+    }
+    byDistribution.get(distribution).push({
+      report_digest: report.report_digest,
+      operator_path: report.deployment_path_binding.operator_path,
+      target_profile: report.deployment_path_binding.target_profile,
+      deployment_path_report_digest: report.deployment_path_binding.deployment_path_report_digest
+    });
+  }
+  for (const distribution of REQUIRED_PRODUCT_SMOKE_DISTRIBUTIONS) {
+    if (!byDistribution.has(distribution)) {
+      fail(`post_deploy_product_smoke coverage must include at least one ${distribution} deployment target`);
+    }
+  }
+
+  const coveredDistributions = [...byDistribution.keys()].sort();
+  return {
+    required_distributions: [...REQUIRED_PRODUCT_SMOKE_DISTRIBUTIONS],
+    covered_distributions: coveredDistributions,
+    covered_operator_paths: reports
+      .map((report) => report.deployment_path_binding.operator_path)
+      .sort(),
+    covered_target_profiles: reports
+      .map((report) => report.deployment_path_binding.target_profile)
+      .sort(),
+    reports_by_distribution: Object.fromEntries(
+      [...byDistribution.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([distribution, entries]) => [
+          distribution,
+          entries.sort((left, right) => left.operator_path.localeCompare(right.operator_path))
+        ])
+    ),
+    reports
   };
 }
 
@@ -2905,6 +2957,12 @@ async function writeSummary(file, report) {
     return;
   }
 
+  const productSmokeReports = Array.isArray(report.post_deploy_product_smoke_reports)
+    ? report.post_deploy_product_smoke_reports
+    : report.post_deploy_product_smoke
+      ? [report.post_deploy_product_smoke]
+      : [];
+  const coverage = report.post_deploy_product_smoke_coverage;
   const lines = [
     '# AgentSmith GA Release Summary',
     '',
@@ -2919,6 +2977,10 @@ async function writeSummary(file, report) {
     '',
     `Product readiness: ${report.product_readiness.report_digest}`,
     `Post-deploy product smoke: ${report.post_deploy_product_smoke.report_digest}`,
+    `Post-deploy product smoke reports: ${productSmokeReports.length}`,
+    ...(coverage?.covered_distributions
+      ? [`Post-deploy product smoke distributions: ${coverage.covered_distributions.join(', ')}`]
+      : []),
     `Post-deploy product smoke schema: ${report.post_deploy_product_smoke.schema}`,
     `Post-deploy product smoke producer: ${report.post_deploy_product_smoke.producer}`,
     `Post-deploy product smoke release contract: ${report.post_deploy_product_smoke.release_contract.input_sha256}`,
@@ -2981,8 +3043,14 @@ function buildEvidenceIndex(report) {
       : [];
   const productRuntimeReadiness = report.product_readiness?.runtime_readiness ?? null;
   const productSmoke = report.post_deploy_product_smoke ?? null;
-  const productSmokeCoverage = productSmoke
-    ? {
+  const productSmokeReports = Array.isArray(report.post_deploy_product_smoke_reports)
+    ? report.post_deploy_product_smoke_reports
+    : productSmoke
+      ? [productSmoke]
+      : [];
+  const productSmokeCoverage = report.post_deploy_product_smoke_coverage
+    ?? (productSmoke
+      ? {
         canonical_smoke_ids: productSmoke.canonical_smoke_ids ?? [],
         source_evidence_paths: productSmoke.source_evidence_paths ?? {},
         source_evidence_sha256: productSmoke.source_evidence_sha256 ?? {},
@@ -2991,7 +3059,7 @@ function buildEvidenceIndex(report) {
         deployment_target: productSmoke.deployment_target ?? null,
         deployment_path_binding: productSmoke.deployment_path_binding ?? null
       }
-    : null;
+      : null);
   const indexedDeploymentPaths = Array.isArray(artifactIndex?.deployment_paths)
     ? artifactIndex.deployment_paths.map((entry) => ({
         operator_path: entry.operator_path,
@@ -3026,6 +3094,14 @@ function buildEvidenceIndex(report) {
     ...(productRuntimeReadiness ? { product_runtime_readiness: productRuntimeReadiness } : {}),
     post_deploy_product_smoke:
       artifactIndex?.post_deploy_product_smoke ?? report.post_deploy_product_smoke?.report_digest ?? null,
+    ...(productSmokeReports.length > 0 ? {
+      post_deploy_product_smoke_reports: artifactIndex?.post_deploy_product_smoke_reports
+        ?? productSmokeReports.map((entry) => ({
+          report_digest: entry.report_digest,
+          deployment_target: entry.deployment_target,
+          deployment_path_binding: entry.deployment_path_binding
+        }))
+    } : {}),
     ...(productSmokeCoverage ? { post_deploy_product_smoke_coverage: productSmokeCoverage } : {}),
     blockers: Array.isArray(report.blockers) ? report.blockers : []
   };
@@ -3064,7 +3140,10 @@ async function buildPassReport(args) {
   const contract = await readJson(args.releaseContract, 'release contract');
   const deployTemplate = await readJson(args.deployTemplatePackage, 'deploy template package');
   const productReady = await readJson(args.productReadinessReport, 'product readiness report');
-  const productSmoke = await readJson(args.postDeployProductSmokeReport, 'post-deploy product smoke report');
+  const productSmokeInputs = [];
+  for (const file of args.postDeployProductSmokeReports) {
+    productSmokeInputs.push(await readJson(file, 'post-deploy product smoke report'));
+  }
   const pathReports = [];
   for (const file of args.deploymentPathReports) {
     pathReports.push(await readJson(file, 'deployment path report'));
@@ -3074,7 +3153,7 @@ async function buildPassReport(args) {
     operatorInputsPlans.push(await readJson(file, 'operator-inputs plan'));
   }
 
-  for (const input of [productReady, productSmoke, ...pathReports]) {
+  for (const input of [productReady, ...productSmokeInputs, ...pathReports]) {
     scanReportForForbiddenContent({
       value: input.value,
       buffer: input.buffer,
@@ -3094,7 +3173,9 @@ async function buildPassReport(args) {
   );
   const deployTemplateSummary = validateDeployTemplatePackage(deployTemplate.value, contract.value, deployTemplate.digest);
   const productReadinessSummary = validateProductReadiness(productReady.value, productReady.digest, release);
-  const productSmokeSummary = validateProductSmoke(productSmoke.value, productSmoke.digest, release);
+  const productSmokeSummaries = productSmokeInputs.map((input) =>
+    validateProductSmoke(input.value, input.digest, release)
+  );
 
   const deploymentPaths = [];
   for (const entry of pathReports) {
@@ -3112,10 +3193,10 @@ async function buildPassReport(args) {
       fail(`missing deployment path report: ${pathName}`);
     }
   }
-  const productSmokeDeploymentPathBinding = validateProductSmokeDeploymentPathBinding(
-    productSmokeSummary,
-    deploymentPaths
-  );
+  const productSmokeCoverage = validateProductSmokeCoverage(productSmokeSummaries, deploymentPaths);
+  const primaryProductSmoke =
+    productSmokeCoverage.reports.find((entry) => entry.deployment_path_binding.distribution === 'online')
+      ?? productSmokeCoverage.reports[0];
   const operatorInputsPackages = await validateOperatorInputsPlans(
     operatorInputsPlans,
     deploymentPaths,
@@ -3152,9 +3233,14 @@ async function buildPassReport(args) {
     },
     deployment_paths: deploymentPathReportEntries,
     product_readiness: productReadinessSummary,
-    post_deploy_product_smoke: {
-      ...productSmokeSummary,
-      deployment_path_binding: productSmokeDeploymentPathBinding
+    post_deploy_product_smoke: primaryProductSmoke,
+    post_deploy_product_smoke_reports: productSmokeCoverage.reports,
+    post_deploy_product_smoke_coverage: {
+      required_distributions: productSmokeCoverage.required_distributions,
+      covered_distributions: productSmokeCoverage.covered_distributions,
+      covered_operator_paths: productSmokeCoverage.covered_operator_paths,
+      covered_target_profiles: productSmokeCoverage.covered_target_profiles,
+      reports_by_distribution: productSmokeCoverage.reports_by_distribution
     },
     canonical_repos: canonicalRepos,
     artifact_index: {
@@ -3174,17 +3260,24 @@ async function buildPassReport(args) {
         operator_inputs_packages: operatorInputsPackages
       } : {}),
       product_readiness: productReadinessSummary.report_digest,
-      post_deploy_product_smoke: productSmokeSummary.report_digest
+      post_deploy_product_smoke: primaryProductSmoke.report_digest,
+      post_deploy_product_smoke_reports: productSmokeCoverage.reports.map((entry) => ({
+        report_digest: entry.report_digest,
+        deployment_target: entry.deployment_target,
+        deployment_path_binding: entry.deployment_path_binding
+      }))
     },
     summary: {
       conclusion: 'AgentSmith GA release aggregate passed.',
       operator_paths: deploymentPathReportEntries.map((entry) => entry.operator_path).sort(),
       post_deploy_product_smoke: {
-        report_digest: productSmokeSummary.report_digest,
-        schema: productSmokeSummary.schema,
-        producer: productSmokeSummary.producer,
-        release_contract: productSmokeSummary.release_contract,
-        canonical_smoke_ids: productSmokeSummary.canonical_smoke_ids
+        report_digest: primaryProductSmoke.report_digest,
+        reports_count: productSmokeCoverage.reports.length,
+        covered_distributions: productSmokeCoverage.covered_distributions,
+        schema: primaryProductSmoke.schema,
+        producer: primaryProductSmoke.producer,
+        release_contract: primaryProductSmoke.release_contract,
+        canonical_smoke_ids: primaryProductSmoke.canonical_smoke_ids
       }
     },
     blockers: []

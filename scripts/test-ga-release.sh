@@ -891,46 +891,84 @@ writeJson(path.join(outDir, 'product-readiness-report.json'), {
   artifact_provenance: provenance('product-readiness-report')
 });
 
-writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
-  schema_version: 'agentsmith.post-deploy-product-smoke-report/v1',
-  producer: 'agentsmith-post-deploy-product-smoke',
-  owner: 'agentsmith',
-  repo: 'github.com/agentsmith-project/agentsmith',
-  release_contract: {
-    path: 'release-contract.json',
-    input_sha256: contractDigest,
-    release_id: contract.release_id,
-    git_sha: contract.git_sha
-  },
-  status: 'passed',
-  generated_at: '2026-05-31T12:00:00.000Z',
-  source: {
-    product_flows_path: 'unified-deploy/product-flows/product-flows-aggregate.json',
-    product_flows_sha256: sha('post-deploy-product-smoke:product-flows'),
-    aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
-    aggregate_producer: 'unified-deploy-product-flows',
-    aggregate_generated_at: '2026-05-31T12:00:00.000Z',
-    aggregate_command: 'focused fixture'
-  },
-  deployment_target: {
-    profile: 'existing_kubernetes/external_declared/online',
-    public_base_url: 'https://agentsmith.example.com',
-    api_base_url: 'https://agentsmith.example.com/api/v1',
-    site_env: {
-      path: 'unified-deploy/site.env',
-      sha256: sha('post-deploy-product-smoke:site-env')
+function productSmokeReport({
+  profile,
+  publicBaseUrl,
+  apiBaseUrl,
+  productFlowsPath,
+  productFlowsDigest,
+  siteEnvPath,
+  siteEnvDigest,
+  substrateTruthPath,
+  substrateTruthDigest,
+  reportPath
+}) {
+  return {
+    schema_version: 'agentsmith.post-deploy-product-smoke-report/v1',
+    producer: 'agentsmith-post-deploy-product-smoke',
+    owner: 'agentsmith',
+    repo: 'github.com/agentsmith-project/agentsmith',
+    release_contract: {
+      path: 'release-contract.json',
+      input_sha256: contractDigest,
+      release_id: contract.release_id,
+      git_sha: contract.git_sha
     },
-    substrate_truth: {
-      path: 'unified-deploy/substrate-truth.json',
-      sha256: sha('post-deploy-product-smoke:substrate-truth')
+    status: 'passed',
+    generated_at: '2026-05-31T12:00:00.000Z',
+    source: {
+      product_flows_path: productFlowsPath,
+      product_flows_sha256: productFlowsDigest,
+      aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
+      aggregate_producer: 'unified-deploy-product-flows',
+      aggregate_generated_at: '2026-05-31T12:00:00.000Z',
+      aggregate_command: 'focused fixture'
+    },
+    deployment_target: {
+      profile,
+      public_base_url: publicBaseUrl,
+      api_base_url: apiBaseUrl,
+      site_env: {
+        path: siteEnvPath,
+        sha256: siteEnvDigest
+      },
+      substrate_truth: {
+        path: substrateTruthPath,
+        sha256: substrateTruthDigest
+      }
+    },
+    smoke_results: canonicalSmokeResults(),
+    failures: [],
+    paths: {
+      report_path: reportPath
     }
-  },
-  smoke_results: canonicalSmokeResults(),
-  failures: [],
-  paths: {
-    report_path: 'post-deploy-product-smoke/post-deploy-product-smoke-report.json'
-  }
-});
+  };
+}
+
+writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), productSmokeReport({
+  profile: 'existing_kubernetes/external_declared/online',
+  publicBaseUrl: 'https://agentsmith.example.com',
+  apiBaseUrl: 'https://agentsmith.example.com/api/v1',
+  productFlowsPath: 'unified-deploy/product-flows/product-flows-aggregate.json',
+  productFlowsDigest: sha('post-deploy-product-smoke:product-flows'),
+  siteEnvPath: 'unified-deploy/site.env',
+  siteEnvDigest: sha('post-deploy-product-smoke:site-env'),
+  substrateTruthPath: 'unified-deploy/substrate-truth.json',
+  substrateTruthDigest: sha('post-deploy-product-smoke:substrate-truth'),
+  reportPath: 'post-deploy-product-smoke/post-deploy-product-smoke-report.json'
+}));
+writeJson(path.join(outDir, 'post-deploy-product-smoke-airgap-report.json'), productSmokeReport({
+  profile: 'existing_kubernetes/external_declared/airgap',
+  publicBaseUrl: 'https://agentsmith-airgap.example.com',
+  apiBaseUrl: 'https://agentsmith-airgap.example.com/api/v1',
+  productFlowsPath: 'unified-deploy/airgap-product-flows/product-flows-aggregate.json',
+  productFlowsDigest: sha('post-deploy-product-smoke:airgap-product-flows'),
+  siteEnvPath: 'unified-deploy/airgap-site.env',
+  siteEnvDigest: sha('post-deploy-product-smoke:airgap-site-env'),
+  substrateTruthPath: 'unified-deploy/airgap-substrate-truth.json',
+  substrateTruthDigest: sha('post-deploy-product-smoke:airgap-substrate-truth'),
+  reportPath: 'post-deploy-product-smoke/post-deploy-product-smoke-airgap-report.json'
+}));
 NODE
 }
 
@@ -1015,6 +1053,7 @@ run_ga_release() {
     --deployment-path-report "$path_dir/airgap-install-substrates/deployment-path-report.json" \
     --product-readiness-report "$fixture_dir/product-readiness-report.json" \
     --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-report.json" \
+    --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-airgap-report.json" \
     --output-dir "$output_dir"
 }
 
@@ -1166,6 +1205,7 @@ run_ga_release_with_operator_plans() {
     --operator-inputs-plan "$plan_dir/airgap-install-substrates/.release-kit-internal/operator-inputs-plan.json" \
     --product-readiness-report "$fixture_dir/product-readiness-report.json" \
     --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-report.json" \
+    --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-airgap-report.json" \
     --output-dir "$output_dir"
 }
 
@@ -1184,6 +1224,7 @@ run_ga_release_with_summary_write_failure() {
     --deployment-path-report "$path_dir/airgap-install-substrates/deployment-path-report.json" \
     --product-readiness-report "$fixture_dir/product-readiness-report.json" \
     --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-report.json" \
+    --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-airgap-report.json" \
     --output-dir "$output_dir"
 }
 
@@ -1217,6 +1258,7 @@ run_ga_release_without_release_kit_provenance() {
       --deployment-path-report "$path_dir/airgap-install-substrates/deployment-path-report.json" \
       --product-readiness-report "$fixture_dir/product-readiness-report.json" \
       --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-report.json" \
+      --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-airgap-report.json" \
       --output-dir "$output_dir"
 }
 
@@ -2130,20 +2172,33 @@ if (
 ) {
   throw new Error('GA evidence index must expose product runtime readiness evidence');
 }
-const expectedSmokeCoverageIndex = {
-  canonical_smoke_ids: report.post_deploy_product_smoke.canonical_smoke_ids,
-  source_evidence_paths: report.post_deploy_product_smoke.source_evidence_paths,
-  source_evidence_sha256: report.post_deploy_product_smoke.source_evidence_sha256,
-  provider_neutral_endpoint_proof: report.post_deploy_product_smoke.provider_neutral_endpoint_proof,
-  source: report.post_deploy_product_smoke.source,
-  deployment_target: report.post_deploy_product_smoke.deployment_target,
-  deployment_path_binding: report.post_deploy_product_smoke.deployment_path_binding
-};
+if (!Array.isArray(report.post_deploy_product_smoke_reports) || report.post_deploy_product_smoke_reports.length !== 2) {
+  throw new Error('GA report must archive online and airgap post-deploy product smoke reports');
+}
+if (!Array.isArray(report.artifact_index?.post_deploy_product_smoke_reports) || report.artifact_index.post_deploy_product_smoke_reports.length !== 2) {
+  throw new Error('GA report artifact index must archive both product smoke reports');
+}
+const expectedSmokeCoverageIndex = report.post_deploy_product_smoke_coverage;
 if (
   JSON.stringify(stableJson(evidenceIndex.post_deploy_product_smoke_coverage)) !==
   JSON.stringify(stableJson(expectedSmokeCoverageIndex))
 ) {
   throw new Error('GA evidence index must expose post-deploy product smoke coverage evidence');
+}
+if (
+  JSON.stringify(stableJson(evidenceIndex.post_deploy_product_smoke_reports)) !==
+  JSON.stringify(stableJson(report.artifact_index.post_deploy_product_smoke_reports))
+) {
+  throw new Error('GA evidence index must expose both post-deploy product smoke reports');
+}
+if (
+  JSON.stringify(report.post_deploy_product_smoke_coverage?.covered_distributions) !==
+  JSON.stringify(['airgap', 'online'])
+) {
+  throw new Error('GA report product smoke coverage must include online and airgap distributions');
+}
+if (!report.post_deploy_product_smoke_coverage?.covered_operator_paths?.includes('airgap/use_existing')) {
+  throw new Error('GA report product smoke coverage must bind an airgap deployment path');
 }
 if (!Array.isArray(evidenceIndex.deployment_paths) || evidenceIndex.deployment_paths.length !== 4) {
   throw new Error('GA evidence index must archive four deployment path evidence entries');
@@ -2361,6 +2416,9 @@ if (smoke?.deployment_target?.profile !== 'existing_kubernetes/external_declared
 if (smoke?.deployment_path_binding?.operator_path !== 'online/use_existing') {
   throw new Error('GA report did not bind product smoke target to finalized deployment path');
 }
+if (smoke?.deployment_path_binding?.distribution !== 'online') {
+  throw new Error('GA report did not bind product smoke distribution');
+}
 if (smoke?.deployment_path_binding?.target_profile !== smoke.deployment_target.profile) {
   throw new Error('GA report product smoke deployment path binding target profile mismatch');
 }
@@ -2396,6 +2454,21 @@ if (
 ) {
   throw new Error('GA report did not bind provider-neutral endpoint proof');
 }
+const airgapSmoke = report.post_deploy_product_smoke_reports.find(
+  (entry) => entry.deployment_path_binding?.distribution === 'airgap'
+);
+if (!airgapSmoke) {
+  throw new Error('GA report did not archive an airgap product smoke report');
+}
+if (airgapSmoke.deployment_target?.profile !== 'existing_kubernetes/external_declared/airgap') {
+  throw new Error('GA report did not bind airgap product smoke target profile');
+}
+if (airgapSmoke.deployment_path_binding?.operator_path !== 'airgap/use_existing') {
+  throw new Error('GA report did not bind airgap product smoke to finalized airgap path');
+}
+if (airgapSmoke.source?.product_flows_sha256 !== sha('post-deploy-product-smoke:airgap-product-flows')) {
+  throw new Error('GA report did not bind airgap product smoke aggregate digest');
+}
 if (Object.hasOwn(report.summary || {}, 'product_smoke_flows')) {
   throw new Error('GA report must not expose covered_flows as product smoke truth');
 }
@@ -2403,6 +2476,23 @@ NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
 [[ -f "$TMP_DIR/out-valid/ga-evidence-index.json" ]] || fail "missing GA evidence index"
 pass "valid GA aggregate consumes finalizer-generated path bundles"
+
+ONLINE_ONLY_SMOKE_OUTPUT_DIR="$TMP_DIR/out-online-only-product-smoke"
+mkdir -p "$ONLINE_ONLY_SMOKE_OUTPUT_DIR"
+if bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
+  --release-contract "$VALID_DIR/release-contract.json" \
+  --deploy-template-package "$VALID_DIR/deploy-template-package.json" \
+  --deployment-path-report "$PATH_DIR/online-use-existing/deployment-path-report.json" \
+  --deployment-path-report "$PATH_DIR/online-install-substrates/deployment-path-report.json" \
+  --deployment-path-report "$PATH_DIR/airgap-use-existing/deployment-path-report.json" \
+  --deployment-path-report "$PATH_DIR/airgap-install-substrates/deployment-path-report.json" \
+  --product-readiness-report "$VALID_DIR/product-readiness-report.json" \
+  --post-deploy-product-smoke-report "$VALID_DIR/post-deploy-product-smoke-report.json" \
+  --output-dir "$ONLINE_ONLY_SMOKE_OUTPUT_DIR" >"$TMP_DIR/ga-release-online-only-product-smoke.out" 2>&1; then
+  fail "GA aggregate with only online product smoke should fail"
+fi
+assert_ga_failure_report "$ONLINE_ONLY_SMOKE_OUTPUT_DIR" "post_deploy_product_smoke coverage must include at least one airgap deployment target"
+pass "GA aggregate requires post-deploy product smoke coverage for online and airgap"
 
 PLAN_DIR="$TMP_DIR/operator-input-plans-valid"
 write_operator_inputs_plan_set "$VALID_DIR" "$PLAN_DIR" "$PATH_DIR" valid
@@ -2910,6 +3000,7 @@ if bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
   --deployment-path-report "$TMP_DIR/path-missing/airgap-use-existing/deployment-path-report.json" \
   --product-readiness-report "$MISSING_DIR/product-readiness-report.json" \
   --post-deploy-product-smoke-report "$MISSING_DIR/post-deploy-product-smoke-report.json" \
+  --post-deploy-product-smoke-report "$MISSING_DIR/post-deploy-product-smoke-airgap-report.json" \
   --output-dir "$MISSING_OUTPUT_DIR" >"$TMP_DIR/ga-release-missing.out" 2>&1; then
   fail "missing path report should fail"
 fi

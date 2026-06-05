@@ -24,11 +24,13 @@ bash scripts/operator-release.sh --ga-report \
   --operator-inputs <airgap-use-existing-pkg> \
   --operator-inputs <airgap-install-substrates-pkg> \
   --product-readiness-report <agentsmith/product-readiness-report.json> \
-  --post-deploy-product-smoke-report <agentsmith/post-deploy-product-smoke-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/online-post-deploy-product-smoke-report.json> \
+  --post-deploy-product-smoke-report <agentsmith/airgap-post-deploy-product-smoke-report.json> \
   --output-dir <dir>
 ```
 
-The post-deploy product smoke input must be the AgentSmith canonical report:
+The post-deploy product smoke inputs must be AgentSmith canonical reports, with
+at least one online target and one airgap target:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
 agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,
 input_sha256, release_id, git_sha }`. Its `input_sha256`, `release_id`, and

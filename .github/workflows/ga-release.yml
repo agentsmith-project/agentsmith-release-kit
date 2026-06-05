@@ -46,10 +46,15 @@ on:
         required: true
         default: agentsmith-product-readiness-report
         type: string
-      post_deploy_product_smoke_artifact:
-        description: Artifact name containing post-deploy-product-smoke-report.json.
+      online_post_deploy_product_smoke_artifact:
+        description: Artifact name containing the online post-deploy-product-smoke-report.json.
         required: true
         default: agentsmith-post-deploy-product-smoke-report
+        type: string
+      airgap_post_deploy_product_smoke_artifact:
+        description: Artifact name containing the airgap post-deploy-product-smoke-report.json.
+        required: true
+        default: agentsmith-post-deploy-product-smoke-airgap-report
         type: string
       output_artifact_name:
         description: Artifact name for the final GA report files.
@@ -114,14 +119,23 @@ jobs:
           name: ${{ inputs.product_readiness_artifact }}
           path: ${{ runner.temp }}/ga-release-inputs/product-readiness
 
-      - name: Download AgentSmith post-deploy product smoke report
+      - name: Download AgentSmith online post-deploy product smoke report
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
           repository: ${{ inputs.product_reports_repository }}
           run-id: ${{ inputs.product_reports_run_id }}
-          name: ${{ inputs.post_deploy_product_smoke_artifact }}
-          path: ${{ runner.temp }}/ga-release-inputs/post-deploy-product-smoke
+          name: ${{ inputs.online_post_deploy_product_smoke_artifact }}
+          path: ${{ runner.temp }}/ga-release-inputs/post-deploy-product-smoke-online
+
+      - name: Download AgentSmith airgap post-deploy product smoke report
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
+          repository: ${{ inputs.product_reports_repository }}
+          run-id: ${{ inputs.product_reports_run_id }}
+          name: ${{ inputs.airgap_post_deploy_product_smoke_artifact }}
+          path: ${{ runner.temp }}/ga-release-inputs/post-deploy-product-smoke-airgap
 
       - name: Run final GA aggregate
         shell: bash
@@ -253,9 +267,13 @@ jobs:
             find_one_file "$RUNNER_TEMP/ga-release-inputs/product-readiness" \
               product-readiness-report.json "AgentSmith product readiness report"
           )"
-          POST_DEPLOY_PRODUCT_SMOKE_REPORT="$(
-            find_one_file "$RUNNER_TEMP/ga-release-inputs/post-deploy-product-smoke" \
-              post-deploy-product-smoke-report.json "AgentSmith post-deploy product smoke report"
+          ONLINE_POST_DEPLOY_PRODUCT_SMOKE_REPORT="$(
+            find_one_file "$RUNNER_TEMP/ga-release-inputs/post-deploy-product-smoke-online" \
+              post-deploy-product-smoke-report.json "AgentSmith online post-deploy product smoke report"
+          )"
+          AIRGAP_POST_DEPLOY_PRODUCT_SMOKE_REPORT="$(
+            find_one_file "$RUNNER_TEMP/ga-release-inputs/post-deploy-product-smoke-airgap" \
+              post-deploy-product-smoke-report.json "AgentSmith airgap post-deploy product smoke report"
           )"
 
           mkdir -p .ga-release-output
@@ -266,7 +284,8 @@ jobs:
             --operator-inputs "$AIRGAP_USE_EXISTING_PACKAGE" \
             --operator-inputs "$AIRGAP_INSTALL_SUBSTRATES_PACKAGE" \
             --product-readiness-report "$PRODUCT_READINESS_REPORT" \
-            --post-deploy-product-smoke-report "$POST_DEPLOY_PRODUCT_SMOKE_REPORT" \
+            --post-deploy-product-smoke-report "$ONLINE_POST_DEPLOY_PRODUCT_SMOKE_REPORT" \
+            --post-deploy-product-smoke-report "$AIRGAP_POST_DEPLOY_PRODUCT_SMOKE_REPORT" \
             --output-dir .ga-release-output
           aggregate_status="$?"
           set -e

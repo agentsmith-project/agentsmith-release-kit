@@ -17,7 +17,8 @@ Usage:
     --operator-inputs <airgap-use-existing-package> \
     --operator-inputs <airgap-install-substrates-package> \
     --product-readiness-report <json> \
-    --post-deploy-product-smoke-report <json> \
+    --post-deploy-product-smoke-report <online-json> \
+    --post-deploy-product-smoke-report <airgap-json> \
     --output-dir <dir>
 
 Operator facade:
@@ -46,7 +47,8 @@ Success boundary:
 Final GA report:
   --ga-report consumes four operator-inputs packages that have already been
   run with --operator-inputs <package> --run, locates the finalized path
-  evidence from those packages, and writes the final ga-release-report.json.
+  evidence from those packages, requires online and airgap post-deploy product
+  smoke reports, and writes the final ga-release-report.json.
   A passing aggregate writes formal_verdict=issued; a blocked aggregate writes
   status=fail, formal_verdict=not_issued, and blockers in that same report.
   Operators do not pass internal deployment path report paths.
@@ -467,7 +469,8 @@ function usage() {
     --operator-inputs <airgap-use-existing-package> \\
     --operator-inputs <airgap-install-substrates-package> \\
     --product-readiness-report <json> \\
-    --post-deploy-product-smoke-report <json> \\
+    --post-deploy-product-smoke-report <online-json> \\
+    --post-deploy-product-smoke-report <airgap-json> \\
     --output-dir <dir>`;
 }
 
@@ -496,7 +499,8 @@ function setSingleton(parsed, key, value, flag) {
 
 function parseArgs() {
   const parsed = {
-    operatorInputs: []
+    operatorInputs: [],
+    postDeployProductSmokeReports: []
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -515,7 +519,7 @@ function parseArgs() {
         setSingleton(parsed, 'productReadinessReport', nextValue(), arg);
         break;
       case '--post-deploy-product-smoke-report':
-        setSingleton(parsed, 'postDeployProductSmokeReport', nextValue(), arg);
+        parsed.postDeployProductSmokeReports.push(nextValue());
         break;
       case '--output-dir':
         setSingleton(parsed, 'outputDir', nextValue(), arg);
@@ -564,7 +568,7 @@ function parseArgs() {
   if (!parsed.productReadinessReport) {
     cliFail('missing required --product-readiness-report');
   }
-  if (!parsed.postDeployProductSmokeReport) {
+  if (parsed.postDeployProductSmokeReports.length === 0) {
     cliFail('missing required --post-deploy-product-smoke-report');
   }
   if (!parsed.outputDir) {
@@ -909,9 +913,12 @@ async function main() {
     }
     verifyArgs.push(
       '--product-readiness-report',
-      args.productReadinessReport,
-      '--post-deploy-product-smoke-report',
-      args.postDeployProductSmokeReport,
+      args.productReadinessReport
+    );
+    for (const report of args.postDeployProductSmokeReports) {
+      verifyArgs.push('--post-deploy-product-smoke-report', report);
+    }
+    verifyArgs.push(
       '--output-dir',
       args.outputDir
     );

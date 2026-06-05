@@ -47,7 +47,8 @@ bash scripts/operator-release.sh --ga-report \
   --operator-inputs <airgap-use-existing-pkg> \
   --operator-inputs <airgap-install-substrates-pkg> \
   --product-readiness-report <json> \
-  --post-deploy-product-smoke-report <json> \
+  --post-deploy-product-smoke-report <online-json> \
+  --post-deploy-product-smoke-report <airgap-json> \
   --output-dir <dir>
 ```
 
@@ -73,7 +74,10 @@ evidence, plus post-deploy product smoke coverage.
 Formal release success or failure is represented only by the final
 `ga-release-report.json` issued by the release finalizer/captain through
 `operator-release.sh --ga-report`. The facade takes four package paths plus
-AgentSmith product-side reports and locates internal path evidence itself.
+AgentSmith product-side reports and locates internal path evidence itself. Pass
+post-deploy product smoke reports for at least one online target and one airgap
+target; the final report records that coverage under
+`post_deploy_product_smoke_coverage`.
 On pass the report has `formal_verdict=issued`; when blocked it replaces stale
 pass outputs with `status=fail`, `formal_verdict=not_issued`, and blockers.
 The sibling `ga-evidence-index.json` binds that source report digest to the

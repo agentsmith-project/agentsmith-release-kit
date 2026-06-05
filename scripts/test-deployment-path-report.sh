@@ -1060,6 +1060,46 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
     report_path: 'post-deploy-product-smoke/post-deploy-product-smoke-report.json'
   }
 });
+writeJson(path.join(outDir, 'post-deploy-product-smoke-airgap-report.json'), {
+  schema_version: 'agentsmith.post-deploy-product-smoke-report/v1',
+  producer: 'agentsmith-post-deploy-product-smoke',
+  owner: 'agentsmith',
+  repo: 'github.com/agentsmith-project/agentsmith',
+  release_contract: {
+    path: 'release-contract.json',
+    input_sha256: contractDigest,
+    release_id: contract.release_id,
+    git_sha: contract.git_sha
+  },
+  status: 'passed',
+  generated_at: '2026-05-31T12:00:00.000Z',
+  source: {
+    product_flows_path: 'unified-deploy/airgap-product-flows/product-flows-aggregate.json',
+    product_flows_sha256: sha('post-deploy-product-smoke:airgap-product-flows'),
+    aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
+    aggregate_producer: 'unified-deploy-product-flows',
+    aggregate_generated_at: '2026-05-31T12:00:00.000Z',
+    aggregate_command: 'focused fixture'
+  },
+  deployment_target: {
+    profile: 'existing_kubernetes/external_declared/airgap',
+    public_base_url: 'https://agentsmith-airgap.example.com',
+    api_base_url: 'https://agentsmith-airgap.example.com/api/v1',
+    site_env: {
+      path: 'unified-deploy/airgap-site.env',
+      sha256: sha('post-deploy-product-smoke:airgap-site-env')
+    },
+    substrate_truth: {
+      path: 'unified-deploy/airgap-substrate-truth.json',
+      sha256: sha('post-deploy-product-smoke:airgap-substrate-truth')
+    }
+  },
+  smoke_results: canonicalSmokeResults(),
+  failures: [],
+  paths: {
+    report_path: 'post-deploy-product-smoke/post-deploy-product-smoke-airgap-report.json'
+  }
+});
 NODE
 }
 
@@ -1111,6 +1151,7 @@ run_ga_release() {
     --deployment-path-report "$path_dir/airgap-install-substrates/deployment-path-report.json" \
     --product-readiness-report "$fixture_dir/product-readiness-report.json" \
     --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-report.json" \
+    --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-airgap-report.json" \
     --output-dir "$output_dir"
 }
 
