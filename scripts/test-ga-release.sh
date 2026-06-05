@@ -2070,6 +2070,12 @@ const actualCanonicalRepos = canonicalRepos.map((entry) => entry.repo).sort();
 if (JSON.stringify(actualCanonicalRepos) !== JSON.stringify(expectedCanonicalRepos)) {
   throw new Error(`GA report canonical_repos must exactly cover six repos: ${actualCanonicalRepos.join(', ')}`);
 }
+if (
+  JSON.stringify(stableJson(report.artifact_index?.canonical_repos)) !==
+  JSON.stringify(stableJson(canonicalRepos))
+) {
+  throw new Error('GA report artifact index must archive canonical repo provenance/freshness entries');
+}
 for (const repo of canonicalRepos) {
   if (!/^[0-9a-f]{40}$/.test(repo.commit_sha || '')) {
     throw new Error(`canonical repo missing commit sha: ${repo.repo}`);

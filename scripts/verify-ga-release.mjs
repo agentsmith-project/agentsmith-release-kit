@@ -2819,6 +2819,7 @@ async function buildPassReport(args) {
         digest: release.release_contract_digest,
         provenance: release.provenance
       },
+      canonical_repos: canonicalRepos,
       deploy_template_package: deployTemplateSummary,
       deployment_paths: deploymentPathReportEntries.map((entry) => ({
         operator_path: entry.operator_path,

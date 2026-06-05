@@ -412,6 +412,12 @@ if (
 if (JSON.stringify(stableJson(evidenceIndex.artifact_index)) !== JSON.stringify(stableJson(report.artifact_index))) {
   throw new Error('GA evidence index artifact_index must match the final GA report artifact_index');
 }
+if (
+  JSON.stringify(stableJson(report.artifact_index?.canonical_repos)) !==
+  JSON.stringify(stableJson(report.canonical_repos))
+) {
+  throw new Error('GA report artifact index must archive canonical repo provenance/freshness entries');
+}
 if (!Array.isArray(evidenceIndex.deployment_paths) || evidenceIndex.deployment_paths.length !== expectedPaths.size) {
   throw new Error('GA evidence index must archive four deployment path evidence entries');
 }
