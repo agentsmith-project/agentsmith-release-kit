@@ -2376,6 +2376,7 @@ example_readme="$ROOT_DIR/examples/online-existing-kubernetes/README.md"
 runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
 maintainer_diagnostics="$ROOT_DIR/docs/maintainer-diagnostics.md"
 mapfile -t example_readmes < <(find "$ROOT_DIR/examples" -mindepth 1 -maxdepth 2 -name README.md -type f | sort)
+operator_surface_readmes=("$root_readme" "$runbooks_readme" "${example_readmes[@]}")
 
 grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run' "$root_readme" ||
   fail "root README must document package-driven --operator-inputs --run main path"
@@ -2395,6 +2396,9 @@ grep -q -- 'deployment_target' "$maintainer_diagnostics" ||
   fail "maintainer diagnostics must document canonical product smoke deployment target binding"
 if grep -Eq 'Legacy Diagnostic Status|Machine profile mapping|operator-release-surface-report|airgap-bundle/kit_provided|online/kit_provided|airgap/kit_provided|kind_rehearsal/kit_installed' "$runbooks_readme"; then
   fail "runbook README must keep maintainer/internal diagnostic tables out of the operator path"
+fi
+if grep -Eiq '\b(target_cluster|substrate_source|distribution|external_declared|kit_installed|existing_kubernetes|kind_rehearsal|target_profile)\b|operator-release-surface-report|adoption report|candidate intake|Machine profile mapping' "${operator_surface_readmes[@]}"; then
+  fail "operator-facing README/runbook/example docs must not expose internal machine profile vocabulary or maintainer report names"
 fi
 if grep -Fq -- '--deployment-path-report' "$runbooks_readme"; then
   fail "runbook README must not expose internal --deployment-path-report copy path"

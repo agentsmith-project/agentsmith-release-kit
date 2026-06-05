@@ -41,7 +41,7 @@ AgentSmith Release Kit owns:
 - Kubernetes render, apply, rollout, and smoke evidence.
 - Operator runbooks for deployment, package handling, troubleshooting, and
   evidence collection.
-- Deployment, distribution, and package evidence produced by this repository.
+- Deployment and package evidence produced by this repository.
 
 AgentSmith Release Kit does not own:
 
