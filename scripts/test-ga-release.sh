@@ -922,7 +922,7 @@ function productSmokeReport({
       aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
       aggregate_producer: 'unified-deploy-product-flows',
       aggregate_generated_at: '2026-05-31T12:00:00.000Z',
-      aggregate_command: 'focused fixture'
+      aggregate_command: 'npm run lane:unified-deploy:product-flows'
     },
     deployment_target: {
       profile,
@@ -1444,6 +1444,10 @@ if (mutation === 'legacy-surrogate-shape') {
   report.source.aggregate_schema_version = 'agentsmith.unified-deploy.product-flows.aggregate/v0';
 } else if (mutation === 'wrong-product-flows-producer') {
   report.source.aggregate_producer = 'release-kit-product-flows';
+} else if (mutation === 'missing-aggregate-command') {
+  delete report.source.aggregate_command;
+} else if (mutation === 'wrong-aggregate-command') {
+  report.source.aggregate_command = 'npm run test:unified-deploy:product-flows';
 } else if (mutation === 'missing-deployment-target') {
   delete report.deployment_target;
 } else if (mutation === 'missing-deployment-target-profile') {
@@ -2410,6 +2414,9 @@ if (smoke?.source?.aggregate_schema_version !== 'agentsmith.unified-deploy.produ
 if (smoke?.source?.aggregate_producer !== 'unified-deploy-product-flows') {
   throw new Error('GA report did not bind product smoke aggregate producer');
 }
+if (smoke?.source?.aggregate_command !== 'npm run lane:unified-deploy:product-flows') {
+  throw new Error('GA report did not bind product smoke canonical lane command');
+}
 if (smoke?.deployment_target?.profile !== 'existing_kubernetes/external_declared/online') {
   throw new Error('GA report did not bind product smoke deployment target profile');
 }
@@ -2784,6 +2791,8 @@ product_smoke_mutations=(
   malformed-product-flows-sha256
   wrong-product-flows-schema
   wrong-product-flows-producer
+  missing-aggregate-command
+  wrong-aggregate-command
   missing-deployment-target
   missing-deployment-target-profile
   unknown-deployment-target-profile
@@ -2857,6 +2866,12 @@ for mutation in "${product_smoke_mutations[@]}"; do
       ;;
     wrong-product-flows-producer)
       expected_message="post_deploy_product_smoke.source.aggregate_producer must be unified-deploy-product-flows"
+      ;;
+    missing-aggregate-command)
+      expected_message="post_deploy_product_smoke.source.aggregate_command is required"
+      ;;
+    wrong-aggregate-command)
+      expected_message="post_deploy_product_smoke.source.aggregate_command must be npm run lane:unified-deploy:product-flows"
       ;;
     missing-deployment-target)
       expected_message="post_deploy_product_smoke.deployment_target must be an object"

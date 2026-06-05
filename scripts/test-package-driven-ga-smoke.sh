@@ -404,7 +404,7 @@ function productSmokeReport({
       aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
       aggregate_producer: 'unified-deploy-product-flows',
       aggregate_generated_at: '2026-05-31T12:00:00.000Z',
-      aggregate_command: 'focused fixture'
+      aggregate_command: 'npm run lane:unified-deploy:product-flows'
     },
     deployment_target: {
       profile,
@@ -722,6 +722,9 @@ if (report.post_deploy_product_smoke?.source?.product_flows_path !== 'unified-de
 }
 if (report.post_deploy_product_smoke?.source?.product_flows_sha256 !== digest('post-deploy-product-smoke:product-flows')) {
   throw new Error('GA report must bind product smoke aggregate digest');
+}
+if (report.post_deploy_product_smoke?.source?.aggregate_command !== 'npm run lane:unified-deploy:product-flows') {
+  throw new Error('GA report must bind product smoke canonical lane command');
 }
 if (report.post_deploy_product_smoke?.deployment_target?.profile !== 'existing_kubernetes/external_declared/online') {
   throw new Error('GA report must bind product smoke deployment target profile');

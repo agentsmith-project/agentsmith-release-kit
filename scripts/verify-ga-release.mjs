@@ -79,6 +79,7 @@ const OPERATOR_INPUTS_PLAN_SCOPE = 'operator_inputs_intake_only';
 const OPERATOR_INPUTS_PLAN_INTERNAL_SCHEMA = 'agentsmith.operator-inputs-plan-internal/v1';
 const PRODUCT_FLOWS_AGGREGATE_SCHEMA = 'agentsmith.unified-deploy.product-flows.aggregate/v1';
 const PRODUCT_FLOWS_AGGREGATE_PRODUCER = 'unified-deploy-product-flows';
+const PRODUCT_FLOWS_AGGREGATE_COMMAND = 'npm run lane:unified-deploy:product-flows';
 const PRODUCT_SMOKE_LEGACY_FIELDS = [
   'covered_flows',
   'artifact_provenance',
@@ -1640,8 +1641,13 @@ function validateProductSmokeSource(value) {
       source.aggregate_generated_at,
       'post_deploy_product_smoke.source.aggregate_generated_at'
     );
-  const aggregateCommand = optionalString(
+  const aggregateCommand = requireString(
     source.aggregate_command,
+    'post_deploy_product_smoke.source.aggregate_command'
+  );
+  requireEquals(
+    aggregateCommand,
+    PRODUCT_FLOWS_AGGREGATE_COMMAND,
     'post_deploy_product_smoke.source.aggregate_command'
   );
   return {
@@ -1650,7 +1656,7 @@ function validateProductSmokeSource(value) {
     aggregate_schema_version: aggregateSchemaVersion,
     aggregate_producer: aggregateProducer,
     ...(aggregateGeneratedAt ? { aggregate_generated_at: aggregateGeneratedAt } : {}),
-    ...(aggregateCommand ? { aggregate_command: aggregateCommand } : {})
+    aggregate_command: aggregateCommand
   };
 }
 
