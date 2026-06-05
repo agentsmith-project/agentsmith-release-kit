@@ -86,6 +86,7 @@ require_text "$WORKFLOW" "uses: actions/upload-artifact@v4"
 require_text "$WORKFLOW" "if: always()"
 require_text "$WORKFLOW" "ga-release-report.json"
 require_text "$WORKFLOW" "ga-release-summary.md"
+require_text "$WORKFLOW" "ga-evidence-index.json"
 require_text "$WORKFLOW" "if-no-files-found: warn"
 
 reject_text "$WORKFLOW" "bash scripts/verify-release.sh --ga-release"

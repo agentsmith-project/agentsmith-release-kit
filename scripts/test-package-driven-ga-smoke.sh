@@ -171,12 +171,36 @@ assert_ga_failure_report() {
   local output_dir="$1"
   local expected_message="$2"
 
-  "$NODE_BIN" --input-type=module - "$output_dir/ga-release-report.json" "$output_dir/ga-release-summary.md" "$expected_message" <<'NODE'
+  "$NODE_BIN" --input-type=module - \
+    "$output_dir/ga-release-report.json" \
+    "$output_dir/ga-release-summary.md" \
+    "$output_dir/ga-evidence-index.json" \
+    "$expected_message" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-const [reportFile, summaryFile, expectedMessage] = process.argv.slice(2);
+const [reportFile, summaryFile, evidenceIndexFile, expectedMessage] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const summary = fs.readFileSync(summaryFile, 'utf8');
+const evidenceIndex = JSON.parse(fs.readFileSync(evidenceIndexFile, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function canonicalDigest(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
 
 if (report.schema !== 'agentsmith.ga-release-report/v1') {
   throw new Error(`unexpected failure report schema: ${report.schema}`);
@@ -192,6 +216,20 @@ if (!report.blockers.some((entry) => String(entry.message || '').includes(expect
 }
 if (!summary.includes('Formal verdict: not_issued') || !summary.includes(expectedMessage)) {
   throw new Error('failure summary must include not_issued verdict and blocker message');
+}
+if (evidenceIndex.schema !== 'agentsmith.ga-evidence-index/v1') {
+  throw new Error(`unexpected evidence index schema: ${evidenceIndex.schema}`);
+}
+if (
+  evidenceIndex.source_report?.path !== 'ga-release-report.json' ||
+  evidenceIndex.source_report?.digest !== canonicalDigest(report) ||
+  evidenceIndex.source_report?.status !== report.status ||
+  evidenceIndex.source_report?.formal_verdict !== report.formal_verdict
+) {
+  throw new Error('evidence index must bind the failure GA report');
+}
+if (!Array.isArray(evidenceIndex.blockers) || !evidenceIndex.blockers.some((entry) => String(entry.message || '').includes(expectedMessage))) {
+  throw new Error('evidence index must carry the failure blockers from the source report');
 }
 NODE
 }
@@ -322,6 +360,21 @@ const [reportFile, ...packageDirs] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const digest = (label) => `sha256:${crypto.createHash('sha256').update(label).digest('hex')}`;
 const fileDigest = (file) => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+const canonicalDigest = (value) =>
+  `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
 const expectedPaths = new Set([
   'online/use_existing',
   'online/install_substrates',
@@ -337,6 +390,24 @@ if (report.status !== 'pass') {
 }
 if (report.formal_verdict !== 'issued') {
   throw new Error(`unexpected GA formal_verdict: ${report.formal_verdict}`);
+}
+const evidenceIndex = JSON.parse(fs.readFileSync(path.join(path.dirname(reportFile), 'ga-evidence-index.json'), 'utf8'));
+if (evidenceIndex.schema !== 'agentsmith.ga-evidence-index/v1') {
+  throw new Error(`unexpected GA evidence index schema: ${evidenceIndex.schema}`);
+}
+if (
+  evidenceIndex.source_report?.path !== 'ga-release-report.json' ||
+  evidenceIndex.source_report?.digest !== canonicalDigest(report) ||
+  evidenceIndex.source_report?.status !== report.status ||
+  evidenceIndex.source_report?.formal_verdict !== report.formal_verdict
+) {
+  throw new Error('GA evidence index must bind the final GA report');
+}
+if (JSON.stringify(stableJson(evidenceIndex.artifact_index)) !== JSON.stringify(stableJson(report.artifact_index))) {
+  throw new Error('GA evidence index artifact_index must match the final GA report artifact_index');
+}
+if (!Array.isArray(evidenceIndex.deployment_paths) || evidenceIndex.deployment_paths.length !== expectedPaths.size) {
+  throw new Error('GA evidence index must archive four deployment path evidence entries');
 }
 const actualPaths = new Set((report.deployment_paths || []).map((entry) => entry.operator_path));
 if (actualPaths.size !== expectedPaths.size) {
@@ -361,13 +432,20 @@ if (!Array.isArray(packageIndex) || packageIndex.length !== expectedPaths.size) 
   throw new Error('GA report artifact index must cover four operator-inputs packages');
 }
 const serializedPackageIndex = JSON.stringify(packageIndex);
+const serializedEvidenceIndex = JSON.stringify(evidenceIndex);
 for (const packageDir of packageDirs) {
   if (serializedPackageIndex.includes(packageDir)) {
     throw new Error('GA report operator-inputs package index must not expose local package dirs');
   }
+  if (serializedEvidenceIndex.includes(packageDir)) {
+    throw new Error('GA evidence index must not expose local package dirs');
+  }
 }
 if (serializedPackageIndex.includes('.release-kit-internal')) {
   throw new Error('GA report operator-inputs package index must not expose internal output paths');
+}
+if (serializedEvidenceIndex.includes('.release-kit-internal')) {
+  throw new Error('GA evidence index must not expose internal output paths');
 }
 for (const entry of packageIndex) {
   const plan = plansByPath.get(entry.operator_path);
@@ -581,6 +659,7 @@ seed_stale_ga_outputs() {
   mkdir -p "$output_dir"
   cp "$ga_output_dir/ga-release-report.json" "$output_dir/ga-release-report.json"
   cp "$ga_output_dir/ga-release-summary.md" "$output_dir/ga-release-summary.md"
+  cp "$ga_output_dir/ga-evidence-index.json" "$output_dir/ga-evidence-index.json"
 }
 
 missing_package_output="$TMP_DIR/ga-output-missing-package"

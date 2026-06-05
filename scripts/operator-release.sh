@@ -429,6 +429,7 @@ NODE
 
 run_ga_report_facade() {
   "$NODE_BIN" --input-type=module - "$ROOT_DIR" "$@" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -438,6 +439,7 @@ const rootDir = process.argv[2];
 const argv = process.argv.slice(3);
 const REPORT_FILE = 'ga-release-report.json';
 const SUMMARY_FILE = 'ga-release-summary.md';
+const EVIDENCE_INDEX_FILE = 'ga-evidence-index.json';
 const PATH_REPORT_FILE = 'deployment-path-report.json';
 const FINALIZER_MANIFEST_FILE = 'deployment-path-finalizer-manifest.json';
 const SOURCE_EVIDENCE_DIR = 'source-evidence';
@@ -621,11 +623,50 @@ async function clearStaleFinalOutputs(outputDir) {
   const resolvedOutputDir = path.resolve(outputDir);
   await removeStaleOutputFile(path.join(resolvedOutputDir, REPORT_FILE));
   await removeStaleOutputFile(path.join(resolvedOutputDir, SUMMARY_FILE));
+  await removeStaleOutputFile(path.join(resolvedOutputDir, EVIDENCE_INDEX_FILE));
 }
 
 async function writeJson(file, value) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.writeFile(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function canonicalDigest(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
+
+function buildFailureEvidenceIndex(report) {
+  return {
+    schema: 'agentsmith.ga-evidence-index/v1',
+    generated_at: report.generated_at,
+    role: 'derived_from_ga_release_report',
+    source_report: {
+      path: REPORT_FILE,
+      schema: report.schema,
+      digest: canonicalDigest(report),
+      status: report.status,
+      formal_verdict: report.formal_verdict
+    },
+    artifact_index: null,
+    deployment_paths: [],
+    product_readiness: null,
+    post_deploy_product_smoke: null,
+    blockers: Array.isArray(report.blockers) ? report.blockers : []
+  };
 }
 
 async function writeFailureOutputs(outputDir, error) {
@@ -651,6 +692,7 @@ async function writeFailureOutputs(outputDir, error) {
     ]
   };
   await writeJson(path.join(resolvedOutputDir, REPORT_FILE), report);
+  await writeJson(path.join(resolvedOutputDir, EVIDENCE_INDEX_FILE), buildFailureEvidenceIndex(report));
   await fs.writeFile(
     path.join(resolvedOutputDir, SUMMARY_FILE),
     [

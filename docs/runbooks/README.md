@@ -64,7 +64,9 @@ are available, use `--ga-report` to write the final `ga-release-report.json`.
 Release captains can also use the repository's manual
 `ga-release-aggregate` GitHub workflow to download already-produced artifacts
 and run this same final aggregate. That workflow is aggregate-only; it does
-not rerun package, product, deployment, or airgap producers.
+not rerun package, product, deployment, or airgap producers. Both paths also
+write `ga-evidence-index.json` for release archive lookup; it is derived from
+the final report and does not issue another verdict.
 
 ### 4. What is the final report?
 
@@ -74,6 +76,8 @@ Formal release success or failure is represented only by the final
 AgentSmith product-side reports and locates internal path evidence itself.
 On pass the report has `formal_verdict=issued`; when blocked it replaces stale
 pass outputs with `status=fail`, `formal_verdict=not_issued`, and blockers.
+The sibling `ga-evidence-index.json` binds that source report digest to the
+archived path and product evidence for release captain review.
 
 ## Operator Package Matrix
 

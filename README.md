@@ -150,12 +150,16 @@ locates finalized path evidence inside each package and writes the final
 report files.
 A blocked final aggregate overwrites stale pass outputs with `status=fail`,
 `formal_verdict=not_issued`, and blockers in that same report.
+It also writes `ga-evidence-index.json`, a derived archive index that binds
+the final report digest to the path evidence, product readiness, post-deploy
+smoke, and blockers without issuing another verdict.
 The repository also provides a manual `ga-release-aggregate` GitHub workflow
 for release captains. It is `workflow_dispatch` only, downloads the six
 already-produced artifacts by repository, run id, and artifact name, runs the
 same `operator-release.sh --ga-report` facade, and uploads the final
-`ga-release-report.json` plus `ga-release-summary.md`. It does not rerun
-product, deployment, airgap, or operator package producers.
+`ga-release-report.json`, `ga-release-summary.md`, and
+`ga-evidence-index.json`. It does not rerun product, deployment, airgap, or
+operator package producers.
 These paths are still release-kit installer producer/finalizer evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
@@ -1159,7 +1163,9 @@ post-deploy product smoke reports through the operator-facing
 diagnostics. The aggregate writes `ga-release-report.json` with
 `formal_verdict=issued` on pass; blocked aggregates replace stale pass outputs
 with `status=fail`, `formal_verdict=not_issued`, and blockers. It does not
-rerun producers.
+rerun producers. It also writes the derived `ga-evidence-index.json` archive
+index, whose `source_report` binds the final report schema, status,
+formal_verdict, and canonical digest.
 The post-deploy product smoke input must be the AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
 agentsmith-post-deploy-product-smoke`, and nested `release_contract: { path,

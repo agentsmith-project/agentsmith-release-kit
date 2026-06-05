@@ -16,9 +16,11 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 const REPORT_FILE = 'ga-release-report.json';
 const SUMMARY_FILE = 'ga-release-summary.md';
+const EVIDENCE_INDEX_FILE = 'ga-evidence-index.json';
 const FINALIZER_MANIFEST_FILE = 'deployment-path-finalizer-manifest.json';
 const SOURCE_EVIDENCE_DIR = 'source-evidence';
 const REPORT_SCHEMA = 'agentsmith.ga-release-report/v1';
+const EVIDENCE_INDEX_SCHEMA = 'agentsmith.ga-evidence-index/v1';
 const PATH_REPORT_SCHEMA = 'agentsmith.deployment-path-report/v1';
 const PATH_REPORT_SCOPE = 'deployment_path_ga_evidence';
 const FINALIZER_MANIFEST_SCHEMA = 'agentsmith.deployment-path-finalizer-manifest/v1';
@@ -2521,6 +2523,7 @@ async function removeStaleOutputFile(file) {
 async function clearStaleFinalOutputs(outputDir) {
   await removeStaleOutputFile(path.join(outputDir, REPORT_FILE));
   await removeStaleOutputFile(path.join(outputDir, SUMMARY_FILE));
+  await removeStaleOutputFile(path.join(outputDir, EVIDENCE_INDEX_FILE));
 }
 
 async function bestEffortRemoveOutputFile(file) {
@@ -2617,24 +2620,68 @@ async function writeFailureOutputs(outputDir, error, argsOrRawArgs) {
   console.error(`FAIL: wrote ${REPORT_FILE} (${canonicalDigest(report)}) with formal_verdict=not_issued`);
 }
 
+function buildEvidenceIndex(report) {
+  const artifactIndex = report.artifact_index ?? null;
+  const indexedDeploymentPaths = Array.isArray(artifactIndex?.deployment_paths)
+    ? artifactIndex.deployment_paths.map((entry) => ({
+        operator_path: entry.operator_path,
+        digest: entry.digest,
+        finalizer_manifest: entry.finalizer_manifest,
+        source_evidence_files: entry.source_evidence_files
+      }))
+    : [];
+  const reportDeploymentPaths = Array.isArray(report.deployment_paths)
+    ? report.deployment_paths.map((entry) => ({
+        operator_path: entry.operator_path,
+        digest: entry.report_digest
+      }))
+    : [];
+
+  return {
+    schema: EVIDENCE_INDEX_SCHEMA,
+    generated_at: report.generated_at,
+    role: 'derived_from_ga_release_report',
+    source_report: {
+      path: REPORT_FILE,
+      schema: report.schema,
+      digest: canonicalDigest(report),
+      status: report.status,
+      formal_verdict: report.formal_verdict
+    },
+    ...(report.release ? { release: report.release } : {}),
+    artifact_index: artifactIndex,
+    deployment_paths: indexedDeploymentPaths.length > 0 ? indexedDeploymentPaths : reportDeploymentPaths,
+    product_readiness: artifactIndex?.product_readiness ?? report.product_readiness?.report_digest ?? null,
+    post_deploy_product_smoke:
+      artifactIndex?.post_deploy_product_smoke ?? report.post_deploy_product_smoke?.report_digest ?? null,
+    blockers: Array.isArray(report.blockers) ? report.blockers : []
+  };
+}
+
 async function writeFinalOutputs(outputDir, report) {
   const stamp = `${process.pid}-${Date.now()}`;
   const reportFile = path.join(outputDir, REPORT_FILE);
   const summaryFile = path.join(outputDir, SUMMARY_FILE);
+  const evidenceIndexFile = path.join(outputDir, EVIDENCE_INDEX_FILE);
   const reportTemp = path.join(outputDir, `.${REPORT_FILE}.${stamp}.tmp`);
   const summaryTemp = path.join(outputDir, `.${SUMMARY_FILE}.${stamp}.tmp`);
+  const evidenceIndexTemp = path.join(outputDir, `.${EVIDENCE_INDEX_FILE}.${stamp}.tmp`);
 
   try {
     await writeJson(reportTemp, report);
     await writeSummary(summaryTemp, report);
+    await writeJson(evidenceIndexTemp, buildEvidenceIndex(report));
     await fs.rename(summaryTemp, summaryFile);
+    await fs.rename(evidenceIndexTemp, evidenceIndexFile);
     await fs.rename(reportTemp, reportFile);
   } catch (error) {
     await Promise.all([
       bestEffortRemoveOutputFile(reportFile),
       bestEffortRemoveOutputFile(summaryFile),
+      bestEffortRemoveOutputFile(evidenceIndexFile),
       bestEffortRemoveOutputFile(reportTemp),
-      bestEffortRemoveOutputFile(summaryTemp)
+      bestEffortRemoveOutputFile(summaryTemp),
+      bestEffortRemoveOutputFile(evidenceIndexTemp)
     ]);
     throw error;
   }

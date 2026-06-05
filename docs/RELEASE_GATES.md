@@ -122,15 +122,17 @@ finalized path reports inside those packages and calls the existing GA
 aggregate verifier. The only formal GA output in this smoke is
 `ga-release-report.json`: a passing aggregate has `status: pass` and
 `formal_verdict: issued`; blocked aggregate paths replace stale pass outputs
-with `status: fail`, `formal_verdict: not_issued`, and blockers.
+with `status: fail`, `formal_verdict: not_issued`, and blockers. The smoke also
+checks the derived `ga-evidence-index.json` archive binding without treating it
+as a verdict.
 
 `bash scripts/test-ga-release-workflow.sh` is the companion lightweight guard
 for the manual GitHub workflow. It asserts that `.github/workflows/ga-release.yml`
 is `workflow_dispatch` only, downloads exactly the four operator-inputs
 package artifacts plus the two AgentSmith product-side artifacts, runs the
-operator-facing `--ga-report` facade, uploads the final GA report files even
-when the aggregate is blocked, and does not rerun package or product
-producers.
+operator-facing `--ga-report` facade, uploads the final GA report, summary,
+and evidence index files even when the aggregate is blocked, and does not rerun
+package or product producers.
 
 ## Operator Release Surface v0 Focused Guard
 
@@ -1567,8 +1569,11 @@ deployment/package evidence. It consumes finalized deployment path reports,
 AgentSmith product readiness, and post-deploy product smoke reports. It writes
 `ga-release-report.json` with `status: pass` and `formal_verdict: issued` on
 pass, or `status: fail`, `formal_verdict: not_issued`, and blockers when the
-aggregate is blocked. It also writes a derived `ga-release-summary.md`; the
-JSON report is the gate evidence.
+aggregate is blocked. It also writes derived `ga-release-summary.md` and
+`ga-evidence-index.json` outputs. The JSON report is the gate evidence; the
+evidence index is an archive lookup that binds the source report digest to the
+deployment path evidence, product readiness, post-deploy product smoke, and
+blockers without issuing another verdict.
 
 The post-deploy product smoke input must be the AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:
@@ -1598,6 +1603,9 @@ plan `input_refs`, verifies their sha256 digests against the final
 `--release-contract` and `--deploy-template-package` inputs, and records only
 safe relative paths plus digests in
 `artifact_index.operator_inputs_packages[].release_materials`.
+The sibling `ga-evidence-index.json` mirrors this `artifact_index` and records
+the source report schema, status, formal_verdict, and canonical digest for
+release archive consumption.
 `scripts/test-package-driven-ga-smoke.sh` verifies that finalized path reports
 created by the four package-driven operator-inputs runs can be consumed
 directly by this aggregate without adding a package-level verdict or a

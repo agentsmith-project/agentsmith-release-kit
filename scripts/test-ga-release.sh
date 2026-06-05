@@ -22,12 +22,36 @@ assert_ga_failure_report() {
   local output_dir="$1"
   local expected_message="$2"
 
-  "$NODE_BIN" --input-type=module - "$output_dir/ga-release-report.json" "$output_dir/ga-release-summary.md" "$expected_message" <<'NODE'
+  "$NODE_BIN" --input-type=module - \
+    "$output_dir/ga-release-report.json" \
+    "$output_dir/ga-release-summary.md" \
+    "$output_dir/ga-evidence-index.json" \
+    "$expected_message" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-const [reportFile, summaryFile, expectedMessage] = process.argv.slice(2);
+const [reportFile, summaryFile, evidenceIndexFile, expectedMessage] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const summary = fs.readFileSync(summaryFile, 'utf8');
+const evidenceIndex = JSON.parse(fs.readFileSync(evidenceIndexFile, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function canonicalDigest(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
 
 if (report.schema !== 'agentsmith.ga-release-report/v1') {
   throw new Error(`unexpected failure report schema: ${report.schema}`);
@@ -43,6 +67,24 @@ if (!report.blockers.some((entry) => String(entry.message || '').includes(expect
 }
 if (!summary.includes('Formal verdict: not_issued') || !summary.includes(expectedMessage)) {
   throw new Error('failure summary must include not_issued verdict and blocker message');
+}
+if (evidenceIndex.schema !== 'agentsmith.ga-evidence-index/v1') {
+  throw new Error(`unexpected evidence index schema: ${evidenceIndex.schema}`);
+}
+if (evidenceIndex.source_report?.path !== 'ga-release-report.json') {
+  throw new Error('evidence index must point at ga-release-report.json');
+}
+if (evidenceIndex.source_report?.digest !== canonicalDigest(report)) {
+  throw new Error('evidence index source_report digest must bind the failure report');
+}
+if (
+  evidenceIndex.source_report?.status !== report.status ||
+  evidenceIndex.source_report?.formal_verdict !== report.formal_verdict
+) {
+  throw new Error('evidence index must mirror the failure report status/verdict');
+}
+if (!Array.isArray(evidenceIndex.blockers) || !evidenceIndex.blockers.some((entry) => String(entry.message || '').includes(expectedMessage))) {
+  throw new Error('evidence index must carry the failure blockers from the source report');
 }
 NODE
 }
@@ -1882,21 +1924,63 @@ write_fixture_set "$VALID_DIR" valid
 generate_path_bundles "$VALID_DIR" "$PATH_DIR"
 run_ga_release "$VALID_DIR" "$PATH_DIR" "$TMP_DIR/out-valid"
 
-"$NODE_BIN" --input-type=module - "$TMP_DIR/out-valid/ga-release-report.json" "$VALID_DIR/release-contract.json" <<'NODE'
+"$NODE_BIN" --input-type=module - \
+  "$TMP_DIR/out-valid/ga-release-report.json" \
+  "$TMP_DIR/out-valid/ga-evidence-index.json" \
+  "$VALID_DIR/release-contract.json" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const releaseContractBytes = fs.readFileSync(process.argv[3]);
+const [reportFile, evidenceIndexFile, releaseContractFile] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const evidenceIndex = JSON.parse(fs.readFileSync(evidenceIndexFile, 'utf8'));
+const releaseContractBytes = fs.readFileSync(releaseContractFile);
 const releaseContract = JSON.parse(releaseContractBytes.toString('utf8'));
 const releaseContractDigest =
   `sha256:${crypto.createHash('sha256').update(releaseContractBytes).digest('hex')}`;
 const sha = (label) => `sha256:${crypto.createHash('sha256').update(label).digest('hex')}`;
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+function canonicalDigest(value) {
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
+}
 if (report.schema !== 'agentsmith.ga-release-report/v1') {
   throw new Error('unexpected schema');
 }
 if (report.status !== 'pass' || report.formal_verdict !== 'issued') {
   throw new Error('GA report did not issue pass verdict');
+}
+if (evidenceIndex.schema !== 'agentsmith.ga-evidence-index/v1') {
+  throw new Error('GA evidence index used an unexpected schema');
+}
+if (evidenceIndex.role !== 'derived_from_ga_release_report') {
+  throw new Error('GA evidence index must be marked as derived from the GA report');
+}
+if (
+  evidenceIndex.source_report?.path !== 'ga-release-report.json' ||
+  evidenceIndex.source_report?.schema !== report.schema ||
+  evidenceIndex.source_report?.digest !== canonicalDigest(report) ||
+  evidenceIndex.source_report?.status !== report.status ||
+  evidenceIndex.source_report?.formal_verdict !== report.formal_verdict
+) {
+  throw new Error('GA evidence index must bind the final GA report status, verdict, schema, and digest');
+}
+if (JSON.stringify(stableJson(evidenceIndex.artifact_index)) !== JSON.stringify(stableJson(report.artifact_index))) {
+  throw new Error('GA evidence index artifact_index must match the final GA report artifact_index');
+}
+if (!Array.isArray(evidenceIndex.deployment_paths) || evidenceIndex.deployment_paths.length !== 4) {
+  throw new Error('GA evidence index must archive four deployment path evidence entries');
 }
 if (!Array.isArray(report.deployment_paths) || report.deployment_paths.length !== 4) {
   throw new Error('expected four deployment paths');
@@ -2107,6 +2191,7 @@ if (Object.hasOwn(report.summary || {}, 'product_smoke_flows')) {
 }
 NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
+[[ -f "$TMP_DIR/out-valid/ga-evidence-index.json" ]] || fail "missing GA evidence index"
 pass "valid GA aggregate consumes finalizer-generated path bundles"
 
 PLAN_DIR="$TMP_DIR/operator-input-plans-valid"
@@ -2170,6 +2255,7 @@ cp -R "$VALID_DIR" "$STALE_FAILURE_DIR"
 mkdir -p "$STALE_OUTPUT_DIR"
 cp "$TMP_DIR/out-valid/ga-release-report.json" "$STALE_OUTPUT_DIR/ga-release-report.json"
 cp "$TMP_DIR/out-valid/ga-release-summary.md" "$STALE_OUTPUT_DIR/ga-release-summary.md"
+cp "$TMP_DIR/out-valid/ga-evidence-index.json" "$STALE_OUTPUT_DIR/ga-evidence-index.json"
 mutate_product_report "$STALE_FAILURE_DIR/product-readiness-report.json" wrong-repo
 if run_ga_release "$STALE_FAILURE_DIR" "$PATH_DIR" "$STALE_OUTPUT_DIR" >"$TMP_DIR/ga-release-stale-failure.out" 2>&1; then
   fail "GA aggregate with invalid product readiness should fail"
@@ -2197,6 +2283,9 @@ grep -Fq "injected summary write failure" "$TMP_DIR/ga-release-summary-write-fai
   fail "summary write failure did not reach finalizer output"
 if [[ -e "$SUMMARY_FAILURE_OUTPUT_DIR/ga-release-report.json" ]]; then
   fail "failed GA aggregate summary write must not leave ga-release-report.json"
+fi
+if [[ -e "$SUMMARY_FAILURE_OUTPUT_DIR/ga-evidence-index.json" ]]; then
+  fail "failed GA aggregate summary write must not leave ga-evidence-index.json"
 fi
 pass "failed GA aggregate summary write does not leave formal report"
 
@@ -2529,6 +2618,7 @@ MISSING_OUTPUT_DIR="$TMP_DIR/out-missing"
 mkdir -p "$MISSING_OUTPUT_DIR"
 cp "$TMP_DIR/out-valid/ga-release-report.json" "$MISSING_OUTPUT_DIR/ga-release-report.json"
 cp "$TMP_DIR/out-valid/ga-release-summary.md" "$MISSING_OUTPUT_DIR/ga-release-summary.md"
+cp "$TMP_DIR/out-valid/ga-evidence-index.json" "$MISSING_OUTPUT_DIR/ga-evidence-index.json"
 if bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
   --release-contract "$MISSING_DIR/release-contract.json" \
   --deploy-template-package "$MISSING_DIR/deploy-template-package.json" \

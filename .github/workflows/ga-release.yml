@@ -207,4 +207,5 @@ jobs:
           path: |
             .ga-release-output/ga-release-report.json
             .ga-release-output/ga-release-summary.md
+            .ga-release-output/ga-evidence-index.json
           if-no-files-found: warn
