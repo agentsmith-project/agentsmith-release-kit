@@ -183,6 +183,7 @@ assert_development_default_commands_are_slim() {
 
 assert_root_readme_operator_surface_slim() {
   local first_screen
+  local whole_readme
   local forbidden
 
   first_screen="$(
@@ -191,6 +192,7 @@ assert_root_readme_operator_surface_slim() {
       { print }
     ' README.md
   )"
+  whole_readme="$(<README.md)"
 
   for forbidden in \
     'kit_provided' \
@@ -208,6 +210,24 @@ assert_root_readme_operator_surface_slim() {
     if grep -Eiq -- "$forbidden" <<<"$first_screen"; then
       printf '%s\n' "$first_screen" | grep -Ein -- "$forbidden" >&2 || true
       fail "root README operator first screen exposes legacy aliases, internal paths, machine profiles, or maintainer diagnostics"
+    fi
+  done
+
+  for forbidden in \
+    'operator-release-surface-report' \
+    'airgap-adoption-report' \
+    'release-engineering-gate-intake' \
+    'operator-signoff-intake' \
+    'verify-release[.]sh[[:space:]]+--' \
+    'test-[a-z0-9-]+[.]sh' \
+    '[.]release-kit-internal' \
+    'kit_provided' \
+    'external_declared' \
+    'kit_installed' \
+    'kind_rehearsal'; do
+    if grep -Eiq -- "$forbidden" <<<"$whole_readme"; then
+      printf '%s\n' "$whole_readme" | grep -Ein -- "$forbidden" >&2 || true
+      fail "root README must not duplicate the maintainer producer catalog"
     fi
   done
 }
@@ -338,7 +358,7 @@ require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
 require_text README.md '`airgap/use_existing`'
 require_text README.md '`airgap/install_substrates`'
-require_text README.md 'Maintainer/internal diagnostics are documented in'
+require_text README.md 'The focused producer catalog is no longer duplicated'
 require_text README.md 'docs/maintainer-diagnostics.md'
 require_text docs/runbooks/README.md "Use the single operator facade"
 require_text docs/runbooks/README.md "Formal release success or failure is represented only by the final"

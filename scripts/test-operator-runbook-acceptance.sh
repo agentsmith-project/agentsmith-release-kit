@@ -26,6 +26,7 @@ assert_operator_success_contract_docs() {
   local root_readme="$ROOT_DIR/README.md"
   local first_screen="$TMP_DIR/runbook-first-screen.md"
   local root_first_screen="$TMP_DIR/root-readme-first-screen.md"
+  local root_full="$TMP_DIR/root-readme-full.md"
   local forbidden
 
   bash "$ROOT_DIR/scripts/operator-release.sh" --help >"$help_output"
@@ -78,6 +79,7 @@ assert_operator_success_contract_docs() {
     /^### Maintainer\/Internal Diagnostics$/ { exit }
     { print }
   ' "$root_readme" >"$root_first_screen"
+  cp "$root_readme" "$root_full"
   for forbidden in \
     'kit_provided' \
     '[.]release-kit-internal' \
@@ -93,6 +95,22 @@ assert_operator_success_contract_docs() {
     'kind_rehearsal'; do
     if grep -Eiq "$forbidden" "$root_first_screen"; then
       fail "root README operator first screen must not expose legacy aliases, internal paths, machine profiles, or maintainer diagnostics: $forbidden"
+    fi
+  done
+  for forbidden in \
+    'operator-release-surface-report' \
+    'airgap-adoption-report' \
+    'release-engineering-gate-intake' \
+    'operator-signoff-intake' \
+    'verify-release[.]sh[[:space:]]+--' \
+    'test-[a-z0-9-]+[.]sh' \
+    '[.]release-kit-internal' \
+    'kit_provided' \
+    'external_declared' \
+    'kit_installed' \
+    'kind_rehearsal'; do
+    if grep -Eiq "$forbidden" "$root_full"; then
+      fail "root README must not duplicate the maintainer producer catalog: $forbidden"
     fi
   done
 
@@ -115,7 +133,7 @@ assert_operator_success_contract_docs() {
     fail "root README must describe blocked GA aggregates as not_issued"
   grep -q -- 'formal_verdict=not_issued' "$first_screen" ||
     fail "operator runbook first screen must describe blocked GA aggregates as not_issued"
-  grep -q -- 'Maintainer/internal diagnostics are documented in' "$root_readme" ||
+  grep -q -- 'The focused producer catalog is no longer duplicated' "$root_readme" ||
     fail "root README must route maintainer diagnostics out of the operator first screen"
   grep -q -- 'docs/maintainer-diagnostics.md' "$root_readme" ||
     fail "root README must point maintainers to maintainer diagnostics"
