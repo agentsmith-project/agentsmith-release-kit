@@ -2657,6 +2657,11 @@ async function writeFailureOutputs(outputDir, error, argsOrRawArgs) {
 
 function buildEvidenceIndex(report) {
   const artifactIndex = report.artifact_index ?? null;
+  const canonicalRepos = Array.isArray(artifactIndex?.canonical_repos)
+    ? artifactIndex.canonical_repos
+    : Array.isArray(report.canonical_repos)
+      ? report.canonical_repos
+      : [];
   const indexedDeploymentPaths = Array.isArray(artifactIndex?.deployment_paths)
     ? artifactIndex.deployment_paths.map((entry) => ({
         operator_path: entry.operator_path,
@@ -2685,6 +2690,7 @@ function buildEvidenceIndex(report) {
     },
     ...(report.release ? { release: report.release } : {}),
     artifact_index: artifactIndex,
+    ...(canonicalRepos.length > 0 ? { canonical_repos: canonicalRepos } : {}),
     deployment_paths: indexedDeploymentPaths.length > 0 ? indexedDeploymentPaths : reportDeploymentPaths,
     product_readiness: artifactIndex?.product_readiness ?? report.product_readiness?.report_digest ?? null,
     post_deploy_product_smoke:

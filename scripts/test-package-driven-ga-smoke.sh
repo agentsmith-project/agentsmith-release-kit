@@ -413,6 +413,12 @@ if (JSON.stringify(stableJson(evidenceIndex.artifact_index)) !== JSON.stringify(
   throw new Error('GA evidence index artifact_index must match the final GA report artifact_index');
 }
 if (
+  JSON.stringify(stableJson(evidenceIndex.canonical_repos)) !==
+  JSON.stringify(stableJson(report.canonical_repos))
+) {
+  throw new Error('GA evidence index must expose canonical repo provenance/freshness entries');
+}
+if (
   JSON.stringify(stableJson(report.artifact_index?.canonical_repos)) !==
   JSON.stringify(stableJson(report.canonical_repos))
 ) {
