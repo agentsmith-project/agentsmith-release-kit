@@ -446,6 +446,20 @@ if (
 ) {
   throw new Error('GA evidence index must expose product runtime readiness evidence');
 }
+const expectedSmokeCoverageIndex = {
+  canonical_smoke_ids: report.post_deploy_product_smoke.canonical_smoke_ids,
+  source_evidence_paths: report.post_deploy_product_smoke.source_evidence_paths,
+  source_evidence_sha256: report.post_deploy_product_smoke.source_evidence_sha256,
+  source: report.post_deploy_product_smoke.source,
+  deployment_target: report.post_deploy_product_smoke.deployment_target,
+  deployment_path_binding: report.post_deploy_product_smoke.deployment_path_binding
+};
+if (
+  JSON.stringify(stableJson(evidenceIndex.post_deploy_product_smoke_coverage)) !==
+  JSON.stringify(stableJson(expectedSmokeCoverageIndex))
+) {
+  throw new Error('GA evidence index must expose post-deploy product smoke coverage evidence');
+}
 if (
   JSON.stringify(stableJson(report.artifact_index?.canonical_repos)) !==
   JSON.stringify(stableJson(report.canonical_repos))

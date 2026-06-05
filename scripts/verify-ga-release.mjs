@@ -2768,6 +2768,17 @@ function buildEvidenceIndex(report) {
       ? report.canonical_repos
       : [];
   const productRuntimeReadiness = report.product_readiness?.runtime_readiness ?? null;
+  const productSmoke = report.post_deploy_product_smoke ?? null;
+  const productSmokeCoverage = productSmoke
+    ? {
+        canonical_smoke_ids: productSmoke.canonical_smoke_ids ?? [],
+        source_evidence_paths: productSmoke.source_evidence_paths ?? {},
+        source_evidence_sha256: productSmoke.source_evidence_sha256 ?? {},
+        source: productSmoke.source ?? null,
+        deployment_target: productSmoke.deployment_target ?? null,
+        deployment_path_binding: productSmoke.deployment_path_binding ?? null
+      }
+    : null;
   const indexedDeploymentPaths = Array.isArray(artifactIndex?.deployment_paths)
     ? artifactIndex.deployment_paths.map((entry) => ({
         operator_path: entry.operator_path,
@@ -2802,6 +2813,7 @@ function buildEvidenceIndex(report) {
     ...(productRuntimeReadiness ? { product_runtime_readiness: productRuntimeReadiness } : {}),
     post_deploy_product_smoke:
       artifactIndex?.post_deploy_product_smoke ?? report.post_deploy_product_smoke?.report_digest ?? null,
+    ...(productSmokeCoverage ? { post_deploy_product_smoke_coverage: productSmokeCoverage } : {}),
     blockers: Array.isArray(report.blockers) ? report.blockers : []
   };
 }
