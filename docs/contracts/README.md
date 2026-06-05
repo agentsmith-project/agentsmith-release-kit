@@ -44,7 +44,10 @@ Current post-push contract index:
   `git_sha` must match the same `--release-contract` raw digest, id, and git
   sha. Legacy surrogate top-level fields are rejected: `release_id`,
   `git_sha`, `release_contract_digest`, `covered_flows`, and
-  `artifact_provenance`.
+  `artifact_provenance`. When operator-inputs plans are provided, the embedded
+  `artifact_index.operator_inputs_packages[].release_materials` binds each
+  package-local release contract and deploy template package descriptor by safe
+  relative path and sha256 digest; local absolute package paths are not exposed.
 
 For package-driven operator runs, each
 `operator-release.sh --operator-inputs <pkg> --run` package still represents

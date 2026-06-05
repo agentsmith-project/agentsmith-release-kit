@@ -2247,7 +2247,54 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
   };
 }
 
-async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPath) {
+async function validateOperatorInputsMaterialRef({
+  plan,
+  packageRoot,
+  key,
+  expectedDigest,
+  expectedDigestLabel,
+  operatorPath
+}) {
+  const inputRefs = requireObject(plan.input_refs, 'operator_inputs_plan.input_refs');
+  const ref = requireObject(inputRefs[key], `operator_inputs_plan.input_refs.${key}`);
+  if (requireString(ref.kind, `operator_inputs_plan.input_refs.${key}.kind`) !== 'file') {
+    fail(`operator_inputs_plan.input_refs.${key}.kind must be file`);
+  }
+  const relativePath = requireSafePackageRelativePath(
+    ref.path,
+    `operator_inputs_plan.input_refs.${key}.path`
+  );
+  const absolutePath = requireString(
+    ref.absolute_path,
+    `operator_inputs_plan.input_refs.${key}.absolute_path`
+  );
+  if (path.resolve(packageRoot, relativePath) !== path.resolve(absolutePath)) {
+    fail(`operator_inputs_plan.input_refs.${key}.path must bind absolute_path for ${operatorPath}`);
+  }
+
+  const declaredDigest = requireDigest(
+    ref.sha256,
+    `operator_inputs_plan.input_refs.${key}.sha256`
+  );
+  const material = await readBuffer(
+    absolutePath,
+    `operator-inputs ${key} for ${operatorPath}`
+  );
+  const actualDigest = digestBuffer(material);
+  if (declaredDigest !== actualDigest) {
+    fail(`operator_inputs_plan.input_refs.${key}.sha256 must match file digest for ${operatorPath}`);
+  }
+  if (declaredDigest !== expectedDigest) {
+    fail(`operator_inputs_plan.input_refs.${key}.sha256 must match ${expectedDigestLabel} for ${operatorPath}`);
+  }
+
+  return {
+    path: relativePath,
+    digest: declaredDigest
+  };
+}
+
+async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPath, release, deployTemplate) {
   const plan = planInput.value;
   requireSchema(plan, OPERATOR_INPUTS_PLAN_SCHEMA, 'operator-inputs plan');
   if (requireString(plan.scope, 'operator_inputs_plan.scope') !== OPERATOR_INPUTS_PLAN_SCOPE) {
@@ -2301,6 +2348,22 @@ async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPat
   if (manifestInput.value.operator_inputs_version !== OPERATOR_INPUTS_MANIFEST_VERSION) {
     fail(`operator_inputs_manifest.operator_inputs_version must be ${OPERATOR_INPUTS_MANIFEST_VERSION}`);
   }
+  const releaseContractRef = await validateOperatorInputsMaterialRef({
+    plan,
+    packageRoot,
+    key: 'release_contract',
+    expectedDigest: release.release_contract_digest,
+    expectedDigestLabel: 'release contract digest',
+    operatorPath
+  });
+  const deployTemplatePackageRef = await validateOperatorInputsMaterialRef({
+    plan,
+    packageRoot,
+    key: 'deploy_template_package',
+    expectedDigest: deployTemplate.deploy_template_package_digest,
+    expectedDigestLabel: 'deploy template package descriptor digest',
+    operatorPath
+  });
 
   return {
     operator_path: operatorPath,
@@ -2315,13 +2378,17 @@ async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPat
       schema: OPERATOR_INPUTS_PLAN_SCHEMA,
       scope: OPERATOR_INPUTS_PLAN_SCOPE
     },
+    release_materials: {
+      release_contract: releaseContractRef,
+      deploy_template_package: deployTemplatePackageRef
+    },
     deployment_path_report: {
       digest: deploymentPath.report_digest
     }
   };
 }
 
-async function validateOperatorInputsPlans(planInputs, deploymentPaths) {
+async function validateOperatorInputsPlans(planInputs, deploymentPaths, release, deployTemplate) {
   if (planInputs.length === 0) {
     return [];
   }
@@ -2332,7 +2399,12 @@ async function validateOperatorInputsPlans(planInputs, deploymentPaths) {
   const packages = [];
   const seenPaths = new Set();
   for (const planInput of planInputs) {
-    const entry = await validateOperatorInputsPlan(planInput, deploymentPathByOperatorPath);
+    const entry = await validateOperatorInputsPlan(
+      planInput,
+      deploymentPathByOperatorPath,
+      release,
+      deployTemplate
+    );
     if (seenPaths.has(entry.operator_path)) {
       fail(`duplicate operator-inputs plan: ${entry.operator_path}`);
     }
@@ -2488,7 +2560,9 @@ async function main() {
   }
   const operatorInputsPackages = await validateOperatorInputsPlans(
     operatorInputsPlans,
-    deploymentPaths
+    deploymentPaths,
+    release,
+    deployTemplateSummary
   );
 
   const report = {

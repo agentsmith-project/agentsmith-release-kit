@@ -292,6 +292,7 @@ import path from 'node:path';
 const [reportFile, ...packageDirs] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const digest = (label) => `sha256:${crypto.createHash('sha256').update(label).digest('hex')}`;
+const fileDigest = (file) => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
 const expectedPaths = new Set([
   'online/use_existing',
   'online/install_substrates',
@@ -359,6 +360,18 @@ for (const entry of packageIndex) {
   }
   if (entry.package_plan?.digest !== plan.plan_sha256) {
     throw new Error(`GA report operator-inputs plan digest mismatch: ${entry.operator_path}`);
+  }
+  if (entry.release_materials?.release_contract?.path !== plan.input_refs?.release_contract?.path) {
+    throw new Error(`GA report operator-inputs release contract path mismatch: ${entry.operator_path}`);
+  }
+  if (entry.release_materials?.release_contract?.digest !== fileDigest(plan.input_refs.release_contract.absolute_path)) {
+    throw new Error(`GA report operator-inputs release contract digest mismatch: ${entry.operator_path}`);
+  }
+  if (entry.release_materials?.deploy_template_package?.path !== plan.input_refs?.deploy_template_package?.path) {
+    throw new Error(`GA report operator-inputs deploy template package path mismatch: ${entry.operator_path}`);
+  }
+  if (entry.release_materials?.deploy_template_package?.digest !== fileDigest(plan.input_refs.deploy_template_package.absolute_path)) {
+    throw new Error(`GA report operator-inputs deploy template package digest mismatch: ${entry.operator_path}`);
   }
   const deploymentPathEntry = report.deployment_paths.find((pathEntry) => pathEntry.operator_path === entry.operator_path);
   if (entry.deployment_path_report?.digest !== deploymentPathEntry?.report_digest) {

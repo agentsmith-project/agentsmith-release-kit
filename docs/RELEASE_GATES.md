@@ -1579,6 +1579,12 @@ single report JSON is not accepted. `operator-release-surface-report.json`,
 adoption reports, candidate intake reports, runbook acceptance reports, and
 other producer outputs remain internal evidence unless wrapped by a finalized
 `deployment-path-report.json`.
+When operator-inputs plans are supplied, the aggregate also re-reads each
+package-local release contract and deploy template package descriptor from the
+plan `input_refs`, verifies their sha256 digests against the final
+`--release-contract` and `--deploy-template-package` inputs, and records only
+safe relative paths plus digests in
+`artifact_index.operator_inputs_packages[].release_materials`.
 `scripts/test-package-driven-ga-smoke.sh` verifies that finalized path reports
 created by the four package-driven operator-inputs runs can be consumed
 directly by this aggregate without adding a package-level verdict or a

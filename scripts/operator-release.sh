@@ -445,6 +445,7 @@ const REQUIRED_DEPLOYMENT_PATHS = [
   'airgap/use_existing',
   'airgap/install_substrates'
 ];
+const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 
 class CliError extends Error {
   constructor(message) {
@@ -595,6 +596,14 @@ function requireString(value, label) {
   return value;
 }
 
+function requireDigest(value, label) {
+  const digest = requireString(value, label);
+  if (!DIGEST_RE.test(digest)) {
+    fail(`${label} must be a sha256 digest`);
+  }
+  return digest;
+}
+
 async function removeStaleOutputFile(file) {
   try {
     await fs.rm(file, { force: true });
@@ -683,7 +692,7 @@ function requireFileRef(ref, key, deploymentPath) {
   }
   return {
     path: requireString(ref.absolute_path, `${key} path for ${deploymentPath}`),
-    sha256: requireString(ref.sha256, `${key} digest for ${deploymentPath}`)
+    sha256: requireDigest(ref.sha256, `${key} digest for ${deploymentPath}`)
   };
 }
 

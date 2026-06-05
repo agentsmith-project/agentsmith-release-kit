@@ -878,6 +878,143 @@ run_ga_release() {
     --output-dir "$output_dir"
 }
 
+write_operator_inputs_plan_set() {
+  local fixture_dir="$1"
+  local plan_dir="$2"
+  local mutation="${3:-valid}"
+
+  "$NODE_BIN" --input-type=module - "$fixture_dir" "$plan_dir" "$mutation" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [fixtureDir, planDir, mutation] = process.argv.slice(2);
+const deploymentPaths = [
+  'online/use_existing',
+  'online/install_substrates',
+  'airgap/use_existing',
+  'airgap/install_substrates'
+];
+const wrongDigest = `sha256:${'0'.repeat(64)}`;
+
+function digest(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function canonicalDigest(value) {
+  return digest(Buffer.from(JSON.stringify(stableJson(value))));
+}
+
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function copyMaterial(source, target) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(source, target);
+}
+
+function fileDigest(file) {
+  return digest(fs.readFileSync(file));
+}
+
+function slug(operatorPath) {
+  return operatorPath.replace(/[/_]+/g, '-');
+}
+
+for (const operatorPath of deploymentPaths) {
+  const packageRoot = path.resolve(planDir, slug(operatorPath));
+  fs.mkdirSync(packageRoot, { recursive: true });
+  const manifestPath = path.join(packageRoot, 'operator-inputs.json');
+  const releaseContractPath = path.join(packageRoot, 'release-contract.json');
+  const deployTemplatePackagePath = path.join(packageRoot, 'deploy-template-package.json');
+
+  copyMaterial(path.join(fixtureDir, 'release-contract.json'), releaseContractPath);
+  copyMaterial(path.join(fixtureDir, 'deploy-template-package.json'), deployTemplatePackagePath);
+
+  const manifest = {
+    schema_version: 'agentsmith.operator-inputs/v1',
+    operator_inputs_version: 1,
+    deployment_path: operatorPath
+  };
+  writeJson(manifestPath, manifest);
+
+  const releaseContractDigest = fileDigest(releaseContractPath);
+  const plan = {
+    schema_version: 'agentsmith.operator-inputs-plan/v1',
+    scope: 'operator_inputs_intake_only',
+    status: 'pass',
+    repo_root: path.resolve(fixtureDir, '..'),
+    operator_inputs_root: packageRoot,
+    argv_path_mode: 'absolute',
+    deployment_path: operatorPath,
+    mode: 'apply',
+    package: {
+      manifest_path: manifestPath,
+      manifest_relative_path: 'operator-inputs.json',
+      manifest_sha256: fileDigest(manifestPath)
+    },
+    input_refs: {
+      release_contract: {
+        kind: 'file',
+        path: 'release-contract.json',
+        absolute_path: releaseContractPath,
+        sha256: mutation === 'stale-release-contract-ref'
+          ? wrongDigest
+          : releaseContractDigest
+      },
+      deploy_template_package: {
+        kind: 'file',
+        path: 'deploy-template-package.json',
+        absolute_path: deployTemplatePackagePath,
+        sha256: fileDigest(deployTemplatePackagePath)
+      }
+    },
+    plan_sha256: null
+  };
+  plan.plan_sha256 = canonicalDigest({ ...plan, plan_sha256: null });
+  writeJson(path.join(packageRoot, '.release-kit-internal/operator-inputs-plan.json'), plan);
+}
+NODE
+}
+
+run_ga_release_with_operator_plans() {
+  local fixture_dir="$1"
+  local path_dir="$2"
+  local plan_dir="$3"
+  local output_dir="$4"
+
+  bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
+    --release-contract "$fixture_dir/release-contract.json" \
+    --deploy-template-package "$fixture_dir/deploy-template-package.json" \
+    --deployment-path-report "$path_dir/online-use-existing/deployment-path-report.json" \
+    --deployment-path-report "$path_dir/online-install-substrates/deployment-path-report.json" \
+    --deployment-path-report "$path_dir/airgap-use-existing/deployment-path-report.json" \
+    --deployment-path-report "$path_dir/airgap-install-substrates/deployment-path-report.json" \
+    --operator-inputs-plan "$plan_dir/online-use-existing/.release-kit-internal/operator-inputs-plan.json" \
+    --operator-inputs-plan "$plan_dir/online-install-substrates/.release-kit-internal/operator-inputs-plan.json" \
+    --operator-inputs-plan "$plan_dir/airgap-use-existing/.release-kit-internal/operator-inputs-plan.json" \
+    --operator-inputs-plan "$plan_dir/airgap-install-substrates/.release-kit-internal/operator-inputs-plan.json" \
+    --product-readiness-report "$fixture_dir/product-readiness-report.json" \
+    --post-deploy-product-smoke-report "$fixture_dir/post-deploy-product-smoke-report.json" \
+    --output-dir "$output_dir"
+}
+
 run_ga_release_with_summary_write_failure() {
   local fixture_dir="$1"
   local path_dir="$2"
@@ -1927,6 +2064,61 @@ if (Object.hasOwn(report.summary || {}, 'product_smoke_flows')) {
 NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
 pass "valid GA aggregate consumes finalizer-generated path bundles"
+
+PLAN_DIR="$TMP_DIR/operator-input-plans-valid"
+write_operator_inputs_plan_set "$VALID_DIR" "$PLAN_DIR" valid
+run_ga_release_with_operator_plans "$VALID_DIR" "$PATH_DIR" "$PLAN_DIR" "$TMP_DIR/out-valid-with-operator-plans"
+
+"$NODE_BIN" --input-type=module - \
+  "$TMP_DIR/out-valid-with-operator-plans/ga-release-report.json" \
+  "$VALID_DIR/release-contract.json" \
+  "$VALID_DIR/deploy-template-package.json" \
+  "$PLAN_DIR" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [reportFile, releaseContractFile, deployTemplatePackageFile, planDir] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const digest = (file) => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+const releaseContractDigest = digest(releaseContractFile);
+const deployTemplatePackageDigest = digest(deployTemplatePackageFile);
+const packageIndex = report.artifact_index?.operator_inputs_packages;
+
+if (!Array.isArray(packageIndex) || packageIndex.length !== 4) {
+  throw new Error('GA report must index four operator-inputs packages when plans are provided');
+}
+if (JSON.stringify(packageIndex).includes(planDir)) {
+  throw new Error('GA report operator-inputs package index must not expose local plan dir');
+}
+for (const entry of packageIndex) {
+  if (entry.release_materials?.release_contract?.path !== 'release-contract.json') {
+    throw new Error(`operator-inputs package index missing release contract path: ${entry.operator_path}`);
+  }
+  if (entry.release_materials?.release_contract?.digest !== releaseContractDigest) {
+    throw new Error(`operator-inputs package index missing release contract digest: ${entry.operator_path}`);
+  }
+  if (entry.release_materials?.deploy_template_package?.path !== 'deploy-template-package.json') {
+    throw new Error(`operator-inputs package index missing deploy template package path: ${entry.operator_path}`);
+  }
+  if (entry.release_materials?.deploy_template_package?.digest !== deployTemplatePackageDigest) {
+    throw new Error(`operator-inputs package index missing deploy template package digest: ${entry.operator_path}`);
+  }
+}
+NODE
+pass "GA aggregate binds operator-inputs package release materials"
+
+STALE_PLAN_DIR="$TMP_DIR/operator-input-plans-stale-release-ref"
+write_operator_inputs_plan_set "$VALID_DIR" "$STALE_PLAN_DIR" stale-release-contract-ref
+if run_ga_release_with_operator_plans \
+  "$VALID_DIR" \
+  "$PATH_DIR" \
+  "$STALE_PLAN_DIR" \
+  "$TMP_DIR/out-stale-operator-plan-ref" >"$TMP_DIR/ga-stale-operator-plan-ref.out" 2>&1; then
+  fail "GA aggregate should reject operator-inputs plan with stale release contract ref digest"
+fi
+grep -Fq 'operator_inputs_plan.input_refs.release_contract.sha256 must match file digest for online/use_existing' \
+  "$TMP_DIR/ga-stale-operator-plan-ref.out" ||
+  fail "stale operator-inputs plan ref failure did not name release contract digest binding"
 
 STALE_FAILURE_DIR="$TMP_DIR/stale-failure"
 STALE_OUTPUT_DIR="$TMP_DIR/out-stale-failure"
