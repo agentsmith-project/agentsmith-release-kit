@@ -415,17 +415,22 @@ seed_stale_ga_outputs() {
   cp "$ga_output_dir/ga-release-summary.md" "$output_dir/ga-release-summary.md"
 }
 
+missing_package_output="$TMP_DIR/ga-output-missing-package"
+seed_stale_ga_outputs "$missing_package_output"
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --operator-inputs "$online_package" \
   --operator-inputs "$online_install_package" \
   --operator-inputs "$airgap_package" \
   --product-readiness-report "$product_dir/product-readiness-report.json" \
   --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
-  --output-dir "$TMP_DIR/ga-output-missing-package" >"$TMP_DIR/ga-missing-package.out" 2>&1; then
+  --output-dir "$missing_package_output" >"$TMP_DIR/ga-missing-package.out" 2>&1; then
   fail "operator GA facade should fail when a package is missing"
 fi
 grep -Fq 'requires exactly 4 --operator-inputs packages' "$TMP_DIR/ga-missing-package.out" ||
   fail "missing package failure did not explain required package count"
+if [[ -e "$missing_package_output/ga-release-report.json" || -e "$missing_package_output/ga-release-summary.md" ]]; then
+  fail "operator GA facade missing package failure must remove stale final GA outputs"
+fi
 
 duplicate_path_output="$TMP_DIR/ga-output-duplicate-path"
 seed_stale_ga_outputs "$duplicate_path_output"

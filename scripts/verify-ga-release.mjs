@@ -244,6 +244,20 @@ function parseArgs(argv) {
   return parsed;
 }
 
+function findOutputDirArg(argv) {
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== '--output-dir') {
+      continue;
+    }
+    const value = argv[index + 1];
+    if (!value || value.trim() === '' || value.startsWith('--')) {
+      return undefined;
+    }
+    return path.resolve(value);
+  }
+  return undefined;
+}
+
 function digestBuffer(buffer) {
   return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
 }
@@ -1905,7 +1919,17 @@ async function writeFinalOutputs(outputDir, report) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const rawArgs = process.argv.slice(2);
+  let args;
+  try {
+    args = parseArgs(rawArgs);
+  } catch (error) {
+    const outputDir = findOutputDirArg(rawArgs);
+    if (outputDir) {
+      await clearStaleFinalOutputs(outputDir);
+    }
+    throw error;
+  }
   if (args.help) {
     console.log(usage());
     return;

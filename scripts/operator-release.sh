@@ -569,6 +569,20 @@ function parseArgs() {
   return parsed;
 }
 
+function findOutputDirArg() {
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] !== '--output-dir') {
+      continue;
+    }
+    const value = argv[index + 1];
+    if (!value || value.trim() === '' || value.startsWith('--')) {
+      return undefined;
+    }
+    return value;
+  }
+  return undefined;
+}
+
 function requireString(value, label) {
   if (typeof value !== 'string' || value.trim() === '') {
     fail(`${label} is required`);
@@ -683,7 +697,16 @@ function pickSharedRef(resolvedPackages, key) {
 }
 
 async function main() {
-  const args = parseArgs();
+  let args;
+  try {
+    args = parseArgs();
+  } catch (error) {
+    const outputDir = findOutputDirArg();
+    if (outputDir) {
+      await clearStaleFinalOutputs(outputDir);
+    }
+    throw error;
+  }
   if (args.help) {
     console.log(usage());
     return;

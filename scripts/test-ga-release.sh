@@ -1998,6 +1998,10 @@ pass "GA aggregate requires canonical runner and dependency source provenance"
 MISSING_DIR="$TMP_DIR/missing"
 write_fixture_set "$MISSING_DIR" valid
 generate_path_bundles "$MISSING_DIR" "$TMP_DIR/path-missing"
+MISSING_OUTPUT_DIR="$TMP_DIR/out-missing"
+mkdir -p "$MISSING_OUTPUT_DIR"
+cp "$TMP_DIR/out-valid/ga-release-report.json" "$MISSING_OUTPUT_DIR/ga-release-report.json"
+cp "$TMP_DIR/out-valid/ga-release-summary.md" "$MISSING_OUTPUT_DIR/ga-release-summary.md"
 if bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
   --release-contract "$MISSING_DIR/release-contract.json" \
   --deploy-template-package "$MISSING_DIR/deploy-template-package.json" \
@@ -2006,11 +2010,14 @@ if bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
   --deployment-path-report "$TMP_DIR/path-missing/airgap-use-existing/deployment-path-report.json" \
   --product-readiness-report "$MISSING_DIR/product-readiness-report.json" \
   --post-deploy-product-smoke-report "$MISSING_DIR/post-deploy-product-smoke-report.json" \
-  --output-dir "$TMP_DIR/out-missing" >"$TMP_DIR/ga-release-missing.out" 2>&1; then
+  --output-dir "$MISSING_OUTPUT_DIR" >"$TMP_DIR/ga-release-missing.out" 2>&1; then
   fail "missing path report should fail"
 fi
 grep -Fq "expected exactly 4 --deployment-path-report inputs" "$TMP_DIR/ga-release-missing.out" || \
   fail "missing path report failure message did not explain blocker"
+if [[ -e "$MISSING_OUTPUT_DIR/ga-release-report.json" || -e "$MISSING_OUTPUT_DIR/ga-release-summary.md" ]]; then
+  fail "missing path report failure must remove stale final GA outputs"
+fi
 pass "missing path report fails fast"
 
 NO_MANIFEST_DIR="$TMP_DIR/missing-manifest"
