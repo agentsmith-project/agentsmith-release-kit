@@ -215,6 +215,7 @@ Maintainers changing release-kit internals should use
 manual diagnostics, and `docs/RELEASE_GATES.md` for the full gate contract.
 Those references are not the operator copy-paste path, not package readiness,
 not operator readiness, and not a separate GA signoff surface.
+Legacy compatibility aliases are maintainer/internal only; removal target: release-kit v1.0.0 GA cut.
 
 The root README intentionally keeps the default path to `operator-inputs`,
 `scripts/operator-release.sh`, `ga-release-report.json`, and the concise

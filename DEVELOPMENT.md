@@ -41,11 +41,13 @@ Airgap-bundle surfaces may optionally write unsigned scoped
 digest-only airgap evidence handoff fields; runbook acceptance is checked by
 `scripts/test-operator-runbook-acceptance.sh` and does not issue readiness,
 identity, signature, or verdict claims.
-`airgap/use_existing` and `airgap/kit_provided` remain transitional focused
-entries for consuming an already assembled airgap bundle; the package-driven
-operator main path uses `airgap/use_existing` and `airgap/install_substrates`.
-`kit_provided` means pack/truth validation for kit-supplied substrate material,
-not substrate installation. removal target: release-kit v1.0.0 GA cut.
+Legacy positional diagnostics still include `airgap/use_existing` and internal
+`airgap/kit_provided` for already assembled airgap bundle investigation; they
+are maintainer-only compatibility entries. The package-driven operator main
+path uses `airgap/use_existing` and `airgap/install_substrates`. In legacy
+diagnostics, `kit_provided` means pack/truth validation for kit-supplied
+substrate material, not substrate installation. removal target: release-kit
+v1.0.0 GA cut.
 Package-driven `install_substrates` runs the
 namespace-scoped `substrate-install` producer inside
 `operator-release.sh --operator-inputs <pkg> --run`, requires explicit
@@ -55,16 +57,18 @@ pack/truth identity and provenance markers only; `installed_by` is not
 installer proof and does not mean release-kit created databases, buckets, OIDC
 realms, or other substrate resources.
 `--airgap-adoption` consumes matching repo-local airgap-bundle and
-confirmed-apply airgap operator surface summaries for `use_existing` or
-`kit_provided` plus an explicit release contract and bundle manifest. It
-writes a digest-only `airgap-adoption-report.json` with `readiness: false`.
+confirmed-apply airgap operator surface summaries for legacy substrate
+strategies (`use_existing` or internal `kit_provided`) plus an explicit release
+contract and bundle manifest. It writes a digest-only
+`airgap-adoption-report.json` with `readiness: false`.
 `--release-engineering-gate-intake` consumes only existing focused online and
-airgap adoption reports, requires the four online/airgap use-existing/kit-provided
-operator choices, and writes `release-engineering-gate-intake-report.json`
-with `readiness: false`, `status: pass`, and `formal_verdict: not_issued`.
-This maintainer-only path is for explicit GA or compliance trigger work; it
-lists the missing inputs for the final `--ga-release` aggregate and is not
-release readiness.
+airgap adoption reports, requires the four legacy online/airgap diagnostic
+combinations (`online/use_existing`, internal `online/kit_provided`,
+`airgap/use_existing`, internal `airgap/kit_provided`), and writes
+`release-engineering-gate-intake-report.json` with `readiness: false`,
+`status: pass`, and `formal_verdict: not_issued`. This maintainer-only path is
+for explicit GA or compliance trigger work; it lists the missing inputs for the
+final `--ga-release` aggregate and is not release readiness.
 
 ## Development Principles
 

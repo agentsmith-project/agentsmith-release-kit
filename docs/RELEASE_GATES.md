@@ -231,9 +231,9 @@ bash scripts/test-airgap-adoption.sh
 
 This focused guard exercises `bash scripts/verify-release.sh
 --airgap-adoption`. It consumes matching generated airgap-bundle and
-confirmed-apply airgap `operator-release-surface-report.json` files for either
-`use_existing` or `kit_provided`, plus an explicit release contract and
-`airgap-bundle-manifest.json`.
+confirmed-apply airgap `operator-release-surface-report.json` files for legacy
+substrate strategies (`use_existing` or internal `kit_provided`), plus an
+explicit release contract and `airgap-bundle-manifest.json`.
 
 The generated `airgap-adoption-report.json` keeps `schema:
 agentsmith.airgap-adoption/v1`, `scope: airgap_adoption_only`, `readiness:
@@ -1125,13 +1125,14 @@ This focused guard exercises `bash scripts/verify-release.sh
 candidate intake boundary for explicit GA or compliance trigger work. It
 consumes the existing focused `online-adoption-report.json` plus two existing
 focused `airgap-adoption-report.json` files for `airgap/use_existing` and
-`airgap/kit_provided`; it does not consume producer reports directly.
+internal `airgap/kit_provided`; it does not consume producer reports directly.
 
-The intake requires all four maintainer/internal transitional deployment choices:
-`online/use_existing`, `online/kit_provided`, `airgap/use_existing`, and
-`airgap/kit_provided`. Release id, git sha, release contract raw digest,
-release contract subject/provenance, online adoption provenance summaries, and
-airgap adoption digest chains must bind to the supplied release contract.
+The intake requires all four maintainer/internal legacy diagnostic
+combinations: `online/use_existing`, internal `online/kit_provided`,
+`airgap/use_existing`, and internal `airgap/kit_provided`. Release id, git sha,
+release contract raw digest, release contract subject/provenance, online
+adoption provenance summaries, and airgap adoption digest chains must bind to
+the supplied release contract.
 Inputs containing `readiness: true`, `release_verdict`, `operator_verdict`,
 `deploy_readiness`, or `package_readiness` fail fast.
 
