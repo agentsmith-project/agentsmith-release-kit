@@ -920,6 +920,13 @@ function provenance(subjectName) {
 }
 
 function canonicalSmokeResults() {
+  const providerNeutralEndpointProof = {
+    endpoint_type: 'custom',
+    provider_family: 'custom',
+    upstream_protocol: 'openai_chat_completions',
+    credential_type: 'api_key',
+    success_path: 'provider_neutral_endpoint'
+  };
   const specs = [
     { id: 'login_profile', source_flow: 'login_profile', label: 'login/profile' },
     { id: 'workspace_project', source_flow: 'workspace_project', label: 'workspace/project' },
@@ -937,9 +944,51 @@ function canonicalSmokeResults() {
       label: spec.label,
       source_flow: spec.source_flow,
       source_evidence_path: `unified-deploy/product-flows/${spec.source_flow}.json`,
-      source_evidence_sha256: sha(`product-smoke:${spec.source_flow}`)
+      source_evidence_sha256: sha(`product-smoke:${spec.source_flow}`),
+      ...(spec.id === 'provider_neutral_endpoint' ? { proof: providerNeutralEndpointProof } : {})
     }
   ]));
+}
+
+function runtimeReadinessObservationPolicy() {
+  return {
+    step_id: 'gate-release',
+    gate_id: 'gate-release',
+    theme: 'runtime_pending_readiness',
+    backoff: 'increasing_after_consecutive_non_terminal',
+    interval_ms: [60000, 90000, 120000, 180000, 300000],
+    evidence_focus: [
+      'Files restore continuation focused backend-real gate',
+      'AGENT_SANDBOX_UNAVAILABLE API/pod-manager/ASBCP summaries',
+      'runtime flake versus stability blocker classification'
+    ],
+    state_convergence: {
+      files: {
+        pending: 'Return typed file_library_list_pending, continue runtime-access release convergence, and recheck without reading a stale projection.',
+        releasing: 'Wait for workspace binding release convergence before creating a read export; return typed pending while release is non-terminal.',
+        offline: 'Treat as no active writer for Files read export and create or read the clean read export through the Files path only.',
+        not_found: 'Treat as no active writer for Files read export; do not synthesize an executable connector.'
+      },
+      agent_task_sandbox: {
+        pending: 'Continue bounded ASBCP status checks until Running, Failed, or timeout.',
+        releasing: 'Wait for workload release or surface a typed release-incomplete error; do not start a second task HOME holder.',
+        offline: 'Call ASBCP create-or-ensure for the workload, then continue status checks until Running, Failed, or timeout.',
+        not_found: 'Call ASBCP create-or-ensure for the workload, then continue status checks until Running, Failed, or timeout.'
+      },
+      afscp_workspace_binding: {
+        pending: 'Return typed runtime readiness pending and recheck through the workspace binding owner before Files read export proceeds.',
+        releasing: 'Continue release convergence through the workspace binding owner until terminal released/revoked/expired/deleted.',
+        offline: 'Treat as no active writer for Files read export; executable attachment must use the Agent Task sandbox owner path.',
+        not_found: 'Treat as no active writer for Files read export; executable attachment must use the Agent Task sandbox owner path.'
+      },
+      read_export: {
+        pending: 'Return typed pending, trigger or continue runtime-access release, and keep the pending read export warm for the caller next poll.',
+        releasing: 'Wait for runtime release fence or export invalidation, and avoid revoke/create loops while convergence is non-terminal.',
+        offline: 'Create or reuse the read export only after no active writer is observed.',
+        not_found: 'Create a fresh read export if runtime access is clean; otherwise return typed pending.'
+      }
+    }
+  };
 }
 
 writeJson(path.join(outDir, 'product-readiness-report.json'), {
@@ -948,6 +997,26 @@ writeJson(path.join(outDir, 'product-readiness-report.json'), {
   release_id: contract.release_id,
   git_sha: contract.git_sha,
   release_contract_digest: contractDigest,
+  runtime_readiness: {
+    observation_policy: runtimeReadinessObservationPolicy(),
+    files_restore_continuation: {
+      path: 'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json',
+      sha256: sha('runtime-readiness-details'),
+      schema_version: 'agentsmith.runtime-readiness-details/v1',
+      theme: 'runtime_pending_readiness',
+      classification: 'runtime_flake',
+      outcome: 'focused_gate_passed_after_runtime_readiness_marker',
+      signals_count: 3,
+      call_summaries_count: 3
+    }
+  },
+  referenced_files: [
+    {
+      id: 'runtime_readiness_details',
+      path: 'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json',
+      sha256: sha('runtime-readiness-details')
+    }
+  ],
   artifact_provenance: provenance('product-readiness-report')
 });
 
