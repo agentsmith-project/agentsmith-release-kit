@@ -181,6 +181,37 @@ assert_development_default_commands_are_slim() {
   fi
 }
 
+assert_root_readme_operator_surface_slim() {
+  local first_screen
+  local forbidden
+
+  first_screen="$(
+    awk '
+      /^### Maintainer\/Internal Diagnostics$/ { exit }
+      { print }
+    ' README.md
+  )"
+
+  for forbidden in \
+    'kit_provided' \
+    '[.]release-kit-internal' \
+    'operator-inputs-plan' \
+    'operator-release-surface-report' \
+    'adoption report|adoption aggregation' \
+    'candidate intake' \
+    'release-engineering' \
+    'operator-signoff|operator signoff' \
+    'external_declared' \
+    'kit_installed' \
+    'existing_kubernetes' \
+    'kind_rehearsal'; do
+    if grep -Eiq -- "$forbidden" <<<"$first_screen"; then
+      printf '%s\n' "$first_screen" | grep -Ein -- "$forbidden" >&2 || true
+      fail "root README operator first screen exposes legacy aliases, internal paths, machine profiles, or maintainer diagnostics"
+    fi
+  done
+}
+
 reject_ecosystem_bootstrap_files
 
 remote_url="$(git remote get-url origin 2>/dev/null || true)"
@@ -281,6 +312,8 @@ reject_scan \
   '[.]release-kit-internal|operator-inputs-plan|operator-release-surface-report|evidence-provenance|adoption report|candidate intake|release-engineering|operator-signoff|--target-profile|verify-release[.]sh' \
   "${example_readmes[@]}"
 
+assert_root_readme_operator_surface_slim
+
 require_text README.md "$EXPECTED_IDENTITY"
 require_text README.md "AgentSmith release contract"
 require_text README.md "deploy template package"
@@ -305,13 +338,8 @@ require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
 require_text README.md '`airgap/use_existing`'
 require_text README.md '`airgap/install_substrates`'
-require_text README.md 'removal target: release-kit v1.0.0 GA cut'
-require_text README.md '`install_substrates` requires an explicit report from the separate'
-require_text README.md 'kit-provided pack/truth identity marker / provenance marker'
-require_text README.md 'not installer proof'
-require_text README.md '`kind_rehearsal/kit_installed/online` remains rehearsal-only accepted input'
-require_text README.md "is not a release profile, user deployment prerequisite, package-driven release"
-require_text README.md "target, or replacement for real Kubernetes evidence"
+require_text README.md 'Maintainer/internal diagnostics are documented in'
+require_text README.md 'docs/maintainer-diagnostics.md'
 require_text docs/runbooks/README.md "Use the single operator facade"
 require_text docs/runbooks/README.md "Formal release success or failure is represented only by the final"
 require_text docs/runbooks/README.md '`ga-release-report.json` issued by the release finalizer/captain'

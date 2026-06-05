@@ -78,9 +78,23 @@ assert_operator_success_contract_docs() {
     /^### Maintainer\/Internal Diagnostics$/ { exit }
     { print }
   ' "$root_readme" >"$root_first_screen"
-  if grep -Eiq 'kit_provided' "$root_first_screen"; then
-    fail "root README operator first screen must not expose legacy kit_provided"
-  fi
+  for forbidden in \
+    'kit_provided' \
+    '[.]release-kit-internal' \
+    'operator-inputs-plan' \
+    'operator-release-surface-report' \
+    'adoption report|adoption aggregation' \
+    'candidate intake' \
+    'release-engineering' \
+    'operator-signoff|operator signoff' \
+    'external_declared' \
+    'kit_installed' \
+    'existing_kubernetes' \
+    'kind_rehearsal'; do
+    if grep -Eiq "$forbidden" "$root_first_screen"; then
+      fail "root README operator first screen must not expose legacy aliases, internal paths, machine profiles, or maintainer diagnostics: $forbidden"
+    fi
+  done
 
   grep -q -- 'The GA operator substrate choices are `use_existing` and' "$root_readme" ||
     fail "root README must name the GA operator substrate choices"
@@ -91,7 +105,9 @@ assert_operator_success_contract_docs() {
   fi
   grep -q -- 'Formal release success' "$root_readme" ||
     fail "root README must name the formal GA success boundary"
-  grep -q -- 'or failure is represented only by the final `ga-release-report.json` issued by' "$root_readme" ||
+  grep -q -- 'or failure is represented only by the' "$root_readme" ||
+    fail "root README must point formal success to the finalizer GA report"
+  grep -q -- 'final `ga-release-report.json` issued by' "$root_readme" ||
     fail "root README must point formal success to the finalizer GA report"
   grep -q -- 'release finalizer/captain' "$root_readme" ||
     fail "root README must point formal success to the finalizer GA report"
@@ -99,8 +115,10 @@ assert_operator_success_contract_docs() {
     fail "root README must describe blocked GA aggregates as not_issued"
   grep -q -- 'formal_verdict=not_issued' "$first_screen" ||
     fail "operator runbook first screen must describe blocked GA aggregates as not_issued"
-  grep -q -- 'Legacy `kit_provided` is an internal compatibility alias' "$root_readme" ||
-    fail "root README must mark kit_provided as legacy/internal"
+  grep -q -- 'Maintainer/internal diagnostics are documented in' "$root_readme" ||
+    fail "root README must route maintainer diagnostics out of the operator first screen"
+  grep -q -- 'docs/maintainer-diagnostics.md' "$root_readme" ||
+    fail "root README must point maintainers to maintainer diagnostics"
   pass "operator success contract docs keep internal diagnostics out of the first screen"
 }
 

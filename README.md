@@ -99,10 +99,10 @@ The GA operator substrate choices are `use_existing` and
 
 Without `--run`, this slice validates the package, rejects internal producer
 vocabulary, secret-looking payloads, missing path-specific inputs, and path
-escapes, then writes `.release-kit-internal/operator-inputs-plan.json`. The
-plan is internal only: it is not GA evidence, not release readiness, and does
-not write `formal_verdict`. Post-deploy smoke reports are runtime evidence and
-are not operator-inputs.
+escapes, then prepares an internal execution plan for `--run`. That validation
+is not GA evidence, not release readiness, and does not write
+`formal_verdict`. Post-deploy smoke reports are runtime evidence and are not
+operator-inputs.
 
 With `--doctor`, the facade reports all currently missing package fields for
 the selected deployment path and exits without executing producers, issuing a
@@ -125,12 +125,11 @@ with bundle-local release contract/deploy package components. It requires
 package-local `kubectl`, explicit `context`, package-local archive/image load
 tools, and apply smoke inputs. The airgap install path runs substrate-install,
 then runs bundle-check plus airgap deployment-gate using bundle-local release
-materials and the installer output substrate truth. These paths write
-path-level evidence under `.release-kit-internal/` for the release
-captain/finalizer. Server-dry-run modes also fail fast. Formal release success
-or failure is represented only by the final `ga-release-report.json` issued by
-the release finalizer/captain after required path evidence and AgentSmith
-product-side reports are available.
+materials and the installer output substrate truth. These paths record
+path-level evidence for the release captain/finalizer. Server-dry-run modes
+also fail fast. Formal release success or failure is represented only by the
+final `ga-release-report.json` issued by the release finalizer/captain after
+required path evidence and AgentSmith product-side reports are available.
 
 For `online/install_substrates`, the package must provide namespace-scoped
 installer inputs, `kubectl` and `context` inputs, a package-local routability
@@ -139,15 +138,15 @@ probe, and an explicit install confirmation; it must not provide package-local
 `airgap/install_substrates`, the package must provide package-local
 `kubectl`, `context`, the airgap bundle plus manifest, package-local
 archive/image loader probes for apply, and explicit install confirmation; it
-uses the installer-generated substrate truth under `.release-kit-internal` and
-does not require `routability_probe` or bundle/package `substrate_truth`.
+uses the installer-generated substrate truth created during the package run
+and does not require `routability_probe` or bundle/package `substrate_truth`.
 
 After the four packages have been run, the operator-facing final step is
 `operator-release.sh --ga-report` with those four package paths plus the
 AgentSmith product readiness and post-deploy product smoke reports. The facade
 locates finalized path evidence inside each package and writes the final
-`ga-release-report.json`; operators do not pass `.release-kit-internal` path
-report files.
+`ga-release-report.json`; operators pass package paths, not internal evidence
+paths.
 A blocked final aggregate overwrites stale pass outputs with `status=fail`,
 `formal_verdict=not_issued`, and blockers in that same report.
 It also writes `ga-evidence-index.json`, a derived archive index that binds
@@ -168,11 +167,10 @@ These paths are still release-kit installer producer/finalizer evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
 
-Maintainer/internal references, including legacy positional surfaces,
-adoption aggregation, operator signoff intake, release-engineering intake, and
-deployment-path finalization, are documented in `docs/maintainer-diagnostics.md`
-and `docs/RELEASE_GATES.md`. They are not the operator main path, not package
-readiness, not operator readiness, and not a separate GA signoff surface.
+Maintainer/internal diagnostics are documented in
+`docs/maintainer-diagnostics.md` and `docs/RELEASE_GATES.md`. They are not the
+operator main path, not package readiness, not operator readiness, and not a
+separate GA signoff surface.
 
 For `airgap`, operators must provide all required tools, templates, artifacts,
 and images from inside the target network. Airgap flow must not download from
