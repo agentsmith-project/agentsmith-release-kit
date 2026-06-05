@@ -147,6 +147,9 @@ function driftInventoryId(oldId, newId) {
   case 'missing-provenance-workflow-name':
     delete contract.artifact_provenance.workflow_name;
     break;
+  case 'missing-provenance-run-url':
+    delete contract.artifact_provenance.run_url;
+    break;
   case 'bad-subject-sha256':
     contract.artifact_provenance.subject_sha256 = digestE;
     break;
@@ -162,6 +165,10 @@ function driftInventoryId(oldId, newId) {
     break;
   case 'deploy-package-bad-subject-sha256':
     contract.deploy_template_package.artifact_provenance.subject_sha256 = digestE;
+    refreshContractSubjectDigest();
+    break;
+  case 'deploy-package-missing-provenance-run-url':
+    delete contract.deploy_template_package.artifact_provenance.run_url;
     refreshContractSubjectDigest();
     break;
   case 'missing-attestation':
@@ -795,6 +802,9 @@ switch (label) {
   case 'bad-provenance-kind':
     deployTemplatePackage.artifact_provenance.provenance_kind = 'local_build';
     break;
+  case 'deploy-package-missing-provenance-run-url':
+    delete deployTemplatePackage.artifact_provenance.run_url;
+    break;
   case 'missing-attestation':
   case 'deploy-package-missing-attestation':
     delete deployTemplatePackage.artifact_provenance.attestation;
@@ -1196,11 +1206,13 @@ for label in \
   provider-tag-only-image \
   missing-provenance \
   missing-provenance-workflow-name \
+  missing-provenance-run-url \
   bad-subject-sha256 \
   bad-contract-artifact-sha256 \
   local-subject-uri \
   github-source-subject-uri \
   deploy-package-bad-subject-sha256 \
+  deploy-package-missing-provenance-run-url \
   missing-attestation \
   deploy-package-missing-attestation \
   bad-artifact-provenance-schema \
@@ -1270,7 +1282,7 @@ do
   mutate_contract "$label" "$mutated"
 
   case "$label" in
-    bad-provenance-kind|deploy-package-bad-subject-sha256|missing-attestation|deploy-package-missing-attestation|bad-artifact-provenance-schema|deploy-package-bad-artifact-provenance-schema|non-agentsmith-repo-provenance|package-provenance-artifact-drift|product-image-inventory-id-drift|managed-runner-inventory-id-drift|stale-six-image-required-image-ids|missing-deploy-package-required-image-ids|empty-deploy-package-required-image-ids|non-array-deploy-package-required-image-ids|duplicate-deploy-package-required-image-id|required-image-id-missing-in-inventory)
+    bad-provenance-kind|deploy-package-bad-subject-sha256|deploy-package-missing-provenance-run-url|missing-attestation|deploy-package-missing-attestation|bad-artifact-provenance-schema|deploy-package-bad-artifact-provenance-schema|non-agentsmith-repo-provenance|package-provenance-artifact-drift|product-image-inventory-id-drift|managed-runner-inventory-id-drift|stale-six-image-required-image-ids|missing-deploy-package-required-image-ids|empty-deploy-package-required-image-ids|non-array-deploy-package-required-image-ids|duplicate-deploy-package-required-image-id|required-image-id-missing-in-inventory)
       deploy_template_package="$TMP_DIR/$label.deploy-template-package.json"
       mutate_deploy_template_package "$label" "$deploy_template_package"
       ;;

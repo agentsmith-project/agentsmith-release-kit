@@ -1905,6 +1905,23 @@ generate_path_bundles "$ROLLOUT_EXTRA_DIGEST_DIR" "$TMP_DIR/path-rollout-observe
 run_ga_release "$ROLLOUT_EXTRA_DIGEST_DIR" "$TMP_DIR/path-rollout-observed-extra-digest" "$TMP_DIR/out-rollout-observed-extra-digest"
 pass "GA aggregate allows rollout observed sidecar digest extras"
 
+MISSING_HANDOFF_ARTIFACT_RUN_URL_DIR="$TMP_DIR/missing-handoff-artifact-run-url"
+write_fixture_set "$MISSING_HANDOFF_ARTIFACT_RUN_URL_DIR" valid
+"$NODE_BIN" --input-type=module - "$MISSING_HANDOFF_ARTIFACT_RUN_URL_DIR/deploy-template-package.json" <<'NODE'
+import fs from 'node:fs';
+
+const [templateFile] = process.argv.slice(2);
+const template = JSON.parse(fs.readFileSync(templateFile, 'utf8'));
+delete template.artifact_provenance.run_url;
+fs.writeFileSync(templateFile, `${JSON.stringify(template, null, 2)}\n`);
+NODE
+if run_ga_release "$MISSING_HANDOFF_ARTIFACT_RUN_URL_DIR" "$PATH_DIR" "$TMP_DIR/out-missing-handoff-artifact-run-url" >"$TMP_DIR/ga-release-missing-handoff-artifact-run-url.out" 2>&1; then
+  fail "GA aggregate should reject handoff artifact provenance without run_url"
+fi
+grep -Fq "deploy_template_package.artifact_provenance.run_url is required" "$TMP_DIR/ga-release-missing-handoff-artifact-run-url.out" || \
+  fail "missing handoff artifact run_url failure message did not explain blocker"
+pass "GA aggregate requires handoff artifact CI run URLs"
+
 product_report_cases=(
   "product-readiness-report.json|product_readiness_report.artifact_provenance|product readiness"
 )

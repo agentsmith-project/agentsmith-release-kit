@@ -752,6 +752,11 @@ function validateReleaseContract(contract, contractDigest) {
   if (provenance.normalized_remote !== AGENTSMITH_REPO || provenance.commit_sha !== gitSha) {
     fail('release contract provenance must match AgentSmith repo and git sha');
   }
+  requireGithubActionsRunUrl(contract.artifact_provenance.run_url, 'release_contract.artifact_provenance.run_url', {
+    expectedRepo: AGENTSMITH_REPO,
+    runId: provenance.run_id,
+    runAttempt: provenance.run_attempt
+  });
 
   const inventory = requireArray(contract.deploy_image_inventory, 'release_contract.deploy_image_inventory')
     .map((entry, index) => validateImageRef(entry, `release_contract.deploy_image_inventory[${index}]`));
@@ -926,6 +931,15 @@ function validateDeployTemplatePackage(descriptor, contract, descriptorDigest) {
   requireDigest(descriptor.package_sha256, 'deploy_template_package.package_sha256');
   requireDigest(descriptor.manifest_sha256, 'deploy_template_package.manifest_sha256');
   const provenance = requireProvenance(descriptor.artifact_provenance, 'deploy_template_package.artifact_provenance');
+  requireGithubActionsRunUrl(
+    descriptor.artifact_provenance.run_url,
+    'deploy_template_package.artifact_provenance.run_url',
+    {
+      expectedRepo: AGENTSMITH_REPO,
+      runId: provenance.run_id,
+      runAttempt: provenance.run_attempt
+    }
+  );
   const contractDescriptor = requireObject(contract.deploy_template_package, 'release_contract.deploy_template_package');
   if (descriptor.package_sha256 !== contractDescriptor.package_sha256) {
     fail('deploy template package package_sha256 must match release contract');

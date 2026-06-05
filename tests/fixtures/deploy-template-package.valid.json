@@ -15,6 +15,7 @@
     "workflow_name": "release-contract",
     "run_id": "10001",
     "run_attempt": "1",
+    "run_url": "https://github.com/agentsmith-project/agentsmith/actions/runs/10001/attempts/1",
     "job": "package-deploy-template",
     "artifact_uri": "gh-artifact://agentsmith/deploy-template-package/10001/agentsmith-deploy-template-package.tgz",
     "artifact_sha256": "sha256:abababababababababababababababababababababababababababababababab",

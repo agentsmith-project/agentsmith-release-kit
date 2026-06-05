@@ -700,6 +700,44 @@ function requireRemoteArtifactUri(value, label) {
   return uri;
 }
 
+function requireGithubActionsRunUrl(value, label, { expectedRepo, runId, runAttempt }) {
+  const uri = requireString(value, label);
+  if (uri !== uri.trim() || !URI_SCHEME_RE.test(uri) || LOCAL_URI_RE.test(uri) || LOCALHOST_URI_RE.test(uri)) {
+    fail(`${label} must be a GitHub Actions run attempt URL`);
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    fail(`${label} must be a GitHub Actions run attempt URL`);
+  }
+
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com' || parsed.search || parsed.hash) {
+    fail(`${label} must be a GitHub Actions run attempt URL`);
+  }
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  if (
+    parts.length !== 7 ||
+    parts[2] !== 'actions' ||
+    parts[3] !== 'runs' ||
+    parts[5] !== 'attempts'
+  ) {
+    fail(`${label} must be a GitHub Actions run attempt URL`);
+  }
+  const repo = `github.com/${parts[0]}/${parts[1]}`.toLowerCase();
+  if (repo !== expectedRepo) {
+    fail(`${label} must be for canonical repo ${expectedRepo}`);
+  }
+  if (parts[4] !== runId) {
+    fail(`${label} run id must match ${label.replace(/\.run_url$/, '.run_id')}`);
+  }
+  if (parts[6] !== runAttempt) {
+    fail(`${label} run attempt must match ${label.replace(/\.run_url$/, '.run_attempt')}`);
+  }
+  return uri;
+}
+
 function requireSubjectUri(value, label) {
   const uri = requireString(value, label);
 
@@ -808,6 +846,15 @@ function readProvenance(payload, label) {
     run_attempt: requireString(
       provenance.run_attempt,
       `${label}.artifact_provenance.run_attempt`
+    ),
+    run_url: requireGithubActionsRunUrl(
+      provenance.run_url,
+      `${label}.artifact_provenance.run_url`,
+      {
+        expectedRepo: AGENTSMITH_REPO,
+        runId: requireString(provenance.run_id, `${label}.artifact_provenance.run_id`),
+        runAttempt: requireString(provenance.run_attempt, `${label}.artifact_provenance.run_attempt`)
+      }
     ),
     job: requireString(
       provenance.job,
