@@ -1278,6 +1278,18 @@ if grep -Eq 'external_declared|kit_installed|existing_kubernetes|kind_rehearsal|
 fi
 pass "operator-release help keeps operator-facing surface minimal"
 
+install_positional_error="$TMP_DIR/operator-release-install-positional.err"
+if bash "$ROOT_DIR/scripts/operator-release.sh" online install_substrates \
+  >"$TMP_DIR/operator-release-install-positional.out" \
+  2>"$install_positional_error"; then
+  fail "legacy positional operator facade must reject install_substrates"
+fi
+grep -q -- 'legacy positional diagnostics do not accept install_substrates' "$install_positional_error" ||
+  fail "legacy positional install_substrates rejection must point away from old facade"
+grep -q -- 'bash scripts/operator-release.sh --operator-inputs <package-or-json> --run' "$install_positional_error" ||
+  fail "legacy positional install_substrates rejection must point to operator-inputs --run"
+pass "operator-release legacy positional install_substrates rejection points to operator-inputs"
+
 image_args=()
 for id in "${RELEASE_IMAGE_IDS[@]}"; do
   image_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")

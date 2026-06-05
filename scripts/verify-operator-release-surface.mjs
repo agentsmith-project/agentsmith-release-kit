@@ -330,7 +330,7 @@ function requireNonNegativeInteger(value, label) {
 function assertMapping(args) {
   if (args.substrateStrategy === 'install_substrates') {
     fail(
-      'install_substrates is not implemented by the operator facade; run verify-release.sh --substrate-install as a separate producer and provide its report to deployment-path finalization'
+      'legacy positional diagnostics do not accept install_substrates; use package-driven operator inputs instead: bash scripts/operator-release.sh --operator-inputs <package-or-json> --run'
     );
   }
   const key = `${args.surface}/${args.substrateStrategy}`;

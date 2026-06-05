@@ -830,7 +830,7 @@ case "$surface/$substrate_strategy" in
     machine_profile="existing_kubernetes/kit_installed/airgap"
     ;;
   online/install_substrates|airgap/install_substrates|airgap-bundle/install_substrates)
-    fail "install_substrates is not implemented by operator-release.sh; provide a separate --substrate-install report and explicit confirmation to deployment-path finalization."
+    fail "legacy positional diagnostics do not accept install_substrates; use package-driven operator inputs instead: bash scripts/operator-release.sh --operator-inputs <package-or-json> --run"
     ;;
   online/*)
     fail "unknown online substrate strategy: $substrate_strategy"

@@ -145,12 +145,12 @@ diagnostic:
 
 `kit_provided` validates kit-supplied substrate pack/truth inputs and related
 focused evidence only; it is not substrate installation. `install_substrates`
-is not implemented by the old positional/transitional operator facade. Use
-`--operator-inputs` for install_substrates intake. The package-driven install
-paths now run substrate-install before the deployment gate, then use installer
-output truth for path-level evidence only; the existing separate
-substrate-install producer and deployment-path finalizer stay
-maintainer/internal building blocks.
+is accepted only through package-driven `--operator-inputs`; the old
+positional/transitional facade remains a legacy diagnostic surface and does
+not execute install paths. The package-driven install paths now run
+substrate-install before the deployment gate, then use installer output truth
+for path-level evidence only; the existing separate substrate-install producer
+and deployment-path finalizer stay maintainer/internal building blocks.
 `installed_by: agentsmith-release-kit` is a kit-provided pack/truth identity marker / provenance marker only.
 It is not installer proof and does not mean release-kit created databases,
 buckets, OIDC realms, or other substrate resources.
