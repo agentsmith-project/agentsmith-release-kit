@@ -32,7 +32,8 @@ bash scripts/operator-release.sh --ga-report \
   --operator-inputs <airgap-use-existing-pkg> \
   --operator-inputs <airgap-install-substrates-pkg> \
   --product-readiness-report <json> \
-  --post-deploy-product-smoke-report <json> \
+  --post-deploy-product-smoke-report <online-json> \
+  --post-deploy-product-smoke-report <airgap-json> \
   --output-dir <dir>
 ```
 

@@ -24,6 +24,8 @@ assert_operator_success_contract_docs() {
   local help_output="$TMP_DIR/operator-release-help.out"
   local runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
   local root_readme="$ROOT_DIR/README.md"
+  local examples_readme="$ROOT_DIR/examples/README.md"
+  local online_example_readme="$ROOT_DIR/examples/online-existing-kubernetes/README.md"
   local first_screen="$TMP_DIR/runbook-first-screen.md"
   local root_first_screen="$TMP_DIR/root-readme-first-screen.md"
   local root_full="$TMP_DIR/root-readme-full.md"
@@ -147,6 +149,15 @@ assert_operator_success_contract_docs() {
     fail "root README must describe blocked GA aggregates as not_issued"
   grep -q -- 'formal_verdict=not_issued' "$first_screen" ||
     fail "operator runbook first screen must describe blocked GA aggregates as not_issued"
+  for example_readme in "$examples_readme" "$online_example_readme"; do
+    grep -q -- '--post-deploy-product-smoke-report <online-json>' "$example_readme" ||
+      fail "${example_readme#$ROOT_DIR/} must pass an online product smoke report to --ga-report"
+    grep -q -- '--post-deploy-product-smoke-report <airgap-json>' "$example_readme" ||
+      fail "${example_readme#$ROOT_DIR/} must pass an airgap product smoke report to --ga-report"
+    if grep -q -- '--post-deploy-product-smoke-report <json>' "$example_readme"; then
+      fail "${example_readme#$ROOT_DIR/} must not document a single generic product smoke report for --ga-report"
+    fi
+  done
   grep -q -- 'The focused producer catalog is no longer duplicated' "$root_readme" ||
     fail "root README must route maintainer diagnostics out of the operator first screen"
   grep -q -- 'docs/maintainer-diagnostics.md' "$root_readme" ||
