@@ -492,12 +492,62 @@ function requireArtifactUri(value, label) {
   return uri;
 }
 
+function requireExternalUri(value, label) {
+  const uri = requireString(value, label);
+  if (!ARTIFACT_URI_RE.test(uri) || uri.toLowerCase().startsWith('file://')) {
+    fail(`${label} must be a URI`);
+  }
+  assertReportUriHasNoForbiddenContent(uri, label);
+  return uri;
+}
+
+function requireGithubActionsRunUrl(value, label, { expectedRepo, runId, runAttempt }) {
+  const uri = requireExternalUri(value, label);
+  let parsed;
+  try {
+    parsed = new URL(uri);
+  } catch {
+    fail(`${label} must be a GitHub Actions run attempt URL`);
+  }
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.hostname !== 'github.com' ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    fail(`${label} must be a GitHub Actions run attempt URL`);
+  }
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  if (
+    parts.length !== 7 ||
+    parts[2] !== 'actions' ||
+    parts[3] !== 'runs' ||
+    parts[5] !== 'attempts'
+  ) {
+    fail(`${label} must be a GitHub Actions run attempt URL`);
+  }
+  const repo = normalizeRepoIdentity(`github.com/${parts[0]}/${parts[1]}`, `${label}.repo`);
+  if (repo !== expectedRepo) {
+    fail(`${label} must be for canonical repo ${expectedRepo}`);
+  }
+  if (parts[4] !== runId) {
+    fail(`${label} run id must match ${label.replace(/\.run_url$/, '.run_id')}`);
+  }
+  if (parts[6] !== runAttempt) {
+    fail(`${label} run attempt must match ${label.replace(/\.run_url$/, '.run_attempt')}`);
+  }
+  return uri;
+}
+
 function requireProvenance(provenance, label) {
   const value = requireObject(provenance, label);
   const normalizedRemote = requireString(value.normalized_remote ?? value.producer_repo, `${label}.normalized_remote`);
   const commitSha = requireGitSha(value.commit_sha, `${label}.commit_sha`);
   const runId = requireString(value.run_id, `${label}.run_id`);
   const runAttempt = requireString(value.run_attempt, `${label}.run_attempt`);
+  const runUrl = value.run_url === undefined
+    ? undefined
+    : requireExternalUri(value.run_url, `${label}.run_url`);
   const subjectSha = optionalString(value.subject_sha256, `${label}.subject_sha256`);
   const artifactSha = optionalString(value.artifact_sha256, `${label}.artifact_sha256`);
   const artifactUri = value.artifact_uri === undefined
@@ -515,6 +565,7 @@ function requireProvenance(provenance, label) {
     commit_sha: commitSha,
     run_id: runId,
     run_attempt: runAttempt,
+    run_url: runUrl,
     subject_name: optionalString(value.subject_name, `${label}.subject_name`),
     subject_sha256: subjectSha,
     artifact_sha256: artifactSha,
@@ -560,12 +611,18 @@ function validateImageSourceProvenance(image, expectedRepo) {
   if (provenance.artifact_sha256 !== image.digest) {
     fail(`${label}.artifact_sha256 must match release_contract.deploy_image_inventory.${image.id}.digest`);
   }
+  const runUrl = requireGithubActionsRunUrl(image.source_provenance.run_url, `${label}.run_url`, {
+    expectedRepo,
+    runId: provenance.run_id,
+    runAttempt: provenance.run_attempt
+  });
   const artifactUri = requireArtifactUri(image.source_provenance.artifact_uri, `${label}.artifact_uri`);
   return {
     repo: expectedRepo,
     commit_sha: provenance.commit_sha,
     run_id: provenance.run_id,
     run_attempt: provenance.run_attempt,
+    run_url: runUrl,
     image_ids: [image.id],
     image_tags: [imageTag],
     image_digests: [image.digest],
@@ -575,12 +632,14 @@ function validateImageSourceProvenance(image, expectedRepo) {
       imageTag,
       provenance.run_id,
       provenance.run_attempt,
+      runUrl,
       artifactUri,
       image.digest
     ].join(':'),
     provenance: {
       ...provenance,
       tag: provenanceTag,
+      run_url: runUrl,
       artifact_uri: artifactUri
     }
   };
@@ -757,17 +816,30 @@ async function releaseKitFinalizerProvenance() {
   const runAttempt = process.env.GITHUB_RUN_ATTEMPT && process.env.GITHUB_RUN_ATTEMPT.trim() !== ''
     ? process.env.GITHUB_RUN_ATTEMPT
     : '0';
+  const runUrl = process.env.GITHUB_SERVER_URL && process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+    ? requireGithubActionsRunUrl(
+      `${process.env.GITHUB_SERVER_URL.replace(/\/+$/, '')}/${process.env.GITHUB_REPOSITORY}/actions/runs/${runId}/attempts/${runAttempt}`,
+      'release_kit_finalizer_provenance.run_url',
+      {
+        expectedRepo: RELEASE_KIT_REPO,
+        runId,
+        runAttempt
+      }
+    )
+    : undefined;
 
   return {
     repo: RELEASE_KIT_REPO,
     commit_sha: commitSha,
     run_id: runId,
     run_attempt: runAttempt,
+    ...(runUrl ? { run_url: runUrl } : {}),
     freshness_key: [
       RELEASE_KIT_REPO,
       commitSha,
       runId,
-      runAttempt
+      runAttempt,
+      runUrl ?? 'local-git'
     ].join(':'),
     provenance: {
       producer_repo: RELEASE_KIT_REPO,
@@ -775,6 +847,7 @@ async function releaseKitFinalizerProvenance() {
       commit_sha: commitSha,
       run_id: runId,
       run_attempt: runAttempt,
+      ...(runUrl ? { run_url: runUrl } : {}),
       source: process.env.GITHUB_SHA ? 'github_actions_env' : 'git_worktree'
     }
   };
@@ -804,7 +877,8 @@ async function buildCanonicalRepos(release) {
       if (
         summary.commit_sha !== first.commit_sha ||
         summary.run_id !== first.run_id ||
-        summary.run_attempt !== first.run_attempt
+        summary.run_attempt !== first.run_attempt ||
+        summary.run_url !== first.run_url
       ) {
         fail(`canonical repo ${spec.repo} source provenance must use one commit/run across images`);
       }
@@ -815,6 +889,7 @@ async function buildCanonicalRepos(release) {
       commit_sha: first.commit_sha,
       run_id: first.run_id,
       run_attempt: first.run_attempt,
+      run_url: first.run_url,
       image_ids: imageSummaries.flatMap((summary) => summary.image_ids).sort(),
       image_tags: imageSummaries.flatMap((summary) => summary.image_tags).sort(),
       image_digests: imageSummaries.flatMap((summary) => summary.image_digests).sort(),
@@ -823,6 +898,7 @@ async function buildCanonicalRepos(release) {
         first.commit_sha,
         first.run_id,
         first.run_attempt,
+        first.run_url,
         ...imageSummaries.map((summary) => summary.provenance.artifact_uri).sort(),
         ...imageSummaries.flatMap((summary) => summary.image_tags).sort(),
         ...imageSummaries.flatMap((summary) => summary.image_digests).sort()
