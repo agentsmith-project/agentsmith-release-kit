@@ -1271,8 +1271,18 @@ if (!readme.includes('bash scripts/operator-release.sh --ga-report')) {
 if (!readme.includes('ga-release-report.json')) {
   throw new Error('init package README must point to ga-release-report.json');
 }
+if (!readme.includes('"deploy_confirmation": {') || !readme.includes('"operator_run_id": "replace-with-deploy-run-id"')) {
+  throw new Error('init package README must include a deploy_confirmation JSON snippet');
+}
 if (deploymentPath.endsWith('/install_substrates') && !readme.includes('namespace-scoped installer')) {
   throw new Error('install_substrates README must explain the installer boundary');
+}
+if (deploymentPath.endsWith('/install_substrates')) {
+  if (!readme.includes('"install_confirmation": {') || !readme.includes('"confirm_current_install_parameters": true')) {
+    throw new Error('install_substrates README must include an install_confirmation JSON snippet');
+  }
+} else if (readme.includes('"install_confirmation": {')) {
+  throw new Error('use_existing README must not include an install_confirmation snippet');
 }
 if (deploymentPath.startsWith('airgap/') && !readme.includes('airgap-bundle/')) {
   throw new Error('airgap README must explain bundle-local materials');

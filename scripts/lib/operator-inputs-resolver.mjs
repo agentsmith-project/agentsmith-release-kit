@@ -2343,6 +2343,20 @@ function packageReadmeForManifest(manifest) {
       '- Provide package-local kubectl, archive_probe, and image_loader executables before run.'
     ]
     : [];
+  const installConfirmationSnippet = deploymentPath.endsWith('/install_substrates')
+    ? [
+      'Add this only after checking the namespace-scoped installer inputs:',
+      '',
+      '```json',
+      '"install_confirmation": {',
+      '  "confirmed": true,',
+      '  "confirm_current_install_parameters": true,',
+      '  "operator_run_id": "replace-with-install-run-id"',
+      '}',
+      '```',
+      ''
+    ]
+    : [];
 
   return `${[
     '# AgentSmith Operator Inputs',
@@ -2356,6 +2370,20 @@ function packageReadmeForManifest(manifest) {
     ...airgapNote,
     '- Add deploy_confirmation only when this package is ready to execute.',
     '- Keep secrets as references, not raw secret values.',
+    '',
+    '## Confirmation Snippets',
+    '',
+    'Insert these as top-level fields in operator-inputs.json and add commas as needed.',
+    '',
+    ...installConfirmationSnippet,
+    'Add this only when this package is ready to execute:',
+    '',
+    '```json',
+    '"deploy_confirmation": {',
+    '  "confirmed": true,',
+    '  "operator_run_id": "replace-with-deploy-run-id"',
+    '}',
+    '```',
     '',
     '## Check And Run',
     '',
