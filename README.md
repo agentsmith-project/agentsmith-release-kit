@@ -1140,6 +1140,9 @@ input_sha256, release_id, git_sha }`. Its `input_sha256`, `release_id`, and
 `git_sha` must match the same `--release-contract` raw digest, id, and git sha.
 Its `source.product_flows_path` and `source.product_flows_sha256` must bind the
 AgentSmith product-flow aggregate consumed by that smoke report.
+Its `deployment_target` must bind the deployed target profile, public/API base
+URLs, and portable relative `site_env` plus `substrate_truth` path/digest pairs
+used for the smoke run.
 Legacy surrogate top-level fields are rejected: `release_id`, `git_sha`,
 `release_contract_digest`, `covered_flows`, and `artifact_provenance`.
 Deployment path report finalization is internal evidence plumbing for

@@ -257,6 +257,19 @@ writeJson(path.join(outputDir, 'post-deploy-product-smoke-report.json'), {
     aggregate_generated_at: '2026-05-31T12:00:00.000Z',
     aggregate_command: 'focused fixture'
   },
+  deployment_target: {
+    profile: 'existing_kubernetes/external_declared/online',
+    public_base_url: 'https://agentsmith.example.com',
+    api_base_url: 'https://agentsmith.example.com/api/v1',
+    site_env: {
+      path: 'unified-deploy/site.env',
+      sha256: digest('post-deploy-product-smoke:site-env')
+    },
+    substrate_truth: {
+      path: 'unified-deploy/substrate-truth.json',
+      sha256: digest('post-deploy-product-smoke:substrate-truth')
+    }
+  },
   smoke_results: canonicalSmokeResults(),
   failures: [],
   paths: {
@@ -336,6 +349,15 @@ if (report.post_deploy_product_smoke?.source?.product_flows_path !== 'unified-de
 }
 if (report.post_deploy_product_smoke?.source?.product_flows_sha256 !== digest('post-deploy-product-smoke:product-flows')) {
   throw new Error('GA report must bind product smoke aggregate digest');
+}
+if (report.post_deploy_product_smoke?.deployment_target?.profile !== 'existing_kubernetes/external_declared/online') {
+  throw new Error('GA report must bind product smoke deployment target profile');
+}
+if (report.post_deploy_product_smoke?.deployment_target?.site_env?.sha256 !== digest('post-deploy-product-smoke:site-env')) {
+  throw new Error('GA report must bind product smoke site env digest');
+}
+if (report.post_deploy_product_smoke?.deployment_target?.substrate_truth?.sha256 !== digest('post-deploy-product-smoke:substrate-truth')) {
+  throw new Error('GA report must bind product smoke substrate truth digest');
 }
 const expectedSmokeDigests = Object.fromEntries([
   ['login_profile', 'login_profile'],

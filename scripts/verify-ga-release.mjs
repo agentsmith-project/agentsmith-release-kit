@@ -55,6 +55,18 @@ const PRODUCT_SMOKE_SOURCE_KEYS = new Set([
   'aggregate_generated_at',
   'aggregate_command'
 ]);
+const PRODUCT_SMOKE_DEPLOYMENT_TARGET_KEYS = new Set([
+  'profile',
+  'public_base_url',
+  'api_base_url',
+  'runner_public_api_base_url',
+  'site_env',
+  'substrate_truth'
+]);
+const PRODUCT_SMOKE_FILE_BINDING_KEYS = new Set([
+  'path',
+  'sha256'
+]);
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const DEPLOY_TEMPLATE_SCHEMA = 'agentsmith.deploy-template-package/v1';
 const ARTIFACT_PROVENANCE_SCHEMA = 'agentsmith.artifact-provenance/v1';
@@ -1033,11 +1045,57 @@ function validateProductSmokeSource(value) {
   };
 }
 
+function validateProductSmokeFileBinding(value, label) {
+  const binding = requireObject(value, label);
+  rejectUnknownKeys(binding, PRODUCT_SMOKE_FILE_BINDING_KEYS, label);
+  return {
+    path: requirePortableRelativePath(binding.path, `${label}.path`),
+    sha256: requireDigest(binding.sha256, `${label}.sha256`)
+  };
+}
+
+function validateProductSmokeDeploymentTarget(value) {
+  const target = requireObject(value, 'post_deploy_product_smoke.deployment_target');
+  rejectUnknownKeys(
+    target,
+    PRODUCT_SMOKE_DEPLOYMENT_TARGET_KEYS,
+    'post_deploy_product_smoke.deployment_target'
+  );
+  const runnerPublicApiBaseUrl = optionalString(
+    target.runner_public_api_base_url,
+    'post_deploy_product_smoke.deployment_target.runner_public_api_base_url'
+  );
+  return {
+    profile: requireString(
+      target.profile,
+      'post_deploy_product_smoke.deployment_target.profile'
+    ),
+    public_base_url: requireString(
+      target.public_base_url,
+      'post_deploy_product_smoke.deployment_target.public_base_url'
+    ),
+    api_base_url: requireString(
+      target.api_base_url,
+      'post_deploy_product_smoke.deployment_target.api_base_url'
+    ),
+    ...(runnerPublicApiBaseUrl ? { runner_public_api_base_url: runnerPublicApiBaseUrl } : {}),
+    site_env: validateProductSmokeFileBinding(
+      target.site_env,
+      'post_deploy_product_smoke.deployment_target.site_env'
+    ),
+    substrate_truth: validateProductSmokeFileBinding(
+      target.substrate_truth,
+      'post_deploy_product_smoke.deployment_target.substrate_truth'
+    )
+  };
+}
+
 function validateProductSmoke(report, reportDigest, release) {
   const schemaVersion = requireProductSmokeSchemaVersion(report);
   rejectProductSmokeLegacyFields(report);
   const releaseContract = validateProductSmokeReleaseContract(report.release_contract, release);
   const source = validateProductSmokeSource(report.source);
+  const deploymentTarget = validateProductSmokeDeploymentTarget(report.deployment_target);
   requireEquals(
     requireString(report.producer, 'post_deploy_product_smoke.producer'),
     PRODUCT_SMOKE_PRODUCER,
@@ -1115,6 +1173,7 @@ function validateProductSmoke(report, reportDigest, release) {
     repo: report.repo,
     release_contract: releaseContract,
     source,
+    deployment_target: deploymentTarget,
     canonical_smoke_ids: [...REQUIRED_PRODUCT_SMOKE_IDS],
     source_evidence_paths: Object.fromEntries(
       Object.entries(sourceEvidencePaths).sort(([left], [right]) => left.localeCompare(right))

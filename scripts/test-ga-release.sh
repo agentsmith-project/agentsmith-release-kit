@@ -771,6 +771,19 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
     aggregate_generated_at: '2026-05-31T12:00:00.000Z',
     aggregate_command: 'focused fixture'
   },
+  deployment_target: {
+    profile: 'existing_kubernetes/external_declared/online',
+    public_base_url: 'https://agentsmith.example.com',
+    api_base_url: 'https://agentsmith.example.com/api/v1',
+    site_env: {
+      path: 'unified-deploy/site.env',
+      sha256: sha('post-deploy-product-smoke:site-env')
+    },
+    substrate_truth: {
+      path: 'unified-deploy/substrate-truth.json',
+      sha256: sha('post-deploy-product-smoke:substrate-truth')
+    }
+  },
   smoke_results: canonicalSmokeResults(),
   failures: [],
   paths: {
@@ -1082,6 +1095,18 @@ if (mutation === 'legacy-surrogate-shape') {
   report.source.aggregate_schema_version = 'agentsmith.unified-deploy.product-flows.aggregate/v0';
 } else if (mutation === 'wrong-product-flows-producer') {
   report.source.aggregate_producer = 'release-kit-product-flows';
+} else if (mutation === 'missing-deployment-target') {
+  delete report.deployment_target;
+} else if (mutation === 'missing-deployment-target-profile') {
+  delete report.deployment_target.profile;
+} else if (mutation === 'missing-deployment-target-site-env-digest') {
+  delete report.deployment_target.site_env.sha256;
+} else if (mutation === 'malformed-deployment-target-site-env-digest') {
+  report.deployment_target.site_env.sha256 = 'sha256:not-a-digest';
+} else if (mutation === 'deployment-target-site-env-backslash-path') {
+  report.deployment_target.site_env.path = 'reports\\site.env';
+} else if (mutation === 'missing-deployment-target-substrate-truth') {
+  delete report.deployment_target.substrate_truth;
 } else if (mutation === 'missing-canonical-smoke') {
   delete report.smoke_results.usage;
 } else if (mutation === 'missing-source-evidence-path') {
@@ -1762,6 +1787,27 @@ if (smoke?.source?.aggregate_schema_version !== 'agentsmith.unified-deploy.produ
 if (smoke?.source?.aggregate_producer !== 'unified-deploy-product-flows') {
   throw new Error('GA report did not bind product smoke aggregate producer');
 }
+if (smoke?.deployment_target?.profile !== 'existing_kubernetes/external_declared/online') {
+  throw new Error('GA report did not bind product smoke deployment target profile');
+}
+if (smoke?.deployment_target?.public_base_url !== 'https://agentsmith.example.com') {
+  throw new Error('GA report did not bind product smoke public base URL');
+}
+if (smoke?.deployment_target?.api_base_url !== 'https://agentsmith.example.com/api/v1') {
+  throw new Error('GA report did not bind product smoke API base URL');
+}
+if (smoke?.deployment_target?.site_env?.path !== 'unified-deploy/site.env') {
+  throw new Error('GA report did not bind product smoke site env path');
+}
+if (smoke?.deployment_target?.site_env?.sha256 !== sha('post-deploy-product-smoke:site-env')) {
+  throw new Error('GA report did not bind product smoke site env digest');
+}
+if (smoke?.deployment_target?.substrate_truth?.path !== 'unified-deploy/substrate-truth.json') {
+  throw new Error('GA report did not bind product smoke substrate truth path');
+}
+if (smoke?.deployment_target?.substrate_truth?.sha256 !== sha('post-deploy-product-smoke:substrate-truth')) {
+  throw new Error('GA report did not bind product smoke substrate truth digest');
+}
 for (const id of expectedSmokeIds) {
   if (smoke?.source_evidence_paths?.[id] !== expectedSourceEvidencePaths[id]) {
     throw new Error(`GA report did not bind source evidence path for product smoke id: ${id}`);
@@ -1922,6 +1968,12 @@ product_smoke_mutations=(
   malformed-product-flows-sha256
   wrong-product-flows-schema
   wrong-product-flows-producer
+  missing-deployment-target
+  missing-deployment-target-profile
+  missing-deployment-target-site-env-digest
+  malformed-deployment-target-site-env-digest
+  deployment-target-site-env-backslash-path
+  missing-deployment-target-substrate-truth
   missing-canonical-smoke
   missing-source-evidence-path
   missing-source-evidence-sha256
@@ -1985,6 +2037,24 @@ for mutation in "${product_smoke_mutations[@]}"; do
       ;;
     wrong-product-flows-producer)
       expected_message="post_deploy_product_smoke.source.aggregate_producer must be unified-deploy-product-flows"
+      ;;
+    missing-deployment-target)
+      expected_message="post_deploy_product_smoke.deployment_target must be an object"
+      ;;
+    missing-deployment-target-profile)
+      expected_message="post_deploy_product_smoke.deployment_target.profile is required"
+      ;;
+    missing-deployment-target-site-env-digest)
+      expected_message="post_deploy_product_smoke.deployment_target.site_env.sha256 is required"
+      ;;
+    malformed-deployment-target-site-env-digest)
+      expected_message="post_deploy_product_smoke.deployment_target.site_env.sha256 must be a sha256 digest"
+      ;;
+    deployment-target-site-env-backslash-path)
+      expected_message="post_deploy_product_smoke.deployment_target.site_env.path must be a portable relative path"
+      ;;
+    missing-deployment-target-substrate-truth)
+      expected_message="post_deploy_product_smoke.deployment_target.substrate_truth must be an object"
       ;;
     missing-canonical-smoke)
       expected_message="post-deploy product smoke missing canonical smoke id: usage"
