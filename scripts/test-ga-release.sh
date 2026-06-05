@@ -1194,6 +1194,8 @@ if (mutation === 'missing-runner-source-provenance') {
   provenance.normalized_remote = 'github.com/example/agentsmith-fs-control-plane';
 } else if (mutation === 'missing-dependency-run-evidence') {
   delete inventory('llmup').source_provenance.run_id;
+} else if (mutation === 'missing-dependency-artifact-uri') {
+  delete inventory('llmup').source_provenance.artifact_uri;
 } else if (mutation === 'dependency-tag-mismatch') {
   inventory('llmup').source_provenance.tag = 'not-the-release-tag';
 } else if (mutation === 'dependency-digest-mismatch') {
@@ -1718,6 +1720,15 @@ for (const repo of canonicalRepos) {
     if (!repo.run_id || !repo.run_attempt) {
       throw new Error(`image-backed canonical repo missing run evidence: ${repo.repo}`);
     }
+    const imageProvenance = Object.values(repo.provenance || {});
+    if (imageProvenance.length === 0) {
+      throw new Error(`image-backed canonical repo missing provenance entries: ${repo.repo}`);
+    }
+    for (const provenance of imageProvenance) {
+      if (typeof provenance.artifact_uri !== 'string' || !provenance.artifact_uri.startsWith('gh-artifact://')) {
+        throw new Error(`image-backed canonical repo missing artifact uri trace: ${repo.repo}`);
+      }
+    }
   }
 }
 const smoke = report.post_deploy_product_smoke;
@@ -2118,6 +2129,7 @@ source_provenance_cases=(
   "missing-dependency-source-provenance|release_contract.deploy_image_inventory.llmup.source_provenance must be an object"
   "non-canonical-source-repo|release_contract.deploy_image_inventory.afscp.source_provenance.normalized_remote must be canonical repo github.com/agentsmith-project/agentsmith-fs-control-plane"
   "missing-dependency-run-evidence|release_contract.deploy_image_inventory.llmup.source_provenance.run_id is required"
+  "missing-dependency-artifact-uri|release_contract.deploy_image_inventory.llmup.source_provenance.artifact_uri is required"
   "dependency-tag-mismatch|release_contract.deploy_image_inventory.llmup.source_provenance.tag must match release_contract.deploy_image_inventory.llmup.image tag"
   "dependency-digest-mismatch|release_contract.deploy_image_inventory.llmup.source_provenance.artifact_sha256 must match release_contract.deploy_image_inventory.llmup.digest"
 )

@@ -500,6 +500,9 @@ function requireProvenance(provenance, label) {
   const runAttempt = requireString(value.run_attempt, `${label}.run_attempt`);
   const subjectSha = optionalString(value.subject_sha256, `${label}.subject_sha256`);
   const artifactSha = optionalString(value.artifact_sha256, `${label}.artifact_sha256`);
+  const artifactUri = value.artifact_uri === undefined
+    ? undefined
+    : requireArtifactUri(value.artifact_uri, `${label}.artifact_uri`);
   if (subjectSha !== undefined) {
     requireDigest(subjectSha, `${label}.subject_sha256`);
   }
@@ -514,7 +517,8 @@ function requireProvenance(provenance, label) {
     run_attempt: runAttempt,
     subject_name: optionalString(value.subject_name, `${label}.subject_name`),
     subject_sha256: subjectSha,
-    artifact_sha256: artifactSha
+    artifact_sha256: artifactSha,
+    artifact_uri: artifactUri
   };
 }
 
@@ -556,6 +560,7 @@ function validateImageSourceProvenance(image, expectedRepo) {
   if (provenance.artifact_sha256 !== image.digest) {
     fail(`${label}.artifact_sha256 must match release_contract.deploy_image_inventory.${image.id}.digest`);
   }
+  const artifactUri = requireArtifactUri(image.source_provenance.artifact_uri, `${label}.artifact_uri`);
   return {
     repo: expectedRepo,
     commit_sha: provenance.commit_sha,
@@ -570,11 +575,13 @@ function validateImageSourceProvenance(image, expectedRepo) {
       imageTag,
       provenance.run_id,
       provenance.run_attempt,
+      artifactUri,
       image.digest
     ].join(':'),
     provenance: {
       ...provenance,
-      tag: provenanceTag
+      tag: provenanceTag,
+      artifact_uri: artifactUri
     }
   };
 }
@@ -816,6 +823,7 @@ async function buildCanonicalRepos(release) {
         first.commit_sha,
         first.run_id,
         first.run_attempt,
+        ...imageSummaries.map((summary) => summary.provenance.artifact_uri).sort(),
         ...imageSummaries.flatMap((summary) => summary.image_tags).sort(),
         ...imageSummaries.flatMap((summary) => summary.image_digests).sort()
       ].join(':'),
