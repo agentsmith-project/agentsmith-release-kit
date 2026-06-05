@@ -1062,6 +1062,7 @@ async function assembleBundle({
     deployTemplateArchiveInputDigest,
     imageMapInputDigest: imageMapInput.inputDigest,
     imageMapImageCount: mappings.length,
+    bundleChecksumsInputDigest: checksumsSha256,
     substratePackManifestInputDigest: substratePackManifest?.inputDigest,
     manifestPath
   };
@@ -1101,6 +1102,9 @@ function buildReport({
       },
       bundle_manifest: {
         input_sha256: bundleManifestInputDigest
+      },
+      bundle_checksums: {
+        input_sha256: assembly.bundleChecksumsInputDigest
       },
       airgap_bundle_check_report: {
         input_sha256: checkReportInputDigest

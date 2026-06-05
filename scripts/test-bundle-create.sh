@@ -565,7 +565,8 @@ for (const digest of [
   report.artifacts?.deploy_template_archive?.input_sha256,
   report.artifacts?.image_map?.input_sha256,
   report.artifacts?.bundle_manifest?.input_sha256,
-  report.artifacts?.airgap_bundle_check_report?.input_sha256
+  report.artifacts?.airgap_bundle_check_report?.input_sha256,
+  report.artifacts?.bundle_checksums?.input_sha256
 ]) {
   if (typeof digest !== 'string' || !digest.startsWith('sha256:')) {
     throw new Error('create report digest summary is missing');

@@ -1075,7 +1075,8 @@ for (const [label, digest] of [
   ['deploy template package artifact', report.artifacts?.deploy_template_package?.artifact_sha256],
   ['deploy template archive input', report.artifacts?.deploy_template_archive?.input_sha256],
   ['image map', report.artifacts?.image_map?.input_sha256],
-  ['bundle manifest', report.artifacts?.bundle_manifest?.input_sha256]
+  ['bundle manifest', report.artifacts?.bundle_manifest?.input_sha256],
+  ['bundle checksums', report.artifacts?.bundle_checksums?.input_sha256]
 ]) {
   if (typeof digest !== 'string' || !digest.startsWith('sha256:')) {
     throw new Error(`${label} digest is missing`);

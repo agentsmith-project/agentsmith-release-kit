@@ -1084,6 +1084,7 @@ async function assertPayloadArtifacts({ artifacts, bundleRoot }) {
   const items = requireArray(artifacts, 'bundle_manifest.payload_artifacts');
   const seenIds = new Set();
   const seenRequiredKinds = new Set();
+  let checksumsInputDigest;
 
   for (const [index, value] of items.entries()) {
     const label = `bundle_manifest.payload_artifacts[${index}]`;
@@ -1110,6 +1111,9 @@ async function assertPayloadArtifacts({ artifacts, bundleRoot }) {
       declaredSha256,
       label
     });
+    if (kind === 'checksums') {
+      checksumsInputDigest = declaredSha256;
+    }
   }
 
   for (const kind of REQUIRED_PAYLOAD_ARTIFACT_KINDS) {
@@ -1118,7 +1122,10 @@ async function assertPayloadArtifacts({ artifacts, bundleRoot }) {
     }
   }
 
-  return items.length;
+  return {
+    payloadArtifactCount: items.length,
+    checksumsInputDigest
+  };
 }
 
 function assertOperatorRef(value, label) {
@@ -1251,7 +1258,7 @@ async function assertBundleManifest({
     bundleRoot,
     imageMapSummary
   });
-  const payloadArtifactCount = await assertPayloadArtifacts({
+  const payloadSummary = await assertPayloadArtifacts({
     artifacts: manifest.payload_artifacts,
     bundleRoot
   });
@@ -1264,7 +1271,8 @@ async function assertBundleManifest({
   return {
     componentsCount,
     imageArtifactDeclarationCount,
-    payloadArtifactCount,
+    payloadArtifactCount: payloadSummary.payloadArtifactCount,
+    checksumsInputDigest: payloadSummary.checksumsInputDigest,
     substrate: substrateSummary,
     ...operatorPrerequisiteSummary
   };
@@ -1310,6 +1318,9 @@ function buildReport({
       bundle_manifest: {
         input_sha256: bundleManifestInputDigest,
         image_artifact_declaration_count: bundleSummary.imageArtifactDeclarationCount
+      },
+      bundle_checksums: {
+        input_sha256: bundleSummary.checksumsInputDigest
       }
     },
     substrate: bundleSummary.substrate,
