@@ -2475,6 +2475,14 @@ if (Object.hasOwn(report.summary || {}, 'product_smoke_flows')) {
 NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
 [[ -f "$TMP_DIR/out-valid/ga-evidence-index.json" ]] || fail "missing GA evidence index"
+grep -Fq "Post-deploy product smoke reports: 2" "$TMP_DIR/out-valid/ga-release-summary.md" || \
+  fail "human summary must show post-deploy product smoke report count"
+grep -Fq "Post-deploy product smoke report details:" "$TMP_DIR/out-valid/ga-release-summary.md" || \
+  fail "human summary must include post-deploy product smoke report details"
+grep -Fq -- "  - online/use_existing: " "$TMP_DIR/out-valid/ga-release-summary.md" || \
+  fail "human summary must list online post-deploy product smoke report digest"
+grep -Fq -- "  - airgap/use_existing: " "$TMP_DIR/out-valid/ga-release-summary.md" || \
+  fail "human summary must list airgap post-deploy product smoke report digest"
 pass "valid GA aggregate consumes finalizer-generated path bundles"
 
 ONLINE_ONLY_SMOKE_OUTPUT_DIR="$TMP_DIR/out-online-only-product-smoke"

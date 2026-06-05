@@ -2963,6 +2963,14 @@ async function writeSummary(file, report) {
       ? [report.post_deploy_product_smoke]
       : [];
   const coverage = report.post_deploy_product_smoke_coverage;
+  const productSmokeReportDetails = productSmokeReports
+    .map((entry) => ({
+      operatorPath: entry.deployment_path_binding?.operator_path ?? 'unbound',
+      targetProfile: entry.deployment_path_binding?.target_profile ?? entry.deployment_target?.profile ?? 'unknown-target',
+      digest: entry.report_digest ?? 'missing-digest'
+    }))
+    .sort((left, right) => left.operatorPath.localeCompare(right.operatorPath))
+    .map((entry) => `  - ${entry.operatorPath}: ${entry.digest} (target: ${entry.targetProfile})`);
   const lines = [
     '# AgentSmith GA Release Summary',
     '',
@@ -2980,6 +2988,9 @@ async function writeSummary(file, report) {
     `Post-deploy product smoke reports: ${productSmokeReports.length}`,
     ...(coverage?.covered_distributions
       ? [`Post-deploy product smoke distributions: ${coverage.covered_distributions.join(', ')}`]
+      : []),
+    ...(productSmokeReportDetails.length > 0
+      ? ['Post-deploy product smoke report details:', ...productSmokeReportDetails]
       : []),
     `Post-deploy product smoke schema: ${report.post_deploy_product_smoke.schema}`,
     `Post-deploy product smoke producer: ${report.post_deploy_product_smoke.producer}`,
