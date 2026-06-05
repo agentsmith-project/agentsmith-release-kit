@@ -21,6 +21,8 @@ Usage:
 Operator facade:
   This is the only operator-facing release-kit entry. Legacy positional flows
   are maintainer/internal diagnostics only; see docs/RELEASE_GATES.md.
+  kit_provided is a maintainer/internal compatibility alias only; removal target: release-kit v1.0.0 GA cut.
+  Operator packages use install_substrates.
 
 Operator-inputs intake:
   --operator-inputs validates one deployment-path input package and writes

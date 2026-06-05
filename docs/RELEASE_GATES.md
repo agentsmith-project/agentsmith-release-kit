@@ -147,7 +147,8 @@ diagnostic:
 focused evidence only; it is not substrate installation. `install_substrates`
 is accepted only through package-driven `--operator-inputs`; the old
 positional/transitional facade remains a legacy diagnostic surface and does
-not execute install paths. The package-driven install paths now run
+not execute install paths. removal target: release-kit v1.0.0 GA cut. The
+package-driven install paths now run
 substrate-install before the deployment gate, then use installer output truth
 for path-level evidence only; the existing separate substrate-install producer
 and deployment-path finalizer stay maintainer/internal building blocks.

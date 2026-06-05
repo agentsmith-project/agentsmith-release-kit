@@ -91,7 +91,7 @@ values are:
 
 The GA operator substrate choices are `use_existing` and
 `install_substrates`. Legacy `kit_provided` is an internal compatibility alias
-for focused diagnostics; it is not a GA operator `deployment_path`.
+for focused diagnostics; it is not a GA operator `deployment_path`. removal target: release-kit v1.0.0 GA cut.
 
 Without `--run`, this slice validates the package, rejects internal producer
 vocabulary, secret-looking payloads, missing path-specific inputs, and path
@@ -199,8 +199,9 @@ legacy positional path, existing-Kubernetes airgap machine profile, surface repo
 evidence root, and safe runbook path/digest without adding identity,
 signature, verdict, or readiness semantics.
 Legacy `kit_provided` is an internal compatibility alias for focused
-diagnostics; it is not a GA operator `deployment_path`. `online/kit_provided`
-and `airgap/kit_provided` map to the kit-supplied producer diagnostics only.
+diagnostics; it is not a GA operator `deployment_path`. removal target: release-kit v1.0.0 GA cut.
+`online/kit_provided` and `airgap/kit_provided` map to the kit-supplied
+producer diagnostics only.
 `install_substrates` requires an explicit report from the separate
 `--substrate-install` producer only when maintainers run focused diagnostics
 directly. The package-driven

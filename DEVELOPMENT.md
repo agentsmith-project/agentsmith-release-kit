@@ -57,7 +57,8 @@ identity, signature, or verdict claims.
 entries for consuming an already assembled airgap bundle; the package-driven
 operator main path uses `airgap/use_existing` and `airgap/install_substrates`.
 `kit_provided` means pack/truth validation for kit-supplied substrate material,
-not substrate installation. Package-driven `install_substrates` runs the
+not substrate installation. removal target: release-kit v1.0.0 GA cut.
+Package-driven `install_substrates` runs the
 namespace-scoped `substrate-install` producer inside
 `operator-release.sh --operator-inputs <pkg> --run`, requires explicit
 installer confirmation, and still writes path-level evidence only.

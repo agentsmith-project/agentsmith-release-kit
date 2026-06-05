@@ -1273,6 +1273,8 @@ grep -q -- '--ga-report' "$help_output" ||
   fail "operator-release help must document final GA report facade"
 grep -q 'maintainer/internal diagnostics only; see' "$help_output" ||
   fail "operator-release help must demote legacy positional diagnostics"
+grep -q 'removal target: release-kit v1.0.0 GA cut' "$help_output" ||
+  fail "operator-release help must document kit_provided removal target"
 if grep -Eq 'external_declared|kit_installed|existing_kubernetes|kind_rehearsal|operator-release[.]sh (online|airgap|airgap-bundle)' "$help_output"; then
   fail "operator-release help must not expose machine profile mappings or positional examples"
 fi
@@ -2379,10 +2381,14 @@ grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --r
   fail "root README must document package-driven --operator-inputs --run main path"
 grep -q -- 'bash scripts/operator-release.sh --ga-report' "$root_readme" ||
   fail "root README must document package-driven --ga-report final facade"
+grep -q 'removal target: release-kit v1.0.0 GA cut' "$root_readme" ||
+  fail "root README must document kit_provided removal target"
 grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run' "$runbooks_readme" ||
   fail "runbook README must document package-driven --operator-inputs --run main path"
 grep -q -- 'bash scripts/operator-release.sh --ga-report' "$runbooks_readme" ||
   fail "runbook README must document package-driven --ga-report final facade"
+grep -q 'removal target: release-kit v1.0.0 GA cut' "$runbooks_readme" ||
+  fail "runbook README must document kit_provided removal target"
 grep -q -- 'source.product_flows_path' "$runbooks_readme" ||
   fail "runbook README must document canonical product smoke product-flow source binding"
 grep -q -- 'deployment_target' "$runbooks_readme" ||

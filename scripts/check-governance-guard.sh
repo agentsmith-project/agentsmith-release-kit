@@ -242,6 +242,7 @@ require_text README.md '`online/kit_provided`'
 require_text README.md '`airgap/use_existing`'
 require_text README.md '`airgap/install_substrates`'
 require_text README.md '`airgap/kit_provided`'
+require_text README.md 'removal target: release-kit v1.0.0 GA cut'
 require_text README.md '`install_substrates` requires an explicit report from the separate'
 require_text README.md 'kit-provided pack/truth identity marker / provenance marker'
 require_text README.md 'not installer proof'
@@ -255,9 +256,11 @@ require_text docs/runbooks/README.md "## Operator Package Matrix"
 require_text docs/runbooks/README.md "Airgap bundle packaging commands are packaging-side helpers"
 require_text docs/runbooks/README.md "not standalone operator choices"
 require_text docs/runbooks/README.md 'use `airgap/kit_provided` for the consume/deployment-focused path'
+require_text docs/runbooks/README.md 'removal target: release-kit v1.0.0 GA cut'
 require_text docs/runbooks/README.md "provenance marker, not installer"
 require_text docs/RELEASE_GATES.md "map to the operator choice surface"
 require_text docs/RELEASE_GATES.md 'kit-provided pack/truth identity marker / provenance marker'
+require_text docs/RELEASE_GATES.md 'removal target: release-kit v1.0.0 GA cut'
 require_text docs/RELEASE_GATES.md "rehearsal-only accepted input"
 require_text docs/contracts/README.md "Only accepted pre-GA profile tuples are accepted"
 require_text docs/contracts/README.md "not an operator choice"

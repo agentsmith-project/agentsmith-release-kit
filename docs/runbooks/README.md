@@ -171,7 +171,7 @@ Legacy surrogate top-level fields are rejected: `release_id`, `git_sha`,
 
 Legacy `kit_provided` is a maintainer/internal alias for focused diagnostics.
 It is not a GA operator `deployment_path`; operator packages use
-`install_substrates`.
+`install_substrates`. removal target: release-kit v1.0.0 GA cut.
 
 ### Maintainer/Internal Diagnostics
 
