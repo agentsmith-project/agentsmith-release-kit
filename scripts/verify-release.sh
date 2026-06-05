@@ -54,7 +54,7 @@ Usage:
   bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --target-prerequisites <json> --output-dir <dir> [--expected-namespace <name>] [--release-contract <json>]
   bash scripts/verify-release.sh --help
 
-Bootstrap status:
+Mode status:
   --quick checks repo identity and boundary guardrails only.
   --inputs checks release contract intake only; it is not release readiness.
   --template-package checks materialized deploy template package intake only; it is not release readiness.

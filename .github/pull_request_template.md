@@ -18,7 +18,7 @@
 
 ## Evidence
 
-- [ ] I confirm the quick gate is bootstrap governance only; it is not release readiness and not a deployment or package verdict.
+- [ ] I confirm the quick gate is repo-boundary governance only; it is not release readiness and not a deployment or package verdict.
 
 ```bash
 bash scripts/verify-release.sh --quick

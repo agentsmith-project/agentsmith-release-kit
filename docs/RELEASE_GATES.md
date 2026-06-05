@@ -1,6 +1,6 @@
 # Release Gates
 
-Status: bootstrap-focused producers plus GA aggregate gate.
+Status: focused producers plus GA aggregate gate.
 
 ## Quick Gate
 
@@ -16,7 +16,7 @@ boundary guardrails.
 Current quick checks:
 
 - Canonical repo identity is `github.com/agentsmith-project/agentsmith-release-kit`.
-- Required bootstrap files exist.
+- Required repo files exist.
 - Owner/team metadata exists.
 - Scope and non-goals are declared.
 - Release gate entry exists and states that quick is not release readiness.

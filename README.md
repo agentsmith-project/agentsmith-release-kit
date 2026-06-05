@@ -16,11 +16,11 @@ plumbing and troubleshooting, but they are not the operator copy-paste path.
 | Repository | `github.com/agentsmith-project/agentsmith-release-kit` |
 | Remote URL | `https://github.com/agentsmith-project/agentsmith-release-kit.git` |
 | Default branch | `main` |
-| Local bootstrap path | `$WORKSPACE/agentsmith-release-kit` |
+| Workspace path | `$WORKSPACE/agentsmith-release-kit` |
 
-The local bootstrap path is a workspace convention only; use this repository
-root when working outside that layout. CI and future release evidence must use
-the normalized GitHub repository identity.
+The workspace path is a local checkout convention only; use this repository
+root when working outside that layout. CI and release evidence must use the
+normalized GitHub repository identity.
 
 ## Scope
 

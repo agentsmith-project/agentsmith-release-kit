@@ -77,7 +77,7 @@ reject_ecosystem_bootstrap_files() {
     \) -print -quit
   )"
 
-  [[ -z "$found" ]] || fail "ecosystem bootstrap file is not allowed during bootstrap: $found"
+  [[ -z "$found" ]] || fail "ecosystem dependency file is not allowed in release-kit repo boundary: $found"
 }
 
 reject_scan() {
@@ -266,7 +266,7 @@ required_files=(
 for file in "${required_files[@]}"; do
   require_file "$file"
 done
-pass "required bootstrap files"
+pass "required repo files"
 
 require_text OWNERS.md "AgentSmith release-kit team"
 pass "owner metadata"
