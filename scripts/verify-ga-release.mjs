@@ -33,6 +33,39 @@ const AIRGAP_OFFLINE_PROOF_SCOPE = 'release_kit_package_local_bundle_local_diges
 const PRODUCT_READY_SCHEMA = 'agentsmith.product-readiness-report/v1';
 const PRODUCT_RUNTIME_READINESS_SCHEMA = 'agentsmith.runtime-readiness-details/v1';
 const PRODUCT_RUNTIME_READINESS_THEME = 'runtime_pending_readiness';
+const PRODUCT_RUNTIME_READINESS_BACKOFF = 'increasing_after_consecutive_non_terminal';
+const PRODUCT_RUNTIME_READINESS_INTERVAL_MS = [60_000, 90_000, 120_000, 180_000, 300_000];
+const PRODUCT_RUNTIME_READINESS_EVIDENCE_FOCUS = [
+  'Files restore continuation focused backend-real gate',
+  'AGENT_SANDBOX_UNAVAILABLE API/pod-manager/ASBCP summaries',
+  'runtime flake versus stability blocker classification'
+];
+const PRODUCT_RUNTIME_READINESS_CONVERGENCE = {
+  files: {
+    pending: 'file_library_list_pending',
+    releasing: 'workspace binding release convergence',
+    offline: 'no active writer',
+    not_found: 'no active writer'
+  },
+  agent_task_sandbox: {
+    pending: 'bounded ASBCP status checks',
+    releasing: 'release-incomplete',
+    offline: 'ASBCP create-or-ensure',
+    not_found: 'ASBCP create-or-ensure'
+  },
+  afscp_workspace_binding: {
+    pending: 'workspace binding owner',
+    releasing: 'terminal released/revoked/expired/deleted',
+    offline: 'no active writer',
+    not_found: 'no active writer'
+  },
+  read_export: {
+    pending: 'typed pending',
+    releasing: 'runtime release fence',
+    offline: 'no active writer',
+    not_found: 'fresh read export'
+  }
+};
 const PRODUCT_RUNTIME_READINESS_DETAILS_PATH =
   'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json';
 const PRODUCT_SMOKE_SCHEMA = 'agentsmith.post-deploy-product-smoke-report/v1';
@@ -1227,11 +1260,81 @@ function commonReportChecks(report, label, release) {
   }
 }
 
+function requireExactStringSet(value, expectedValues, label) {
+  const actual = requireStringSet(value, label);
+  const expected = new Set(expectedValues);
+  if (!sameSet(actual, expected)) {
+    fail(`${label} must exactly match ${expectedValues.join(', ')}`);
+  }
+  return [...expectedValues];
+}
+
+function validateProductRuntimeObservationPolicy(runtimeReadiness) {
+  const label = 'product_readiness_report.runtime_readiness.observation_policy';
+  const policy = requireObject(runtimeReadiness.observation_policy, label);
+  if (requireString(policy.step_id, `${label}.step_id`) !== 'gate-release') {
+    fail(`${label}.step_id must be gate-release`);
+  }
+  if (requireString(policy.gate_id, `${label}.gate_id`) !== 'gate-release') {
+    fail(`${label}.gate_id must be gate-release`);
+  }
+  if (requireString(policy.theme, `${label}.theme`) !== PRODUCT_RUNTIME_READINESS_THEME) {
+    fail(`${label}.theme must be ${PRODUCT_RUNTIME_READINESS_THEME}`);
+  }
+  if (requireString(policy.backoff, `${label}.backoff`) !== PRODUCT_RUNTIME_READINESS_BACKOFF) {
+    fail(`${label}.backoff must be ${PRODUCT_RUNTIME_READINESS_BACKOFF}`);
+  }
+  const intervalMs = requireArray(policy.interval_ms, `${label}.interval_ms`)
+    .map((entry, index) => requireInteger(entry, `${label}.interval_ms[${index}]`));
+  if (JSON.stringify(intervalMs) !== JSON.stringify(PRODUCT_RUNTIME_READINESS_INTERVAL_MS)) {
+    fail(`${label}.interval_ms must be ${PRODUCT_RUNTIME_READINESS_INTERVAL_MS.join(', ')}`);
+  }
+  const evidenceFocus = requireExactStringSet(
+    policy.evidence_focus,
+    PRODUCT_RUNTIME_READINESS_EVIDENCE_FOCUS,
+    `${label}.evidence_focus`
+  );
+  const convergence = requireObject(policy.state_convergence, `${label}.state_convergence`);
+  const expectedSurfaces = Object.keys(PRODUCT_RUNTIME_READINESS_CONVERGENCE);
+  if (!sameSet(new Set(Object.keys(convergence)), new Set(expectedSurfaces))) {
+    fail(`${label}.state_convergence must cover ${expectedSurfaces.join(', ')}`);
+  }
+  const stateConvergence = {};
+  for (const surface of expectedSurfaces) {
+    const surfaceLabel = `${label}.state_convergence.${surface}`;
+    const states = requireObject(convergence[surface], surfaceLabel);
+    const expectedStates = Object.keys(PRODUCT_RUNTIME_READINESS_CONVERGENCE[surface]);
+    if (!sameSet(new Set(Object.keys(states)), new Set(expectedStates))) {
+      fail(`${surfaceLabel} must cover ${expectedStates.join(', ')}`);
+    }
+    stateConvergence[surface] = {};
+    for (const state of expectedStates) {
+      const text = requireString(states[state], `${surfaceLabel}.${state}`);
+      const requiredSnippet = PRODUCT_RUNTIME_READINESS_CONVERGENCE[surface][state];
+      if (!text.includes(requiredSnippet)) {
+        fail(`${surfaceLabel}.${state} must describe ${requiredSnippet}`);
+      }
+      stateConvergence[surface][state] = text;
+    }
+  }
+
+  return {
+    step_id: 'gate-release',
+    gate_id: 'gate-release',
+    theme: PRODUCT_RUNTIME_READINESS_THEME,
+    backoff: PRODUCT_RUNTIME_READINESS_BACKOFF,
+    interval_ms: [...PRODUCT_RUNTIME_READINESS_INTERVAL_MS],
+    evidence_focus: evidenceFocus,
+    state_convergence: stateConvergence
+  };
+}
+
 function validateProductRuntimeReadiness(report) {
   const runtimeReadiness = requireObject(
     report.runtime_readiness,
     'product_readiness_report.runtime_readiness'
   );
+  const observationPolicy = validateProductRuntimeObservationPolicy(runtimeReadiness);
   const filesRestore = requireObject(
     runtimeReadiness.files_restore_continuation,
     'product_readiness_report.runtime_readiness.files_restore_continuation'
@@ -1314,6 +1417,7 @@ function validateProductRuntimeReadiness(report) {
   }
 
   return {
+    observation_policy: observationPolicy,
     files_restore_continuation: {
       path: runtimePath,
       sha256: runtimeDigest,

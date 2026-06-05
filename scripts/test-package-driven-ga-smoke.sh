@@ -290,6 +290,47 @@ function canonicalSmokeResults() {
   ]));
 }
 
+function runtimeReadinessObservationPolicy() {
+  return {
+    step_id: 'gate-release',
+    gate_id: 'gate-release',
+    theme: 'runtime_pending_readiness',
+    backoff: 'increasing_after_consecutive_non_terminal',
+    interval_ms: [60000, 90000, 120000, 180000, 300000],
+    evidence_focus: [
+      'Files restore continuation focused backend-real gate',
+      'AGENT_SANDBOX_UNAVAILABLE API/pod-manager/ASBCP summaries',
+      'runtime flake versus stability blocker classification'
+    ],
+    state_convergence: {
+      files: {
+        pending: 'Return typed file_library_list_pending, continue runtime-access release convergence, and recheck without reading a stale projection.',
+        releasing: 'Wait for workspace binding release convergence before creating a read export; return typed pending while release is non-terminal.',
+        offline: 'Treat as no active writer for Files read export and create or read the clean read export through the Files path only.',
+        not_found: 'Treat as no active writer for Files read export; do not synthesize an executable connector.'
+      },
+      agent_task_sandbox: {
+        pending: 'Continue bounded ASBCP status checks until Running, Failed, or timeout.',
+        releasing: 'Wait for workload release or surface a typed release-incomplete error; do not start a second task HOME holder.',
+        offline: 'Call ASBCP create-or-ensure for the workload, then continue status checks until Running, Failed, or timeout.',
+        not_found: 'Call ASBCP create-or-ensure for the workload, then continue status checks until Running, Failed, or timeout.'
+      },
+      afscp_workspace_binding: {
+        pending: 'Return typed runtime readiness pending and recheck through the workspace binding owner before Files read export proceeds.',
+        releasing: 'Continue release convergence through the workspace binding owner until terminal released/revoked/expired/deleted.',
+        offline: 'Treat as no active writer for Files read export; executable attachment must use the Agent Task sandbox owner path.',
+        not_found: 'Treat as no active writer for Files read export; executable attachment must use the Agent Task sandbox owner path.'
+      },
+      read_export: {
+        pending: 'Return typed pending, trigger or continue runtime-access release, and keep the pending read export warm for the caller next poll.',
+        releasing: 'Wait for runtime release fence or export invalidation, and avoid revoke/create loops while convergence is non-terminal.',
+        offline: 'Create or reuse the read export only after no active writer is observed.',
+        not_found: 'Create a fresh read export if runtime access is clean; otherwise return typed pending.'
+      }
+    }
+  };
+}
+
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
@@ -302,6 +343,7 @@ writeJson(path.join(outputDir, 'product-readiness-report.json'), {
   git_sha: contract.git_sha,
   release_contract_digest: releaseContractDigest,
   runtime_readiness: {
+    observation_policy: runtimeReadinessObservationPolicy(),
     files_restore_continuation: {
       path: 'gate-release/child-internal-evidence/files_restore_continuation_spec/runtime-readiness-details.json',
       sha256: digest('runtime-readiness-details'),
@@ -412,6 +454,17 @@ if (report.formal_verdict !== 'issued') {
 }
 if (report.product_readiness?.runtime_readiness?.files_restore_continuation?.classification !== 'runtime_flake') {
   throw new Error('GA report product_readiness must archive runtime readiness classification');
+}
+if (
+  JSON.stringify(report.product_readiness?.runtime_readiness?.observation_policy?.interval_ms) !==
+  JSON.stringify([60000, 90000, 120000, 180000, 300000])
+) {
+  throw new Error('GA report product_readiness must archive adaptive runtime readiness observation intervals');
+}
+if (
+  !report.product_readiness?.runtime_readiness?.observation_policy?.state_convergence?.read_export?.pending?.includes('typed pending')
+) {
+  throw new Error('GA report product_readiness must archive read export pending convergence rule');
 }
 if (typeof report.generated_at !== 'string' || Number.isNaN(Date.parse(report.generated_at))) {
   throw new Error('GA report must include an ISO generated_at timestamp');
