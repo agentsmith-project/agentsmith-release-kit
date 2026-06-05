@@ -147,7 +147,10 @@
         "artifact_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "runner_release_manifest_uri": "gh-artifact://agentsmith-project/agentsmith-runner/runner-release-manifest/20001/runner-release-manifest.json",
         "runner_release_manifest_subject_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        "runner_release_manifest_artifact_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        "runner_release_manifest_artifact_sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "runner_ga_handoff_uri": "gh-artifact://agentsmith-project/agentsmith-runner/runner-ga-handoff/20001/runner-ga-handoff-report.json",
+        "runner_ga_handoff_manifest_input_sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "runner_ga_handoff_report_sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       }
     }
   ],

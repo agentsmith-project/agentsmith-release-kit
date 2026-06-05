@@ -1532,6 +1532,13 @@ if (mutation === 'missing-runner-source-provenance') {
     'gh-artifact://agentsmith-project/agentsmith-runner/runner-release-manifest/99999/runner-release-manifest.json';
 } else if (mutation === 'runner-release-manifest-digest-mismatch') {
   inventory('managed_runner').source_provenance.runner_release_manifest_artifact_sha256 = `sha256:${'8'.repeat(64)}`;
+} else if (mutation === 'missing-runner-ga-handoff-report-digest') {
+  delete inventory('managed_runner').source_provenance.runner_ga_handoff_report_sha256;
+} else if (mutation === 'runner-ga-handoff-uri-mismatch') {
+  inventory('managed_runner').source_provenance.runner_ga_handoff_uri =
+    'gh-artifact://agentsmith-project/agentsmith-runner/runner-ga-handoff/99999/runner-ga-handoff-report.json';
+} else if (mutation === 'runner-ga-handoff-digest-invalid') {
+  inventory('managed_runner').source_provenance.runner_ga_handoff_manifest_input_sha256 = 'sha256:not-a-digest';
 } else if (mutation === 'missing-dependency-source-provenance') {
   delete inventory('llmup').source_provenance;
 } else if (mutation === 'non-canonical-source-repo') {
@@ -2181,6 +2188,31 @@ const actualCanonicalRepos = canonicalRepos.map((entry) => entry.repo).sort();
 if (JSON.stringify(actualCanonicalRepos) !== JSON.stringify(expectedCanonicalRepos)) {
   throw new Error(`GA report canonical_repos must exactly cover six repos: ${actualCanonicalRepos.join(', ')}`);
 }
+const runnerRepo = canonicalRepos.find((entry) => entry.repo === 'github.com/agentsmith-project/agentsmith-runner');
+const runnerProvenance = releaseContract.deploy_image_inventory
+  .find((entry) => entry.id === 'managed_runner')
+  ?.source_provenance;
+if (report.images?.runner_release_manifest?.artifact_uri !== runnerProvenance?.runner_release_manifest_uri) {
+  throw new Error('GA report runner release manifest URI mismatch');
+}
+if (report.images?.runner_release_manifest?.subject_sha256 !== runnerProvenance?.runner_release_manifest_subject_sha256) {
+  throw new Error('GA report runner release manifest subject digest mismatch');
+}
+if (report.images?.runner_release_manifest?.artifact_sha256 !== runnerProvenance?.runner_release_manifest_artifact_sha256) {
+  throw new Error('GA report runner release manifest artifact digest mismatch');
+}
+if (report.images?.runner_ga_handoff?.artifact_uri !== runnerProvenance?.runner_ga_handoff_uri) {
+  throw new Error('GA report runner GA handoff URI mismatch');
+}
+if (report.images?.runner_ga_handoff?.manifest_input_sha256 !== runnerProvenance?.runner_ga_handoff_manifest_input_sha256) {
+  throw new Error('GA report runner GA handoff manifest input digest mismatch');
+}
+if (report.images?.runner_ga_handoff?.report_sha256 !== runnerProvenance?.runner_ga_handoff_report_sha256) {
+  throw new Error('GA report runner GA handoff report digest mismatch');
+}
+if (runnerRepo?.runner_ga_handoff?.artifact_uri !== report.images?.runner_ga_handoff?.artifact_uri) {
+  throw new Error('GA report canonical runner repo must archive runner GA handoff evidence');
+}
 if (
   JSON.stringify(stableJson(report.artifact_index?.canonical_repos)) !==
   JSON.stringify(stableJson(canonicalRepos))
@@ -2762,6 +2794,9 @@ source_provenance_cases=(
   "missing-runner-release-manifest-digest|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_release_manifest_subject_sha256 is required"
   "runner-release-manifest-uri-mismatch|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_release_manifest_uri run id must match release_contract.deploy_image_inventory.managed_runner.source_provenance.run_id"
   "runner-release-manifest-digest-mismatch|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_release_manifest_artifact_sha256 must match release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_release_manifest_subject_sha256"
+  "missing-runner-ga-handoff-report-digest|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_ga_handoff_report_sha256 is required"
+  "runner-ga-handoff-uri-mismatch|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_ga_handoff_uri run id must match release_contract.deploy_image_inventory.managed_runner.source_provenance.run_id"
+  "runner-ga-handoff-digest-invalid|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_ga_handoff_manifest_input_sha256 must be a sha256 digest"
   "missing-dependency-source-provenance|release_contract.deploy_image_inventory.llmup.source_provenance must be an object"
   "non-canonical-source-repo|release_contract.deploy_image_inventory.afscp.source_provenance.normalized_remote must be canonical repo github.com/agentsmith-project/agentsmith-fs-control-plane"
   "missing-dependency-run-evidence|release_contract.deploy_image_inventory.llmup.source_provenance.run_id is required"

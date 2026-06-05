@@ -1630,10 +1630,10 @@ provenance, digests, path coverage, and product report bindings.
 The GA aggregate also closes managed runner release provenance. The
 `managed_runner` deploy inventory source provenance must include the runner
 image artifact digest plus the runner release manifest artifact URI, subject
-sha256, and artifact sha256 from the canonical
-`github.com/agentsmith-project/agentsmith-runner` run. The final report exposes
-that manifest proof as `images.runner_release_manifest` and includes it in the
-runner repo freshness key.
+sha256, artifact sha256, and runner GA handoff report URI/hash fields from the
+canonical `github.com/agentsmith-project/agentsmith-runner` run. The final
+report exposes these proofs as `images.runner_release_manifest` and
+`images.runner_ga_handoff`, and includes both in the runner repo freshness key.
 
 The GA aggregate must not delegate release readiness to AgentSmith product
 gates, AFSCP gates, ASBCP gates, or kind rehearsal alone. AgentSmith product

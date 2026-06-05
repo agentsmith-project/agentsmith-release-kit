@@ -132,6 +132,8 @@ const AFSCP_REPO = 'github.com/agentsmith-project/agentsmith-fs-control-plane';
 const ASBCP_REPO = 'github.com/agentsmith-project/agentsmith-sandbox-control-plane';
 const RUNNER_RELEASE_MANIFEST_URI_RE =
   /^gh-artifact:\/\/agentsmith-project\/agentsmith-runner\/runner-release-manifest\/([0-9]+)\/runner-release-manifest\.json$/;
+const RUNNER_GA_HANDOFF_URI_RE =
+  /^gh-artifact:\/\/agentsmith-project\/agentsmith-runner\/runner-ga-handoff\/([0-9]+)\/runner-ga-handoff-report\.json$/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:[\\/]/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
@@ -768,6 +770,9 @@ function validateImageSourceProvenance(image, expectedRepo) {
   const runnerReleaseManifest = image.id === 'managed_runner'
     ? validateRunnerReleaseManifestProvenance({ image, provenance, label })
     : undefined;
+  const runnerGaHandoff = image.id === 'managed_runner'
+    ? validateRunnerGaHandoffProvenance({ image, provenance, label })
+    : undefined;
   return {
     repo: expectedRepo,
     commit_sha: provenance.commit_sha,
@@ -790,15 +795,22 @@ function validateImageSourceProvenance(image, expectedRepo) {
         runnerReleaseManifest.artifact_uri,
         runnerReleaseManifest.subject_sha256,
         runnerReleaseManifest.artifact_sha256
+      ] : []),
+      ...(runnerGaHandoff ? [
+        runnerGaHandoff.artifact_uri,
+        runnerGaHandoff.manifest_input_sha256,
+        runnerGaHandoff.report_sha256
       ] : [])
     ].join(':'),
     ...(runnerReleaseManifest ? { runner_release_manifest: runnerReleaseManifest } : {}),
+    ...(runnerGaHandoff ? { runner_ga_handoff: runnerGaHandoff } : {}),
     provenance: {
       ...provenance,
       tag: provenanceTag,
       run_url: runUrl,
       artifact_uri: artifactUri,
-      ...(runnerReleaseManifest ? { runner_release_manifest: runnerReleaseManifest } : {})
+      ...(runnerReleaseManifest ? { runner_release_manifest: runnerReleaseManifest } : {}),
+      ...(runnerGaHandoff ? { runner_ga_handoff: runnerGaHandoff } : {})
     }
   };
 }
@@ -833,6 +845,39 @@ function validateRunnerReleaseManifestProvenance({ image, provenance, label }) {
     artifact_uri: manifestUri,
     subject_sha256: subjectSha,
     artifact_sha256: artifactSha,
+    producer_repo: RUNNER_REPO,
+    run_id: provenance.run_id,
+    run_attempt: provenance.run_attempt
+  };
+}
+
+function validateRunnerGaHandoffProvenance({ image, provenance, label }) {
+  if (provenance.normalized_remote !== RUNNER_REPO) {
+    fail(`${label}.runner_ga_handoff_uri is only valid for canonical repo ${RUNNER_REPO}`);
+  }
+  const handoffUri = requireArtifactUri(
+    image.source_provenance.runner_ga_handoff_uri,
+    `${label}.runner_ga_handoff_uri`
+  );
+  const match = handoffUri.match(RUNNER_GA_HANDOFF_URI_RE);
+  if (!match) {
+    fail(`${label}.runner_ga_handoff_uri must be the canonical runner GA handoff artifact URI`);
+  }
+  if (match[1] !== provenance.run_id) {
+    fail(`${label}.runner_ga_handoff_uri run id must match ${label}.run_id`);
+  }
+  const manifestInputSha = requireDigest(
+    image.source_provenance.runner_ga_handoff_manifest_input_sha256,
+    `${label}.runner_ga_handoff_manifest_input_sha256`
+  );
+  const reportSha = requireDigest(
+    image.source_provenance.runner_ga_handoff_report_sha256,
+    `${label}.runner_ga_handoff_report_sha256`
+  );
+  return {
+    artifact_uri: handoffUri,
+    manifest_input_sha256: manifestInputSha,
+    report_sha256: reportSha,
     producer_repo: RUNNER_REPO,
     run_id: provenance.run_id,
     run_attempt: provenance.run_attempt
@@ -1176,9 +1221,17 @@ async function buildCanonicalRepos(release) {
             summary.runner_release_manifest.subject_sha256,
             summary.runner_release_manifest.artifact_sha256
           ]
+          : []).sort(),
+        ...imageSummaries.flatMap((summary) => summary.runner_ga_handoff
+          ? [
+            summary.runner_ga_handoff.artifact_uri,
+            summary.runner_ga_handoff.manifest_input_sha256,
+            summary.runner_ga_handoff.report_sha256
+          ]
           : []).sort()
       ].join(':'),
       ...(first.runner_release_manifest ? { runner_release_manifest: first.runner_release_manifest } : {}),
+      ...(first.runner_ga_handoff ? { runner_ga_handoff: first.runner_ga_handoff } : {}),
       provenance: Object.fromEntries(
         imageSummaries.map((summary) => [summary.image_ids[0], summary.provenance])
       )
@@ -2979,6 +3032,10 @@ async function buildPassReport(args) {
     canonicalRepos.find((entry) => entry.repo === RUNNER_REPO)?.runner_release_manifest,
     'canonical_repos.agentsmith-runner.runner_release_manifest'
   );
+  const runnerGaHandoff = requireObject(
+    canonicalRepos.find((entry) => entry.repo === RUNNER_REPO)?.runner_ga_handoff,
+    'canonical_repos.agentsmith-runner.runner_ga_handoff'
+  );
   const deployTemplateSummary = validateDeployTemplatePackage(deployTemplate.value, contract.value, deployTemplate.digest);
   const productReadinessSummary = validateProductReadiness(productReady.value, productReady.digest, release);
   const productSmokeSummary = validateProductSmoke(productSmoke.value, productSmoke.digest, release);
@@ -3034,7 +3091,8 @@ async function buildPassReport(args) {
     },
     images: {
       ...release.images,
-      runner_release_manifest: runnerReleaseManifest
+      runner_release_manifest: runnerReleaseManifest,
+      runner_ga_handoff: runnerGaHandoff
     },
     deployment_paths: deploymentPathReportEntries,
     product_readiness: productReadinessSummary,

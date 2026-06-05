@@ -52,10 +52,11 @@ Current post-push contract index:
   package-local release contract and deploy template package descriptor by safe
   relative path and sha256 digest; local absolute package paths are not exposed.
   The managed runner entry must also carry runner release manifest provenance:
-  canonical manifest artifact URI, manifest subject sha256, and manifest
-  artifact sha256. The GA report exposes that as
-  `images.runner_release_manifest`. Both pass and fail reports include
-  `generated_at` for release archive traceability.
+  canonical manifest artifact URI, manifest subject sha256, manifest artifact
+  sha256, and runner GA handoff report URI/hash fields. The GA report exposes
+  those as `images.runner_release_manifest` and `images.runner_ga_handoff`.
+  Both pass and fail reports include `generated_at` for release archive
+  traceability.
 - `agentsmith.ga-evidence-index/v1`: derived archive index written next to the
   final GA report. It does not issue a verdict; `source_report` copies the
   final `ga-release-report.json` schema, status, formal_verdict, and canonical

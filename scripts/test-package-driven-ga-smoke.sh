@@ -601,6 +601,7 @@ for (const entry of packageIndex) {
   }
 }
 const runnerManifest = report.images?.runner_release_manifest;
+const runnerGaHandoff = report.images?.runner_ga_handoff;
 const runnerProvenance = contract.deploy_image_inventory
   .find((entry) => entry.id === 'managed_runner')
   ?.source_provenance;
@@ -612,6 +613,19 @@ if (runnerManifest?.subject_sha256 !== runnerProvenance?.runner_release_manifest
 }
 if (runnerManifest?.artifact_sha256 !== runnerProvenance?.runner_release_manifest_artifact_sha256) {
   throw new Error('GA report runner release manifest artifact digest mismatch');
+}
+if (runnerGaHandoff?.artifact_uri !== runnerProvenance?.runner_ga_handoff_uri) {
+  throw new Error('GA report runner GA handoff URI mismatch');
+}
+if (runnerGaHandoff?.manifest_input_sha256 !== runnerProvenance?.runner_ga_handoff_manifest_input_sha256) {
+  throw new Error('GA report runner GA handoff manifest input digest mismatch');
+}
+if (runnerGaHandoff?.report_sha256 !== runnerProvenance?.runner_ga_handoff_report_sha256) {
+  throw new Error('GA report runner GA handoff report digest mismatch');
+}
+const runnerRepo = report.canonical_repos.find((entry) => entry.repo === 'github.com/agentsmith-project/agentsmith-runner');
+if (runnerRepo?.runner_ga_handoff?.artifact_uri !== runnerGaHandoff?.artifact_uri) {
+  throw new Error('GA report canonical runner repo must expose runner GA handoff evidence');
 }
 const expectedSmokeIds = [
   'login_profile',
