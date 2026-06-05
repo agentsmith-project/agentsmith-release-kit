@@ -24,9 +24,6 @@ focused diagnostic plumbing. Do not use it as the operator example path.
 - `substrate-truth.example.json`: external substrate connection truth.
 - `target-prerequisites.example.json`: namespace, RBAC, ingress, registry pull
   secret, storage, and matching substrate secret refs.
-- `evidence-provenance.example.json`: optional evidence-root provenance for a
-  maintainer/internal focused diagnostic. It does not prove operator identity
-  or signature, and it is not required by the operator-inputs main flow.
 
 ## Build The Package
 
@@ -61,16 +58,14 @@ Edit `"$PKG/operator-inputs.json"` before apply:
 - Optional route smoke can add `smoke_url`, `expected_status`, `timeout`, and
   `timeout_ms`; keep them omitted when route smoke is not in scope.
 
-## Plan
+## Validate
 
 ```bash
 bash scripts/operator-release.sh --operator-inputs "$PKG"
 ```
 
-This validates package intake and writes
-`$PKG/.release-kit-internal/operator-inputs-plan.json`. The plan is internal
-next-step data only. It is not runtime evidence and does not issue a GA
-verdict.
+This validates package intake and prepares the package for `--run`. It is not
+runtime evidence and does not issue a GA verdict.
 
 ## Apply
 

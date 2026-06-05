@@ -2377,6 +2377,7 @@ root_readme="$ROOT_DIR/README.md"
 example_readme="$ROOT_DIR/examples/online-existing-kubernetes/README.md"
 runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
 maintainer_diagnostics="$ROOT_DIR/docs/maintainer-diagnostics.md"
+mapfile -t example_readmes < <(find "$ROOT_DIR/examples" -mindepth 1 -maxdepth 2 -name README.md -type f | sort)
 
 grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --run' "$root_readme" ||
   fail "root README must document package-driven --operator-inputs --run main path"
@@ -2421,6 +2422,9 @@ if grep -Eq 'bash scripts/operator-release[.]sh (online|airgap|airgap-bundle)\b'
 fi
 if grep -REq 'bash scripts/operator-release[.]sh (online|airgap|airgap-bundle)\b' "$ROOT_DIR/examples"; then
   fail "operator examples must not present legacy positional operator-release commands"
+fi
+if grep -Eiq '[.]release-kit-internal|operator-inputs-plan|operator-release-surface-report|evidence-provenance|adoption report|candidate intake|release-engineering|operator-signoff|--target-profile|verify-release[.]sh' "${example_readmes[@]}"; then
+  fail "operator examples must not expose internal release-kit plans or maintainer diagnostics"
 fi
 if grep -Eq 'TARGET_PROFILE=|--target-profile|verify-release\.sh --online-deployment-gate' "$example_readme"; then
   fail "online existing Kubernetes example must not expose producer profile commands as the operator path"

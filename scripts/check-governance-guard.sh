@@ -275,6 +275,12 @@ reject_scan \
   'Maintainer/Internal Diagnostics|Legacy Diagnostic Status|Machine profile mapping|operator-release-surface-report|airgap-bundle/kit_provided|online/kit_provided|airgap/kit_provided|kind_rehearsal/kit_installed|release-engineering-gate-intake|operator-signoff-intake' \
   docs/runbooks/README.md
 
+mapfile -t example_readmes < <(find examples -mindepth 1 -maxdepth 2 -name README.md -type f | sort)
+reject_scan \
+  "operator examples expose internal release-kit plans or maintainer diagnostics" \
+  '[.]release-kit-internal|operator-inputs-plan|operator-release-surface-report|evidence-provenance|adoption report|candidate intake|release-engineering|operator-signoff|--target-profile|verify-release[.]sh' \
+  "${example_readmes[@]}"
+
 require_text README.md "$EXPECTED_IDENTITY"
 require_text README.md "AgentSmith release contract"
 require_text README.md "deploy template package"
