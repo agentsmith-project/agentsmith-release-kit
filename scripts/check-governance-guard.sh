@@ -136,6 +136,50 @@ reject_operator_substrate_surface() {
   fi
 }
 
+assert_development_default_commands_are_slim() {
+  local default_block
+  local forbidden
+
+  default_block="$(
+    awk '
+      /^```bash$/ {
+        if (!seen) {
+          seen=1
+          capture=1
+          next
+        }
+      }
+      /^```$/ && capture {
+        exit
+      }
+      capture {
+        print
+      }
+    ' DEVELOPMENT.md
+  )"
+
+  [[ -n "$default_block" ]] || fail "DEVELOPMENT.md must keep a default command block"
+
+  for required in \
+    'bash scripts/verify-release.sh --quick' \
+    'bash scripts/test-operator-inputs.sh' \
+    'bash scripts/test-operator-inputs-orchestration.sh' \
+    'bash scripts/test-operator-release-surface.sh' \
+    'bash scripts/test-substrate-install.sh' \
+    'bash scripts/test-deployment-path-report.sh' \
+    'bash scripts/test-ga-release.sh' \
+    'bash scripts/test-package-driven-ga-smoke.sh'; do
+    grep -Fq -- "$required" <<<"$default_block" || \
+      fail "DEVELOPMENT.md default command block missing core command: $required"
+  done
+
+  forbidden='test-(image-map|registry-presence|bundle-create|airgap-bundle-check|airgap-image-archive-check|airgap-image-load|bundle-load-plan|airgap-bundle-render-check|airgap-deployment-gate|airgap-consume-rehearsal|airgap-adoption|substrate-pack-check|apply|rollout|smoke|online-deployment-gate|online-adoption|release-engineering-gate-intake|operator-runbook-acceptance|operator-signoff-intake|evidence|target-preflight)[.]sh'
+  if grep -Eq -- "$forbidden" <<<"$default_block"; then
+    printf '%s\n' "$default_block" | grep -En -- "$forbidden" >&2
+    fail "DEVELOPMENT.md default command block must not include maintainer-only diagnostics"
+  fi
+}
+
 reject_ecosystem_bootstrap_files
 
 remote_url="$(git remote get-url origin 2>/dev/null || true)"
@@ -172,6 +216,9 @@ pass "required bootstrap files"
 
 require_text OWNERS.md "AgentSmith release-kit team"
 pass "owner metadata"
+
+assert_development_default_commands_are_slim
+pass "development default command surface"
 
 doc_policy_paths=(
   README.md

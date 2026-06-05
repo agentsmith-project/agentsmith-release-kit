@@ -6,7 +6,7 @@ Status: bootstrap + GA aggregate gate.
 
 No package manager setup is required for the bootstrap skeleton.
 
-Use:
+Default focused closure:
 
 ```bash
 bash scripts/verify-release.sh --quick
@@ -14,34 +14,21 @@ bash scripts/test-inputs.sh
 bash scripts/test-template-package.sh
 bash scripts/test-render.sh
 bash scripts/test-render-check.sh
-bash scripts/test-image-map.sh
-bash scripts/test-registry-presence.sh
-bash scripts/test-bundle-create.sh
-bash scripts/test-airgap-bundle-check.sh
-bash scripts/test-airgap-image-archive-check.sh
-bash scripts/test-airgap-image-load.sh
-bash scripts/test-bundle-load-plan.sh
-bash scripts/test-airgap-bundle-render-check.sh
-bash scripts/test-airgap-deployment-gate.sh
-bash scripts/test-airgap-consume-rehearsal.sh
-bash scripts/test-airgap-adoption.sh
-bash scripts/test-substrate-pack-check.sh
+bash scripts/test-operator-inputs.sh
+bash scripts/test-operator-inputs-orchestration.sh
+bash scripts/test-operator-release-surface.sh
 bash scripts/test-substrate-install.sh
-bash scripts/test-apply.sh
-bash scripts/test-rollout.sh
-bash scripts/test-smoke.sh
-bash scripts/test-online-deployment-gate.sh
 bash scripts/test-deployment-path-report.sh
 bash scripts/test-ga-release.sh
 bash scripts/test-package-driven-ga-smoke.sh
-bash scripts/test-online-adoption.sh
-bash scripts/test-release-engineering-gate-intake.sh
-bash scripts/test-operator-release-surface.sh
-bash scripts/test-operator-runbook-acceptance.sh
-bash scripts/test-operator-signoff-intake.sh
-bash scripts/test-evidence.sh
-bash scripts/test-target-preflight.sh
 ```
+
+Maintainer diagnostics such as image-map, registry presence, airgap
+bundle/load/render, adoption aggregation, operator signoff intake, evidence,
+target-preflight, apply, rollout, and route-smoke checks are manual
+`workflow_dispatch` or targeted checks named in `docs/RELEASE_GATES.md`. They
+are not the default local command list and do not issue deployment, package,
+operator, or release readiness verdicts.
 
 There is intentionally no `package.json` in this repository.
 
