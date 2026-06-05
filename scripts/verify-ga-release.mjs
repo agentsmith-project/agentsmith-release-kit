@@ -1879,7 +1879,23 @@ async function validateFinalizerManifest({
   }
 
   const materializedSourceEvidence = {
-    sourceInputsByStep: new Map()
+    sourceInputsByStep: new Map(),
+    evidenceIndex: {
+      finalizer_manifest: {
+        path: FINALIZER_MANIFEST_FILE,
+        digest: manifestInput.digest,
+        created_at: manifest.created_at,
+        path_report_sha256: manifest.path_report_sha256
+      },
+      source_evidence_files: actualEntries.map((entry) => ({
+        kind: entry.kind,
+        ...(entry.step === undefined ? {} : { step: entry.step }),
+        path: entry.path,
+        sha256: entry.sha256,
+        schema: entry.schema,
+        scope: entry.scope
+      }))
+    }
   };
 
   for (const expected of expectedEntries) {
@@ -2071,6 +2087,7 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
     target_profile: report.target_profile.value,
     report_digest: reportDigest,
     steps: [...steps.keys()],
+    source_evidence_index: materializedSourceEvidence.evidenceIndex,
     ...(airgapOffline ? { airgap_offline: airgapOffline } : {})
   };
 }
@@ -2242,7 +2259,9 @@ async function main() {
       deploy_template_package: deployTemplateSummary,
       deployment_paths: deploymentPaths.map((entry) => ({
         operator_path: entry.operator_path,
-        digest: entry.report_digest
+        digest: entry.report_digest,
+        finalizer_manifest: entry.source_evidence_index.finalizer_manifest,
+        source_evidence_files: entry.source_evidence_index.source_evidence_files
       })),
       product_readiness: productReadinessSummary.report_digest,
       post_deploy_product_smoke: productSmokeSummary.report_digest

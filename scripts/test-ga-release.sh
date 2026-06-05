@@ -1682,6 +1682,39 @@ if (report.status !== 'pass' || report.formal_verdict !== 'issued') {
 if (!Array.isArray(report.deployment_paths) || report.deployment_paths.length !== 4) {
   throw new Error('expected four deployment paths');
 }
+if (!Array.isArray(report.artifact_index?.deployment_paths) || report.artifact_index.deployment_paths.length !== 4) {
+  throw new Error('GA report artifact index must cover four deployment paths');
+}
+for (const indexedPath of report.artifact_index.deployment_paths) {
+  if (!indexedPath.operator_path || !indexedPath.digest?.startsWith('sha256:')) {
+    throw new Error('GA report artifact index deployment path missing digest binding');
+  }
+  if (indexedPath.finalizer_manifest?.path !== 'deployment-path-finalizer-manifest.json') {
+    throw new Error(`GA report artifact index missing finalizer manifest path: ${indexedPath.operator_path}`);
+  }
+  if (!indexedPath.finalizer_manifest?.digest?.startsWith('sha256:')) {
+    throw new Error(`GA report artifact index missing finalizer manifest digest: ${indexedPath.operator_path}`);
+  }
+  if (!Array.isArray(indexedPath.source_evidence_files) || indexedPath.source_evidence_files.length === 0) {
+    throw new Error(`GA report artifact index missing source evidence files: ${indexedPath.operator_path}`);
+  }
+  for (const sourceFile of indexedPath.source_evidence_files) {
+    if (!sourceFile.path?.startsWith('source-evidence/') || !sourceFile.sha256?.startsWith('sha256:')) {
+      throw new Error(`GA report artifact index source evidence file missing path/digest: ${indexedPath.operator_path}`);
+    }
+    if (!sourceFile.kind || !sourceFile.schema) {
+      throw new Error(`GA report artifact index source evidence file missing kind/schema: ${indexedPath.operator_path}`);
+    }
+  }
+  const sourceKinds = indexedPath.source_evidence_files.map((entry) => entry.kind).sort();
+  if (indexedPath.operator_path.startsWith('airgap/')) {
+    for (const kind of ['airgap_bundle_manifest', 'airgap_image_map']) {
+      if (!sourceKinds.includes(kind)) {
+        throw new Error(`GA report artifact index airgap path missing ${kind}: ${indexedPath.operator_path}`);
+      }
+    }
+  }
+}
 const airgapPaths = report.deployment_paths.filter((entry) => entry.operator_path?.startsWith('airgap/'));
 if (airgapPaths.length !== 2) {
   throw new Error('GA report must include two airgap deployment paths');
