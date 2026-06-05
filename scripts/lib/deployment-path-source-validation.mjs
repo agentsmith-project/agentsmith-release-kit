@@ -1559,7 +1559,7 @@ export function validateSubstrateInstallReport(report, release, expectedTargetPr
     fail('substrate_install_report.mode must be apply');
   }
   if (operatorRunId !== undefined && requireOperatorRunId(report.operator_run_id, 'substrate_install_report.operator_run_id') !== operatorRunId) {
-    fail('substrate install report operator_run_id must match --confirm-install-substrates');
+    fail('substrate install report operator_run_id must match install_confirmation.operator_run_id');
   }
   if (operatorRunId === undefined) {
     requireOperatorRunId(report.operator_run_id, 'substrate_install_report.operator_run_id');

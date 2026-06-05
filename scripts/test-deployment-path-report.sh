@@ -1550,6 +1550,19 @@ grep -Fq "airgap-image-load step report.digest_summary.airgap_bundle_check_repor
   fail "airgap image-load binding failure message did not explain blocker"
 pass "airgap image load is bound to bundle check digest"
 
+if run_online_path \
+  "$VALID_DIR" \
+  "online/install_substrates" \
+  "$VALID_DIR/online-install-substrates" \
+  "$TMP_DIR/out-install-confirmation-mismatch" \
+  --substrate-install-report "$VALID_DIR/online-install-substrates/substrate-install-report.json" \
+  --confirm-install-substrates "operator-online-install-wrong" >"$TMP_DIR/deployment-path-install-confirmation-mismatch.out" 2>&1; then
+  fail "substrate install confirmation operator_run_id mismatch should fail"
+fi
+grep -Fq "substrate install report operator_run_id must match install_confirmation.operator_run_id" "$TMP_DIR/deployment-path-install-confirmation-mismatch.out" || \
+  fail "install confirmation mismatch failure message did not explain blocker"
+pass "install_substrates confirmation mismatch uses operator-inputs wording"
+
 MISSING_INSTALL_CONTRACT_DIGEST_DIR="$TMP_DIR/missing-install-release-contract-digest"
 write_fixture_set "$MISSING_INSTALL_CONTRACT_DIGEST_DIR" missing-install-release-contract-digest
 if run_online_path \
