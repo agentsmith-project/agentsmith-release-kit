@@ -417,6 +417,15 @@ if (report.post_deploy_product_smoke?.source?.product_flows_sha256 !== digest('p
 if (report.post_deploy_product_smoke?.deployment_target?.profile !== 'existing_kubernetes/external_declared/online') {
   throw new Error('GA report must bind product smoke deployment target profile');
 }
+if (report.post_deploy_product_smoke?.deployment_path_binding?.operator_path !== 'online/use_existing') {
+  throw new Error('GA report must bind product smoke to a finalized deployment path');
+}
+if (
+  report.post_deploy_product_smoke?.deployment_path_binding?.target_profile !==
+  report.post_deploy_product_smoke?.deployment_target?.profile
+) {
+  throw new Error('GA report product smoke deployment path binding target profile mismatch');
+}
 if (report.post_deploy_product_smoke?.deployment_target?.site_env?.sha256 !== digest('post-deploy-product-smoke:site-env')) {
   throw new Error('GA report must bind product smoke site env digest');
 }

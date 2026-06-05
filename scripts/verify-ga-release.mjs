@@ -1443,6 +1443,19 @@ function validateProductSmoke(report, reportDigest, release) {
   };
 }
 
+function validateProductSmokeDeploymentPathBinding(productSmokeSummary, deploymentPaths) {
+  const smokeProfile = productSmokeSummary.deployment_target.profile;
+  const matchingPath = deploymentPaths.find((entry) => entry.target_profile === smokeProfile);
+  if (!matchingPath) {
+    fail('post_deploy_product_smoke.deployment_target.profile must match one finalized deployment path target_profile');
+  }
+  return {
+    operator_path: matchingPath.operator_path,
+    target_profile: matchingPath.target_profile,
+    deployment_path_report_digest: matchingPath.report_digest
+  };
+}
+
 function requireEquals(actual, expected, label) {
   if (actual !== expected) {
     fail(`${label} must be ${expected}`);
@@ -2558,6 +2571,10 @@ async function main() {
       fail(`missing deployment path report: ${pathName}`);
     }
   }
+  const productSmokeDeploymentPathBinding = validateProductSmokeDeploymentPathBinding(
+    productSmokeSummary,
+    deploymentPaths
+  );
   const operatorInputsPackages = await validateOperatorInputsPlans(
     operatorInputsPlans,
     deploymentPaths,
@@ -2586,7 +2603,10 @@ async function main() {
     images: release.images,
     deployment_paths: deploymentPaths.sort((a, b) => a.operator_path.localeCompare(b.operator_path)),
     product_readiness: productReadinessSummary,
-    post_deploy_product_smoke: productSmokeSummary,
+    post_deploy_product_smoke: {
+      ...productSmokeSummary,
+      deployment_path_binding: productSmokeDeploymentPathBinding
+    },
     canonical_repos: canonicalRepos,
     artifact_index: {
       release_contract: {

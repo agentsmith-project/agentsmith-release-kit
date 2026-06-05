@@ -1242,6 +1242,8 @@ if (mutation === 'legacy-surrogate-shape') {
   delete report.deployment_target;
 } else if (mutation === 'missing-deployment-target-profile') {
   delete report.deployment_target.profile;
+} else if (mutation === 'unknown-deployment-target-profile') {
+  report.deployment_target.profile = 'existing_kubernetes/external_declared/preview';
 } else if (mutation === 'missing-deployment-target-site-env-digest') {
   delete report.deployment_target.site_env.sha256;
 } else if (mutation === 'malformed-deployment-target-site-env-digest') {
@@ -2032,6 +2034,12 @@ if (smoke?.source?.aggregate_producer !== 'unified-deploy-product-flows') {
 if (smoke?.deployment_target?.profile !== 'existing_kubernetes/external_declared/online') {
   throw new Error('GA report did not bind product smoke deployment target profile');
 }
+if (smoke?.deployment_path_binding?.operator_path !== 'online/use_existing') {
+  throw new Error('GA report did not bind product smoke target to finalized deployment path');
+}
+if (smoke?.deployment_path_binding?.target_profile !== smoke.deployment_target.profile) {
+  throw new Error('GA report product smoke deployment path binding target profile mismatch');
+}
 if (smoke?.deployment_target?.public_base_url !== 'https://agentsmith.example.com') {
   throw new Error('GA report did not bind product smoke public base URL');
 }
@@ -2292,6 +2300,7 @@ product_smoke_mutations=(
   wrong-product-flows-producer
   missing-deployment-target
   missing-deployment-target-profile
+  unknown-deployment-target-profile
   missing-deployment-target-site-env-digest
   malformed-deployment-target-site-env-digest
   deployment-target-site-env-backslash-path
@@ -2365,6 +2374,9 @@ for mutation in "${product_smoke_mutations[@]}"; do
       ;;
     missing-deployment-target-profile)
       expected_message="post_deploy_product_smoke.deployment_target.profile is required"
+      ;;
+    unknown-deployment-target-profile)
+      expected_message="post_deploy_product_smoke.deployment_target.profile must match one finalized deployment path target_profile"
       ;;
     missing-deployment-target-site-env-digest)
       expected_message="post_deploy_product_smoke.deployment_target.site_env.sha256 is required"
