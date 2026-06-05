@@ -285,6 +285,8 @@ require_text README.md 'bash scripts/operator-release.sh --operator-inputs <dir-
 require_text README.md "Formal release success"
 require_text README.md 'final `ga-release-report.json` issued by'
 require_text README.md 'release finalizer/captain'
+require_text README.md '`ga-evidence-index.json`, a derived archive index'
+require_text README.md "without issuing another verdict"
 require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
 require_text README.md '`airgap/use_existing`'
@@ -299,6 +301,8 @@ require_text README.md "target, or replacement for real Kubernetes evidence"
 require_text docs/runbooks/README.md "Use the single operator facade"
 require_text docs/runbooks/README.md "Formal release success or failure is represented only by the final"
 require_text docs/runbooks/README.md '`ga-release-report.json` issued by the release finalizer/captain'
+require_text docs/runbooks/README.md 'write `ga-evidence-index.json` for release archive lookup'
+require_text docs/runbooks/README.md "does not issue another verdict"
 require_text docs/runbooks/README.md "## Operator Package Matrix"
 require_text docs/runbooks/README.md "Airgap bundle packaging commands are packaging-side helpers"
 require_text docs/runbooks/README.md "not standalone operator choices"
@@ -326,6 +330,10 @@ require_text docs/RELEASE_GATES.md "The quick gate is not release readiness"
 require_text docs/RELEASE_GATES.md "Deployment Path Report Finalization Focused Diagnostic"
 require_text docs/RELEASE_GATES.md "The GA release aggregate gate is the repo-local final verdict authority"
 require_text docs/RELEASE_GATES.md "consumes finalized deployment path reports"
+require_text docs/RELEASE_GATES.md '`ga-evidence-index.json` outputs'
+require_text docs/RELEASE_GATES.md "without issuing another verdict"
+require_text docs/contracts/README.md '`agentsmith.ga-evidence-index/v1`'
+require_text docs/contracts/README.md "It does not issue a verdict"
 require_text scripts/verify-release.sh "--ga-release is the release-kit final GA aggregate"
 require_text scripts/verify-release.sh "formal_verdict=issued"
 require_text scripts/verify-release.sh "does not rerun producers"
