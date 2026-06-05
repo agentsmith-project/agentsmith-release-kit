@@ -311,7 +311,7 @@ reject_scan \
 
 reject_scan \
   "stale formal operator verdict gap wording found" \
-  'future formal operator verdict|formal_operator_verdict|does not yet have full deploy/package evidence' \
+  'future formal operator verdict|formal_operator_verdict|does not yet have full deploy/package evidence|full release gate will be a future|future repo-local authority' \
   "${doc_policy_paths[@]}" scripts/verify-release-engineering-gate-intake.mjs
 
 reject_scan \

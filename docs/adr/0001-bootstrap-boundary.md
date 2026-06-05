@@ -1,6 +1,7 @@
 # ADR 0001: Bootstrap Boundary
 
-Status: Accepted
+Status: Bootstrap reference; superseded for GA release verdict by
+`operator-release.sh --ga-report` / `verify-release.sh --ga-release`
 Date: 2026-05-23
 
 ## Context
@@ -10,10 +11,13 @@ repository without expanding AgentSmith product scope. The first step should
 create a local sibling repository with governance documents and a quick guard
 only.
 
-The release kit should eventually own online deployment, airgap package/deploy
-flows, operator runbooks, and deployment/package evidence. AgentSmith remains
-the owner of product readiness, product contracts, product flows, visual
-validation, backend-real validation, and product bootstrap semantics.
+This ADR records the bootstrap boundary only. The current GA boundary is now
+defined by the root `README.md`, `docs/runbooks/README.md`,
+`docs/RELEASE_GATES.md`, and `docs/contracts/README.md`: release-kit owns
+online/airgap deployment execution, path-level evidence, operator runbooks, and
+the final GA aggregate report. AgentSmith remains the owner of product
+readiness, product contracts, product smoke producer output, visual validation,
+backend-real validation, and product bootstrap semantics.
 
 ## Decision
 
@@ -30,8 +34,10 @@ The skeleton includes:
 - A release gate entry that fails fast for full release readiness while
   allowing bootstrap quick checks.
 
-The quick gate is not release readiness. The full release gate will be a future
-repo-local authority.
+The bootstrap quick gate was not release readiness. In the current GA flow,
+formal release success or failure is issued only by the final
+`ga-release-report.json` from `operator-release.sh --ga-report` /
+`verify-release.sh --ga-release`.
 
 ## Consequences
 
