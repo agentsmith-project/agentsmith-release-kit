@@ -2383,6 +2383,10 @@ grep -q -- 'bash scripts/operator-release.sh --operator-inputs <dir-or-json> --r
   fail "runbook README must document package-driven --operator-inputs --run main path"
 grep -q -- 'bash scripts/operator-release.sh --ga-report' "$runbooks_readme" ||
   fail "runbook README must document package-driven --ga-report final facade"
+grep -q -- 'source.product_flows_path' "$runbooks_readme" ||
+  fail "runbook README must document canonical product smoke product-flow source binding"
+grep -q -- 'deployment_target' "$runbooks_readme" ||
+  fail "runbook README must document canonical product smoke deployment target binding"
 if grep -Fq -- '--deployment-path-report' "$runbooks_readme"; then
   fail "runbook README must not expose internal --deployment-path-report copy path"
 fi
