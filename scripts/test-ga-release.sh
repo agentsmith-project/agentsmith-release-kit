@@ -1109,6 +1109,12 @@ function copyMaterial(source, target) {
   fs.copyFileSync(source, target);
 }
 
+function writeExecutable(file, body) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, body);
+  fs.chmodSync(file, 0o755);
+}
+
 function fileDigest(file) {
   return digest(fs.readFileSync(file));
 }
@@ -1123,6 +1129,9 @@ for (const operatorPath of deploymentPaths) {
   const manifestPath = path.join(packageRoot, 'operator-inputs.json');
   const releaseContractPath = path.join(packageRoot, 'release-contract.json');
   const deployTemplatePackagePath = path.join(packageRoot, 'deploy-template-package.json');
+  const isAirgap = operatorPath.startsWith('airgap/');
+  const archiveProbePath = path.join(packageRoot, 'tools/archive-probe');
+  const imageLoaderPath = path.join(packageRoot, 'tools/image-loader');
   const deploymentPathOutputDir =
     mutation === 'path-output-dir-drift' && operatorPath === 'online/use_existing'
       ? path.resolve(planDir, 'wrong-output', slug(operatorPath))
@@ -1136,9 +1145,50 @@ for (const operatorPath of deploymentPaths) {
     operator_inputs_version: 1,
     deployment_path: operatorPath
   };
+  if (isAirgap) {
+    writeExecutable(archiveProbePath, '#!/usr/bin/env sh\nprintf "%s\\n" archive-probe-fixture\n');
+    writeExecutable(imageLoaderPath, '#!/usr/bin/env sh\nprintf "%s\\n" image-loader-fixture\n');
+    manifest.archive_probe = 'tools/archive-probe';
+    manifest.image_loader = 'tools/image-loader';
+  }
   writeJson(manifestPath, manifest);
 
   const releaseContractDigest = fileDigest(releaseContractPath);
+  const inputRefs = {
+    release_contract: {
+      kind: 'file',
+      path: 'release-contract.json',
+      absolute_path: releaseContractPath,
+      sha256: mutation === 'stale-release-contract-ref'
+        ? wrongDigest
+        : releaseContractDigest
+    },
+    deploy_template_package: {
+      kind: 'file',
+      path: 'deploy-template-package.json',
+      absolute_path: deployTemplatePackagePath,
+      sha256: fileDigest(deployTemplatePackagePath)
+    }
+  };
+  if (isAirgap) {
+    inputRefs.archive_probe = {
+      kind: 'file',
+      path: 'tools/archive-probe',
+      absolute_path: archiveProbePath,
+      sha256: fileDigest(archiveProbePath)
+    };
+    inputRefs.image_loader = {
+      kind: 'file',
+      path: 'tools/image-loader',
+      absolute_path: imageLoaderPath,
+      sha256: mutation === 'stale-airgap-image-loader-ref' && operatorPath === 'airgap/use_existing'
+        ? wrongDigest
+        : fileDigest(imageLoaderPath)
+    };
+    if (mutation === 'missing-airgap-image-loader-ref' && operatorPath === 'airgap/use_existing') {
+      delete inputRefs.image_loader;
+    }
+  }
   const plan = {
     schema_version: 'agentsmith.operator-inputs-plan/v1',
     scope: 'operator_inputs_intake_only',
@@ -1153,22 +1203,7 @@ for (const operatorPath of deploymentPaths) {
       manifest_relative_path: 'operator-inputs.json',
       manifest_sha256: fileDigest(manifestPath)
     },
-    input_refs: {
-      release_contract: {
-        kind: 'file',
-        path: 'release-contract.json',
-        absolute_path: releaseContractPath,
-        sha256: mutation === 'stale-release-contract-ref'
-          ? wrongDigest
-          : releaseContractDigest
-      },
-      deploy_template_package: {
-        kind: 'file',
-        path: 'deploy-template-package.json',
-        absolute_path: deployTemplatePackagePath,
-        sha256: fileDigest(deployTemplatePackagePath)
-      }
-    },
+    input_refs: inputRefs,
     _internal: {
       expected: {
         schema_version: 'agentsmith.operator-inputs-plan-internal/v1',
@@ -2557,9 +2592,53 @@ for (const entry of packageIndex) {
   if (entry.release_materials?.deploy_template_package?.digest !== deployTemplatePackageDigest) {
     throw new Error(`operator-inputs package index missing deploy template package digest: ${entry.operator_path}`);
   }
+  if (entry.operator_path.startsWith('airgap/')) {
+    const tools = entry.airgap_runtime_tools;
+    if (tools?.archive_probe?.path !== 'tools/archive-probe') {
+      throw new Error(`operator-inputs package index missing airgap archive_probe path: ${entry.operator_path}`);
+    }
+    if (tools?.archive_probe?.digest !== digest(`${planDir}/${entry.operator_path.replace(/[/_]+/g, '-')}/tools/archive-probe`)) {
+      throw new Error(`operator-inputs package index missing airgap archive_probe digest: ${entry.operator_path}`);
+    }
+    if (tools?.image_loader?.path !== 'tools/image-loader') {
+      throw new Error(`operator-inputs package index missing airgap image_loader path: ${entry.operator_path}`);
+    }
+    if (tools?.image_loader?.digest !== digest(`${planDir}/${entry.operator_path.replace(/[/_]+/g, '-')}/tools/image-loader`)) {
+      throw new Error(`operator-inputs package index missing airgap image_loader digest: ${entry.operator_path}`);
+    }
+  } else if (entry.airgap_runtime_tools !== undefined) {
+    throw new Error(`operator-inputs package index must not attach airgap tools to online path: ${entry.operator_path}`);
+  }
 }
 NODE
 pass "GA aggregate binds operator-inputs package release materials"
+
+MISSING_AIRGAP_TOOL_PLAN_DIR="$TMP_DIR/operator-input-plans-missing-airgap-tool"
+write_operator_inputs_plan_set "$VALID_DIR" "$MISSING_AIRGAP_TOOL_PLAN_DIR" "$PATH_DIR" missing-airgap-image-loader-ref
+if run_ga_release_with_operator_plans \
+  "$VALID_DIR" \
+  "$PATH_DIR" \
+  "$MISSING_AIRGAP_TOOL_PLAN_DIR" \
+  "$TMP_DIR/out-missing-airgap-tool-plan-ref" >"$TMP_DIR/ga-missing-airgap-tool-plan-ref.out" 2>&1; then
+  fail "GA aggregate should reject airgap operator-inputs plan missing image_loader ref"
+fi
+grep -Fq 'operator_inputs_plan.input_refs.image_loader is required for airgap/use_existing' \
+  "$TMP_DIR/ga-missing-airgap-tool-plan-ref.out" ||
+  fail "missing airgap image_loader plan ref failure did not explain blocker"
+
+STALE_AIRGAP_TOOL_PLAN_DIR="$TMP_DIR/operator-input-plans-stale-airgap-tool"
+write_operator_inputs_plan_set "$VALID_DIR" "$STALE_AIRGAP_TOOL_PLAN_DIR" "$PATH_DIR" stale-airgap-image-loader-ref
+if run_ga_release_with_operator_plans \
+  "$VALID_DIR" \
+  "$PATH_DIR" \
+  "$STALE_AIRGAP_TOOL_PLAN_DIR" \
+  "$TMP_DIR/out-stale-airgap-tool-plan-ref" >"$TMP_DIR/ga-stale-airgap-tool-plan-ref.out" 2>&1; then
+  fail "GA aggregate should reject airgap operator-inputs plan with stale image_loader digest"
+fi
+grep -Fq 'operator_inputs_plan.input_refs.image_loader.sha256 must match file digest for airgap/use_existing' \
+  "$TMP_DIR/ga-stale-airgap-tool-plan-ref.out" ||
+  fail "stale airgap image_loader plan ref failure did not explain blocker"
+pass "GA aggregate binds airgap operator-inputs runtime tools"
 
 STALE_PLAN_DIR="$TMP_DIR/operator-input-plans-stale-release-ref"
 write_operator_inputs_plan_set "$VALID_DIR" "$STALE_PLAN_DIR" "$PATH_DIR" stale-release-contract-ref

@@ -655,6 +655,22 @@ for (const entry of packageIndex) {
   if (entry.release_materials?.deploy_template_package?.digest !== fileDigest(plan.input_refs.deploy_template_package.absolute_path)) {
     throw new Error(`GA report operator-inputs deploy template package digest mismatch: ${entry.operator_path}`);
   }
+  if (entry.operator_path.startsWith('airgap/')) {
+    if (entry.airgap_runtime_tools?.archive_probe?.path !== plan.input_refs?.archive_probe?.path) {
+      throw new Error(`GA report operator-inputs archive_probe path mismatch: ${entry.operator_path}`);
+    }
+    if (entry.airgap_runtime_tools?.archive_probe?.digest !== fileDigest(plan.input_refs.archive_probe.absolute_path)) {
+      throw new Error(`GA report operator-inputs archive_probe digest mismatch: ${entry.operator_path}`);
+    }
+    if (entry.airgap_runtime_tools?.image_loader?.path !== plan.input_refs?.image_loader?.path) {
+      throw new Error(`GA report operator-inputs image_loader path mismatch: ${entry.operator_path}`);
+    }
+    if (entry.airgap_runtime_tools?.image_loader?.digest !== fileDigest(plan.input_refs.image_loader.absolute_path)) {
+      throw new Error(`GA report operator-inputs image_loader digest mismatch: ${entry.operator_path}`);
+    }
+  } else if (entry.airgap_runtime_tools !== undefined) {
+    throw new Error(`GA report operator-inputs tools must only attach to airgap paths: ${entry.operator_path}`);
+  }
   const deploymentPathEntry = report.deployment_paths.find((pathEntry) => pathEntry.operator_path === entry.operator_path);
   if (entry.deployment_path_report?.digest !== deploymentPathEntry?.report_digest) {
     throw new Error(`GA report operator-inputs package index must bind deployment path report digest: ${entry.operator_path}`);

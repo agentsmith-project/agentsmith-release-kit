@@ -2736,7 +2736,29 @@ async function validateOperatorInputsMaterialRef({
   expectedDigestLabel,
   operatorPath
 }) {
+  return validateOperatorInputsFileRef({
+    plan,
+    packageRoot,
+    key,
+    expectedDigest,
+    expectedDigestLabel,
+    operatorPath
+  });
+}
+
+async function validateOperatorInputsFileRef({
+  plan,
+  packageRoot,
+  key,
+  expectedDigest,
+  expectedDigestLabel,
+  operatorPath,
+  executable = false
+}) {
   const inputRefs = requireObject(plan.input_refs, 'operator_inputs_plan.input_refs');
+  if (!Object.prototype.hasOwnProperty.call(inputRefs, key)) {
+    fail(`operator_inputs_plan.input_refs.${key} is required for ${operatorPath}`);
+  }
   const ref = requireObject(inputRefs[key], `operator_inputs_plan.input_refs.${key}`);
   if (requireString(ref.kind, `operator_inputs_plan.input_refs.${key}.kind`) !== 'file') {
     fail(`operator_inputs_plan.input_refs.${key}.kind must be file`);
@@ -2753,6 +2775,22 @@ async function validateOperatorInputsMaterialRef({
     fail(`operator_inputs_plan.input_refs.${key}.path must bind absolute_path for ${operatorPath}`);
   }
 
+  let stat;
+  try {
+    stat = await fs.lstat(absolutePath);
+  } catch (error) {
+    fail(`cannot read operator-inputs ${key} for ${operatorPath}: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`operator_inputs_plan.input_refs.${key}.absolute_path must not be a symlink for ${operatorPath}`);
+  }
+  if (!stat.isFile()) {
+    fail(`operator_inputs_plan.input_refs.${key}.absolute_path must point to a file for ${operatorPath}`);
+  }
+  if (executable && (stat.mode & 0o111) === 0) {
+    fail(`operator_inputs_plan.input_refs.${key}.absolute_path must be executable for ${operatorPath}`);
+  }
+
   const declaredDigest = requireDigest(
     ref.sha256,
     `operator_inputs_plan.input_refs.${key}.sha256`
@@ -2765,7 +2803,7 @@ async function validateOperatorInputsMaterialRef({
   if (declaredDigest !== actualDigest) {
     fail(`operator_inputs_plan.input_refs.${key}.sha256 must match file digest for ${operatorPath}`);
   }
-  if (declaredDigest !== expectedDigest) {
+  if (expectedDigest !== undefined && declaredDigest !== expectedDigest) {
     fail(`operator_inputs_plan.input_refs.${key}.sha256 must match ${expectedDigestLabel} for ${operatorPath}`);
   }
 
@@ -2773,6 +2811,16 @@ async function validateOperatorInputsMaterialRef({
     path: relativePath,
     digest: declaredDigest
   };
+}
+
+function validateOperatorInputsManifestRef(manifest, key, expectedRelativePath, operatorPath) {
+  const actual = requireString(
+    manifest[key],
+    `operator_inputs_manifest.${key}`
+  );
+  if (actual !== expectedRelativePath) {
+    fail(`operator_inputs_manifest.${key} must match operator_inputs_plan.input_refs.${key}.path for ${operatorPath}`);
+  }
 }
 
 async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPath, release, deployTemplate) {
@@ -2878,6 +2926,39 @@ async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPat
     expectedDigestLabel: 'deploy template package descriptor digest',
     operatorPath
   });
+  let airgapRuntimeTools;
+  if (DEPLOYMENT_PATHS.get(operatorPath).source === 'airgap') {
+    const archiveProbeRef = await validateOperatorInputsFileRef({
+      plan,
+      packageRoot,
+      key: 'archive_probe',
+      operatorPath,
+      executable: true
+    });
+    const imageLoaderRef = await validateOperatorInputsFileRef({
+      plan,
+      packageRoot,
+      key: 'image_loader',
+      operatorPath,
+      executable: true
+    });
+    validateOperatorInputsManifestRef(
+      manifestInput.value,
+      'archive_probe',
+      archiveProbeRef.path,
+      operatorPath
+    );
+    validateOperatorInputsManifestRef(
+      manifestInput.value,
+      'image_loader',
+      imageLoaderRef.path,
+      operatorPath
+    );
+    airgapRuntimeTools = {
+      archive_probe: archiveProbeRef,
+      image_loader: imageLoaderRef
+    };
+  }
 
   return {
     operator_path: operatorPath,
@@ -2896,6 +2977,7 @@ async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPat
       release_contract: releaseContractRef,
       deploy_template_package: deployTemplatePackageRef
     },
+    ...(airgapRuntimeTools ? { airgap_runtime_tools: airgapRuntimeTools } : {}),
     deployment_path_report: {
       digest: deploymentPath.report_digest
     }
