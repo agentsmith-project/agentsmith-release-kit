@@ -12,9 +12,6 @@ bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir>
 bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir> --run
 ```
 
-The positional `<surface> <substrate_strategy>` facade is maintainer/internal
-focused diagnostic plumbing. Do not use it as the operator example path.
-
 ## Files
 
 - `operator-inputs.apply.example.json`: package manifest for
