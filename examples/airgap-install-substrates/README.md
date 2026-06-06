@@ -52,3 +52,22 @@ bash scripts/operator-release.sh --operator-inputs "$PKG" --run
 
 The package run writes path-level evidence for the final GA facade. It does
 not issue `ga-release-report.json`.
+
+## Final GA Report
+
+After all four package runs and AgentSmith product-side reports are available,
+use the final GA facade with the four package paths:
+
+```bash
+bash scripts/operator-release.sh --ga-report \
+  --operator-inputs <online-use-existing-pkg> \
+  --operator-inputs <online-install-substrates-pkg> \
+  --operator-inputs <airgap-use-existing-pkg> \
+  --operator-inputs <airgap-install-substrates-pkg> \
+  --product-readiness-report <json> \
+  --post-deploy-product-smoke-report <online-json> \
+  --post-deploy-product-smoke-report <airgap-json> \
+  --output-dir <dir>
+```
+
+The formal result is `ga-release-report.json`.
