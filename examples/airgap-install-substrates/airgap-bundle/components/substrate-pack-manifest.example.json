@@ -2,7 +2,7 @@
   "schema_version": "agentsmith.substrate-pack-manifest/v1",
   "release_kit_version": "0.1.0",
   "installed_by": "agentsmith-release-kit",
-  "target_profile": "existing_kubernetes/kit_installed/airgap",
+  "deployment_path": "airgap/install_substrates",
   "images": {
     "postgresql": "registry.airgap.example/agentsmith/substrates/postgresql:16.3@sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "mongodb": "registry.airgap.example/agentsmith/substrates/mongodb:7.0@sha256:2222222222222222222222222222222222222222222222222222222222222222",
@@ -11,7 +11,7 @@
     "oidc": "registry.airgap.example/agentsmith/substrates/keycloak:25.0@sha256:5555555555555555555555555555555555555555555555555555555555555555"
   },
   "payload": {
-    "install_plan": "payload/kit-provided.json"
+    "install_plan": "payload/install-substrates.json"
   },
   "templates": {
     "postgresql": "templates/postgresql.yaml",
@@ -28,4 +28,3 @@
     "manifest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
   }
 }
-

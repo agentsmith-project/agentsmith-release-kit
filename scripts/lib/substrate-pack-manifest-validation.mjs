@@ -15,10 +15,21 @@ const MANIFEST_FIELDS = new Set([
   'schema_version',
   'release_kit_version',
   'installed_by',
+  'deployment_path',
   'target_profile',
   'images',
   ...MATERIAL_SECTIONS
 ]);
+const DEPLOYMENT_PATH_TO_TARGET_PROFILE = new Map([
+  ['online/install_substrates', 'existing_kubernetes/kit_installed/online'],
+  ['airgap/install_substrates', 'existing_kubernetes/kit_installed/airgap']
+]);
+const TARGET_PROFILE_TO_DEPLOYMENT_PATH = new Map(
+  [...DEPLOYMENT_PATH_TO_TARGET_PROFILE.entries()].map(([deploymentPath, targetProfile]) => [
+    targetProfile,
+    deploymentPath
+  ])
+);
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const SAFE_RELATIVE_PATH_RE = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -93,6 +104,42 @@ function targetProfileValue(targetProfile, fail) {
   }
   const profile = requireObject(targetProfile, 'target_profile', fail);
   return requireString(profile.value, 'target_profile.value', fail);
+}
+
+function validateManifestTargetIdentity(manifest, expectedTargetProfile, label, fail) {
+  const hasDeploymentPath = Object.prototype.hasOwnProperty.call(manifest, 'deployment_path');
+  const hasTargetProfile = Object.prototype.hasOwnProperty.call(manifest, 'target_profile');
+
+  if (hasDeploymentPath && hasTargetProfile) {
+    fail(`${label} must declare either deployment_path or target_profile, not both`);
+  }
+  if (!hasDeploymentPath && !hasTargetProfile) {
+    fail(`${label}.deployment_path is required for operator-facing substrate packs; legacy target_profile is accepted only for maintainer diagnostics`);
+  }
+
+  if (hasDeploymentPath) {
+    const deploymentPath = requireString(manifest.deployment_path, `${label}.deployment_path`, fail);
+    const derivedTargetProfile = DEPLOYMENT_PATH_TO_TARGET_PROFILE.get(deploymentPath);
+    if (!derivedTargetProfile) {
+      fail(`${label}.deployment_path must be online/install_substrates or airgap/install_substrates`);
+    }
+    if (derivedTargetProfile !== expectedTargetProfile) {
+      fail(`${label}.deployment_path must match the selected install_substrates target`);
+    }
+    return {
+      deploymentPath,
+      targetProfile: derivedTargetProfile
+    };
+  }
+
+  const actualTargetProfile = targetProfileValue(manifest.target_profile, fail);
+  if (actualTargetProfile !== expectedTargetProfile) {
+    fail(`${label}.target_profile must be ${expectedTargetProfile}`);
+  }
+  return {
+    deploymentPath: TARGET_PROFILE_TO_DEPLOYMENT_PATH.get(actualTargetProfile),
+    targetProfile: actualTargetProfile
+  };
 }
 
 function assertSafeRelativePackPath(value, label, fail) {
@@ -332,7 +379,7 @@ export function validateSubstratePackManifest(value, targetProfile, options = {}
     `${label}.installed_by`,
     fail
   );
-  assertStringEquals(manifest.target_profile, expectedTargetProfile, `${label}.target_profile`, fail);
+  const targetIdentity = validateManifestTargetIdentity(manifest, expectedTargetProfile, label, fail);
 
   const imageSummary = validateImages(manifest.images, label, fail);
   const materialSections = {};
@@ -343,11 +390,17 @@ export function validateSubstratePackManifest(value, targetProfile, options = {}
   }
 
   return {
-    manifest,
+    manifest: {
+      ...manifest,
+      target_profile: targetIdentity.targetProfile,
+      ...(targetIdentity.deploymentPath ? { deployment_path: targetIdentity.deploymentPath } : {})
+    },
     manifestSummary: {
       schema_version: SUBSTRATE_PACK_MANIFEST_SCHEMA,
       installed_by: SUBSTRATE_PACK_INSTALLED_BY,
       release_kit_version: manifest.release_kit_version,
+      target_profile: targetIdentity.targetProfile,
+      ...(targetIdentity.deploymentPath ? { deployment_path: targetIdentity.deploymentPath } : {}),
       ...imageSummary,
       material_sections: materialSections
     }

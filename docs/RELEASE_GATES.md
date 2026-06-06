@@ -1347,7 +1347,10 @@ The only accepted target profiles are
 The substrate pack manifest schema is
 `agentsmith.substrate-pack-manifest/v1`. It must declare
 `installed_by: agentsmith-release-kit`, a plain semver `release_kit_version`,
-and a `target_profile` string that exactly matches the CLI target profile.
+and either an operator-facing `deployment_path` (`online/install_substrates` or
+`airgap/install_substrates`) or, for maintainer/internal diagnostics only, a
+legacy `target_profile` string that exactly matches the CLI target profile.
+Validators normalize both forms to the internal target profile in reports.
 That `installed_by` value is a pack/truth identity and provenance marker, not
 installer proof.
 `images` must include `postgresql`, `mongodb`, `redis`, `object_storage`, and

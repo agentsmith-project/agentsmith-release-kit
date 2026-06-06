@@ -2,7 +2,7 @@
   "schema_version": "agentsmith.substrate-pack-manifest/v1",
   "release_kit_version": "0.1.0",
   "installed_by": "agentsmith-release-kit",
-  "target_profile": "existing_kubernetes/kit_installed/online",
+  "deployment_path": "online/install_substrates",
   "images": {
     "postgresql": "ghcr.io/agentsmith-project/substrates/postgresql:16.3@sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "mongodb": "ghcr.io/agentsmith-project/substrates/mongodb:7.0@sha256:2222222222222222222222222222222222222222222222222222222222222222",
@@ -11,7 +11,7 @@
     "oidc": "ghcr.io/agentsmith-project/substrates/keycloak:25.0@sha256:5555555555555555555555555555555555555555555555555555555555555555"
   },
   "payload": {
-    "install_plan": "payload/kit-provided.json"
+    "install_plan": "payload/install-substrates.json"
   },
   "templates": {
     "postgresql": "templates/postgresql.yaml",
@@ -27,4 +27,3 @@
     "manifest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
   }
 }
-

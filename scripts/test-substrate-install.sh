@@ -258,6 +258,15 @@ const manifest = {
     manifest: digest('8')
   }
 };
+if (mutation === 'operator_facing_pack_manifest' || mutation === 'operator_facing_pack_manifest_mismatch') {
+  const deploymentPath = profile.endsWith('/airgap')
+    ? 'airgap/install_substrates'
+    : 'online/install_substrates';
+  manifest.deployment_path = mutation === 'operator_facing_pack_manifest_mismatch'
+    ? (deploymentPath === 'online/install_substrates' ? 'airgap/install_substrates' : 'online/install_substrates')
+    : deploymentPath;
+  delete manifest.target_profile;
+}
 
 function kitMetadata(name) {
   return {
@@ -1084,6 +1093,19 @@ NODE
 
 valid_dir="$TMP_DIR/valid"
 write_fixture_set "$valid_dir" valid
+
+operator_facing_pack_dir="$TMP_DIR/operator-facing-pack"
+write_fixture_set "$operator_facing_pack_dir" operator_facing_pack_manifest
+operator_facing_pack_output="$TMP_DIR/out-operator-facing-pack"
+reset_kubectl_log
+run_install "$operator_facing_pack_dir" "$operator_facing_pack_output" >/dev/null
+assert_install_report "$operator_facing_pack_output/substrate-install-report.json" "$operator_facing_pack_output/substrate-truth.json" server-dry-run
+pass "operator-facing substrate pack manifest deployment_path is accepted and normalized"
+
+assert_install_rejected_before_kubectl \
+  operator_facing_pack_manifest_mismatch \
+  "substrate_pack_manifest.deployment_path must match the selected install_substrates target" \
+  "operator-facing substrate pack manifest deployment_path mismatch"
 
 reset_kubectl_log
 if run_install "$valid_dir" "$TMP_DIR/out-missing-confirm" \

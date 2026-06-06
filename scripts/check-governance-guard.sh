@@ -527,6 +527,16 @@ reject_scan \
   "${doc_policy_paths[@]}"
 
 require_text docs/RELEASE_GATES.md "No mutable image or non-digest release claim is present"
+require_text docs/RELEASE_GATES.md 'operator-facing `deployment_path`'
+
+for pack_manifest in \
+  examples/online-install-substrates/substrate-pack-manifest.example.json \
+  examples/airgap-install-substrates/airgap-bundle/components/substrate-pack-manifest.example.json; do
+  require_text "$pack_manifest" '"deployment_path"'
+  if grep -Eq 'target_profile|existing_kubernetes|kit_installed|kit-provided' "$pack_manifest"; then
+    fail "operator-facing substrate pack example must not expose internal target profile vocabulary: $pack_manifest"
+  fi
+done
 pass "boundary scans"
 
 echo "PASS: quick identity and boundary guard"
