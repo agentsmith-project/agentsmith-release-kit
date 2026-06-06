@@ -1664,6 +1664,11 @@ provenance, digests, path coverage, and product report bindings.
 The Product Readiness artifact input defaults to the canonical AgentSmith
 artifact name `agentsmith-product-readiness`, which contains
 `product-readiness/product-readiness-report.json`.
+The post-deploy product smoke artifact inputs default to the canonical
+AgentSmith artifact names `agentsmith-post-deploy-product-smoke-report` for
+the online report and `agentsmith-post-deploy-product-smoke-airgap-report` for
+the airgap report; each artifact contains one
+`post-deploy-product-smoke-report.json`.
 
 The GA aggregate also closes managed runner release provenance. The
 `managed_runner` deploy inventory source provenance must include the runner
