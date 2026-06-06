@@ -1051,7 +1051,7 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
     },
     substrate_truth: {
       path: 'unified-deploy/substrate-truth.json',
-      sha256: sha('post-deploy-product-smoke:substrate-truth')
+      sha256: sha('existing_kubernetes/external_declared/online:substrate-truth')
     }
   },
   smoke_results: canonicalSmokeResults(),
@@ -1091,7 +1091,7 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-airgap-report.json'), {
     },
     substrate_truth: {
       path: 'unified-deploy/airgap-substrate-truth.json',
-      sha256: sha('post-deploy-product-smoke:airgap-substrate-truth')
+      sha256: sha('existing_kubernetes/external_declared/airgap:substrate-truth')
     }
   },
   smoke_results: canonicalSmokeResults(),
@@ -1369,6 +1369,34 @@ NODE
 pass "shared forbidden scanner rejects explicit credential/path forms without banning ordinary key fields"
 
 run_ga_release "$VALID_DIR" "$PATH_DIR" "$TMP_DIR/out-ga"
+"$NODE_BIN" --input-type=module - "$TMP_DIR/out-ga/ga-release-report.json" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [reportFile] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const sha = (label) => `sha256:${crypto.createHash('sha256').update(label).digest('hex')}`;
+
+const onlineSmoke = report.post_deploy_product_smoke;
+const onlineDigest = sha('existing_kubernetes/external_declared/online:substrate-truth');
+if (onlineSmoke?.deployment_target?.substrate_truth?.sha256 !== onlineDigest) {
+  throw new Error('GA aggregate did not bind online product smoke substrate truth digest');
+}
+if (onlineSmoke?.deployment_path_binding?.deployment_path_substrate_truth_digest !== onlineDigest) {
+  throw new Error('GA aggregate did not bind online product smoke to finalized path substrate truth digest');
+}
+
+const airgapSmoke = report.post_deploy_product_smoke_reports?.find(
+  (entry) => entry.deployment_path_binding?.distribution === 'airgap'
+);
+const airgapDigest = sha('existing_kubernetes/external_declared/airgap:substrate-truth');
+if (airgapSmoke?.deployment_target?.substrate_truth?.sha256 !== airgapDigest) {
+  throw new Error('GA aggregate did not bind airgap product smoke substrate truth digest');
+}
+if (airgapSmoke?.deployment_path_binding?.deployment_path_substrate_truth_digest !== airgapDigest) {
+  throw new Error('GA aggregate did not bind airgap product smoke to finalized path substrate truth digest');
+}
+NODE
 pass "finalized deployment path reports feed GA aggregate"
 
 MIRROR_RENDER_DIR="$TMP_DIR/render-check-target-registry-mirror"
