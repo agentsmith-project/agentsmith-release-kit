@@ -14,6 +14,8 @@ The bundle manifest and bundle-local operator inputs are already bound to
 `airgap/use_existing`. Keep their path identity fields unchanged. Replace
 bundle components, component checksums, namespace, secret refs, endpoint
 values, and package-local tools.
+The facade derives deployment identity from `deployment_path`; do not add
+deployment identity fields to the bundle-local target prerequisites.
 
 ## Build The Package
 

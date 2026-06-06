@@ -481,10 +481,8 @@ function assertTargetProfilePrerequisites(prerequisites, targetProfile, label) {
     `${label}.schema_version`
   );
 
-  const targetProfileValue = requireString(
-    prerequisites.target_profile,
-    `${label}.target_profile`
-  );
+  const targetProfileValue = prerequisites.target_profile ?? targetProfile.value;
+  requireString(targetProfileValue, `${label}.target_profile`);
   if (targetProfileValue !== targetProfile.value) {
     fail(`${label}.target_profile must match CLI target_profile`);
   }

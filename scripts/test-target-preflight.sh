@@ -334,6 +334,9 @@ switch (mutation) {
   case 'redacted_fingerprint':
     useRedactedFingerprints();
     break;
+  case 'omit_target_profile':
+    delete prerequisites.target_profile;
+    break;
   case 'wrong_schema':
     prerequisites.schema_version = 'agentsmith.kubernetes-prerequisites/v1';
     break;
@@ -580,6 +583,13 @@ write_prerequisites "$EXTERNAL_PREREQUISITES" "$EXTERNAL_PROFILE" valid
 run_target_preflight "$EXTERNAL_PROFILE" "$EXTERNAL_TRUTH" "$EXTERNAL_PREREQUISITES" "$EXTERNAL_OUT" >/dev/null
 assert_pass_report "$EXTERNAL_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
 pass "valid existing_kubernetes/external_declared/online truth accepted with focused non-readiness report"
+
+OMIT_PROFILE_PREREQUISITES="$TMP_DIR/external-prerequisites-omit-profile.json"
+OMIT_PROFILE_OUT="$TMP_DIR/out-external-omit-profile"
+write_prerequisites "$OMIT_PROFILE_PREREQUISITES" "$EXTERNAL_PROFILE" omit_target_profile
+run_target_preflight "$EXTERNAL_PROFILE" "$EXTERNAL_TRUTH" "$OMIT_PROFILE_PREREQUISITES" "$OMIT_PROFILE_OUT" >/dev/null
+assert_pass_report "$OMIT_PROFILE_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
+pass "target prerequisites derive target_profile from CLI target profile when omitted"
 
 EXTERNAL_AIRGAP_TRUTH="$TMP_DIR/external-airgap-valid.json"
 EXTERNAL_AIRGAP_PREREQUISITES="$TMP_DIR/external-airgap-prerequisites-valid.json"

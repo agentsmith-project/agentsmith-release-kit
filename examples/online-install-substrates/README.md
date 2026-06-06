@@ -11,7 +11,8 @@ The example pack, prerequisites, and install-input files are already bound to
 Replace namespace, storage values, service refs, package-local tools, and
 confirmation fields.
 The installer derives its deployment identity from `deployment_path`; do not
-add target profile tuple fields to `substrate-install-inputs.example.json`.
+add deployment identity fields to `target-prerequisites.example.json` or
+`substrate-install-inputs.example.json`.
 
 ## Build The Package
 

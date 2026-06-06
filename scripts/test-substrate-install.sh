@@ -735,6 +735,9 @@ if (mutation === 'missing_registry_proof') {
 if (mutation === 'missing_storage_proof') {
   delete prerequisites.storage.storage_class;
 }
+if (mutation === 'operator_facing_install_inputs') {
+  delete prerequisites.target_profile;
+}
 
 writeJson(path.join(outDir, 'substrate-pack-manifest.json'), manifest);
 if (mutation === 'resource_list_path') {
@@ -1506,7 +1509,7 @@ operator_facing_output="$TMP_DIR/out-operator-facing-inputs"
 reset_kubectl_log
 run_install "$operator_facing_dir" "$operator_facing_output" >/dev/null
 assert_install_report "$operator_facing_output/substrate-install-report.json" "$operator_facing_output/substrate-truth.json" server-dry-run
-pass "operator-facing substrate install inputs derive target profile axes from CLI target profile"
+pass "operator-facing substrate install inputs and prerequisites derive target profile from CLI"
 
 airgap_dir="$TMP_DIR/airgap-valid"
 write_fixture_set "$airgap_dir" valid "$AIRGAP_TARGET_PROFILE"

@@ -1,6 +1,5 @@
 {
   "schema_version": "agentsmith.target-prerequisites.truth/v1",
-  "target_profile": "existing_kubernetes/kit_installed/online",
   "namespace": "agentsmith",
   "rbac": {
     "policy": "pre_provisioned_namespace_admin",
@@ -31,4 +30,3 @@
     "secretRef:agentsmith/redis-ca"
   ]
 }
-
