@@ -10,6 +10,11 @@ outside the bundle.
 
 Secrets stay outside the package. Use `secretRef:` values only.
 
+The bundle manifest and bundle-local operator inputs are already bound to
+`airgap/use_existing`. Keep their path identity fields unchanged. Replace
+bundle components, component checksums, namespace, secret refs, endpoint
+values, and package-local tools.
+
 ## Build The Package
 
 ```bash

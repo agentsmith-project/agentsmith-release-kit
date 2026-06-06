@@ -6,6 +6,11 @@ deploy AgentSmith online using the installer-generated substrate truth.
 
 Secrets stay outside the package. Use `secretRef:` values only.
 
+The example pack, prerequisites, and install-input files are already bound to
+`online/install_substrates`. Keep their path identity fields unchanged.
+Replace namespace, storage values, service refs, package-local tools, and
+confirmation fields.
+
 ## Build The Package
 
 ```bash

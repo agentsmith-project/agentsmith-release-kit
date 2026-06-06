@@ -22,6 +22,11 @@ bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir>
 - `target-prerequisites.example.json`: namespace, RBAC, ingress, registry pull
   secret, storage, and matching substrate secret refs.
 
+The example truth and prerequisite files are already bound to
+`online/use_existing`. Keep their path identity fields unchanged. Replace
+service endpoints, namespace, secret refs, storage values, and proof text with
+values from the target environment.
+
 ## Build The Package
 
 Set these paths to the real AgentSmith release artifacts, then stage one small
