@@ -1903,6 +1903,8 @@ function validateProductSmokeCoverage(productSmokeSummaries, deploymentPaths) {
   }));
   const seenReportDigests = new Set();
   const seenOperatorPaths = new Set();
+  const seenSiteEnvDigests = new Set();
+  const seenProductFlowsDigests = new Set();
   const byDistribution = new Map();
   for (const report of reports) {
     if (seenReportDigests.has(report.report_digest)) {
@@ -1914,6 +1916,16 @@ function validateProductSmokeCoverage(productSmokeSummaries, deploymentPaths) {
       fail(`duplicate post_deploy_product_smoke deployment path: ${operatorPath}`);
     }
     seenOperatorPaths.add(operatorPath);
+    const siteEnvDigest = report.deployment_target.site_env.sha256;
+    if (seenSiteEnvDigests.has(siteEnvDigest)) {
+      fail(`duplicate post_deploy_product_smoke site env digest: ${siteEnvDigest}`);
+    }
+    seenSiteEnvDigests.add(siteEnvDigest);
+    const productFlowsDigest = report.source.product_flows_sha256;
+    if (seenProductFlowsDigests.has(productFlowsDigest)) {
+      fail(`duplicate post_deploy_product_smoke product flows digest: ${productFlowsDigest}`);
+    }
+    seenProductFlowsDigests.add(productFlowsDigest);
     const distribution = report.deployment_path_binding.distribution;
     if (!byDistribution.has(distribution)) {
       byDistribution.set(distribution, []);

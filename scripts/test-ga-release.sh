@@ -2634,6 +2634,74 @@ fi
 assert_ga_failure_report "$DUPLICATE_SMOKE_OUTPUT_DIR" "duplicate post_deploy_product_smoke deployment path: online/use_existing"
 pass "GA aggregate rejects duplicate post-deploy product smoke deployment path evidence"
 
+DUPLICATE_SITE_ENV_SMOKE_DIR="$TMP_DIR/duplicate-site-env-product-smoke"
+mkdir -p "$DUPLICATE_SITE_ENV_SMOKE_DIR"
+cp "$VALID_DIR/post-deploy-product-smoke-airgap-report.json" "$DUPLICATE_SITE_ENV_SMOKE_DIR/post-deploy-product-smoke-airgap-report.json"
+"$NODE_BIN" --input-type=module - \
+  "$VALID_DIR/post-deploy-product-smoke-report.json" \
+  "$DUPLICATE_SITE_ENV_SMOKE_DIR/post-deploy-product-smoke-airgap-report.json" <<'NODE'
+import fs from 'node:fs';
+
+const [onlineReportFile, airgapReportFile] = process.argv.slice(2);
+const onlineReport = JSON.parse(fs.readFileSync(onlineReportFile, 'utf8'));
+const airgapReport = JSON.parse(fs.readFileSync(airgapReportFile, 'utf8'));
+
+airgapReport.deployment_target.site_env.sha256 = onlineReport.deployment_target.site_env.sha256;
+
+fs.writeFileSync(airgapReportFile, `${JSON.stringify(airgapReport, null, 2)}\n`);
+NODE
+DUPLICATE_SITE_ENV_OUTPUT_DIR="$TMP_DIR/out-duplicate-site-env-product-smoke"
+mkdir -p "$DUPLICATE_SITE_ENV_OUTPUT_DIR"
+if bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
+  --release-contract "$VALID_DIR/release-contract.json" \
+  --deploy-template-package "$VALID_DIR/deploy-template-package.json" \
+  --deployment-path-report "$PATH_DIR/online-use-existing/deployment-path-report.json" \
+  --deployment-path-report "$PATH_DIR/online-install-substrates/deployment-path-report.json" \
+  --deployment-path-report "$PATH_DIR/airgap-use-existing/deployment-path-report.json" \
+  --deployment-path-report "$PATH_DIR/airgap-install-substrates/deployment-path-report.json" \
+  --product-readiness-report "$VALID_DIR/product-readiness-report.json" \
+  --post-deploy-product-smoke-report "$VALID_DIR/post-deploy-product-smoke-report.json" \
+  --post-deploy-product-smoke-report "$DUPLICATE_SITE_ENV_SMOKE_DIR/post-deploy-product-smoke-airgap-report.json" \
+  --output-dir "$DUPLICATE_SITE_ENV_OUTPUT_DIR" >"$TMP_DIR/ga-release-duplicate-site-env-product-smoke.out" 2>&1; then
+  fail "GA aggregate with duplicate product smoke site env should fail"
+fi
+assert_ga_failure_report "$DUPLICATE_SITE_ENV_OUTPUT_DIR" "duplicate post_deploy_product_smoke site env digest"
+pass "GA aggregate rejects reused post-deploy product smoke site env evidence"
+
+DUPLICATE_PRODUCT_FLOWS_SMOKE_DIR="$TMP_DIR/duplicate-product-flows-smoke"
+mkdir -p "$DUPLICATE_PRODUCT_FLOWS_SMOKE_DIR"
+cp "$VALID_DIR/post-deploy-product-smoke-airgap-report.json" "$DUPLICATE_PRODUCT_FLOWS_SMOKE_DIR/post-deploy-product-smoke-airgap-report.json"
+"$NODE_BIN" --input-type=module - \
+  "$VALID_DIR/post-deploy-product-smoke-report.json" \
+  "$DUPLICATE_PRODUCT_FLOWS_SMOKE_DIR/post-deploy-product-smoke-airgap-report.json" <<'NODE'
+import fs from 'node:fs';
+
+const [onlineReportFile, airgapReportFile] = process.argv.slice(2);
+const onlineReport = JSON.parse(fs.readFileSync(onlineReportFile, 'utf8'));
+const airgapReport = JSON.parse(fs.readFileSync(airgapReportFile, 'utf8'));
+
+airgapReport.source.product_flows_sha256 = onlineReport.source.product_flows_sha256;
+
+fs.writeFileSync(airgapReportFile, `${JSON.stringify(airgapReport, null, 2)}\n`);
+NODE
+DUPLICATE_PRODUCT_FLOWS_OUTPUT_DIR="$TMP_DIR/out-duplicate-product-flows-smoke"
+mkdir -p "$DUPLICATE_PRODUCT_FLOWS_OUTPUT_DIR"
+if bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
+  --release-contract "$VALID_DIR/release-contract.json" \
+  --deploy-template-package "$VALID_DIR/deploy-template-package.json" \
+  --deployment-path-report "$PATH_DIR/online-use-existing/deployment-path-report.json" \
+  --deployment-path-report "$PATH_DIR/online-install-substrates/deployment-path-report.json" \
+  --deployment-path-report "$PATH_DIR/airgap-use-existing/deployment-path-report.json" \
+  --deployment-path-report "$PATH_DIR/airgap-install-substrates/deployment-path-report.json" \
+  --product-readiness-report "$VALID_DIR/product-readiness-report.json" \
+  --post-deploy-product-smoke-report "$VALID_DIR/post-deploy-product-smoke-report.json" \
+  --post-deploy-product-smoke-report "$DUPLICATE_PRODUCT_FLOWS_SMOKE_DIR/post-deploy-product-smoke-airgap-report.json" \
+  --output-dir "$DUPLICATE_PRODUCT_FLOWS_OUTPUT_DIR" >"$TMP_DIR/ga-release-duplicate-product-flows-smoke.out" 2>&1; then
+  fail "GA aggregate with duplicate product flows smoke evidence should fail"
+fi
+assert_ga_failure_report "$DUPLICATE_PRODUCT_FLOWS_OUTPUT_DIR" "duplicate post_deploy_product_smoke product flows digest"
+pass "GA aggregate rejects reused post-deploy product flows evidence"
+
 PLAN_DIR="$TMP_DIR/operator-input-plans-valid"
 write_operator_inputs_plan_set "$VALID_DIR" "$PLAN_DIR" "$PATH_DIR" valid
 run_ga_release_with_operator_plans "$VALID_DIR" "$PATH_DIR" "$PLAN_DIR" "$TMP_DIR/out-valid-with-operator-plans"
