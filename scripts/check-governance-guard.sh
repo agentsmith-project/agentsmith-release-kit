@@ -385,6 +385,7 @@ require_text docs/maintainer-diagnostics.md "not standalone operator choices"
 require_text docs/maintainer-diagnostics.md 'package-driven `airgap/install_substrates` covers the GA consume/deploy path'
 require_text docs/maintainer-diagnostics.md 'removal target: release-kit v1.0.0 GA cut'
 require_text docs/maintainer-diagnostics.md "provenance marker only"
+require_text docs/maintainer-diagnostics.md 'AGENTSMITH_ALLOW_LEGACY_OPERATOR_RELEASE_DIAGNOSTIC=1'
 require_text docs/maintainer-diagnostics.md 'source.product_flows_path'
 require_text docs/maintainer-diagnostics.md 'deployment_target'
 require_text docs/RELEASE_GATES.md "map to the operator choice surface"

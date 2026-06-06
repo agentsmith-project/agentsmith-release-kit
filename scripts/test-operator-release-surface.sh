@@ -11,6 +11,7 @@ AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
 KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 REPORT_FILE="operator-release-surface-report.json"
 AIRGAP_REGISTRY="registry.release.example/agentsmith"
+export AGENTSMITH_ALLOW_LEGACY_OPERATOR_RELEASE_DIAGNOSTIC=1
 
 mapfile -t RELEASE_IMAGE_IDS < <(
   "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
@@ -1277,6 +1278,19 @@ if grep -Eq 'kit_provided|[.]release-kit-internal|operator-inputs-plan|docs/RELE
   fail "operator-release help must not expose legacy aliases, internal paths, machine profiles, or maintainer diagnostics"
 fi
 pass "operator-release help keeps operator-facing surface minimal"
+
+legacy_opt_in_error="$TMP_DIR/operator-release-legacy-opt-in.err"
+if env -u AGENTSMITH_ALLOW_LEGACY_OPERATOR_RELEASE_DIAGNOSTIC \
+  bash "$ROOT_DIR/scripts/operator-release.sh" online use_existing \
+  >"$TMP_DIR/operator-release-legacy-opt-in.out" \
+  2>"$legacy_opt_in_error"; then
+  fail "legacy positional operator diagnostics must require maintainer opt-in"
+fi
+grep -q -- 'legacy positional diagnostics are maintainer-only' "$legacy_opt_in_error" ||
+  fail "legacy positional opt-in failure must explain maintainer-only boundary"
+grep -q -- 'bash scripts/operator-release.sh --operator-inputs <package-or-json> --run' "$legacy_opt_in_error" ||
+  fail "legacy positional opt-in failure must point to package-driven operator-inputs"
+pass "operator-release legacy positional diagnostics require maintainer opt-in"
 
 install_positional_error="$TMP_DIR/operator-release-install-positional.err"
 if bash "$ROOT_DIR/scripts/operator-release.sh" online install_substrates \

@@ -1024,6 +1024,14 @@ if [[ "${1:-}" == "--run" ]]; then
   fail "--run is accepted only after --operator-inputs <package-or-json>"
 fi
 
+if [[ "$#" -eq 0 ]]; then
+  fail "missing operator command; use --operator-inputs <package-or-json> --doctor|--run or --ga-report"
+fi
+
+if [[ "${1:-}" != --* && "${AGENTSMITH_ALLOW_LEGACY_OPERATOR_RELEASE_DIAGNOSTIC:-}" != "1" ]]; then
+  fail "legacy positional diagnostics are maintainer-only; use package-driven operator inputs instead: bash scripts/operator-release.sh --operator-inputs <package-or-json> --run"
+fi
+
 if [[ "$#" -lt 2 ]]; then
   fail "missing operator surface and substrate strategy"
 fi

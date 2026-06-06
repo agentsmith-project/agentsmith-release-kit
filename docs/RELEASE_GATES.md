@@ -143,6 +143,8 @@ bash scripts/test-operator-release-surface.sh
 ```
 
 This focused guard exercises `bash scripts/operator-release.sh`. The facade
+only runs legacy positional diagnostics when maintainers explicitly set
+`AGENTSMITH_ALLOW_LEGACY_OPERATOR_RELEASE_DIAGNOSTIC=1`. With that opt-in, it
 covers maintainer/internal diagnostics for the four legacy positional choices
 plus packaging-side airgap-bundle commands, rejects producer vocabulary such as
 `--target-profile`, maps the choice internally, and calls the existing producer

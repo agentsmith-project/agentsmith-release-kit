@@ -109,7 +109,10 @@ exercise failure cases and fixture behavior while changing release-kit code.
 
 The positional `bash scripts/operator-release.sh <surface>
 <substrate_strategy> ...` facade is a maintainer/internal focused diagnostic,
-not the operator main path. It rejects producer vocabulary such as
+not the operator main path. It only runs when the maintainer explicitly sets
+`AGENTSMITH_ALLOW_LEGACY_OPERATOR_RELEASE_DIAGNOSTIC=1`; without that opt-in,
+the facade points back to the package-driven `--operator-inputs` command. It
+rejects producer vocabulary such as
 `--target-profile`, maps the operator choice internally, calls the existing
 producer diagnostic, and writes `operator-release-surface-report.json` with a
 minimal `readiness=false` summary. That summary is not accepted by

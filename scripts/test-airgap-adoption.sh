@@ -10,6 +10,7 @@ KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 SURFACE_REPORT_FILE="operator-release-surface-report.json"
 ADOPTION_REPORT_FILE="airgap-adoption-report.json"
+export AGENTSMITH_ALLOW_LEGACY_OPERATOR_RELEASE_DIAGNOSTIC=1
 
 mapfile -t RELEASE_IMAGE_IDS < <(
   "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
