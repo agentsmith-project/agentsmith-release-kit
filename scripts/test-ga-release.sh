@@ -1381,6 +1381,10 @@ if (mutation === 'missing-provenance') {
 } else if (mutation === 'runtime-flake-missing-call-summary-coverage') {
   report.runtime_readiness.files_restore_continuation.signals_count = 1;
   report.runtime_readiness.files_restore_continuation.call_summaries_count = 1;
+} else if (mutation === 'runtime-stability-blocker') {
+  report.runtime_readiness.files_restore_continuation.classification = 'stability_blocker';
+  report.runtime_readiness.files_restore_continuation.outcome =
+    'consecutive_focused_gate_runtime_readiness_failures';
 } else {
   throw new Error(`unknown product report mutation: ${mutation}`);
 }
@@ -2889,6 +2893,17 @@ if run_ga_release "$RUNTIME_FLAKE_INCOMPLETE_DIR" "$PATH_DIR" "$RUNTIME_FLAKE_IN
 fi
 assert_ga_failure_report "$RUNTIME_FLAKE_INCOMPLETE_OUTPUT_DIR" "product_readiness_report.runtime_readiness.files_restore_continuation.classification runtime_flake must cover API, pod-manager, and ASBCP call summaries"
 pass "GA aggregate requires runtime flake call summary coverage"
+
+RUNTIME_STABILITY_BLOCKER_DIR="$TMP_DIR/runtime-stability-blocker"
+RUNTIME_STABILITY_BLOCKER_OUTPUT_DIR="$TMP_DIR/out-runtime-stability-blocker"
+cp -R "$VALID_DIR" "$RUNTIME_STABILITY_BLOCKER_DIR"
+mkdir -p "$RUNTIME_STABILITY_BLOCKER_OUTPUT_DIR"
+mutate_product_report "$RUNTIME_STABILITY_BLOCKER_DIR/product-readiness-report.json" runtime-stability-blocker
+if run_ga_release "$RUNTIME_STABILITY_BLOCKER_DIR" "$PATH_DIR" "$RUNTIME_STABILITY_BLOCKER_OUTPUT_DIR" >"$TMP_DIR/ga-release-runtime-stability-blocker.out" 2>&1; then
+  fail "GA aggregate with runtime readiness stability blocker should fail"
+fi
+assert_ga_failure_report "$RUNTIME_STABILITY_BLOCKER_OUTPUT_DIR" "product_readiness_report.runtime_readiness.files_restore_continuation.classification stability_blocker blocks final GA verdict"
+pass "GA aggregate rejects runtime readiness stability blocker"
 
 SUMMARY_FAILURE_OUTPUT_DIR="$TMP_DIR/out-summary-write-failure"
 SUMMARY_FAILURE_PRELOAD="$TMP_DIR/fail-summary-write.mjs"

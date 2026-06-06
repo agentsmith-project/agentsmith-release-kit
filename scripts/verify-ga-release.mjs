@@ -1459,6 +1459,9 @@ function validateProductRuntimeReadiness(report) {
     filesRestore.classification,
     'product_readiness_report.runtime_readiness.files_restore_continuation.classification'
   );
+  if (classification === 'stability_blocker') {
+    fail('product_readiness_report.runtime_readiness.files_restore_continuation.classification stability_blocker blocks final GA verdict; resolve consecutive focused gate runtime readiness failures before rerunning --ga-release');
+  }
   if (!['clean_pass', 'runtime_flake'].includes(classification)) {
     fail('product_readiness_report.runtime_readiness.files_restore_continuation.classification must be clean_pass or runtime_flake for a passed product readiness report');
   }
