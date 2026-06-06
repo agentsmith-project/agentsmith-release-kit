@@ -562,6 +562,15 @@ if (!Array.isArray(report.post_deploy_product_smoke_reports) || report.post_depl
 if (!Array.isArray(report.artifact_index?.post_deploy_product_smoke_reports) || report.artifact_index.post_deploy_product_smoke_reports.length !== 2) {
   throw new Error('GA report artifact index must archive both product smoke reports');
 }
+const indexedProductFlowDigests = report.artifact_index.post_deploy_product_smoke_reports
+  .map((entry) => entry.source?.product_flows_sha256)
+  .sort();
+const reportProductFlowDigests = report.post_deploy_product_smoke_reports
+  .map((entry) => entry.source?.product_flows_sha256)
+  .sort();
+if (JSON.stringify(indexedProductFlowDigests) !== JSON.stringify(reportProductFlowDigests)) {
+  throw new Error('GA report artifact index must archive each product smoke product-flow digest');
+}
 const expectedSmokeCoverageIndex = report.post_deploy_product_smoke_coverage;
 if (
   JSON.stringify(stableJson(evidenceIndex.post_deploy_product_smoke_coverage)) !==

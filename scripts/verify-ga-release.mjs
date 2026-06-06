@@ -3294,6 +3294,7 @@ function buildEvidenceIndex(report) {
       post_deploy_product_smoke_reports: artifactIndex?.post_deploy_product_smoke_reports
         ?? productSmokeReports.map((entry) => ({
           report_digest: entry.report_digest,
+          source: entry.source,
           deployment_target: entry.deployment_target,
           deployment_path_binding: entry.deployment_path_binding
         }))
@@ -3461,6 +3462,7 @@ async function buildPassReport(args) {
       post_deploy_product_smoke: primaryProductSmoke.report_digest,
       post_deploy_product_smoke_reports: productSmokeCoverage.reports.map((entry) => ({
         report_digest: entry.report_digest,
+        source: entry.source,
         deployment_target: entry.deployment_target,
         deployment_path_binding: entry.deployment_path_binding
       }))

@@ -1599,7 +1599,10 @@ policy and Files restore continuation evidence, and
 distributions, canonical smoke ids, GA acceptance coverage groups, deployment
 targets, and deployment path bindings. The acceptance coverage maps
 `audit_usage_readback` to the canonical `audit` and `usage` smoke ids; source
-evidence digests remain on each archived post-deploy product smoke report.
+evidence digests remain on each archived post-deploy product smoke report, and
+the artifact/evidence indexes also record each report's `source` block so the
+product-flow aggregate path and digest are directly searchable in the release
+archive.
 Missing either distribution fails fast.
 
 Each post-deploy product smoke input must be an AgentSmith canonical report:
