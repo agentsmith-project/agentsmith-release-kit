@@ -1581,8 +1581,11 @@ blockers without issuing another verdict. On pass it mirrors
 `product_runtime_readiness`, including the runtime pending/readiness convergence
 policy and Files restore continuation evidence, and
 `post_deploy_product_smoke_coverage`, including the required online/airgap
-distributions, canonical smoke ids, source evidence digests, deployment targets,
-and deployment path bindings. Missing either distribution fails fast.
+distributions, canonical smoke ids, GA acceptance coverage groups, deployment
+targets, and deployment path bindings. The acceptance coverage maps
+`audit_usage_readback` to the canonical `audit` and `usage` smoke ids; source
+evidence digests remain on each archived post-deploy product smoke report.
+Missing either distribution fails fast.
 
 Each post-deploy product smoke input must be an AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:

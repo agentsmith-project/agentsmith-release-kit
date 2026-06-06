@@ -47,8 +47,10 @@ Current contract index:
   `git_sha`, `release_contract_digest`, `covered_flows`, and
   `artifact_provenance`. The smoke `deployment_target.profile` must match one
   finalized deployment path `target_profile`, and the report records that
-  match in `post_deploy_product_smoke.deployment_path_binding`. When
-  operator-inputs plans are provided, the embedded
+  match in `post_deploy_product_smoke.deployment_path_binding`. The final
+  `post_deploy_product_smoke_coverage.acceptance_coverage` maps GA acceptance
+  groups to canonical smoke ids, including `audit_usage_readback: [audit,
+  usage]`. When operator-inputs plans are provided, the embedded
   `artifact_index.operator_inputs_packages[].release_materials` binds each
   package-local release contract and deploy template package descriptor by safe
   relative path and sha256 digest; local absolute package paths are not exposed.

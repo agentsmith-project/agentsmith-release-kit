@@ -234,6 +234,14 @@ const CANONICAL_PRODUCT_SMOKE_SPECS = {
   usage: canonicalProductSmokeSpec('usage')
 };
 const REQUIRED_PRODUCT_SMOKE_IDS = Object.keys(CANONICAL_PRODUCT_SMOKE_SPECS);
+const PRODUCT_SMOKE_ACCEPTANCE_COVERAGE = {
+  auth_profile: ['login_profile'],
+  workspace_project: ['workspace_project'],
+  files: ['files'],
+  managed_runner_agent_task: ['agent_task_managed_runner'],
+  provider_neutral_endpoint: ['provider_neutral_endpoint'],
+  audit_usage_readback: ['audit', 'usage']
+};
 
 const REQUIRED_IMAGE_IDS = ['agentsmith_app', 'managed_runner', 'llmup', 'afscp', 'asbcp'];
 const CANONICAL_REPO_SPECS = [
@@ -1905,6 +1913,8 @@ function validateProductSmokeCoverage(productSmokeSummaries, deploymentPaths) {
   return {
     required_distributions: [...REQUIRED_PRODUCT_SMOKE_DISTRIBUTIONS],
     covered_distributions: coveredDistributions,
+    canonical_smoke_ids: [...REQUIRED_PRODUCT_SMOKE_IDS],
+    acceptance_coverage: PRODUCT_SMOKE_ACCEPTANCE_COVERAGE,
     covered_operator_paths: reports
       .map((report) => report.deployment_path_binding.operator_path)
       .sort(),
@@ -3361,6 +3371,8 @@ async function buildPassReport(args) {
     post_deploy_product_smoke_coverage: {
       required_distributions: productSmokeCoverage.required_distributions,
       covered_distributions: productSmokeCoverage.covered_distributions,
+      canonical_smoke_ids: productSmokeCoverage.canonical_smoke_ids,
+      acceptance_coverage: productSmokeCoverage.acceptance_coverage,
       covered_operator_paths: productSmokeCoverage.covered_operator_paths,
       covered_target_profiles: productSmokeCoverage.covered_target_profiles,
       reports_by_distribution: productSmokeCoverage.reports_by_distribution
@@ -3397,6 +3409,7 @@ async function buildPassReport(args) {
         report_digest: primaryProductSmoke.report_digest,
         reports_count: productSmokeCoverage.reports.length,
         covered_distributions: productSmokeCoverage.covered_distributions,
+        acceptance_coverage: productSmokeCoverage.acceptance_coverage,
         schema: primaryProductSmoke.schema,
         producer: primaryProductSmoke.producer,
         release_contract: primaryProductSmoke.release_contract,

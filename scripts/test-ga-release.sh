@@ -2243,6 +2243,35 @@ if (
 if (!report.post_deploy_product_smoke_coverage?.covered_operator_paths?.includes('airgap/use_existing')) {
   throw new Error('GA report product smoke coverage must bind an airgap deployment path');
 }
+const expectedAcceptanceCoverage = {
+  auth_profile: ['login_profile'],
+  workspace_project: ['workspace_project'],
+  files: ['files'],
+  managed_runner_agent_task: ['agent_task_managed_runner'],
+  provider_neutral_endpoint: ['provider_neutral_endpoint'],
+  audit_usage_readback: ['audit', 'usage']
+};
+const expectedCoverageSmokeIds = [
+  'login_profile',
+  'workspace_project',
+  'provider_neutral_endpoint',
+  'agent_task_managed_runner',
+  'files',
+  'audit',
+  'usage'
+];
+if (
+  JSON.stringify(stableJson(report.post_deploy_product_smoke_coverage?.acceptance_coverage)) !==
+  JSON.stringify(stableJson(expectedAcceptanceCoverage))
+) {
+  throw new Error('GA report product smoke coverage must map canonical smoke ids to GA acceptance coverage');
+}
+if (
+  JSON.stringify(report.post_deploy_product_smoke_coverage?.canonical_smoke_ids) !==
+  JSON.stringify(expectedCoverageSmokeIds)
+) {
+  throw new Error('GA report product smoke coverage must expose canonical smoke ids');
+}
 if (!Array.isArray(evidenceIndex.deployment_paths) || evidenceIndex.deployment_paths.length !== 4) {
   throw new Error('GA evidence index must archive four deployment path evidence entries');
 }
@@ -2517,6 +2546,9 @@ if (airgapSmoke.source?.product_flows_sha256 !== sha('post-deploy-product-smoke:
 }
 if (Object.hasOwn(report.summary || {}, 'product_smoke_flows')) {
   throw new Error('GA report must not expose covered_flows as product smoke truth');
+}
+if (report.summary?.post_deploy_product_smoke?.acceptance_coverage?.audit_usage_readback?.join(',') !== 'audit,usage') {
+  throw new Error('GA report summary must expose audit/usage readback acceptance coverage');
 }
 NODE
 [[ -f "$TMP_DIR/out-valid/ga-release-summary.md" ]] || fail "missing human summary"
