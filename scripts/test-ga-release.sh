@@ -107,6 +107,10 @@ if (mutation === 'mutable-image') {
   contract.deploy_image_inventory[0].image = `ghcr.io/agentsmith-project/agentsmith-app${mutableTag}`;
 }
 
+for (const profile of contract.target_profiles) {
+  profile.required = true;
+}
+
 function digest(buffer) {
   return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
 }
@@ -1611,6 +1615,16 @@ if (mutation === 'kind-target-profile') {
     throw new Error('missing kit installed online target profile');
   }
   profile.prerequisites.ingress = 'kit_provided';
+} else if (mutation === 'ga-required-false') {
+  const profile = contract.target_profiles.find((entry) =>
+    entry.target_cluster === 'existing_kubernetes' &&
+    entry.substrate_source === 'external_declared' &&
+    entry.distribution === 'online'
+  );
+  if (!profile) {
+    throw new Error('missing external declared online target profile');
+  }
+  profile.required = false;
 } else {
   throw new Error(`unknown release contract target profile mutation: ${mutation}`);
 }
@@ -2163,6 +2177,9 @@ if (report.status !== 'pass' || report.formal_verdict !== 'issued') {
 }
 if (report.product_readiness?.runtime_readiness?.files_restore_continuation?.classification !== 'runtime_flake') {
   throw new Error('GA report product_readiness must archive runtime readiness classification');
+}
+if (!releaseContract.target_profiles.every((profile) => profile.required === true)) {
+  throw new Error('GA release contract fixture must mark every final GA target profile required');
 }
 if (
   JSON.stringify(report.product_readiness?.runtime_readiness?.observation_policy?.interval_ms) !==
@@ -3212,6 +3229,7 @@ pass "GA aggregate rejects release contract required image closure drift"
 target_profile_cases=(
   "kind-target-profile|release_contract.target_profiles must not include non-GA target profile kind_rehearsal/kit_installed/online"
   "kit-provided-prerequisite|must use GA install_substrates/kit_installed wording, not kit_provided"
+  "ga-required-false|release_contract.target_profiles[0].required must be true for final GA aggregate"
 )
 for target_profile_case in "${target_profile_cases[@]}"; do
   IFS='|' read -r mutation expected_message <<< "$target_profile_case"

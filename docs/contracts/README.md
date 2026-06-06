@@ -211,6 +211,12 @@ It also checks the dynamic `required_image_ids` exact-set closure, while
 remaining a focused `readiness: false` diagnostic rather than release
 readiness.
 
+Final `--ga-release` is the only release-kit mode that accepts required target
+profiles. It consumes the final release contract, requires exactly the four
+existing-Kubernetes GA tuples, and requires every final GA target profile entry
+to carry `required: true`; focused diagnostics and bundle intake continue to
+reject `required: true`.
+
 `payload_artifacts[]` allows only `id`, `kind`, `path`, and `sha256`. Allowed
 kinds are `runbook`, `script`, `profile_values_schema`,
 `profile_values_example`, and `checksums`; `runbook`, `script`,

@@ -1019,6 +1019,9 @@ function validateReleaseContractTargetProfiles(contract) {
     if (typeof profile.required !== 'boolean') {
       fail(`${label}.required must be a boolean`);
     }
+    if (profile.required !== true) {
+      fail(`${label}.required must be true for final GA aggregate`);
+    }
     const prerequisites = requireObject(profile.prerequisites, `${label}.prerequisites`);
     rejectUnknownKeys(
       prerequisites,
