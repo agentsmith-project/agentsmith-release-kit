@@ -141,6 +141,9 @@ least one online and one airgap post-deploy product smoke report. The facade
 locates finalized path evidence inside each package and writes the final
 `ga-release-report.json`; operators pass package paths, not internal evidence
 paths.
+The final aggregate also checks that each smoke report's substrate truth
+digest matches the finalized deployment truth for the package it is bound to;
+smoke evidence from a different deployed substrate blocks GA.
 A blocked final aggregate overwrites stale pass outputs with `status=fail`,
 `formal_verdict=not_issued`, and blockers in that same report.
 It also writes `ga-evidence-index.json`, a derived archive index that binds

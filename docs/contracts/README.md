@@ -46,8 +46,11 @@ Current contract index:
   sha. Legacy surrogate top-level fields are rejected: `release_id`,
   `git_sha`, `release_contract_digest`, `covered_flows`, and
   `artifact_provenance`. The smoke `deployment_target.profile` must match one
-  finalized deployment path `target_profile`, and the report records that
-  match in `post_deploy_product_smoke.deployment_path_binding`. The final
+  finalized deployment path `target_profile`, and
+  `deployment_target.substrate_truth.sha256` must match that path's finalized
+  substrate truth digest. The report records that match in
+  `post_deploy_product_smoke.deployment_path_binding`, including
+  `deployment_path_substrate_truth_digest`. The final
   `post_deploy_product_smoke_coverage.acceptance_coverage` maps GA acceptance
   groups to canonical smoke ids, including `audit_usage_readback: [audit,
   usage]`. When operator-inputs plans are provided, the embedded

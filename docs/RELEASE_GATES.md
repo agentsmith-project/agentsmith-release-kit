@@ -1605,7 +1605,11 @@ Its `deployment_target` must bind the deployed target profile, public/API base
 URLs, and portable relative `site_env` plus `substrate_truth` path/digest pairs
 used for the smoke run. The target profile must match one finalized deployment
 path report, and the GA report records that match in
-`post_deploy_product_smoke.deployment_path_binding`.
+`post_deploy_product_smoke.deployment_path_binding`. The smoke
+`deployment_target.substrate_truth.sha256` must also match the finalized
+deployment path substrate truth digest; the binding is archived as
+`deployment_path_binding.deployment_path_substrate_truth_digest` and a mismatch
+fails fast.
 Legacy surrogate top-level fields are rejected: `release_id`, `git_sha`,
 `release_contract_digest`, `covered_flows`, and `artifact_provenance`.
 

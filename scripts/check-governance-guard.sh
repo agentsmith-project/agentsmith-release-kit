@@ -362,6 +362,7 @@ require_text README.md '`ga-evidence-index.json`, a derived archive index'
 require_text README.md "without issuing another verdict"
 require_text README.md '`ga-release-summary.md` is the human-readable view'
 require_text README.md 'Product runtime readiness classification'
+require_text README.md "smoke report's substrate truth"
 require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
 require_text README.md '`airgap/use_existing`'
@@ -376,6 +377,7 @@ require_text docs/runbooks/README.md "does not issue another verdict"
 require_text docs/runbooks/README.md '`ga-release-summary.md` is the human-readable view'
 require_text docs/runbooks/README.md 'Product runtime readiness classification'
 require_text docs/runbooks/README.md 'adaptive wait intervals'
+require_text docs/runbooks/README.md "smoke report's substrate truth digest"
 require_text docs/runbooks/README.md "## Operator Package Matrix"
 require_text docs/runbooks/README.md "provenance marker, not installer"
 require_text docs/runbooks/README.md 'Maintainer/internal diagnostic details are outside this operator runbook'
@@ -388,11 +390,14 @@ require_text docs/maintainer-diagnostics.md "provenance marker only"
 require_text docs/maintainer-diagnostics.md 'AGENTSMITH_ALLOW_LEGACY_OPERATOR_RELEASE_DIAGNOSTIC=1'
 require_text docs/maintainer-diagnostics.md 'source.product_flows_path'
 require_text docs/maintainer-diagnostics.md 'deployment_target'
+require_text docs/maintainer-diagnostics.md 'deployment_target.substrate_truth.sha256'
 require_text docs/RELEASE_GATES.md "map to the operator choice surface"
 require_text docs/RELEASE_GATES.md 'kit-provided pack/truth identity marker / provenance marker'
 require_text docs/RELEASE_GATES.md 'removal target: release-kit v1.0.0 GA cut'
 require_text docs/RELEASE_GATES.md "rehearsal-only accepted input"
+require_text docs/RELEASE_GATES.md 'deployment_path_binding.deployment_path_substrate_truth_digest'
 require_text docs/contracts/README.md "Only GA-supported profile tuples are accepted"
+require_text docs/contracts/README.md 'deployment_path_substrate_truth_digest'
 
 reject_scan \
   "operator-facing docs expose release finalizer/captain roles" \

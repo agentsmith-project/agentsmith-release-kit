@@ -39,7 +39,10 @@ Its `source.product_flows_path` and `source.product_flows_sha256` must bind the
 AgentSmith product-flow aggregate consumed by the smoke run. Its
 `deployment_target` must bind the deployed target profile, public/API base
 URLs, and portable relative `site_env` plus `substrate_truth` path/digest pairs
-used for that smoke run.
+used for that smoke run. The
+`deployment_target.substrate_truth.sha256` must match the finalized deployment
+path substrate truth digest, and the GA report archives that digest under
+`deployment_path_binding.deployment_path_substrate_truth_digest`.
 
 Legacy surrogate top-level fields are rejected: `release_id`, `git_sha`,
 `release_contract_digest`, `covered_flows`, and `artifact_provenance`.

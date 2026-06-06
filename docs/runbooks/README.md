@@ -84,6 +84,9 @@ target; the final report records that coverage under
 `post_deploy_product_smoke_coverage`, including the GA acceptance coverage
 groups and the `audit_usage_readback` binding to the canonical `audit` and
 `usage` smoke ids.
+The final report also verifies that each smoke report's substrate truth digest
+matches the finalized deployment truth for the package it is bound to; smoke
+evidence from a different deployed substrate is a blocker.
 On pass the report has `formal_verdict=issued`; when blocked it replaces stale
 pass outputs with `status=fail`, `formal_verdict=not_issued`, and blockers.
 The sibling `ga-evidence-index.json` binds that source report digest to the

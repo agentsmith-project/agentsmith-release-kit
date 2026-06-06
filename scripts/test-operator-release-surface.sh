@@ -2411,6 +2411,12 @@ grep -q -- 'source.product_flows_path' "$maintainer_diagnostics" ||
   fail "maintainer diagnostics must document canonical product smoke product-flow source binding"
 grep -q -- 'deployment_target' "$maintainer_diagnostics" ||
   fail "maintainer diagnostics must document canonical product smoke deployment target binding"
+grep -q -- 'deployment_target.substrate_truth.sha256' "$maintainer_diagnostics" ||
+  fail "maintainer diagnostics must document product smoke substrate truth path binding"
+grep -q -- "smoke report's substrate truth" "$root_readme" ||
+  fail "root README must document product smoke deployment truth binding"
+grep -q -- "smoke report's substrate truth digest" "$runbooks_readme" ||
+  fail "runbook README must document product smoke deployment truth binding"
 if grep -Eq 'Legacy Diagnostic Status|Machine profile mapping|operator-release-surface-report|airgap-bundle/kit_provided|online/kit_provided|airgap/kit_provided|kind_rehearsal/kit_installed' "$runbooks_readme"; then
   fail "runbook README must keep maintainer/internal diagnostic tables out of the operator path"
 fi
