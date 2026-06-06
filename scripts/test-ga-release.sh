@@ -1689,10 +1689,18 @@ if (mutation === 'missing-runner-source-provenance') {
   inventory('managed_runner').source_provenance.runner_ga_handoff_manifest_input_sha256 = 'sha256:not-a-digest';
 } else if (mutation === 'missing-dependency-source-provenance') {
   delete inventory('llmup').source_provenance;
+} else if (mutation === 'missing-afscp-dependency-source-provenance') {
+  delete inventory('afscp').source_provenance;
+} else if (mutation === 'missing-asbcp-dependency-source-provenance') {
+  delete inventory('asbcp').source_provenance;
 } else if (mutation === 'non-canonical-source-repo') {
   const provenance = inventory('afscp').source_provenance;
   provenance.producer_repo = 'github.com/example/agentsmith-fs-control-plane';
   provenance.normalized_remote = 'github.com/example/agentsmith-fs-control-plane';
+} else if (mutation === 'non-canonical-asbcp-source-repo') {
+  const provenance = inventory('asbcp').source_provenance;
+  provenance.producer_repo = 'github.com/example/mbos-sandbox-v1';
+  provenance.normalized_remote = 'github.com/example/mbos-sandbox-v1';
 } else if (mutation === 'missing-dependency-run-evidence') {
   delete inventory('llmup').source_provenance.run_id;
 } else if (mutation === 'missing-dependency-run-url') {
@@ -1706,6 +1714,10 @@ if (mutation === 'missing-runner-source-provenance') {
   inventory('llmup').source_provenance.tag = 'not-the-release-tag';
 } else if (mutation === 'dependency-digest-mismatch') {
   inventory('llmup').source_provenance.artifact_sha256 = `sha256:${'9'.repeat(64)}`;
+} else if (mutation === 'afscp-dependency-digest-mismatch') {
+  inventory('afscp').source_provenance.artifact_sha256 = `sha256:${'9'.repeat(64)}`;
+} else if (mutation === 'asbcp-dependency-digest-mismatch') {
+  inventory('asbcp').source_provenance.artifact_sha256 = `sha256:${'9'.repeat(64)}`;
 } else {
   throw new Error(`unknown source provenance mutation: ${mutation}`);
 }
@@ -3342,13 +3354,18 @@ source_provenance_cases=(
   "runner-ga-handoff-uri-mismatch|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_ga_handoff_uri run id must match release_contract.deploy_image_inventory.managed_runner.source_provenance.run_id"
   "runner-ga-handoff-digest-invalid|release_contract.deploy_image_inventory.managed_runner.source_provenance.runner_ga_handoff_manifest_input_sha256 must be a sha256 digest"
   "missing-dependency-source-provenance|release_contract.deploy_image_inventory.llmup.source_provenance must be an object"
+  "missing-afscp-dependency-source-provenance|release_contract.deploy_image_inventory.afscp.source_provenance must be an object"
+  "missing-asbcp-dependency-source-provenance|release_contract.deploy_image_inventory.asbcp.source_provenance must be an object"
   "non-canonical-source-repo|release_contract.deploy_image_inventory.afscp.source_provenance.normalized_remote must be canonical repo github.com/agentsmith-project/agentsmith-fs-control-plane"
+  "non-canonical-asbcp-source-repo|release_contract.deploy_image_inventory.asbcp.source_provenance.normalized_remote must be canonical repo github.com/agentsmith-project/agentsmith-sandbox-control-plane"
   "missing-dependency-run-evidence|release_contract.deploy_image_inventory.llmup.source_provenance.run_id is required"
   "missing-dependency-run-url|release_contract.deploy_image_inventory.llmup.source_provenance.run_url is required"
   "dependency-run-url-mismatch|release_contract.deploy_image_inventory.llmup.source_provenance.run_url run id must match release_contract.deploy_image_inventory.llmup.source_provenance.run_id"
   "missing-dependency-artifact-uri|release_contract.deploy_image_inventory.llmup.source_provenance.artifact_uri is required"
   "dependency-tag-mismatch|release_contract.deploy_image_inventory.llmup.source_provenance.tag must match release_contract.deploy_image_inventory.llmup.image tag"
   "dependency-digest-mismatch|release_contract.deploy_image_inventory.llmup.source_provenance.artifact_sha256 must match release_contract.deploy_image_inventory.llmup.digest"
+  "afscp-dependency-digest-mismatch|release_contract.deploy_image_inventory.afscp.source_provenance.artifact_sha256 must match release_contract.deploy_image_inventory.afscp.digest"
+  "asbcp-dependency-digest-mismatch|release_contract.deploy_image_inventory.asbcp.source_provenance.artifact_sha256 must match release_contract.deploy_image_inventory.asbcp.digest"
 )
 for source_case in "${source_provenance_cases[@]}"; do
   IFS='|' read -r mutation expected_message <<< "$source_case"
