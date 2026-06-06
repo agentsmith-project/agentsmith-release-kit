@@ -151,6 +151,8 @@ const RUNNER_REPO = 'github.com/agentsmith-project/agentsmith-runner';
 const LLMUP_REPO = 'github.com/agentsmith-project/llm-universal-proxy';
 const AFSCP_REPO = 'github.com/agentsmith-project/agentsmith-fs-control-plane';
 const ASBCP_REPO = 'github.com/agentsmith-project/agentsmith-sandbox-control-plane';
+const PRODUCT_READINESS_ARTIFACT_URI_RE =
+  /^gh-artifact:\/\/agentsmith-project\/agentsmith\/agentsmith-product-readiness\/([1-9][0-9]*)\/product-readiness\/product-readiness-report\.json$/;
 const RUNNER_RELEASE_MANIFEST_URI_RE =
   /^gh-artifact:\/\/agentsmith-project\/agentsmith-runner\/runner-release-manifest\/([0-9]+)\/runner-release-manifest\.json$/;
 const RUNNER_GA_HANDOFF_URI_RE =
@@ -675,6 +677,18 @@ function requireArtifactUri(value, label) {
   return uri;
 }
 
+function requireProductReadinessArtifactUri(value, label, { runId }) {
+  const uri = requireArtifactUri(value, label);
+  const match = uri.match(PRODUCT_READINESS_ARTIFACT_URI_RE);
+  if (!match) {
+    fail(`${label} must be the canonical AgentSmith product readiness artifact URI`);
+  }
+  if (match[1] !== runId) {
+    fail(`${label} run id must match ${label.replace(/\.artifact_uri$/, '.run_id')}`);
+  }
+  return uri;
+}
+
 function requireExternalUri(value, label) {
   const uri = requireString(value, label);
   if (!ARTIFACT_URI_RE.test(uri) || uri.toLowerCase().startsWith('file://')) {
@@ -952,7 +966,9 @@ function requireProductArtifactProvenance(provenance, label, release, reportLabe
 
   const artifactUri = value.artifact_uri === undefined
     ? undefined
-    : requireArtifactUri(value.artifact_uri, `${label}.artifact_uri`);
+    : requireProductReadinessArtifactUri(value.artifact_uri, `${label}.artifact_uri`, {
+      runId: provenanceSummary.run_id
+    });
   if (
     provenanceSummary.subject_sha256 === undefined &&
     provenanceSummary.artifact_sha256 === undefined &&

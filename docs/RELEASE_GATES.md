@@ -1604,6 +1604,9 @@ the artifact/evidence indexes also record each report's `source` block so the
 product-flow aggregate path and digest are directly searchable in the release
 archive.
 Missing either distribution fails fast.
+When Product Readiness provides an `artifact_uri`, it must be the canonical
+AgentSmith `agentsmith-product-readiness` GitHub artifact URI and its run id
+must match `artifact_provenance.run_id`.
 
 Each post-deploy product smoke input must be an AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:

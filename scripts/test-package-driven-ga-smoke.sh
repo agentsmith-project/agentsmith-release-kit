@@ -258,6 +258,9 @@ const digest = (label) => `sha256:${crypto.createHash('sha256').update(label).di
 const fileDigest = (file) => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
 
 function provenance(subjectName) {
+  const artifactUri = subjectName === 'product-readiness-report'
+    ? 'gh-artifact://agentsmith-project/agentsmith/agentsmith-product-readiness/10001/product-readiness/product-readiness-report.json'
+    : `gh-artifact://agentsmith/package-driven-ga-smoke/${subjectName}.json`;
   return {
     schema_version: 'agentsmith.artifact-provenance/v1',
     provenance_kind: 'ci_artifact',
@@ -267,7 +270,7 @@ function provenance(subjectName) {
     subject_name: subjectName,
     subject_sha256: digest(`package-driven-ga-smoke:${subjectName}:subject`),
     artifact_sha256: digest(`package-driven-ga-smoke:${subjectName}:artifact`),
-    artifact_uri: `gh-artifact://agentsmith/package-driven-ga-smoke/${subjectName}.json`,
+    artifact_uri: artifactUri,
     run_id: '10001',
     run_attempt: '1',
     run_url: 'https://github.com/agentsmith-project/agentsmith/actions/runs/10001/attempts/1',

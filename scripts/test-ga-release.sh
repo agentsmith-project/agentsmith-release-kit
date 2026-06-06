@@ -744,6 +744,9 @@ function substrateInstall(dir, profile, operatorRunId) {
 }
 
 function provenance(subjectName) {
+  const artifactUri = subjectName === 'product-readiness-report'
+    ? 'gh-artifact://agentsmith-project/agentsmith/agentsmith-product-readiness/10001/product-readiness/product-readiness-report.json'
+    : `gh-artifact://agentsmith-project/agentsmith/agentsmith-${subjectName}/10001/${subjectName}/${subjectName}.json`;
   return {
     schema_version: 'agentsmith.artifact-provenance/v1',
     provenance_kind: 'ci_artifact',
@@ -758,7 +761,7 @@ function provenance(subjectName) {
     run_attempt: '1',
     run_url: 'https://github.com/agentsmith-project/agentsmith/actions/runs/10001/attempts/1',
     job: subjectName,
-    artifact_uri: `gh-artifact://agentsmith/${subjectName}/10001/${subjectName}.json`,
+    artifact_uri: artifactUri,
     artifact_sha256: sha(`${subjectName}:artifact`),
     generated_at: '2026-05-31T12:00:00.000Z',
     generator_command: 'focused fixture',
@@ -1359,6 +1362,15 @@ if (mutation === 'missing-provenance') {
 } else if (mutation === 'artifact-uri-only') {
   delete report.artifact_provenance.subject_sha256;
   delete report.artifact_provenance.artifact_sha256;
+} else if (mutation === 'non-canonical-artifact-uri') {
+  report.artifact_provenance.artifact_uri =
+    'gh-artifact://agentsmith/product-readiness/10001/product-readiness/product-readiness-report.json';
+} else if (mutation === 'non-canonical-product-artifact-name') {
+  report.artifact_provenance.artifact_uri =
+    'gh-artifact://agentsmith-project/agentsmith/other-product-readiness/10001/product-readiness/product-readiness-report.json';
+} else if (mutation === 'artifact-uri-run-id-mismatch') {
+  report.artifact_provenance.artifact_uri =
+    'gh-artifact://agentsmith-project/agentsmith/agentsmith-product-readiness/99999/product-readiness/product-readiness-report.json';
 } else if (mutation === 'encoded-home-artifact-uri') {
   report.artifact_provenance.artifact_uri =
     'gh-artifact://agentsmith/product-readiness/10001/%2Fhome%2Fexample%2Freport.json';
@@ -2990,6 +3002,9 @@ product_provenance_mutations=(
   missing-run-url
   run-url-mismatch
   missing-artifact-binding
+  non-canonical-artifact-uri
+  non-canonical-product-artifact-name
+  artifact-uri-run-id-mismatch
   encoded-home-artifact-uri
   encoded-tmp-artifact-uri
   encoded-private-artifact-uri
@@ -3035,6 +3050,15 @@ for report_case in "${product_report_cases[@]}"; do
         ;;
       missing-artifact-binding)
         expected_message="$provenance_label must include subject_sha256, artifact_sha256, or artifact_uri"
+        ;;
+      non-canonical-artifact-uri)
+        expected_message="$provenance_label.artifact_uri must be the canonical AgentSmith product readiness artifact URI"
+        ;;
+      non-canonical-product-artifact-name)
+        expected_message="$provenance_label.artifact_uri must be the canonical AgentSmith product readiness artifact URI"
+        ;;
+      artifact-uri-run-id-mismatch)
+        expected_message="$provenance_label.artifact_uri run id must match $provenance_label.run_id"
         ;;
       encoded-home-artifact-uri|encoded-tmp-artifact-uri|encoded-private-artifact-uri|encoded-kubeconfig-artifact-uri)
         expected_message="input report contains forbidden local path or secret-like text"
