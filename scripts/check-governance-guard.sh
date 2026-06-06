@@ -377,7 +377,7 @@ mapfile -t operator_example_files < <(
 )
 reject_scan \
   "operator examples expose internal release-kit plans or maintainer diagnostics" \
-  '[.]release-kit-internal|operator-inputs-plan|operator-release-surface-report|evidence-provenance|adoption report|candidate intake|release-engineering|operator-signoff|--target-profile|verify-release[.]sh|<surface>[[:space:]]+<substrate_strategy>|positional[[:space:]]+.*substrate_strategy' \
+  '[.]release-kit-internal|operator-inputs-plan|operator-release-surface-report|evidence-provenance|adoption report|candidate intake|release-engineering|operator-signoff|--target-profile|verify-release[.]sh|machine profile|target profile|legacy target|path identity|deployment identity|identity fields|<surface>[[:space:]]+<substrate_strategy>|positional[[:space:]]+.*substrate_strategy' \
   "${example_readmes[@]}"
 reject_scan \
   "operator example inputs expose internal release-kit plans or maintainer diagnostics" \

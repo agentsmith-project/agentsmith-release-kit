@@ -23,11 +23,11 @@ bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir>
   secret, storage, and matching substrate secret refs.
 
 The example truth and prerequisite files are already bound to
-`online/use_existing`. Keep their path identity fields unchanged. Replace
-service endpoints, namespace, secret refs, storage values, and proof text with
-values from the target environment.
-The facade derives deployment identity from `deployment_path`; do not add
-deployment identity fields to `substrate-truth.example.json` or
+`online/use_existing`. Keep `deployment_path` set to `online/use_existing`.
+Replace service endpoints, namespace, secret refs, storage values, and proof
+text with values from the target environment.
+The facade chooses the path from `deployment_path`; do not add extra deployment
+selection fields to `substrate-truth.example.json` or
 `target-prerequisites.example.json`.
 
 ## Build The Package

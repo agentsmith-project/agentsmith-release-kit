@@ -177,6 +177,9 @@ assert_operator_success_contract_docs() {
     if grep -Fq 'without `--doctor` or `--run`' "$example_readme"; then
       fail "${example_readme#$ROOT_DIR/} must not route operators to plain operator-inputs validation"
     fi
+    if grep -Eiq 'machine profile|target profile|legacy target|path identity|deployment identity|identity fields' "$example_readme"; then
+      fail "${example_readme#$ROOT_DIR/} must keep operator examples on deployment_path wording, not internal identity terminology"
+    fi
   done
   grep -q -- 'The focused producer catalog is no longer duplicated' "$root_readme" ||
     fail "root README must route maintainer diagnostics out of the operator first screen"

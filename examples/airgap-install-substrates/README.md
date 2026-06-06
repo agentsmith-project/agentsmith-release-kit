@@ -11,12 +11,12 @@ outside the bundle.
 Secrets stay outside the package. Use `secretRef:` values only.
 
 The bundle manifest and bundle-local install inputs are already bound to
-`airgap/install_substrates`. Keep their path identity fields unchanged.
-Replace bundle components, component checksums, namespace, service refs,
-package-local tools, and confirmation fields.
-The installer derives its deployment identity from `deployment_path`; do not
-add deployment identity fields to the bundle-local target prerequisites or
-install inputs.
+`airgap/install_substrates`. Keep `deployment_path` set to
+`airgap/install_substrates`. Replace bundle components, component checksums,
+namespace, service refs, package-local tools, and confirmation fields.
+The installer chooses the path from `deployment_path`; do not add extra
+deployment selection fields to the bundle-local target prerequisites or install
+inputs.
 
 ## Build The Package
 

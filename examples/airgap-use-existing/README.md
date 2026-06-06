@@ -11,12 +11,11 @@ outside the bundle.
 Secrets stay outside the package. Use `secretRef:` values only.
 
 The bundle manifest and bundle-local operator inputs are already bound to
-`airgap/use_existing`. Keep their path identity fields unchanged. Replace
-bundle components, component checksums, namespace, secret refs, endpoint
-values, and package-local tools.
-The facade derives deployment identity from `deployment_path`; do not add
-deployment identity fields to the bundle-local substrate truth or target
-prerequisites.
+`airgap/use_existing`. Keep `deployment_path` set to `airgap/use_existing`.
+Replace bundle components, component checksums, namespace, secret refs,
+endpoint values, and package-local tools.
+The facade chooses the path from `deployment_path`; do not add extra deployment
+selection fields to the bundle-local substrate truth or target prerequisites.
 
 ## Build The Package
 
