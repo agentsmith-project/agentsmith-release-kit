@@ -599,17 +599,17 @@ function assertTruthIdentity(truth, targetProfile, label, requiredSubstrateSourc
   );
 
   const targetCluster = requireEnumString(
-    truth.target_cluster,
+    truth.target_cluster ?? targetProfile.target_cluster,
     `${label}.target_cluster`,
     TARGET_CLUSTER_VALUES
   );
   const substrateSource = requireEnumString(
-    truth.substrate_source,
+    truth.substrate_source ?? targetProfile.substrate_source,
     `${label}.substrate_source`,
     SUBSTRATE_SOURCE_VALUES
   );
   const distribution = requireEnumString(
-    truth.distribution,
+    truth.distribution ?? targetProfile.distribution,
     `${label}.distribution`,
     DISTRIBUTION_VALUES
   );

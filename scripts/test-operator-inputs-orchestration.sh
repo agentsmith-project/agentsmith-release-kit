@@ -2354,6 +2354,25 @@ run_airgap_operator_inputs() {
     bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" --run
 }
 
+make_operator_facing_substrate_truth() {
+  local package_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$package_dir/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [manifestPath] = process.argv.slice(2);
+const packageRoot = path.dirname(manifestPath);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const truthPath = path.join(packageRoot, manifest.substrate_truth);
+const truth = JSON.parse(fs.readFileSync(truthPath, 'utf8'));
+delete truth.target_cluster;
+delete truth.substrate_source;
+delete truth.distribution;
+fs.writeFileSync(truthPath, `${JSON.stringify(truth, null, 2)}\n`);
+NODE
+}
+
 make_operator_facing_target_prerequisites() {
   local package_dir="$1"
 
@@ -2399,11 +2418,12 @@ start_server
 
 positive_package="$TMP_DIR/positive-online"
 prepare_online_package "$positive_package" apply /ok
+make_operator_facing_substrate_truth "$positive_package"
 make_operator_facing_target_prerequisites "$positive_package"
 write_stale_finalizer "$positive_package"
 run_operator_inputs "$positive_package" positive >"$TMP_DIR/positive.out" 2>"$TMP_DIR/positive.err"
 assert_path_evidence "$positive_package"
-pass "operator-inputs --run executes online/use_existing apply with operator-facing target prerequisites"
+pass "operator-inputs --run executes online/use_existing apply with operator-facing substrate truth and prerequisites"
 
 positive_install_package="$TMP_DIR/positive-online-install"
 prepare_online_install_package "$positive_install_package" apply /ok
@@ -2416,6 +2436,7 @@ pass "operator-inputs --run executes online/install_substrates apply with operat
 
 positive_airgap_package="$TMP_DIR/positive-airgap"
 prepare_airgap_package "$positive_airgap_package" apply /ok
+make_operator_facing_substrate_truth "$positive_airgap_package"
 make_operator_facing_target_prerequisites "$positive_airgap_package"
 write_stale_finalizer "$positive_airgap_package" airgap-use-existing
 if ! run_airgap_operator_inputs "$positive_airgap_package" positive-airgap >"$TMP_DIR/positive-airgap.out" 2>"$TMP_DIR/positive-airgap.err"; then
@@ -2424,7 +2445,7 @@ if ! run_airgap_operator_inputs "$positive_airgap_package" positive-airgap >"$TM
   fail "airgap/use_existing positive run failed"
 fi
 assert_airgap_path_evidence "$positive_airgap_package"
-pass "operator-inputs --run executes airgap/use_existing apply with operator-facing target prerequisites"
+pass "operator-inputs --run executes airgap/use_existing apply with operator-facing substrate truth and prerequisites"
 
 missing_release_contract_package="$TMP_DIR/missing-release-contract"
 prepare_online_package "$missing_release_contract_package" apply /ok

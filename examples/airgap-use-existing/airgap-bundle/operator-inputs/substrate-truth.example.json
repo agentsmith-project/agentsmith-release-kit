@@ -1,8 +1,5 @@
 {
   "schema_version": "agentsmith.substrate-connection.truth/v1",
-  "target_cluster": "existing_kubernetes",
-  "substrate_source": "external_declared",
-  "distribution": "airgap",
   "declared_at": "2026-05-23T12:00:00.000Z",
   "declared_by": "release-operator@example.com",
   "services": {
@@ -83,4 +80,3 @@
     }
   }
 }
-

@@ -137,6 +137,11 @@ if (substrateSource === 'kit_installed') {
 switch (mutation) {
   case 'valid':
     break;
+  case 'omit_target_axes':
+    delete truth.target_cluster;
+    delete truth.substrate_source;
+    delete truth.distribution;
+    break;
   case 'wrong_schema':
     truth.schema_version = 'docker-substrate.truth/v1';
     break;
@@ -583,6 +588,13 @@ write_prerequisites "$EXTERNAL_PREREQUISITES" "$EXTERNAL_PROFILE" valid
 run_target_preflight "$EXTERNAL_PROFILE" "$EXTERNAL_TRUTH" "$EXTERNAL_PREREQUISITES" "$EXTERNAL_OUT" >/dev/null
 assert_pass_report "$EXTERNAL_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
 pass "valid existing_kubernetes/external_declared/online truth accepted with focused non-readiness report"
+
+OMIT_AXES_TRUTH="$TMP_DIR/external-truth-omit-axes.json"
+OMIT_AXES_OUT="$TMP_DIR/out-external-omit-axes"
+write_truth "$OMIT_AXES_TRUTH" "$EXTERNAL_PROFILE" omit_target_axes
+run_target_preflight "$EXTERNAL_PROFILE" "$OMIT_AXES_TRUTH" "$EXTERNAL_PREREQUISITES" "$OMIT_AXES_OUT" >/dev/null
+assert_pass_report "$OMIT_AXES_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
+pass "substrate truth derives target axes from CLI target profile when omitted"
 
 OMIT_PROFILE_PREREQUISITES="$TMP_DIR/external-prerequisites-omit-profile.json"
 OMIT_PROFILE_OUT="$TMP_DIR/out-external-omit-profile"

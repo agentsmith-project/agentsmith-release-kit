@@ -27,7 +27,8 @@ The example truth and prerequisite files are already bound to
 service endpoints, namespace, secret refs, storage values, and proof text with
 values from the target environment.
 The facade derives deployment identity from `deployment_path`; do not add
-deployment identity fields to `target-prerequisites.example.json`.
+deployment identity fields to `substrate-truth.example.json` or
+`target-prerequisites.example.json`.
 
 ## Build The Package
 

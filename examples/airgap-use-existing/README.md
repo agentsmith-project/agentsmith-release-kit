@@ -15,7 +15,8 @@ The bundle manifest and bundle-local operator inputs are already bound to
 bundle components, component checksums, namespace, secret refs, endpoint
 values, and package-local tools.
 The facade derives deployment identity from `deployment_path`; do not add
-deployment identity fields to the bundle-local target prerequisites.
+deployment identity fields to the bundle-local substrate truth or target
+prerequisites.
 
 ## Build The Package
 
