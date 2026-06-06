@@ -1,7 +1,6 @@
 # Runbooks
 
-Status: operator package flow first; maintainer/internal diagnostics are outside
-this operator runbook.
+Status: operator package flow first.
 
 ## Operator First Screen
 

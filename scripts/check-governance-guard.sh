@@ -201,6 +201,10 @@ assert_root_readme_operator_surface_slim() {
   whole_readme="$(<README.md)"
 
   for forbidden in \
+    'focused' \
+    'diagnostic' \
+    'maintainer/internal' \
+    'producer catalog' \
     'kit_provided' \
     '[.]release-kit-internal' \
     'operator-inputs-plan' \
@@ -234,6 +238,29 @@ assert_root_readme_operator_surface_slim() {
     if grep -Eiq -- "$forbidden" <<<"$whole_readme"; then
       printf '%s\n' "$whole_readme" | grep -Ein -- "$forbidden" >&2 || true
       fail "root README must not duplicate the maintainer producer catalog"
+    fi
+  done
+}
+
+assert_operator_runbook_first_screen_slim() {
+  local first_screen
+  local forbidden
+
+  first_screen="$(
+    awk '
+      /^## Operator Package Matrix$/ { exit }
+      { print }
+    ' docs/runbooks/README.md
+  )"
+
+  for forbidden in \
+    'focused' \
+    'diagnostic' \
+    'maintainer/internal' \
+    'producer catalog'; do
+    if grep -Eiq -- "$forbidden" <<<"$first_screen"; then
+      printf '%s\n' "$first_screen" | grep -Ein -- "$forbidden" >&2 || true
+      fail "operator runbook first screen exposes maintainer diagnostics or focused producer language"
     fi
   done
 }
@@ -362,6 +389,7 @@ for example_readme in "${example_readmes[@]}"; do
 done
 
 assert_root_readme_operator_surface_slim
+assert_operator_runbook_first_screen_slim
 
 require_text README.md "$EXPECTED_IDENTITY"
 require_text README.md "AgentSmith release contract"

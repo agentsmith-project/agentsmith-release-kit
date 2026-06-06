@@ -1,13 +1,10 @@
 # AgentSmith Release Kit
 
-Status: package-driven operator facade plus focused producers and GA aggregate
-report.
+Status: package-driven operator facade plus final GA aggregate report.
 
 This repository is the deploy/package evidence home for AgentSmith releases.
 It keeps the operator path small: prepare `operator-inputs`, run the
 `operator-release.sh` facade, and finish with `ga-release-report.json`.
-Maintainer/internal producer diagnostics remain available for evidence
-plumbing and troubleshooting, but they are not the operator copy-paste path.
 
 ## Canonical Identity
 
@@ -169,11 +166,6 @@ These paths are still release-kit installer and package evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
 
-Maintainer/internal diagnostics are documented in
-`docs/maintainer-diagnostics.md` and `docs/RELEASE_GATES.md`. They are not the
-operator main path, not package readiness, not operator readiness, and not a
-separate GA signoff surface.
-
 For `airgap`, operators must provide all required tools, templates, artifacts,
 and images from inside the target network. Airgap flow must not download from
 the public internet. An operator-declared substrate endpoint can be a target
@@ -210,6 +202,9 @@ It does not issue a formal GA verdict. Formal release success or failure is
 issued only by `--ga-report`, which writes the final `ga-release-report.json`.
 
 ### Maintainer/Internal Diagnostics
+
+Maintainer/internal producer diagnostics remain available for evidence plumbing
+and troubleshooting, but they are not the operator copy-paste path.
 
 The focused producer catalog is no longer duplicated in this root README.
 Maintainers changing release-kit internals should use
