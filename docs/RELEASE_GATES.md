@@ -1661,6 +1661,9 @@ output artifact name. For private cross-repository artifact reads, configure the
 `AGENTSMITH_ARTIFACT_READ_TOKEN` secret; otherwise the workflow falls back to
 `github.token`. The workflow still relies on the GA aggregate to validate
 provenance, digests, path coverage, and product report bindings.
+The Product Readiness artifact input defaults to the canonical AgentSmith
+artifact name `agentsmith-product-readiness`, which contains
+`product-readiness/product-readiness-report.json`.
 
 The GA aggregate also closes managed runner release provenance. The
 `managed_runner` deploy inventory source provenance must include the runner

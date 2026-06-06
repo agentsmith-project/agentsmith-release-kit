@@ -44,7 +44,7 @@ on:
       product_readiness_artifact:
         description: Artifact name containing product-readiness-report.json.
         required: true
-        default: agentsmith-product-readiness-report
+        default: agentsmith-product-readiness
         type: string
       online_post_deploy_product_smoke_artifact:
         description: Artifact name containing the online post-deploy-product-smoke-report.json.
