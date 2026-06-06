@@ -237,17 +237,24 @@ NODE
 write_product_reports() {
   local release_contract="$1"
   local output_dir="$2"
+  local online_package_dir="$3"
+  local airgap_package_dir="$4"
 
-  "$NODE_BIN" --input-type=module - "$release_contract" "$output_dir" <<'NODE'
+  "$NODE_BIN" --input-type=module - \
+    "$release_contract" \
+    "$output_dir" \
+    "$online_package_dir" \
+    "$airgap_package_dir" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [releaseContractFile, outputDir] = process.argv.slice(2);
+const [releaseContractFile, outputDir, onlinePackageDir, airgapPackageDir] = process.argv.slice(2);
 const contractBytes = fs.readFileSync(releaseContractFile);
 const contract = JSON.parse(contractBytes.toString('utf8'));
 const releaseContractDigest = `sha256:${crypto.createHash('sha256').update(contractBytes).digest('hex')}`;
 const digest = (label) => `sha256:${crypto.createHash('sha256').update(label).digest('hex')}`;
+const fileDigest = (file) => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
 
 function provenance(subjectName) {
   return {
@@ -436,7 +443,7 @@ writeJson(path.join(outputDir, 'post-deploy-product-smoke-report.json'), product
   siteEnvPath: 'unified-deploy/site.env',
   siteEnvDigest: digest('post-deploy-product-smoke:site-env'),
   substrateTruthPath: 'unified-deploy/substrate-truth.json',
-  substrateTruthDigest: digest('post-deploy-product-smoke:substrate-truth'),
+  substrateTruthDigest: fileDigest(path.join(onlinePackageDir, 'substrate-truth.json')),
   reportPath: 'post-deploy-product-smoke/post-deploy-product-smoke-report.json'
 }));
 writeJson(path.join(outputDir, 'post-deploy-product-smoke-airgap-report.json'), productSmokeReport({
@@ -448,7 +455,7 @@ writeJson(path.join(outputDir, 'post-deploy-product-smoke-airgap-report.json'), 
   siteEnvPath: 'unified-deploy/airgap-site.env',
   siteEnvDigest: digest('post-deploy-product-smoke:airgap-site-env'),
   substrateTruthPath: 'unified-deploy/airgap-substrate-truth.json',
-  substrateTruthDigest: digest('post-deploy-product-smoke:airgap-substrate-truth'),
+  substrateTruthDigest: fileDigest(path.join(airgapPackageDir, 'bundle/operator-inputs/substrate-truth.json')),
   reportPath: 'post-deploy-product-smoke/post-deploy-product-smoke-airgap-report.json'
 }));
 NODE
@@ -467,6 +474,9 @@ const [reportFile, ...packageDirs] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const digest = (label) => `sha256:${crypto.createHash('sha256').update(label).digest('hex')}`;
 const fileDigest = (file) => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+const [onlinePackageDir, , airgapPackageDir] = packageDirs;
+const expectedOnlineSubstrateTruthDigest = fileDigest(path.join(onlinePackageDir, 'substrate-truth.json'));
+const expectedAirgapSubstrateTruthDigest = fileDigest(path.join(airgapPackageDir, 'bundle/operator-inputs/substrate-truth.json'));
 function stableJson(value) {
   if (Array.isArray(value)) {
     return value.map(stableJson);
@@ -757,8 +767,14 @@ if (
 if (report.post_deploy_product_smoke?.deployment_target?.site_env?.sha256 !== digest('post-deploy-product-smoke:site-env')) {
   throw new Error('GA report must bind product smoke site env digest');
 }
-if (report.post_deploy_product_smoke?.deployment_target?.substrate_truth?.sha256 !== digest('post-deploy-product-smoke:substrate-truth')) {
+if (report.post_deploy_product_smoke?.deployment_target?.substrate_truth?.sha256 !== expectedOnlineSubstrateTruthDigest) {
   throw new Error('GA report must bind product smoke substrate truth digest');
+}
+if (
+  report.post_deploy_product_smoke?.deployment_path_binding?.deployment_path_substrate_truth_digest !==
+  expectedOnlineSubstrateTruthDigest
+) {
+  throw new Error('GA report must bind product smoke to deployment path substrate truth digest');
 }
 const expectedSmokeDigests = Object.fromEntries([
   ['login_profile', 'login_profile'],
@@ -798,6 +814,15 @@ if (airgapSmoke.deployment_target?.profile !== 'existing_kubernetes/external_dec
 }
 if (airgapSmoke.deployment_path_binding?.operator_path !== 'airgap/use_existing') {
   throw new Error('GA report must bind airgap product smoke to a finalized airgap path');
+}
+if (airgapSmoke.deployment_target?.substrate_truth?.sha256 !== expectedAirgapSubstrateTruthDigest) {
+  throw new Error('GA report must bind airgap product smoke substrate truth digest');
+}
+if (
+  airgapSmoke.deployment_path_binding?.deployment_path_substrate_truth_digest !==
+  expectedAirgapSubstrateTruthDigest
+) {
+  throw new Error('GA report must bind airgap product smoke to deployment path substrate truth digest');
 }
 if (airgapSmoke.source?.product_flows_sha256 !== digest('post-deploy-product-smoke:airgap-product-flows')) {
   throw new Error('GA report must bind airgap product smoke aggregate digest');
@@ -859,7 +884,11 @@ run_airgap_package "$airgap_install_package" package-airgap-install-substrates
 assert_airgap_install_path_evidence "$airgap_install_package"
 assert_no_formal_ga_verdict_outputs "$airgap_install_package"
 
-write_product_reports "$materials_dir/release-contract.json" "$product_dir"
+write_product_reports \
+  "$materials_dir/release-contract.json" \
+  "$product_dir" \
+  "$online_package" \
+  "$airgap_package"
 
 if ! bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --operator-inputs "$online_package" \
