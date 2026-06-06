@@ -1642,9 +1642,12 @@ safe relative paths plus digests in
 `artifact_index.operator_inputs_packages[].release_materials`.
 The sibling `ga-evidence-index.json` mirrors this `artifact_index` and records
 the source report schema, status, formal_verdict, and canonical digest for
-release archive consumption. It also indexes Product Readiness runtime
-convergence evidence and post-deploy product smoke coverage as archive lookup
-data; the final `ga-release-report.json` remains the verdict.
+release archive consumption. The artifact index stores Product Readiness as
+`{ report_digest, provenance }`, so the release archive can search both the
+readiness report digest and its artifact provenance/reference. It also indexes
+Product Readiness runtime convergence evidence and post-deploy product smoke
+coverage as archive lookup data; the final `ga-release-report.json` remains the
+verdict.
 `scripts/test-package-driven-ga-smoke.sh` verifies that finalized path reports
 created by the four package-driven operator-inputs runs can be consumed
 directly by this aggregate without adding a package-level verdict or a

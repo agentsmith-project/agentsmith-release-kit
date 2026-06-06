@@ -2238,6 +2238,21 @@ if (
 if (JSON.stringify(stableJson(evidenceIndex.artifact_index)) !== JSON.stringify(stableJson(report.artifact_index))) {
   throw new Error('GA evidence index artifact_index must match the final GA report artifact_index');
 }
+if (report.artifact_index?.product_readiness?.report_digest !== report.product_readiness?.report_digest) {
+  throw new Error('GA report artifact index must archive product readiness report digest');
+}
+if (
+  JSON.stringify(stableJson(report.artifact_index?.product_readiness?.provenance)) !==
+  JSON.stringify(stableJson(report.product_readiness?.provenance))
+) {
+  throw new Error('GA report artifact index must archive product readiness artifact provenance');
+}
+if (
+  JSON.stringify(stableJson(evidenceIndex.product_readiness)) !==
+  JSON.stringify(stableJson(report.artifact_index.product_readiness))
+) {
+  throw new Error('GA evidence index must expose product readiness artifact reference and digest');
+}
 if (
   JSON.stringify(stableJson(evidenceIndex.canonical_repos)) !==
   JSON.stringify(stableJson(report.canonical_repos))

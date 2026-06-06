@@ -3474,7 +3474,10 @@ async function buildPassReport(args) {
       ...(operatorInputsPackages.length > 0 ? {
         operator_inputs_packages: operatorInputsPackages
       } : {}),
-      product_readiness: productReadinessSummary.report_digest,
+      product_readiness: {
+        report_digest: productReadinessSummary.report_digest,
+        provenance: productReadinessSummary.provenance
+      },
       post_deploy_product_smoke: primaryProductSmoke.report_digest,
       post_deploy_product_smoke_reports: productSmokeCoverage.reports.map((entry) => ({
         report_digest: entry.report_digest,
