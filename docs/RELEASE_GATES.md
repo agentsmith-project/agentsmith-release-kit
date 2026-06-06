@@ -1669,6 +1669,9 @@ AgentSmith artifact names `agentsmith-post-deploy-product-smoke-report` for
 the online report and `agentsmith-post-deploy-product-smoke-airgap-report` for
 the airgap report; each artifact contains one
 `post-deploy-product-smoke-report.json`.
+The workflow output artifact defaults to `agentsmith-ga-release-report` and
+contains the final `ga-release-report.json`, `ga-release-summary.md`, and
+`ga-evidence-index.json` files.
 
 The GA aggregate also closes managed runner release provenance. The
 `managed_runner` deploy inventory source provenance must include the runner
