@@ -25,7 +25,7 @@ assert_operator_success_contract_docs() {
   local runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
   local root_readme="$ROOT_DIR/README.md"
   local examples_readme="$ROOT_DIR/examples/README.md"
-  local online_example_readme="$ROOT_DIR/examples/online-existing-kubernetes/README.md"
+  local online_example_readme="$ROOT_DIR/examples/online-use-existing/README.md"
   local first_screen="$TMP_DIR/runbook-first-screen.md"
   local root_first_screen="$TMP_DIR/root-readme-first-screen.md"
   local root_full="$TMP_DIR/root-readme-full.md"

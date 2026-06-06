@@ -2389,7 +2389,7 @@ expect_operator_fail unknown-strategy \
     --output-dir "$TMP_DIR/out-unknown-strategy"
 
 root_readme="$ROOT_DIR/README.md"
-example_readme="$ROOT_DIR/examples/online-existing-kubernetes/README.md"
+example_readme="$ROOT_DIR/examples/online-use-existing/README.md"
 runbooks_readme="$ROOT_DIR/docs/runbooks/README.md"
 maintainer_diagnostics="$ROOT_DIR/docs/maintainer-diagnostics.md"
 mapfile -t example_readmes < <(find "$ROOT_DIR/examples" -mindepth 1 -maxdepth 2 -name README.md -type f | sort)
@@ -2430,14 +2430,14 @@ if grep -Eq '\.release-kit-internal/.*/deployment-path-report[.]json' "$runbooks
   fail "runbook README must not expose internal deployment-path-report.json package paths"
 fi
 grep -q -- '--operator-inputs' "$example_readme" ||
-  fail "online existing Kubernetes example must use package-driven --operator-inputs"
+  fail "online use_existing example must use package-driven --operator-inputs"
 grep -q -- '--ga-report' "$example_readme" ||
-  fail "online existing Kubernetes example must document package-driven --ga-report final facade"
+  fail "online use_existing example must document package-driven --ga-report final facade"
 if grep -Eq '\.release-kit-internal/.*/deployment-path-report[.]json' "$example_readme"; then
-  fail "online existing Kubernetes example must not expose internal deployment-path-report.json package paths"
+  fail "online use_existing example must not expose internal deployment-path-report.json package paths"
 fi
 if grep -Fq -- '--deployment-path-report' "$example_readme"; then
-  fail "online existing Kubernetes example must not expose internal --deployment-path-report copy path"
+  fail "online use_existing example must not expose internal --deployment-path-report copy path"
 fi
 if grep -Eq 'bash scripts/operator-release[.]sh (online|airgap|airgap-bundle)\b' "$root_readme"; then
   fail "root README must not present legacy positional operator-release commands"
@@ -2452,7 +2452,7 @@ if grep -Eiq '[.]release-kit-internal|operator-inputs-plan|operator-release-surf
   fail "operator examples must not expose internal release-kit plans or maintainer diagnostics"
 fi
 if grep -Eq 'TARGET_PROFILE=|--target-profile|verify-release\.sh --online-deployment-gate' "$example_readme"; then
-  fail "online existing Kubernetes example must not expose producer profile commands as the operator path"
+  fail "online use_existing example must not expose producer profile commands as the operator path"
 fi
 if grep -Eiq 'kit-installed' "$runbooks_readme"; then
   fail "operator runbook prose must use kit-provided wording"

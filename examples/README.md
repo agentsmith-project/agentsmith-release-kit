@@ -22,7 +22,7 @@ before execution. Run `--run` only when the package is ready to execute.
 
 Available examples:
 
-- `online-existing-kubernetes/`: `online/use_existing`
+- `online-use-existing/`: `online/use_existing`
 - `online-install-substrates/`: `online/install_substrates`
 - `airgap-use-existing/`: `airgap/use_existing`
 - `airgap-install-substrates/`: `airgap/install_substrates`

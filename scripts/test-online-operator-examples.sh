@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
-EXAMPLE_DIR="$ROOT_DIR/examples/online-existing-kubernetes"
+EXAMPLE_DIR="$ROOT_DIR/examples/online-use-existing"
 EXAMPLE_ONLINE_INSTALL_DIR="$ROOT_DIR/examples/online-install-substrates"
 EXAMPLE_AIRGAP_USE_EXISTING_DIR="$ROOT_DIR/examples/airgap-use-existing"
 EXAMPLE_AIRGAP_INSTALL_DIR="$ROOT_DIR/examples/airgap-install-substrates"
@@ -559,9 +559,9 @@ write_fake_kubectl "$FAKE_KUBECTL"
 
 validate_operator_example_package \
   "$EXAMPLE_DIR" \
-  "$TMP_DIR/example-online-existing-kubernetes" \
+  "$TMP_DIR/example-online-use-existing" \
   online/use_existing \
-  online-existing-kubernetes
+  online-use-existing
 validate_operator_example_package \
   "$EXAMPLE_ONLINE_INSTALL_DIR" \
   "$TMP_DIR/example-online-install-substrates" \
@@ -593,7 +593,7 @@ fi
 assert_gate_report "$dry_output/online-deployment-gate-report.json" \
   server-dry-run \
   "inputs,target-preflight,template-package,render,render-check,apply"
-pass "online existing Kubernetes operator example drives server-dry-run focused gate"
+pass "online use_existing operator example drives server-dry-run focused gate"
 
 apply_output="$TMP_DIR/out-apply"
 evidence_root="$TMP_DIR/evidence-root"
@@ -623,6 +623,6 @@ assert_gate_report "$apply_output/online-deployment-gate-report.json" \
   operator-example-1001
 assert_evidence_root "$evidence_root"
 [[ -f "$apply_output/evidence-validation/evidence-validation-report.json" ]] || fail "confirmed apply did not validate evidence root"
-pass "online existing Kubernetes operator example drives confirmed apply, rollout, smoke, and focused evidence"
+pass "online use_existing operator example drives confirmed apply, rollout, smoke, and focused evidence"
 
 pass "online operator example focused tests completed"

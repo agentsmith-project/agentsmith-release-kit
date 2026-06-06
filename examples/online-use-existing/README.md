@@ -1,7 +1,7 @@
-# Online Existing Kubernetes Example
+# Online Use Existing Example
 
 This directory is a minimal operator input pack template for
-`online/use_existing`: deploy to an existing Kubernetes cluster and use
+`online/use_existing`: deploy to an operator-provided Kubernetes target and use
 operator-declared PostgreSQL, MongoDB, Redis, object storage, and OIDC
 endpoints.
 
@@ -39,8 +39,8 @@ operator package:
 RELEASE_CONTRACT="release-contract.json"
 DEPLOY_TEMPLATE_PACKAGE="deploy-template-package.json"
 DEPLOY_TEMPLATE_ARCHIVE="agentsmith-deploy-template-package.tgz"
-EXAMPLE_DIR="examples/online-existing-kubernetes"
-PKG="out/operator-inputs/online-existing-kubernetes"
+EXAMPLE_DIR="examples/online-use-existing"
+PKG="out/operator-inputs/online-use-existing"
 
 mkdir -p "$PKG"
 cp "$EXAMPLE_DIR/operator-inputs.apply.example.json" "$PKG/operator-inputs.json"

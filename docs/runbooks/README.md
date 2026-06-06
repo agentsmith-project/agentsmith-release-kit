@@ -111,7 +111,7 @@ proof.
 
 Copy/pasteable package skeletons are available under `examples/`:
 
-- `examples/online-existing-kubernetes/`: `online/use_existing`
+- `examples/online-use-existing/`: `online/use_existing`
 - `examples/online-install-substrates/`: `online/install_substrates`
 - `examples/airgap-use-existing/`: `airgap/use_existing`
 - `examples/airgap-install-substrates/`: `airgap/install_substrates`
