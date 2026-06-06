@@ -1038,16 +1038,11 @@ async function assembleBundle({
     schema_version: 'agentsmith.airgap-bundle-manifest/v1',
     release_id: releaseId,
     git_sha: gitSha,
-    target_profile: targetProfile,
     bindings,
     components,
     image_artifact_declarations: imageArtifactDeclarations,
     payload_artifacts: payloadArtifacts,
-    operator_prerequisites: operatorPrerequisitesForManifest(operatorPrerequisites),
-    substrate: {
-      mode: targetProfile.substrate_source,
-      bundled: targetProfile.substrate_source === 'kit_installed'
-    }
+    operator_prerequisites: operatorPrerequisitesForManifest(operatorPrerequisites)
   };
 
   const manifestPath = path.join(bundleRoot, BUNDLE_MANIFEST_FILE);

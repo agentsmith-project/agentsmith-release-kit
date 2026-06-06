@@ -312,6 +312,13 @@ function objectValue(value, label) {
   return value;
 }
 
+function arrayValue(value, label) {
+  if (!Array.isArray(value)) {
+    fail(`${label} must be an array`);
+  }
+  return value;
+}
+
 function isInsidePath(rootDir, candidate) {
   const relative = path.relative(rootDir, candidate);
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
@@ -364,6 +371,38 @@ function resolveBundleFile(input, bundleRoot) {
   return realPath;
 }
 
+function resolveBundleComponentFile(manifest, bundleRoot, kind) {
+  const components = arrayValue(manifest.components, 'bundle manifest components');
+  const matches = components
+    .map((value, index) => ({
+      value: objectValue(value, `bundle manifest components[${index}]`),
+      index
+    }))
+    .filter(({ value }) => value.kind === kind);
+  if (matches.length !== 1) {
+    fail(`bundle manifest components must include exactly one ${kind}`);
+  }
+
+  const { value, index } = matches[0];
+  const relativePath = stringValue(value.path, `bundle manifest components[${index}].path`);
+  const requested = path.resolve(bundleRoot, relativePath);
+  if (!isInsidePath(bundleRoot, requested)) {
+    fail(`bundle manifest components[${index}].path must stay inside bundle root`);
+  }
+  const stat = lstatChecked(requested, `bundle manifest components[${index}].path`);
+  if (stat.isSymbolicLink()) {
+    fail(`bundle manifest components[${index}].path must not be a symlink`);
+  }
+  if (!stat.isFile()) {
+    fail(`bundle manifest components[${index}].path must point to a file`);
+  }
+  const realPath = realpathChecked(requested, `bundle manifest components[${index}].path`);
+  if (!isInsidePath(bundleRoot, realPath)) {
+    fail(`bundle manifest components[${index}].path must resolve inside bundle root`);
+  }
+  return realPath;
+}
+
 function readJson(file, label) {
   let raw;
   try {
@@ -378,17 +417,17 @@ function readJson(file, label) {
   }
 }
 
-function parseTargetProfile(profile) {
-  const value = stringValue(profile.value, 'bundle manifest target_profile.value');
+function parseTargetProfile(profile, label) {
+  const value = stringValue(profile.value, `${label}.value`);
   const tuple = value.split('/');
   if (tuple.length !== 3 || tuple.some((part) => part.trim() === '')) {
-    fail('bundle manifest target_profile.value must be <target_cluster>/<substrate_source>/<distribution>');
+    fail(`${label}.value must be <target_cluster>/<substrate_source>/<distribution>`);
   }
 
   const [targetCluster, substrateSource, distribution] = tuple;
   const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
   if (!SUPPORTED_TARGET_PROFILES.includes(normalized)) {
-    fail('bundle manifest target_profile.value must be an existing Kubernetes airgap profile');
+    fail(`${label}.value must be an existing Kubernetes airgap profile`);
   }
 
   const fields = {
@@ -397,11 +436,26 @@ function parseTargetProfile(profile) {
     distribution
   };
   for (const [field, expected] of Object.entries(fields)) {
-    if (stringValue(profile[field], `bundle manifest target_profile.${field}`) !== expected) {
-      fail('bundle manifest target_profile fields must match target_profile.value');
+    if (stringValue(profile[field], `${label}.${field}`) !== expected) {
+      fail(`${label} fields must match ${label}.value`);
     }
   }
   return normalized;
+}
+
+function discoverTargetProfile(manifest, bundleRoot) {
+  if (Object.hasOwn(manifest, 'target_profile')) {
+    return parseTargetProfile(
+      objectValue(manifest.target_profile, 'bundle manifest target_profile'),
+      'bundle manifest target_profile'
+    );
+  }
+  const imageMapPath = resolveBundleComponentFile(manifest, bundleRoot, 'image_map');
+  const imageMap = objectValue(readJson(imageMapPath, 'image map'), 'image map');
+  return parseTargetProfile(
+    objectValue(imageMap.target_profile, 'image map target_profile'),
+    'image map target_profile'
+  );
 }
 
 const bundleRoot = resolveBundleRoot(bundleRootArg);
@@ -410,13 +464,12 @@ const bundleManifestPath = resolveBundleFile(
   bundleRoot
 );
 const manifest = objectValue(readJson(bundleManifestPath, 'bundle manifest'), 'bundle manifest');
-const targetProfile = objectValue(manifest.target_profile, 'bundle manifest target_profile');
-const manifestProfile = parseTargetProfile(targetProfile);
+const manifestProfile = discoverTargetProfile(manifest, bundleRoot);
 
 if (manifestProfile !== expectedProfile) {
   fail(
     `operator airgap consume profile mismatch: facade maps to ${expectedProfile}, ` +
-      `but bundle manifest target_profile.value is ${manifestProfile}`
+      `but bundle identity resolves to ${manifestProfile}`
   );
 }
 NODE

@@ -534,6 +534,12 @@ if (checkReport.readiness !== false) {
 if (manifest.schema_version !== 'agentsmith.airgap-bundle-manifest/v1') {
   throw new Error(`unexpected bundle manifest schema: ${manifest.schema_version}`);
 }
+if (
+  Object.prototype.hasOwnProperty.call(manifest, 'target_profile') ||
+  Object.prototype.hasOwnProperty.call(manifest, 'substrate')
+) {
+  throw new Error('bundle manifest must derive target/substrate identity from the selected path');
+}
 if (manifest.image_artifact_declarations?.length !== expectedImageIds.length) {
   throw new Error('bundle manifest must declare all fixture image archives');
 }
@@ -712,14 +718,11 @@ if (checkReport.readiness !== false || imageMap.readiness !== false) {
 if (checkReport.target_profile?.value !== expectedProfile) {
   throw new Error(`bundle check evidence target profile must be ${expectedProfile}`);
 }
-if (manifest.target_profile?.value !== expectedProfile) {
-  throw new Error(`bundle manifest evidence target profile must be ${expectedProfile}`);
-}
 if (
-  manifest.substrate?.mode !== expectedSubstrateSource ||
-  manifest.substrate?.bundled !== (expectedSubstrateSource === 'kit_installed')
+  Object.prototype.hasOwnProperty.call(manifest, 'target_profile') ||
+  Object.prototype.hasOwnProperty.call(manifest, 'substrate')
 ) {
-  throw new Error(`bundle manifest substrate summary must match ${expectedProfile}`);
+  throw new Error('bundle manifest must derive target/substrate identity from the selected path');
 }
 const packComponent = manifest.components.find((component) => (
   component.kind === 'substrate_pack_manifest'
@@ -779,11 +782,11 @@ if (report.target_profile?.value !== 'existing_kubernetes/kit_installed/airgap')
 if (checkReport.target_profile?.value !== 'existing_kubernetes/kit_installed/airgap') {
   throw new Error(`unexpected kit bundle-check target profile: ${checkReport.target_profile?.value}`);
 }
-if (manifest.target_profile?.value !== 'existing_kubernetes/kit_installed/airgap') {
-  throw new Error(`unexpected kit manifest target profile: ${manifest.target_profile?.value}`);
-}
-if (manifest.substrate?.mode !== 'kit_installed' || manifest.substrate?.bundled !== true) {
-  throw new Error('kit airgap manifest substrate summary must be kit_installed and bundled');
+if (
+  Object.prototype.hasOwnProperty.call(manifest, 'target_profile') ||
+  Object.prototype.hasOwnProperty.call(manifest, 'substrate')
+) {
+  throw new Error('kit airgap manifest must derive target/substrate identity from the selected path');
 }
 if (!packComponent) {
   throw new Error('kit airgap manifest must include substrate_pack_manifest component');

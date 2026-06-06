@@ -614,6 +614,11 @@ The bundle manifest must use `schema_version:
 agentsmith.airgap-bundle-manifest/v1`. Its `components` array must contain
 exactly one component for each `kind`: `release_contract`,
 `deploy_template_package`, `deploy_template_archive`, and `image_map`.
+Operator-facing bundle manifests do not need to repeat the selected target or
+substrate identity; validators derive that identity from the selected
+deployment path, CLI target profile, image-map, or upstream report. Historical
+manifests that still include `target_profile` or `substrate` are accepted only
+when those fields exactly match the derived identity.
 Kit-installed airgap bundles must also contain `substrate_pack_manifest`, and
 `bundle_manifest.bindings.substrate_pack_manifest_sha256` must match that
 component sha. Each component path must stay under the bundle root and its

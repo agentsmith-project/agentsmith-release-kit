@@ -1547,8 +1547,11 @@ const packComponent = manifest.components.find((component) => (
   component.kind === 'substrate_pack_manifest'
 ));
 
-if (manifest.substrate?.mode !== 'kit_installed' || manifest.substrate?.bundled !== true) {
-  throw new Error('operator kit airgap bundle substrate summary drifted');
+if (
+  Object.prototype.hasOwnProperty.call(manifest, 'target_profile') ||
+  Object.prototype.hasOwnProperty.call(manifest, 'substrate')
+) {
+  throw new Error('operator kit airgap bundle manifest must derive target/substrate identity from the selected path');
 }
 if (!packComponent || packComponent.sha256 !== packDigest) {
   throw new Error('operator kit airgap bundle missing bound substrate pack component');

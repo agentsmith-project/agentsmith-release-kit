@@ -418,20 +418,28 @@ function parseTargetProfileValue(value, label) {
   };
 }
 
-function discoverTargetProfile(manifest) {
-  const profile = requireObject(manifest.target_profile, 'bundle_manifest.target_profile');
-  const parsed = parseTargetProfileValue(profile.value, 'bundle_manifest.target_profile.value');
+function targetProfileFromObject(value, label) {
+  const profile = requireObject(value, label);
+  const parsed = parseTargetProfileValue(profile.value, `${label}.value`);
   if (
-    requireString(profile.target_cluster, 'bundle_manifest.target_profile.target_cluster') !==
-      parsed.target_cluster ||
-    requireString(profile.substrate_source, 'bundle_manifest.target_profile.substrate_source') !==
+    requireString(profile.target_cluster, `${label}.target_cluster`) !== parsed.target_cluster ||
+    requireString(profile.substrate_source, `${label}.substrate_source`) !==
       parsed.substrate_source ||
-    requireString(profile.distribution, 'bundle_manifest.target_profile.distribution') !==
-      parsed.distribution
+    requireString(profile.distribution, `${label}.distribution`) !== parsed.distribution
   ) {
-    fail('bundle_manifest.target_profile fields must match bundle_manifest.target_profile.value');
+    fail(`${label} fields must match ${label}.value`);
   }
   return parsed;
+}
+
+function discoverTargetProfile(manifest, imageMap) {
+  if (Object.hasOwn(manifest, 'target_profile')) {
+    return targetProfileFromObject(
+      manifest.target_profile,
+      'bundle_manifest.target_profile'
+    );
+  }
+  return targetProfileFromObject(imageMap.target_profile, 'image_map.target_profile');
 }
 
 async function discoverComponents(bundleRoot, manifest, targetProfile) {
@@ -599,7 +607,16 @@ async function main(argv) {
   const bundleManifestPath = await resolveBundleManifest(args, bundleRoot);
   const bundleManifestInput = await readJson(bundleManifestPath, 'bundle manifest');
   const bundleManifest = requireObject(bundleManifestInput.value, 'bundle_manifest');
-  const targetProfile = discoverTargetProfile(bundleManifest);
+  const baseComponentPaths = await discoverComponents(
+    bundleRoot,
+    bundleManifest,
+    { value: EXTERNAL_AIRGAP_TARGET_PROFILE }
+  );
+  const imageMapInput = await readJson(baseComponentPaths.image_map, 'image map');
+  const targetProfile = discoverTargetProfile(
+    bundleManifest,
+    requireObject(imageMapInput.value, 'image_map')
+  );
   const componentPaths = await discoverComponents(
     bundleRoot,
     bundleManifest,

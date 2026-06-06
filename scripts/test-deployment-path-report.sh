@@ -1039,7 +1039,7 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), {
     aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
     aggregate_producer: 'unified-deploy-product-flows',
     aggregate_generated_at: '2026-05-31T12:00:00.000Z',
-    aggregate_command: 'focused fixture'
+    aggregate_command: 'npm run lane:unified-deploy:product-flows'
   },
   deployment_target: {
     profile: 'existing_kubernetes/external_declared/online',
@@ -1079,7 +1079,7 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-airgap-report.json'), {
     aggregate_schema_version: 'agentsmith.unified-deploy.product-flows.aggregate/v1',
     aggregate_producer: 'unified-deploy-product-flows',
     aggregate_generated_at: '2026-05-31T12:00:00.000Z',
-    aggregate_command: 'focused fixture'
+    aggregate_command: 'npm run lane:unified-deploy:product-flows'
   },
   deployment_target: {
     profile: 'existing_kubernetes/external_declared/airgap',

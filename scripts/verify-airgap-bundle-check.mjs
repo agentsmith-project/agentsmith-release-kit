@@ -382,6 +382,13 @@ function assertTargetProfileObject(value, label, expectedTargetProfile) {
   return expectedTargetProfile;
 }
 
+function assertOptionalTargetProfileObject(value, label, expectedTargetProfile) {
+  if (value === undefined) {
+    return expectedTargetProfile;
+  }
+  return assertTargetProfileObject(value, label, expectedTargetProfile);
+}
+
 function stableJson(value) {
   if (Array.isArray(value)) {
     return value.map(stableJson);
@@ -1210,22 +1217,27 @@ async function assertOperatorPrerequisites({ prerequisites, bundleRoot }) {
 }
 
 function assertSubstrate(value, targetProfile) {
+  const expected = {
+    mode: targetProfile.substrate_source,
+    bundled: targetProfile.substrate_source === 'kit_installed'
+  };
+  if (value === undefined) {
+    return expected;
+  }
+
   const substrate = requireObject(value, 'bundle_manifest.substrate');
   assertAllowedKeys(substrate, BUNDLE_SUBSTRATE_KEYS, 'bundle_manifest.substrate');
   assertStringEquals(
     substrate.mode,
-    targetProfile.substrate_source,
+    expected.mode,
     'bundle_manifest.substrate.mode'
   );
-  if (targetProfile.substrate_source === 'kit_installed') {
+  if (expected.bundled) {
     requireBooleanTrue(substrate.bundled, 'bundle_manifest.substrate.bundled');
   } else {
     requireBooleanFalse(substrate.bundled, 'bundle_manifest.substrate.bundled');
   }
-  return {
-    mode: substrate.mode,
-    bundled: substrate.bundled
-  };
+  return expected;
 }
 
 async function assertBundleManifest({
@@ -1246,7 +1258,11 @@ async function assertBundleManifest({
   );
   assertStringEquals(manifest.release_id, releaseId, 'bundle_manifest.release_id');
   assertStringEquals(manifest.git_sha, gitSha, 'bundle_manifest.git_sha');
-  assertTargetProfileObject(manifest.target_profile, 'bundle_manifest.target_profile', targetProfile);
+  assertOptionalTargetProfileObject(
+    manifest.target_profile,
+    'bundle_manifest.target_profile',
+    targetProfile
+  );
   assertBindings({ bindings: manifest.bindings, expected: expectedBindings });
   const componentsCount = await assertComponents({
     components: manifest.components,

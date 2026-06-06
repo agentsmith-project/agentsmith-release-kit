@@ -527,7 +527,7 @@ function assertRegistryBindable({
   }
 }
 
-function assertBundleManifest(manifest, releaseIdentity, manifestDigest) {
+function assertBundleManifest(manifest, releaseIdentity, manifestDigest, expectedProfile) {
   assertStringEquals(
     manifest.schema_version,
     BUNDLE_MANIFEST_SCHEMA,
@@ -542,7 +542,9 @@ function assertBundleManifest(manifest, releaseIdentity, manifestDigest) {
   if (gitSha !== releaseIdentity.gitSha) {
     fail('airgap_bundle_manifest.git_sha must match release contract');
   }
-  const profile = assertProfile(manifest, 'airgap_bundle_manifest');
+  if (Object.hasOwn(manifest, 'target_profile')) {
+    assertProfile(manifest, 'airgap_bundle_manifest', expectedProfile);
+  }
   const bindings = requireObject(manifest.bindings, 'airgap_bundle_manifest.bindings');
   const releaseContractDigest = requireDigest(
     bindings.release_contract_sha256,
@@ -552,13 +554,17 @@ function assertBundleManifest(manifest, releaseIdentity, manifestDigest) {
     fail('airgap_bundle_manifest release contract binding must match release contract input');
   }
   requireDigest(manifestDigest, 'airgap_bundle_manifest input digest');
-  return profile;
+  return expectedProfile;
 }
 
 function substratePackDigestFromManifest(manifest, expectedProfile) {
-  const substrate = requireObject(manifest.substrate, 'airgap_bundle_manifest.substrate');
-  const mode = requireString(substrate.mode, 'airgap_bundle_manifest.substrate.mode');
-  const bundled = substrate.bundled;
+  let mode = expectedProfile.split('/')[1];
+  let bundled = expectedProfile === KIT_AIRGAP_PROFILE;
+  if (Object.hasOwn(manifest, 'substrate')) {
+    const substrate = requireObject(manifest.substrate, 'airgap_bundle_manifest.substrate');
+    mode = requireString(substrate.mode, 'airgap_bundle_manifest.substrate.mode');
+    bundled = substrate.bundled;
+  }
   const bindings = requireObject(manifest.bindings, 'airgap_bundle_manifest.bindings');
   const components = requireArray(manifest.components, 'airgap_bundle_manifest.components');
   const substratePackComponents = components
@@ -1080,10 +1086,27 @@ async function main(argv) {
   const releaseIdentity = releaseIdentityFromContract(releaseContractInput);
   const bundleManifestInput = await readJson(args.bundleManifest, 'airgap bundle manifest');
   const bundleManifest = requireObject(bundleManifestInput.value, 'airgap_bundle_manifest');
+  const bundleSurfaceInput = {
+    ...(await readJson(args.bundleSurfaceReport, 'airgap bundle operator surface report')),
+    file: args.bundleSurfaceReport
+  };
+  const bundleSurfaceReport = requireObject(bundleSurfaceInput.value, 'bundle_surface_report');
+  const surfaceProfile = assertProfile(
+    {
+      target_profile: {
+        value: bundleSurfaceReport.machine_profile,
+        target_cluster: bundleSurfaceReport.machine_profile?.split('/')?.[0],
+        substrate_source: bundleSurfaceReport.machine_profile?.split('/')?.[1],
+        distribution: bundleSurfaceReport.machine_profile?.split('/')?.[2]
+      }
+    },
+    'bundle_surface_report'
+  );
   const expectedProfile = assertBundleManifest(
     bundleManifest,
     releaseIdentity,
-    bundleManifestInput.digest
+    bundleManifestInput.digest,
+    surfaceProfile
   );
   const expectedStrategy = strategyForProfile(expectedProfile);
   const substratePackDigest = substratePackDigestFromManifest(
@@ -1091,10 +1114,6 @@ async function main(argv) {
     expectedProfile
   );
 
-  const bundleSurfaceInput = {
-    ...(await readJson(args.bundleSurfaceReport, 'airgap bundle operator surface report')),
-    file: args.bundleSurfaceReport
-  };
   const consumeSurfaceInput = {
     ...(await readJson(args.consumeSurfaceReport, 'airgap consume operator surface report')),
     file: args.consumeSurfaceReport

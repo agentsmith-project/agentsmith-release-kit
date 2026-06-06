@@ -1138,45 +1138,49 @@ function validateAirgapBundleManifestTarget({ bundleManifest, expectedTargetProf
     'airgap_bundle_manifest.schema_version'
   );
 
-  const profile = requirePlainObject(
-    bundleManifest.target_profile,
-    'airgap_bundle_manifest.target_profile'
-  );
-  assertTargetProfileFieldEquals(
-    profile.value,
-    expectedTargetProfile.value,
-    'airgap_bundle_manifest.target_profile.value'
-  );
-  assertTargetProfileFieldEquals(
-    profile.target_cluster,
-    expectedTargetProfile.target_cluster,
-    'airgap_bundle_manifest.target_profile.target_cluster'
-  );
-  assertTargetProfileFieldEquals(
-    profile.substrate_source,
-    expectedTargetProfile.substrate_source,
-    'airgap_bundle_manifest.target_profile.substrate_source'
-  );
-  assertTargetProfileFieldEquals(
-    profile.distribution,
-    expectedTargetProfile.distribution,
-    'airgap_bundle_manifest.target_profile.distribution'
-  );
+  if (Object.hasOwn(bundleManifest, 'target_profile')) {
+    const profile = requirePlainObject(
+      bundleManifest.target_profile,
+      'airgap_bundle_manifest.target_profile'
+    );
+    assertTargetProfileFieldEquals(
+      profile.value,
+      expectedTargetProfile.value,
+      'airgap_bundle_manifest.target_profile.value'
+    );
+    assertTargetProfileFieldEquals(
+      profile.target_cluster,
+      expectedTargetProfile.target_cluster,
+      'airgap_bundle_manifest.target_profile.target_cluster'
+    );
+    assertTargetProfileFieldEquals(
+      profile.substrate_source,
+      expectedTargetProfile.substrate_source,
+      'airgap_bundle_manifest.target_profile.substrate_source'
+    );
+    assertTargetProfileFieldEquals(
+      profile.distribution,
+      expectedTargetProfile.distribution,
+      'airgap_bundle_manifest.target_profile.distribution'
+    );
+  }
 
-  const substrate = requirePlainObject(
-    bundleManifest.substrate,
-    'airgap_bundle_manifest.substrate'
-  );
-  assertTargetProfileFieldEquals(
-    substrate.mode,
-    expectedTargetProfile.substrate_source,
-    'airgap_bundle_manifest.substrate.mode'
-  );
-  assertBooleanEquals(
-    substrate.bundled,
-    expectedTargetProfile.substrate_source === 'kit_installed',
-    'airgap_bundle_manifest.substrate.bundled'
-  );
+  if (Object.hasOwn(bundleManifest, 'substrate')) {
+    const substrate = requirePlainObject(
+      bundleManifest.substrate,
+      'airgap_bundle_manifest.substrate'
+    );
+    assertTargetProfileFieldEquals(
+      substrate.mode,
+      expectedTargetProfile.substrate_source,
+      'airgap_bundle_manifest.substrate.mode'
+    );
+    assertBooleanEquals(
+      substrate.bundled,
+      expectedTargetProfile.substrate_source === 'kit_installed',
+      'airgap_bundle_manifest.substrate.bundled'
+    );
+  }
 }
 
 function expectedAirgapComponentKinds(expectedTargetProfile) {

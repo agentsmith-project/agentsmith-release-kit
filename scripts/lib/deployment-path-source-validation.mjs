@@ -1713,7 +1713,9 @@ export function validateAirgapBundleCheckReport(report, release, expectedTargetP
 export function validateAirgapBundleManifest(report, release, expectedTargetProfile) {
   requireSchema(report, AIRGAP_BUNDLE_MANIFEST_SCHEMA, 'airgap bundle manifest');
   requireCommonReleaseFields(report, release, 'airgap bundle manifest');
-  requireTargetProfile(report.target_profile, expectedTargetProfile, 'airgap_bundle_manifest.target_profile');
+  if (Object.hasOwn(report, 'target_profile')) {
+    requireTargetProfile(report.target_profile, expectedTargetProfile, 'airgap_bundle_manifest.target_profile');
+  }
 }
 
 export function imageMapComponentFromBundleManifest(report) {

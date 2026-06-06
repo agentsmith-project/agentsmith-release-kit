@@ -636,6 +636,17 @@ switch (caseName) {
     fs.writeFileSync(bundleManifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`);
     break;
   }
+  case 'operator_facing_airgap_bundle_manifest': {
+    const bundleManifestPath = path.join(
+      path.dirname(manifestPath),
+      manifest.airgap_bundle_manifest
+    );
+    const bundleManifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
+    delete bundleManifest.target_profile;
+    delete bundleManifest.substrate;
+    fs.writeFileSync(bundleManifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`);
+    break;
+  }
   case 'airgap_release_contract_outside_bundle_same_digest': {
     const packageRoot = path.dirname(manifestPath);
     const copyPath = path.join(packageRoot, 'release-contract-copy.json');
@@ -1672,6 +1683,14 @@ mutate_manifest "$outside_substrate_truth_dir" airgap_substrate_truth_outside_bu
 expect_fail_matching airgap_substrate_truth_outside_bundle 'substrate_truth must resolve inside airgap_bundle' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$outside_substrate_truth_dir"
 
+operator_facing_airgap_bundle_dir="$TMP_DIR/operator-facing-airgap-bundle"
+copy_valid_package "$base_airgap" "$operator_facing_airgap_bundle_dir"
+mutate_manifest "$operator_facing_airgap_bundle_dir" operator_facing_airgap_bundle_manifest
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$operator_facing_airgap_bundle_dir" >/dev/null
+assert_plan "$operator_facing_airgap_bundle_dir/.release-kit-internal/operator-inputs-plan.json" airgap/use_existing
+pass "resolve-operator-inputs derives airgap bundle manifest target/substrate identity from deployment_path"
+
 airgap_mismatch_dir="$TMP_DIR/invalid-airgap-bundle-profile-mismatch"
 copy_valid_package "$base_airgap" "$airgap_mismatch_dir"
 mutate_manifest "$airgap_mismatch_dir" airgap_bundle_manifest_existing_mismatch
@@ -1686,10 +1705,11 @@ write_manifest "$base_airgap_install" airgap/install_substrates
 operator_facing_airgap_install_dir="$TMP_DIR/operator-facing-airgap-install"
 copy_valid_package "$base_airgap_install" "$operator_facing_airgap_install_dir"
 mutate_manifest "$operator_facing_airgap_install_dir" operator_facing_substrate_install_inputs
+mutate_manifest "$operator_facing_airgap_install_dir" operator_facing_airgap_bundle_manifest
 "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
   --operator-inputs "$operator_facing_airgap_install_dir" >/dev/null
 assert_plan "$operator_facing_airgap_install_dir/.release-kit-internal/operator-inputs-plan.json" airgap/install_substrates
-pass "resolve-operator-inputs derives airgap install substrate target profile axes from deployment_path"
+pass "resolve-operator-inputs derives airgap install bundle/substrate target axes from deployment_path"
 
 legacy_airgap_install_truth_dir="$TMP_DIR/invalid-airgap-install-substrate-truth"
 copy_valid_package "$base_airgap_install" "$legacy_airgap_install_truth_dir"

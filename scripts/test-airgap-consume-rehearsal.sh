@@ -982,8 +982,14 @@ cp -R "$VALID_BUNDLE_ROOT" "$MISMATCHED_PROFILE_BUNDLE_ROOT"
 import fs from 'node:fs';
 
 const [manifestPath, profile] = process.argv.slice(2);
+const [targetCluster, substrateSource, distribution] = profile.split('/');
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-manifest.target_profile.value = profile;
+manifest.target_profile = {
+  value: profile,
+  target_cluster: targetCluster,
+  substrate_source: substrateSource,
+  distribution
+};
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 

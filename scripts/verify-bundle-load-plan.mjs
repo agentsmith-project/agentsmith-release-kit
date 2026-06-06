@@ -291,6 +291,18 @@ function assertTargetProfileObject(value, label) {
   };
 }
 
+function assertOptionalTargetProfileObject(value, label) {
+  if (value === undefined) {
+    return {
+      value: AIRGAP_TARGET_PROFILE,
+      target_cluster: 'existing_kubernetes',
+      substrate_source: 'external_declared',
+      distribution: 'airgap'
+    };
+  }
+  return assertTargetProfileObject(value, label);
+}
+
 function imageDigestSuffix(image, label) {
   if (/\s/.test(image)) {
     fail(`${label} must not contain whitespace`);
@@ -659,7 +671,7 @@ function assertOperatorPrerequisites(value) {
 }
 
 function assertBundleManifest(manifest, imageMapSummary) {
-  assertTargetProfileObject(manifest.target_profile, 'bundle_manifest.target_profile');
+  assertOptionalTargetProfileObject(manifest.target_profile, 'bundle_manifest.target_profile');
   const imageArtifactDeclarationCount = assertImageArtifactDeclarations(
     manifest.image_artifact_declarations,
     imageMapSummary

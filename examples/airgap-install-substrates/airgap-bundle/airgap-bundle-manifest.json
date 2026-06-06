@@ -1,15 +1,5 @@
 {
   "schema_version": "agentsmith.airgap-bundle-manifest/v1",
-  "target_profile": {
-    "value": "existing_kubernetes/kit_installed/airgap",
-    "target_cluster": "existing_kubernetes",
-    "substrate_source": "kit_installed",
-    "distribution": "airgap"
-  },
-  "substrate": {
-    "mode": "kit_installed",
-    "bundled": true
-  },
   "components": [
     {
       "kind": "release_contract",

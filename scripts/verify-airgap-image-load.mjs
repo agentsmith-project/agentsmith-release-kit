@@ -295,6 +295,13 @@ function assertTargetProfileObject(value, label, targetProfile) {
   assertStringEquals(profile.distribution, targetProfile.distribution, `${label}.distribution`);
 }
 
+function assertOptionalTargetProfileObject(value, label, targetProfile) {
+  if (value === undefined) {
+    return;
+  }
+  assertTargetProfileObject(value, label, targetProfile);
+}
+
 function rejectUriOrWindowsPath(value, label) {
   if (value.trim() !== value) {
     fail(`${label} must not have leading or trailing whitespace`);
@@ -624,7 +631,11 @@ async function readImageLoadInputs({
   targetProfile
 }) {
   const manifest = requireObject(bundleManifest, 'bundle_manifest');
-  assertTargetProfileObject(manifest.target_profile, 'bundle_manifest.target_profile', targetProfile);
+  assertOptionalTargetProfileObject(
+    manifest.target_profile,
+    'bundle_manifest.target_profile',
+    targetProfile
+  );
   const declarations = requireArray(
     manifest.image_artifact_declarations,
     'bundle_manifest.image_artifact_declarations'

@@ -305,6 +305,13 @@ function assertTargetProfileObject(value, label, targetProfile) {
   assertStringEquals(profile.distribution, targetProfile.distribution, `${label}.distribution`);
 }
 
+function assertOptionalTargetProfileObject(value, label, targetProfile) {
+  if (value === undefined) {
+    return;
+  }
+  assertTargetProfileObject(value, label, targetProfile);
+}
+
 function rejectUriOrWindowsPath(value, label) {
   if (value.trim() !== value) {
     fail(`${label} must not have leading or trailing whitespace`);
@@ -849,7 +856,7 @@ async function main() {
       targetProfile
     );
     const bundleManifest = requireObject(bundleManifestInput.value, 'bundle_manifest');
-    assertTargetProfileObject(
+    assertOptionalTargetProfileObject(
       bundleManifest.target_profile,
       'bundle_manifest.target_profile',
       targetProfile

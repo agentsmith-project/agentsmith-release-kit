@@ -608,6 +608,10 @@ const manifest = {
 switch (mutation) {
   case 'valid':
     break;
+  case 'omit_manifest_identity':
+    delete manifest.target_profile;
+    delete manifest.substrate;
+    break;
   case 'schema_field_instead_of_schema_version':
     manifest.schema = manifest.schema_version;
     delete manifest.schema_version;
@@ -632,6 +636,9 @@ switch (mutation) {
     break;
   case 'unexpected_substrate_field':
     manifest.substrate.extra_field = 'not-allowed';
+    break;
+  case 'substrate_mode_mismatch':
+    manifest.substrate.mode = 'kit_installed';
     break;
   case 'missing_payload_artifacts':
     delete manifest.payload_artifacts;
@@ -947,6 +954,10 @@ manifest.components.push({
 
 switch (mutation) {
   case 'valid':
+    break;
+  case 'omit_manifest_identity':
+    delete manifest.target_profile;
+    delete manifest.substrate;
     break;
   case 'substrate_pack_binding_sha_mismatch':
     manifest.bindings.substrate_pack_manifest_sha256 = `sha256:${'1'.repeat(64)}`;
@@ -1344,6 +1355,26 @@ if ! tail -n 1 "$TMP_DIR/valid-airgap.out" | grep -q 'readiness=false'; then
 fi
 pass "valid airgap bundle manifest accepted with focused non-readiness report"
 
+derived_identity_image_map_dir="$TMP_DIR/image-map-derived-identity"
+derived_identity_bundle_root="$TMP_DIR/bundle-derived-identity"
+derived_identity_bundle_manifest="$derived_identity_bundle_root/airgap-bundle-manifest.json"
+derived_identity_output_dir="$TMP_DIR/out-derived-identity"
+
+run_image_map "$derived_identity_image_map_dir"
+create_bundle \
+  "$derived_identity_image_map_dir/image-map.json" \
+  "$derived_identity_bundle_root" \
+  "$derived_identity_bundle_manifest" \
+  omit_manifest_identity
+run_airgap_bundle_check \
+  "$derived_identity_image_map_dir/image-map.json" \
+  "$AIRGAP_PROFILE" \
+  "$derived_identity_bundle_root" \
+  "$derived_identity_bundle_manifest" \
+  "$derived_identity_output_dir" >"$TMP_DIR/derived-identity-airgap.out"
+assert_report "$derived_identity_output_dir/$REPORT_FILE"
+pass "airgap bundle manifest may omit target/substrate identity and derive from CLI"
+
 valid_kit_image_map_dir="$TMP_DIR/image-map-valid-kit"
 valid_kit_bundle_root="$TMP_DIR/bundle-valid-kit"
 valid_kit_bundle_manifest="$valid_kit_bundle_root/airgap-bundle-manifest.json"
@@ -1357,6 +1388,29 @@ add_kit_substrate_pack_to_bundle "$valid_kit_bundle_root" "$valid_kit_bundle_man
 run_airgap_bundle_check "$valid_kit_image_map_dir/image-map.json" "$KIT_AIRGAP_PROFILE" "$valid_kit_bundle_root" "$valid_kit_bundle_manifest" "$valid_kit_output_dir" >"$TMP_DIR/valid-kit-airgap.out"
 assert_report "$valid_kit_output_dir/$REPORT_FILE" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE" 5 kit_installed true
 pass "valid kit-installed airgap bundle manifest binds substrate pack component digest"
+
+derived_kit_image_map_dir="$TMP_DIR/image-map-derived-kit"
+derived_kit_bundle_root="$TMP_DIR/bundle-derived-kit"
+derived_kit_bundle_manifest="$derived_kit_bundle_root/airgap-bundle-manifest.json"
+derived_kit_output_dir="$TMP_DIR/out-derived-kit"
+derived_kit_substrate_pack="$TMP_DIR/substrate-pack-derived-kit.json"
+
+write_kit_substrate_pack_manifest "$derived_kit_substrate_pack" "$KIT_AIRGAP_PROFILE"
+run_image_map "$derived_kit_image_map_dir" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE"
+create_bundle "$derived_kit_image_map_dir/image-map.json" "$derived_kit_bundle_root" "$derived_kit_bundle_manifest"
+add_kit_substrate_pack_to_bundle \
+  "$derived_kit_bundle_root" \
+  "$derived_kit_bundle_manifest" \
+  "$derived_kit_substrate_pack" \
+  omit_manifest_identity
+run_airgap_bundle_check \
+  "$derived_kit_image_map_dir/image-map.json" \
+  "$KIT_AIRGAP_PROFILE" \
+  "$derived_kit_bundle_root" \
+  "$derived_kit_bundle_manifest" \
+  "$derived_kit_output_dir" >"$TMP_DIR/derived-kit-airgap.out"
+assert_report "$derived_kit_output_dir/$REPORT_FILE" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE" 5 kit_installed true
+pass "kit airgap bundle manifest may omit target/substrate identity and derive from CLI"
 
 expect_outside_bundle_manifest_fail
 expect_bundle_root_symlink_fail
@@ -1393,6 +1447,7 @@ expect_bundle_fail component-id-with-kind component_id_with_kind
 expect_bundle_fail unexpected-binding-field unexpected_binding_field
 expect_bundle_fail unexpected-image-declaration-field unexpected_image_declaration_field
 expect_bundle_fail unexpected-substrate-field unexpected_substrate_field
+expect_bundle_fail substrate-mode-mismatch substrate_mode_mismatch
 expect_bundle_fail missing-payload-artifacts missing_payload_artifacts
 expect_bundle_fail missing-required-payload-kind missing_required_payload_kind
 expect_bundle_fail payload-sha-mismatch payload_sha_mismatch

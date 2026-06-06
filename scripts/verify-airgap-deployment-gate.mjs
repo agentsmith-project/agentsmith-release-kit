@@ -650,12 +650,14 @@ async function discoverSubstratePackManifest(args) {
   );
   const bundleManifestInput = await readJsonFile(bundleManifestPath, 'bundle manifest');
   const manifest = requireObject(bundleManifestInput.value, 'bundle_manifest');
-  const manifestTargetProfile = requireObject(
-    manifest.target_profile,
-    'bundle_manifest.target_profile'
-  );
-  if (requireString(manifestTargetProfile.value, 'bundle_manifest.target_profile.value') !== args.targetProfile.value) {
-    fail('bundle_manifest.target_profile.value must match --target-profile');
+  if (Object.hasOwn(manifest, 'target_profile')) {
+    const manifestTargetProfile = requireObject(
+      manifest.target_profile,
+      'bundle_manifest.target_profile'
+    );
+    if (requireString(manifestTargetProfile.value, 'bundle_manifest.target_profile.value') !== args.targetProfile.value) {
+      fail('bundle_manifest.target_profile.value must match --target-profile');
+    }
   }
   const components = requireArray(manifest.components, 'bundle_manifest.components');
   const substratePackComponents = components

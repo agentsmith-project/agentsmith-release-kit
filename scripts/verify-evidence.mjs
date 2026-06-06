@@ -1535,6 +1535,13 @@ function assertTargetProfileObjectMatches(value, expected, label) {
   }
 }
 
+function assertOptionalTargetProfileObjectMatches(value, expected, label) {
+  if (value === undefined) {
+    return;
+  }
+  assertTargetProfileObjectMatches(value, expected, label);
+}
+
 function assertReleaseContractDigestBinding(value, label, evidence, releaseContractInput) {
   const digest = requireDigest(value, label);
   if (digest !== evidence.release_contract_digest) {
@@ -2192,6 +2199,9 @@ function assertAirgapOperatorPrerequisites({
 }
 
 function assertAirgapSubstrate(value, targetProfile) {
+  if (value === undefined) {
+    return;
+  }
   const substrate = requireObject(value, 'airgap_bundle_manifest.substrate');
   assertAllowedKeys(substrate, AIRGAP_SUBSTRATE_KEYS, 'airgap_bundle_manifest.substrate');
   assertStringEquals(
@@ -2271,7 +2281,7 @@ function assertAirgapBundleOutput({
     'airgap_bundle_manifest.release_id'
   );
   assertStringEquals(manifest.git_sha, evidence.git_sha, 'airgap_bundle_manifest.git_sha');
-  assertTargetProfileObjectMatches(
+  assertOptionalTargetProfileObjectMatches(
     manifest.target_profile,
     targetProfile,
     'airgap_bundle_manifest.target_profile'

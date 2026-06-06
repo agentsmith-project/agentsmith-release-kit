@@ -383,6 +383,13 @@ function targetProfileValue(report, label) {
   );
 }
 
+function optionalTargetProfileValue(report, label) {
+  if (!Object.hasOwn(report, 'target_profile')) {
+    return undefined;
+  }
+  return targetProfileValue(report, label);
+}
+
 function isKitAirgapProfile(machineProfile) {
   return machineProfile === KIT_AIRGAP_PROFILE;
 }
@@ -941,7 +948,11 @@ async function buildAirgapEvidenceHandoff(args, releaseIdentity, expectedDigests
     AIRGAP_BUNDLE_MANIFEST_SCHEMA,
     'airgap_evidence_bundle_manifest.schema_version'
   );
-  if (targetProfileValue(manifest, 'airgap_evidence_bundle_manifest') !== args.machineProfile) {
+  const manifestProfile = optionalTargetProfileValue(
+    manifest,
+    'airgap_evidence_bundle_manifest'
+  );
+  if (manifestProfile !== undefined && manifestProfile !== args.machineProfile) {
     fail('airgap_evidence_bundle_manifest.target_profile.value must match machine profile');
   }
   if (substratePackInput) {
@@ -1136,7 +1147,8 @@ async function buildAirgapSummary(args, releaseIdentity) {
   if (manifestGitSha !== releaseIdentity.gitSha) {
     fail('airgap_bundle_manifest.git_sha must match release contract');
   }
-  if (targetProfileValue(manifest, 'airgap_bundle_manifest') !== args.machineProfile) {
+  const manifestProfile = optionalTargetProfileValue(manifest, 'airgap_bundle_manifest');
+  if (manifestProfile !== undefined && manifestProfile !== args.machineProfile) {
     fail('airgap_bundle_manifest.target_profile.value must match machine profile');
   }
   assertArtifactReleaseContractDigest(bundleCreateReport, 'bundle_create_report', releaseIdentity);
@@ -1221,7 +1233,8 @@ function assertAirgapManifestIdentity(manifest, releaseIdentity, args) {
   if (manifestGitSha !== releaseIdentity.gitSha) {
     fail('airgap_bundle_manifest.git_sha must match consume report');
   }
-  if (targetProfileValue(manifest, 'airgap_bundle_manifest') !== args.machineProfile) {
+  const manifestProfile = optionalTargetProfileValue(manifest, 'airgap_bundle_manifest');
+  if (manifestProfile !== undefined && manifestProfile !== args.machineProfile) {
     fail('airgap_bundle_manifest.target_profile.value must match machine profile');
   }
 }
