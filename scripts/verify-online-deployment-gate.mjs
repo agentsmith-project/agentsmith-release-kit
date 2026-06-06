@@ -1234,6 +1234,7 @@ async function main(argv) {
       args.deployTemplatePackage,
       '--target-profile',
       targetProfile,
+      '--allow-required-target-profiles',
       '--output-dir',
       outputSubdir(args, 'inputs')
     ],

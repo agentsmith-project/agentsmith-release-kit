@@ -153,6 +153,7 @@ write_materials() {
   local archive_sha="$2"
   local contract_output="$3"
   local deploy_template_package_output="$4"
+  local target_profiles_required="${5:-false}"
 
   "$NODE_BIN" --input-type=module - \
     "$FIXTURE_CONTRACT" \
@@ -160,7 +161,8 @@ write_materials() {
     "$manifest_sha" \
     "$archive_sha" \
     "$contract_output" \
-    "$deploy_template_package_output" <<'NODE'
+    "$deploy_template_package_output" \
+    "$target_profiles_required" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
@@ -170,11 +172,18 @@ const [
   manifestSha,
   archiveSha,
   contractOutput,
-  packageOutput
+  packageOutput,
+  targetProfilesRequired
 ] = process.argv.slice(2);
 
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 const deployTemplatePackage = JSON.parse(fs.readFileSync(packageInput, 'utf8'));
+
+if (targetProfilesRequired === 'true') {
+  for (const profile of contract.target_profiles) {
+    profile.required = true;
+  }
+}
 
 function stableJson(value) {
   if (Array.isArray(value)) {

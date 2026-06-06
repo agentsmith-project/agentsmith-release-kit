@@ -196,9 +196,10 @@ a matching binding digest.
 archive sha256. Component paths and image artifact paths must be POSIX-style
 relative paths under the bundle root, and sha256 values must match the
 referenced files. The release contract must declare the selected airgap target
-profile in `target_profiles`, each target profile entry must carry
-`required: false` for this GA bundle intake, and
-`support_level` is rejected. The bundle manifest accepts only the documented
+profile in `target_profiles`, each target profile entry must carry boolean
+`required`, and `support_level` is rejected. The bundle check accepts final GA
+release contracts with `required: true` target profiles while keeping
+`readiness: false`. The bundle manifest accepts only the documented
 top-level, `bindings`, `components`, `image_artifact_declarations`,
 `payload_artifacts`, `operator_prerequisites`, and `substrate` fields. Image
 artifact declarations must match image-map mappings one-to-one by id. The
@@ -211,11 +212,11 @@ It also checks the dynamic `required_image_ids` exact-set closure, while
 remaining a focused `readiness: false` diagnostic rather than release
 readiness.
 
-Final `--ga-release` is the only release-kit mode that accepts required target
-profiles. It consumes the final release contract, requires exactly the four
-existing-Kubernetes GA tuples, and requires every final GA target profile entry
-to carry `required: true`; focused diagnostics and bundle intake continue to
-reject `required: true`.
+Final `--ga-release` consumes the final release contract, requires exactly the
+four existing-Kubernetes GA tuples, and requires every final GA target profile
+entry to carry `required: true`. `--inputs` focused intake continues to reject
+`required: true`; deployment/path producers may consume the final contract
+without issuing readiness.
 
 `payload_artifacts[]` allows only `id`, `kind`, `path`, and `sha256`. Allowed
 kinds are `runbook`, `script`, `profile_values_schema`,

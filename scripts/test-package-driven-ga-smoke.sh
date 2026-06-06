@@ -20,7 +20,8 @@ prepare_common_release_materials() {
 
   write_materials "$manifest_sha" "$archive_sha" \
     "$materials_dir/release-contract.json" \
-    "$materials_dir/deploy-template-package.json"
+    "$materials_dir/deploy-template-package.json" \
+    true
 }
 
 copy_common_release_materials() {
@@ -610,6 +611,9 @@ const plansByPath = new Map(packageDirs.map((packageDir) => {
 }));
 const firstPlan = plansByPath.values().next().value;
 const contract = JSON.parse(fs.readFileSync(firstPlan.input_refs.release_contract.absolute_path, 'utf8'));
+if (!contract.target_profiles.every((profile) => profile.required === true)) {
+  throw new Error('package-driven GA smoke must use a final GA release contract with required target profiles');
+}
 const packageIndex = report.artifact_index?.operator_inputs_packages;
 if (!Array.isArray(packageIndex) || packageIndex.length !== expectedPaths.size) {
   throw new Error('GA report artifact index must cover four operator-inputs packages');

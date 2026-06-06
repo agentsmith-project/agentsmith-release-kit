@@ -5,12 +5,10 @@ import path from 'node:path';
 
 import { validateSubstratePackManifest } from './lib/substrate-pack-manifest-validation.mjs';
 import {
-  CANONICAL_DECLARABLE_TARGET_PROFILE_SET,
-  CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES,
   DISTRIBUTION_VALUES,
-  REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE,
   SUBSTRATE_SOURCE_VALUES,
-  TARGET_CLUSTER_VALUES
+  TARGET_CLUSTER_VALUES,
+  validateContractTargetProfileEntry
 } from './lib/release-kit-version-policy.mjs';
 
 const REQUIRED_ARGS = [
@@ -649,40 +647,10 @@ function assertContractTargetProfiles(contract, targetProfile) {
 
   for (const [index, profileValue] of profiles.entries()) {
     const label = `release_contract.target_profiles[${index}]`;
-    const profile = requireObject(profileValue, label);
-    const targetCluster = requireEnumString(
-      profile.target_cluster,
-      `${label}.target_cluster`,
-      TARGET_CLUSTER_VALUES
-    );
-    const substrateSource = requireEnumString(
-      profile.substrate_source,
-      `${label}.substrate_source`,
-      SUBSTRATE_SOURCE_VALUES
-    );
-    const distribution = requireEnumString(
-      profile.distribution,
-      `${label}.distribution`,
-      DISTRIBUTION_VALUES
-    );
-    const tuple = `${targetCluster}/${substrateSource}/${distribution}`;
-    if (!CANONICAL_DECLARABLE_TARGET_PROFILE_SET.has(tuple)) {
-      fail(
-        `${label} must be one of canonical profiles: ${CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.join(
-          ', '
-        )}`
-      );
-    }
-    if (Object.prototype.hasOwnProperty.call(profile, 'support_level')) {
-      fail(`${label}.support_level is not allowed; use ${label}.required`);
-    }
-    if (!Object.prototype.hasOwnProperty.call(profile, 'required')) {
-      fail(`${label}.required is required`);
-    }
-    const required = requireBoolean(profile.required, `${label}.required`);
-    if (required) {
-      fail(`${label}.required ${REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE}`);
-    }
+    const profile = validateContractTargetProfileEntry(profileValue, fail, label, {
+      allowRequired: true
+    });
+    const tuple = profile.value;
     if (seen.has(tuple)) {
       fail(`${label} duplicates target profile tuple declared at ${seen.get(tuple)}`);
     }

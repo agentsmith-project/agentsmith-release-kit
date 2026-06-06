@@ -1343,6 +1343,7 @@ async function main() {
         args.deployTemplatePackage,
         '--target-profile',
         args.targetProfile,
+        '--allow-required-target-profiles',
         '--output-dir',
         inputsDir
       ],

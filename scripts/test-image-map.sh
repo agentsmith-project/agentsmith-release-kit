@@ -312,6 +312,13 @@ run_image_map "$VALID_CONTRACT" "$kit_airgap_output" "$KIT_AIRGAP_PROFILE" \
 assert_report "$kit_airgap_output/image-map.json" "$KIT_AIRGAP_PROFILE" true "$kit_airgap_registry"
 pass "kit-installed airgap image-map with target registry accepted"
 
+required_contract="$TMP_DIR/contract-required-target-profile.json"
+required_output="$TMP_DIR/out-required-target-profile"
+write_contract "$required_contract" required_target_profile
+run_image_map "$required_contract" "$required_output" "$ONLINE_PROFILE" >/dev/null
+assert_report "$required_output/image-map.json" "$ONLINE_PROFILE" false
+pass "image-map consumes final GA required target profiles without claiming readiness"
+
 airgap_missing_output="$TMP_DIR/out-airgap-missing-registry"
 mkdir -p "$airgap_missing_output"
 printf '%s\n' '{"stale":true}' >"$airgap_missing_output/image-map.json"
@@ -343,7 +350,6 @@ expect_registry_fail trailing-separator-namespace "registry.example.internal/rel
 
 expect_contract_fail noncanonical-target-profile noncanonical_contract_target_profile
 expect_contract_fail noncanonical-target-tuple noncanonical_contract_target_tuple
-expect_contract_fail required-target-profile required_target_profile
 expect_contract_fail tag-only-image tag_only_image
 expect_contract_fail digest-mismatch digest_mismatch
 expect_contract_fail duplicate-id duplicate_id

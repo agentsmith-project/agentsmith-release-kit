@@ -132,6 +132,9 @@ function parseArgs(argv) {
       case '--output-dir':
         parsed.outputDir = nextValue();
         break;
+      case '--allow-required-target-profiles':
+        parsed.allowRequiredTargetProfiles = true;
+        break;
       case '--help':
       case '-h':
         parsed.help = true;
@@ -1201,15 +1204,17 @@ function targetProfileFromValue(value) {
   };
 }
 
-function buildTargetProfileCoverageReport(targetProfiles) {
+function buildTargetProfileCoverageReport(targetProfiles, { allowRequiredTargetProfiles = false } = {}) {
   const requiredProfiles = targetProfiles
     .filter((profile) => profile.required)
     .map(targetProfileSummary);
-  const forbiddenRequiredProfiles = requiredProfiles;
+  const forbiddenRequiredProfiles = allowRequiredTargetProfiles ? [] : requiredProfiles;
   const report = {
     scope: 'target_profile_coverage_intake_only',
     readiness: false,
-    required_policy: FOCUSED_REQUIRED_TARGET_PROFILE_POLICY,
+    required_policy: allowRequiredTargetProfiles
+      ? 'deployment_producer_accepts_final_required_target_profiles'
+      : FOCUSED_REQUIRED_TARGET_PROFILE_POLICY,
     declarable_profiles: CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.map(
       targetProfileFromValue
     ),
@@ -1275,7 +1280,9 @@ async function main() {
   const images = assertImageInventory(contract);
   assertRequiredImageIds(contract, deployTemplatePackage, images);
   const targetProfiles = assertTargetProfiles(contract);
-  const targetProfileCoverageReport = buildTargetProfileCoverageReport(targetProfiles);
+  const targetProfileCoverageReport = buildTargetProfileCoverageReport(targetProfiles, {
+    allowRequiredTargetProfiles: args.allowRequiredTargetProfiles === true
+  });
   await writeTargetProfileCoverageReport(args.outputDir, targetProfileCoverageReport);
   if (targetProfileCoverageReport.status === 'failed') {
     fail(`target_profiles.required ${REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE}`);

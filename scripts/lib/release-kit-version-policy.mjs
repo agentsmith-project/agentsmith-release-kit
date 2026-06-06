@@ -130,7 +130,7 @@ export function parseCanonicalTargetProfile(value, fail, label = 'target_profile
   };
 }
 
-export function validateContractTargetProfileEntry(value, fail, label) {
+export function validateContractTargetProfileEntry(value, fail, label, options = {}) {
   const profile = requireProfileObject(value, label, fail);
   const targetCluster = requireProfileString(
     profile.target_cluster,
@@ -160,7 +160,7 @@ export function validateContractTargetProfileEntry(value, fail, label) {
     fail(`${label}.required is required`);
   }
   const required = requireProfileBoolean(profile.required, `${label}.required`, fail);
-  if (required) {
+  if (required && options.allowRequired !== true) {
     fail(`${label}.required ${REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE}`);
   }
 

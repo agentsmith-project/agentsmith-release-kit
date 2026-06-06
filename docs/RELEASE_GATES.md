@@ -286,9 +286,10 @@ must use an accepted GA profile tuple:
 map to the operator choice surface; this is not a formal verdict/readiness
 claim. The kind tuple is rehearsal-only accepted input. During this GA cut every
 focused diagnostic entry must use `required: false`; any `required: true` target
-fails fast outside final GA aggregate mode. Final `--ga-release` is the only
-mode that accepts required target profiles: it requires exactly the four
-existing-Kubernetes GA tuples and every entry must carry `required: true`.
+fails fast in `--inputs` intake. Deployment/path producers may consume the final
+GA release contract without treating `required: true` as readiness. Final
+`--ga-release` requires exactly the four existing-Kubernetes GA tuples and every
+entry must carry `required: true`.
 
 The generated `intake-report.json`, `image-digest-plan.json`, and
 `target-profile-coverage-report.json` must keep `readiness: false`. The
@@ -608,9 +609,11 @@ bundle check release readiness.
 
 The release contract `target_profiles` value must be an array and must declare
 the selected airgap target profile. Every target profile tuple must be accepted
-for this focused GA bundle intake, every entry must carry `required: false`, and
-`support_level` is rejected. The kit-installed airgap check validates only
-bundle manifest/component/digest binding; it does not deploy substrates.
+for this bundle check, every entry must carry boolean `required`, and
+`support_level` is rejected. The check accepts the final GA release contract's
+`required: true` target profiles while keeping `readiness: false`. The
+kit-installed airgap check validates only bundle manifest/component/digest
+binding; it does not deploy substrates.
 
 The bundle manifest must use `schema_version:
 agentsmith.airgap-bundle-manifest/v1`. Its `components` array must contain

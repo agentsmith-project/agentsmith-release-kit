@@ -494,15 +494,18 @@ switch (mutation) {
   case 'required-string':
     contract.target_profiles[0].required = 'true';
     break;
+  case 'required-true':
+    for (const profile of contract.target_profiles) {
+      profile.required = true;
+    }
+    break;
   case 'support-level-present':
     contract.target_profiles[0].support_level = 'primary';
-    break;
-  case 'kind-required':
-    contract.target_profiles[2].required = true;
     break;
   case 'noncanonical-extra-kind-external-declared':
     contract.target_profiles.push({
       ...contract.target_profiles[2],
+      target_cluster: 'kind_rehearsal',
       substrate_source: 'external_declared',
       required: false
     });
@@ -1066,23 +1069,27 @@ expect_fail_case target-profile-required-string \
   "$VALID_VALUES" \
   "$VALID_TRUTH"
 
+REQUIRED_TRUE_CONTRACT="$TMP_DIR/release-contract.target-required-true.json"
+REQUIRED_TRUE_OUT="$TMP_DIR/out-target-required-true"
+mutate_contract_target_profile required-true \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$REQUIRED_TRUE_CONTRACT"
+run_render \
+  "$REQUIRED_TRUE_CONTRACT" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$REQUIRED_TRUE_OUT" >"$TMP_DIR/target-required-true.out"
+assert_pass_report "$REQUIRED_TRUE_OUT/manifest-render-report.json" "$REQUIRED_TRUE_OUT/rendered-manifests"
+pass "render consumes final GA required target profiles without claiming readiness"
+
 SUPPORT_LEVEL_CONTRACT="$TMP_DIR/release-contract.support-level-present.json"
 mutate_contract_target_profile support-level-present \
   "$VALID_CONTRACT_MATERIAL" \
   "$SUPPORT_LEVEL_CONTRACT"
 expect_fail_case target-profile-support-level-present \
   "$SUPPORT_LEVEL_CONTRACT" \
-  "$VALID_PACKAGE_MATERIAL" \
-  "$VALID_ARCHIVE" \
-  "$VALID_VALUES" \
-  "$VALID_TRUTH"
-
-KIND_REQUIRED_CONTRACT="$TMP_DIR/release-contract.kind-required.json"
-mutate_contract_target_profile kind-required \
-  "$VALID_CONTRACT_MATERIAL" \
-  "$KIND_REQUIRED_CONTRACT"
-expect_fail_case kind-required-target-profile \
-  "$KIND_REQUIRED_CONTRACT" \
   "$VALID_PACKAGE_MATERIAL" \
   "$VALID_ARCHIVE" \
   "$VALID_VALUES" \

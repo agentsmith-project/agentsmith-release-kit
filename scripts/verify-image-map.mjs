@@ -4,11 +4,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
-  CANONICAL_DECLARABLE_TARGET_PROFILE_SET,
-  CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES,
   IMAGE_MAP_TARGET_PROFILE_SET,
   IMAGE_MAP_TARGET_PROFILE_VALUES,
-  REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE
+  validateContractTargetProfileEntry
 } from './lib/release-kit-version-policy.mjs';
 import {
   imageDigestSuffix,
@@ -228,44 +226,11 @@ function assertContractTargetProfile(contract, targetProfile) {
   let matched = false;
 
   for (const [index, profileValue] of profiles.entries()) {
-    const profile = requireObject(profileValue, `release_contract.target_profiles[${index}]`);
-    const targetCluster = requireString(
-      profile.target_cluster,
-      `release_contract.target_profiles[${index}].target_cluster`
-    );
-    const substrateSource = requireString(
-      profile.substrate_source,
-      `release_contract.target_profiles[${index}].substrate_source`
-    );
-    const distribution = requireString(
-      profile.distribution,
-      `release_contract.target_profiles[${index}].distribution`
-    );
-    const profileTuple = `${targetCluster}/${substrateSource}/${distribution}`;
-    if (!CANONICAL_DECLARABLE_TARGET_PROFILE_SET.has(profileTuple)) {
-      fail(
-        `release_contract.target_profiles[${index}] must be one of canonical profiles: ${CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.join(
-          ', '
-        )}`
-      );
-    }
-    if (Object.prototype.hasOwnProperty.call(profile, 'support_level')) {
-      fail(
-        `release_contract.target_profiles[${index}].support_level is not allowed; use release_contract.target_profiles[${index}].required`
-      );
-    }
-    if (!Object.prototype.hasOwnProperty.call(profile, 'required')) {
-      fail(`release_contract.target_profiles[${index}].required is required`);
-    }
-    const required = requireBoolean(
-      profile.required,
-      `release_contract.target_profiles[${index}].required`
-    );
-    if (required) {
-      fail(
-        `release_contract.target_profiles[${index}].required ${REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE}`
-      );
-    }
+    const label = `release_contract.target_profiles[${index}]`;
+    const profile = validateContractTargetProfileEntry(profileValue, fail, label, {
+      allowRequired: true
+    });
+    const profileTuple = profile.value;
     if (seen.has(profileTuple)) {
       fail(
         `release_contract.target_profiles[${index}] duplicates target profile tuple declared at ${seen.get(
@@ -275,9 +240,9 @@ function assertContractTargetProfile(contract, targetProfile) {
     }
     seen.set(profileTuple, `release_contract.target_profiles[${index}]`);
     if (
-      targetCluster === targetProfile.target_cluster &&
-      substrateSource === targetProfile.substrate_source &&
-      distribution === targetProfile.distribution
+      profile.target_cluster === targetProfile.target_cluster &&
+      profile.substrate_source === targetProfile.substrate_source &&
+      profile.distribution === targetProfile.distribution
     ) {
       matched = true;
     }

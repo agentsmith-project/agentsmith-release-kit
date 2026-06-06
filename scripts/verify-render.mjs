@@ -452,7 +452,9 @@ function assertContractTargetProfiles(contract, targetProfile) {
 
   for (const [index, profileValue] of profiles.entries()) {
     const label = `release_contract.target_profiles[${index}]`;
-    const profile = validateContractTargetProfileEntry(profileValue, fail, label);
+    const profile = validateContractTargetProfileEntry(profileValue, fail, label, {
+      allowRequired: true
+    });
 
     if (seen.has(profile.value)) {
       fail(`${label} duplicates target profile tuple declared at ${seen.get(profile.value)}`);

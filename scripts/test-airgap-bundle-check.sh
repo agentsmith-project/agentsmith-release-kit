@@ -1389,6 +1389,21 @@ run_airgap_bundle_check "$valid_kit_image_map_dir/image-map.json" "$KIT_AIRGAP_P
 assert_report "$valid_kit_output_dir/$REPORT_FILE" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE" 5 kit_installed true
 pass "valid kit-installed airgap bundle manifest binds substrate pack component digest"
 
+required_contract="$TMP_DIR/required-target-profile.release-contract.json"
+required_deploy_template_package="$TMP_DIR/required-target-profile.deploy-template-package.json"
+required_archive="$TMP_DIR/required-target-profile.archive.tgz"
+required_image_map_dir="$TMP_DIR/image-map-required-target-profile"
+required_bundle_root="$TMP_DIR/bundle-required-target-profile"
+required_bundle_manifest="$required_bundle_root/airgap-bundle-manifest.json"
+required_output_dir="$TMP_DIR/out-required-target-profile"
+create_materials "$required_contract" "$required_deploy_template_package" "$required_archive" target_required_true
+run_image_map "$required_image_map_dir"
+rebind_image_map_release_contract_digest "$required_image_map_dir/image-map.json" "$required_contract"
+create_bundle "$required_image_map_dir/image-map.json" "$required_bundle_root" "$required_bundle_manifest" valid "$required_contract" "$required_deploy_template_package" "$required_archive"
+run_airgap_bundle_check "$required_image_map_dir/image-map.json" "$AIRGAP_PROFILE" "$required_bundle_root" "$required_bundle_manifest" "$required_output_dir" "$required_contract" "$required_deploy_template_package" "$required_archive" >"$TMP_DIR/required-target-profile-airgap.out"
+assert_report "$required_output_dir/$REPORT_FILE" "$required_contract"
+pass "airgap bundle check consumes final GA required target profiles without claiming readiness"
+
 derived_kit_image_map_dir="$TMP_DIR/image-map-derived-kit"
 derived_kit_bundle_root="$TMP_DIR/bundle-derived-kit"
 derived_kit_bundle_manifest="$derived_kit_bundle_root/airgap-bundle-manifest.json"
@@ -1515,9 +1530,7 @@ expect_contract_fail contract-missing-airgap-target-profile target_profiles_miss
 expect_contract_fail contract-noncanonical-target-tuple target_profiles_noncanonical_synonym
 expect_contract_fail target-required-missing target_required_missing
 expect_contract_fail target-required-string target_required_string
-expect_contract_fail target-required-true target_required_true
 expect_contract_fail target-support-level-present target_support_level
-expect_contract_fail kind-required-target-profile kind_required_target_profile
 expect_contract_fail duplicate-target-profile-tuple duplicate_target_profile_tuple
 expect_contract_fail missing-release-required-image-ids missing_release_required_image_ids
 expect_contract_fail required-image-ids-mismatch required_image_ids_mismatch
