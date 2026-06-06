@@ -10,6 +10,8 @@ The example pack, prerequisites, and install-input files are already bound to
 `online/install_substrates`. Keep their path identity fields unchanged.
 Replace namespace, storage values, service refs, package-local tools, and
 confirmation fields.
+The installer derives its deployment identity from `deployment_path`; do not
+add target profile tuple fields to `substrate-install-inputs.example.json`.
 
 ## Build The Package
 

@@ -217,6 +217,11 @@ const substrateTruth = {
 if (mutation === 'installation_id_mismatch') {
   substrateTruth.installation_id = 'other-installation';
 }
+if (mutation === 'operator_facing_install_inputs') {
+  delete substrateTruth.target_cluster;
+  delete substrateTruth.substrate_source;
+  delete substrateTruth.distribution;
+}
 
 const manifest = {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
@@ -734,21 +739,29 @@ if (mutation === 'missing_storage_proof') {
 writeJson(path.join(outDir, 'substrate-pack-manifest.json'), manifest);
 if (mutation === 'resource_list_path') {
   writeJson(path.join(outDir, 'resource-list.json'), resources);
-  writeJson(path.join(outDir, 'substrate-install-inputs.json'), {
+  const installInputs = {
     schema_version: 'agentsmith.substrate-install-inputs/v1',
     target_profile: profile,
     installation_id: 'kit-install-10001',
     substrate_truth: substrateTruth,
     resource_list_path: 'resource-list.json'
-  });
+  };
+  if (mutation === 'operator_facing_install_inputs') {
+    delete installInputs.target_profile;
+  }
+  writeJson(path.join(outDir, 'substrate-install-inputs.json'), installInputs);
 } else {
-  writeJson(path.join(outDir, 'substrate-install-inputs.json'), {
+  const installInputs = {
     schema_version: 'agentsmith.substrate-install-inputs/v1',
     target_profile: profile,
     installation_id: 'kit-install-10001',
     substrate_truth: substrateTruth,
     resources
-  });
+  };
+  if (mutation === 'operator_facing_install_inputs') {
+    delete installInputs.target_profile;
+  }
+  writeJson(path.join(outDir, 'substrate-install-inputs.json'), installInputs);
 }
 writeJson(path.join(outDir, 'target-prerequisites.json'), prerequisites);
 NODE
@@ -1486,6 +1499,14 @@ grep -Eq '^apply .*--dry-run=server' "$KUBECTL_LOG" || \
   fail "server-dry-run substrate install did not pass --dry-run=server"
 assert_install_report "$dry_run_output/substrate-install-report.json" "$dry_run_output/substrate-truth.json" server-dry-run
 pass "server-dry-run writes diagnostic substrate install report and truth"
+
+operator_facing_dir="$TMP_DIR/operator-facing-inputs"
+write_fixture_set "$operator_facing_dir" operator_facing_install_inputs
+operator_facing_output="$TMP_DIR/out-operator-facing-inputs"
+reset_kubectl_log
+run_install "$operator_facing_dir" "$operator_facing_output" >/dev/null
+assert_install_report "$operator_facing_output/substrate-install-report.json" "$operator_facing_output/substrate-truth.json" server-dry-run
+pass "operator-facing substrate install inputs derive target profile axes from CLI target profile"
 
 airgap_dir="$TMP_DIR/airgap-valid"
 write_fixture_set "$airgap_dir" valid "$AIRGAP_TARGET_PROFILE"

@@ -14,6 +14,8 @@ The bundle manifest and bundle-local install inputs are already bound to
 `airgap/install_substrates`. Keep their path identity fields unchanged.
 Replace bundle components, component checksums, namespace, service refs,
 package-local tools, and confirmation fields.
+The installer derives its deployment identity from `deployment_path`; do not
+add target profile tuple fields to the bundle-local install inputs.
 
 ## Build The Package
 

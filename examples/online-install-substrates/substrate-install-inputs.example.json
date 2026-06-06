@@ -1,12 +1,8 @@
 {
   "schema_version": "agentsmith.substrate-install-inputs/v1",
-  "target_profile": "existing_kubernetes/kit_installed/online",
   "installation_id": "kit-install-20260523-001",
   "substrate_truth": {
     "schema_version": "agentsmith.substrate-connection.truth/v1",
-    "target_cluster": "existing_kubernetes",
-    "substrate_source": "kit_installed",
-    "distribution": "online",
     "declared_at": "2026-05-23T12:00:00.000Z",
     "declared_by": "release-operator@example.com",
     "installed_by": "agentsmith-release-kit",
@@ -113,4 +109,3 @@
     }
   ]
 }
-

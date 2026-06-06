@@ -51,6 +51,26 @@ function requireTargetProfile(value, targetProfile, label, fail) {
   return text;
 }
 
+function withExpectedTargetProfileDefaults(inputs, targetProfile) {
+  const normalized = {
+    ...inputs,
+    target_profile: inputs.target_profile ?? targetProfile.value
+  };
+  if (
+    inputs.substrate_truth &&
+    typeof inputs.substrate_truth === 'object' &&
+    !Array.isArray(inputs.substrate_truth)
+  ) {
+    normalized.substrate_truth = {
+      ...inputs.substrate_truth,
+      target_cluster: inputs.substrate_truth.target_cluster ?? targetProfile.target_cluster,
+      substrate_source: inputs.substrate_truth.substrate_source ?? targetProfile.substrate_source,
+      distribution: inputs.substrate_truth.distribution ?? targetProfile.distribution
+    };
+  }
+  return normalized;
+}
+
 function requireInstallationId(value, label, fail) {
   const text = requireString(value, label, fail);
   if (!INSTALLATION_ID_RE.test(text)) {
@@ -79,7 +99,8 @@ export function validateSubstrateInstallInputs(value, targetProfile, options = {
   const fail = options.fail || defaultFail;
   const label = options.label || 'substrate_install_inputs';
   assertNoUnsafeSubstratePayload(value, label, options.raw);
-  const inputs = requireObject(value, label, fail);
+  const rawInputs = requireObject(value, label, fail);
+  const inputs = withExpectedTargetProfileDefaults(rawInputs, targetProfile);
   assertAllowedFields(inputs, label, fail);
 
   const schemaVersion = requireString(inputs.schema_version, `${label}.schema_version`, fail);

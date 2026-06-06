@@ -2354,6 +2354,26 @@ run_airgap_operator_inputs() {
     bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" --run
 }
 
+make_operator_facing_install_inputs() {
+  local package_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$package_dir/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [manifestPath] = process.argv.slice(2);
+const packageRoot = path.dirname(manifestPath);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const installInputsPath = path.join(packageRoot, manifest.substrate_install_inputs);
+const installInputs = JSON.parse(fs.readFileSync(installInputsPath, 'utf8'));
+delete installInputs.target_profile;
+delete installInputs.substrate_truth.target_cluster;
+delete installInputs.substrate_truth.substrate_source;
+delete installInputs.substrate_truth.distribution;
+fs.writeFileSync(installInputsPath, `${JSON.stringify(installInputs, null, 2)}\n`);
+NODE
+}
+
 if [[ "${AGENTSMITH_OPERATOR_INPUTS_ORCHESTRATION_LIB_ONLY:-}" == "1" ]]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -2369,10 +2389,11 @@ pass "operator-inputs --run executes online/use_existing apply and finalizes pat
 
 positive_install_package="$TMP_DIR/positive-online-install"
 prepare_online_install_package "$positive_install_package" apply /ok
+make_operator_facing_install_inputs "$positive_install_package"
 write_stale_finalizer "$positive_install_package" online-install-substrates
 run_operator_inputs "$positive_install_package" positive-install >"$TMP_DIR/positive-install.out" 2>"$TMP_DIR/positive-install.err"
 assert_install_path_evidence "$positive_install_package"
-pass "operator-inputs --run executes online/install_substrates apply and finalizes path evidence"
+pass "operator-inputs --run executes online/install_substrates apply with operator-facing install inputs"
 
 positive_airgap_package="$TMP_DIR/positive-airgap"
 prepare_airgap_package "$positive_airgap_package" apply /ok
@@ -2514,6 +2535,7 @@ pass "operator-inputs --run rejects airgap/install_substrates server-dry-run and
 
 positive_airgap_install_package="$TMP_DIR/positive-airgap-install"
 prepare_airgap_install_package "$positive_airgap_install_package" apply /ok
+make_operator_facing_install_inputs "$positive_airgap_install_package"
 write_stale_finalizer "$positive_airgap_install_package" airgap-install-substrates
 if ! run_airgap_operator_inputs "$positive_airgap_install_package" positive-airgap-install >"$TMP_DIR/positive-airgap-install.out" 2>"$TMP_DIR/positive-airgap-install.err"; then
   cat "$TMP_DIR/positive-airgap-install.out" >&2
@@ -2521,7 +2543,7 @@ if ! run_airgap_operator_inputs "$positive_airgap_install_package" positive-airg
   fail "airgap/install_substrates positive run failed"
 fi
 assert_airgap_install_path_evidence "$positive_airgap_install_package"
-pass "operator-inputs --run executes airgap/install_substrates apply and finalizes path evidence"
+pass "operator-inputs --run executes airgap/install_substrates apply with operator-facing install inputs"
 
 missing_smoke_airgap_package="$TMP_DIR/missing-smoke-airgap"
 prepare_airgap_package "$missing_smoke_airgap_package" apply /ok
