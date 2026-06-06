@@ -338,6 +338,14 @@ reject_scan \
   '[.]release-kit-internal|operator-inputs-plan|operator-release-surface-report|evidence-provenance|adoption report|candidate intake|release-engineering|operator-signoff|--target-profile|verify-release[.]sh|<surface>[[:space:]]+<substrate_strategy>|positional[[:space:]]+.*substrate_strategy' \
   "${example_readmes[@]}"
 
+for example_readme in "${example_readmes[@]}"; do
+  require_text "$example_readme" 'bash scripts/operator-release.sh --ga-report'
+  require_text "$example_readme" 'ga-release-report.json'
+  if [[ "$example_readme" != "examples/README.md" ]]; then
+    require_text "$example_readme" '## Final GA Report'
+  fi
+done
+
 assert_root_readme_operator_surface_slim
 
 require_text README.md "$EXPECTED_IDENTITY"

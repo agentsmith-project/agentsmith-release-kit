@@ -83,6 +83,8 @@ the package internal output for the later GA aggregate. A package run does not
 write `ga-release-report.json`, does not issue `formal_verdict`, and does not
 replace AgentSmith product readiness or post-deploy product smoke evidence.
 
+## Final GA Report
+
 After all four package runs and product-side reports are available, use the
 final GA facade:
 
