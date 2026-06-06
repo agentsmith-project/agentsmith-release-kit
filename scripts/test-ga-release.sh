@@ -954,7 +954,7 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-report.json'), productSmo
   siteEnvPath: 'unified-deploy/site.env',
   siteEnvDigest: sha('post-deploy-product-smoke:site-env'),
   substrateTruthPath: 'unified-deploy/substrate-truth.json',
-  substrateTruthDigest: sha('post-deploy-product-smoke:substrate-truth'),
+  substrateTruthDigest: sha('existing_kubernetes/external_declared/online:substrate-truth'),
   reportPath: 'post-deploy-product-smoke/post-deploy-product-smoke-report.json'
 }));
 writeJson(path.join(outDir, 'post-deploy-product-smoke-airgap-report.json'), productSmokeReport({
@@ -966,7 +966,7 @@ writeJson(path.join(outDir, 'post-deploy-product-smoke-airgap-report.json'), pro
   siteEnvPath: 'unified-deploy/airgap-site.env',
   siteEnvDigest: sha('post-deploy-product-smoke:airgap-site-env'),
   substrateTruthPath: 'unified-deploy/airgap-substrate-truth.json',
-  substrateTruthDigest: sha('post-deploy-product-smoke:airgap-substrate-truth'),
+  substrateTruthDigest: sha('existing_kubernetes/external_declared/airgap:substrate-truth'),
   reportPath: 'post-deploy-product-smoke/post-deploy-product-smoke-airgap-report.json'
 }));
 NODE
@@ -1497,6 +1497,8 @@ if (mutation === 'legacy-surrogate-shape') {
   report.deployment_target.site_env.path = 'reports\\site.env';
 } else if (mutation === 'missing-deployment-target-substrate-truth') {
   delete report.deployment_target.substrate_truth;
+} else if (mutation === 'deployment-target-substrate-truth-digest-mismatch') {
+  report.deployment_target.substrate_truth.sha256 = `sha256:${'8'.repeat(64)}`;
 } else if (mutation === 'missing-canonical-smoke') {
   delete report.smoke_results.usage;
 } else if (mutation === 'missing-source-evidence-path') {
@@ -2497,6 +2499,9 @@ if (smoke?.deployment_path_binding?.distribution !== 'online') {
 if (smoke?.deployment_path_binding?.target_profile !== smoke.deployment_target.profile) {
   throw new Error('GA report product smoke deployment path binding target profile mismatch');
 }
+if (smoke?.deployment_path_binding?.deployment_path_substrate_truth_digest !== sha('existing_kubernetes/external_declared/online:substrate-truth')) {
+  throw new Error('GA report did not bind product smoke to deployment path substrate truth digest');
+}
 if (smoke?.deployment_target?.public_base_url !== 'https://agentsmith.example.com') {
   throw new Error('GA report did not bind product smoke public base URL');
 }
@@ -2512,7 +2517,7 @@ if (smoke?.deployment_target?.site_env?.sha256 !== sha('post-deploy-product-smok
 if (smoke?.deployment_target?.substrate_truth?.path !== 'unified-deploy/substrate-truth.json') {
   throw new Error('GA report did not bind product smoke substrate truth path');
 }
-if (smoke?.deployment_target?.substrate_truth?.sha256 !== sha('post-deploy-product-smoke:substrate-truth')) {
+if (smoke?.deployment_target?.substrate_truth?.sha256 !== sha('existing_kubernetes/external_declared/online:substrate-truth')) {
   throw new Error('GA report did not bind product smoke substrate truth digest');
 }
 for (const id of expectedSmokeIds) {
@@ -2540,6 +2545,12 @@ if (airgapSmoke.deployment_target?.profile !== 'existing_kubernetes/external_dec
 }
 if (airgapSmoke.deployment_path_binding?.operator_path !== 'airgap/use_existing') {
   throw new Error('GA report did not bind airgap product smoke to finalized airgap path');
+}
+if (airgapSmoke.deployment_path_binding?.deployment_path_substrate_truth_digest !== sha('existing_kubernetes/external_declared/airgap:substrate-truth')) {
+  throw new Error('GA report did not bind airgap product smoke to deployment path substrate truth digest');
+}
+if (airgapSmoke.deployment_target?.substrate_truth?.sha256 !== sha('existing_kubernetes/external_declared/airgap:substrate-truth')) {
+  throw new Error('GA report did not bind airgap product smoke substrate truth digest');
 }
 if (airgapSmoke.source?.product_flows_sha256 !== sha('post-deploy-product-smoke:airgap-product-flows')) {
   throw new Error('GA report did not bind airgap product smoke aggregate digest');
@@ -2921,6 +2932,7 @@ product_smoke_mutations=(
   malformed-deployment-target-site-env-digest
   deployment-target-site-env-backslash-path
   missing-deployment-target-substrate-truth
+  deployment-target-substrate-truth-digest-mismatch
   missing-canonical-smoke
   missing-source-evidence-path
   missing-source-evidence-sha256
@@ -3016,6 +3028,9 @@ for mutation in "${product_smoke_mutations[@]}"; do
       ;;
     missing-deployment-target-substrate-truth)
       expected_message="post_deploy_product_smoke.deployment_target.substrate_truth must be an object"
+      ;;
+    deployment-target-substrate-truth-digest-mismatch)
+      expected_message="post_deploy_product_smoke.deployment_target.substrate_truth.sha256 must match finalized deployment path substrate truth digest"
       ;;
     missing-canonical-smoke)
       expected_message="post-deploy product smoke missing canonical smoke id: usage"

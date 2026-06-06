@@ -1877,11 +1877,22 @@ function validateProductSmokeDeploymentPathBinding(productSmokeSummary, deployme
   if (!matchingPath) {
     fail('post_deploy_product_smoke.deployment_target.profile must match one finalized deployment path target_profile');
   }
+  const pathSubstrateTruthDigest = requireDigest(
+    matchingPath.substrate_truth_digest,
+    'deployment path substrate_truth_digest'
+  );
+  if (
+    productSmokeSummary.deployment_target.substrate_truth.sha256 !==
+    pathSubstrateTruthDigest
+  ) {
+    fail('post_deploy_product_smoke.deployment_target.substrate_truth.sha256 must match finalized deployment path substrate truth digest');
+  }
   return {
     operator_path: matchingPath.operator_path,
     target_profile: matchingPath.target_profile,
     distribution: matchingPath.operator_path.split('/')[0],
-    deployment_path_report_digest: matchingPath.report_digest
+    deployment_path_report_digest: matchingPath.report_digest,
+    deployment_path_substrate_truth_digest: pathSubstrateTruthDigest
   };
 }
 
@@ -2645,6 +2656,25 @@ function validateAirgapOfflineSummary({ report, steps, operatorPath }) {
   };
 }
 
+function deploymentPathSubstrateTruthDigest(sourceInputsByStep) {
+  const targetPreflightInput = sourceInputsByStep.get('target-preflight');
+  if (!targetPreflightInput) {
+    fail('deployment path source evidence must include materialized target-preflight report');
+  }
+  const targetPreflightReport = requireObject(
+    targetPreflightInput.value,
+    'target-preflight step report'
+  );
+  const substrateTruth = requireObject(
+    targetPreflightReport.substrate_truth,
+    'target-preflight step report.substrate_truth'
+  );
+  return requireDigest(
+    substrateTruth.input_sha256,
+    'target-preflight step report.substrate_truth.input_sha256'
+  );
+}
+
 async function validateDeploymentPathReport(pathInput, release, deployTemplate) {
   const report = pathInput.value;
   const reportDigest = pathInput.digest;
@@ -2726,11 +2756,15 @@ async function validateDeploymentPathReport(pathInput, release, deployTemplate) 
     materializedSummary,
     requirement
   });
+  const substrateTruthDigest = deploymentPathSubstrateTruthDigest(
+    materializedSourceEvidence.sourceInputsByStep
+  );
 
   return {
     operator_path: operatorPath,
     target_profile: report.target_profile.value,
     report_digest: reportDigest,
+    substrate_truth_digest: substrateTruthDigest,
     report_file: path.resolve(pathInput.file),
     steps: [...steps.keys()],
     source_evidence_index: materializedSourceEvidence.evidenceIndex,
