@@ -1387,6 +1387,10 @@ if (mutation === 'missing-provenance') {
   delete report.runtime_readiness;
 } else if (mutation === 'missing-runtime-observation-policy') {
   delete report.runtime_readiness.observation_policy;
+} else if (mutation === 'runtime-fixed-one-minute-polling') {
+  report.runtime_readiness.observation_policy.interval_ms = [60000, 60000, 60000];
+} else if (mutation === 'runtime-missing-read-export-not-found') {
+  delete report.runtime_readiness.observation_policy.state_convergence.read_export.not_found;
 } else if (mutation === 'runtime-clean-pass-with-signals') {
   report.runtime_readiness.files_restore_continuation.classification = 'clean_pass';
   report.runtime_readiness.files_restore_continuation.outcome = 'focused_gate_passed';
@@ -2907,6 +2911,28 @@ if run_ga_release "$MISSING_RUNTIME_POLICY_DIR" "$PATH_DIR" "$MISSING_RUNTIME_PO
 fi
 assert_ga_failure_report "$MISSING_RUNTIME_POLICY_OUTPUT_DIR" "product_readiness_report.runtime_readiness.observation_policy must be an object"
 pass "GA aggregate requires product runtime readiness observation policy"
+
+RUNTIME_FIXED_POLLING_DIR="$TMP_DIR/runtime-fixed-one-minute-polling"
+RUNTIME_FIXED_POLLING_OUTPUT_DIR="$TMP_DIR/out-runtime-fixed-one-minute-polling"
+cp -R "$VALID_DIR" "$RUNTIME_FIXED_POLLING_DIR"
+mkdir -p "$RUNTIME_FIXED_POLLING_OUTPUT_DIR"
+mutate_product_report "$RUNTIME_FIXED_POLLING_DIR/product-readiness-report.json" runtime-fixed-one-minute-polling
+if run_ga_release "$RUNTIME_FIXED_POLLING_DIR" "$PATH_DIR" "$RUNTIME_FIXED_POLLING_OUTPUT_DIR" >"$TMP_DIR/ga-release-runtime-fixed-one-minute-polling.out" 2>&1; then
+  fail "GA aggregate with fixed one-minute runtime readiness polling should fail"
+fi
+assert_ga_failure_report "$RUNTIME_FIXED_POLLING_OUTPUT_DIR" "product_readiness_report.runtime_readiness.observation_policy.interval_ms must be 60000, 90000, 120000, 180000, 300000"
+pass "GA aggregate rejects fixed one-minute runtime readiness polling"
+
+RUNTIME_MISSING_READ_EXPORT_DIR="$TMP_DIR/runtime-missing-read-export-not-found"
+RUNTIME_MISSING_READ_EXPORT_OUTPUT_DIR="$TMP_DIR/out-runtime-missing-read-export-not-found"
+cp -R "$VALID_DIR" "$RUNTIME_MISSING_READ_EXPORT_DIR"
+mkdir -p "$RUNTIME_MISSING_READ_EXPORT_OUTPUT_DIR"
+mutate_product_report "$RUNTIME_MISSING_READ_EXPORT_DIR/product-readiness-report.json" runtime-missing-read-export-not-found
+if run_ga_release "$RUNTIME_MISSING_READ_EXPORT_DIR" "$PATH_DIR" "$RUNTIME_MISSING_READ_EXPORT_OUTPUT_DIR" >"$TMP_DIR/ga-release-runtime-missing-read-export-not-found.out" 2>&1; then
+  fail "GA aggregate with incomplete read export convergence should fail"
+fi
+assert_ga_failure_report "$RUNTIME_MISSING_READ_EXPORT_OUTPUT_DIR" "product_readiness_report.runtime_readiness.observation_policy.state_convergence.read_export must cover pending, releasing, offline, not_found"
+pass "GA aggregate requires read export not_found convergence"
 
 RUNTIME_CLEAN_PASS_SIGNAL_DIR="$TMP_DIR/runtime-clean-pass-with-signals"
 RUNTIME_CLEAN_PASS_SIGNAL_OUTPUT_DIR="$TMP_DIR/out-runtime-clean-pass-with-signals"
