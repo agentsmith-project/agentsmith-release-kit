@@ -421,7 +421,7 @@ switch (mutation) {
     break;
   case 'provider_matrix':
     prerequisites.provider_matrix = {
-      eks: 'not_in_pre_ga_scope'
+      eks: 'not_in_ga_scope'
     };
     break;
   case 'rollback_plan':
@@ -512,7 +512,7 @@ expect_profile_fail() {
     fail "expected invalid target profile to fail: $label"
   fi
 
-  pass "canonical profiles only; non-canonical pre-GA name or synonym axis rejected: $label"
+  pass "canonical profiles only; non-canonical diagnostic name or synonym axis rejected: $label"
 }
 
 expect_prerequisites_fail() {

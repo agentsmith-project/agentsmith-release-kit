@@ -1028,7 +1028,9 @@ function assertReleaseKitOutput(evidence) {
     'evidence.release_kit_output'
   );
   if (FUTURE_RESERVED_RELEASE_KIT_OUTPUT_VALUES.has(releaseKitOutput)) {
-    fail(`evidence.release_kit_output ${releaseKitOutput} is future reserved and is not accepted during pre-GA`);
+    fail(
+      `evidence.release_kit_output ${releaseKitOutput} is final GA/operator reserved and is not accepted as focused release evidence`
+    );
   }
   if (INVALID_RELEASE_KIT_OUTPUT_VALUES.has(releaseKitOutput)) {
     fail(`evidence.release_kit_output ${INVALID_RELEASE_KIT_OUTPUT_VALUES.get(releaseKitOutput)}`);

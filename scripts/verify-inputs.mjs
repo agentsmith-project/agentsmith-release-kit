@@ -10,7 +10,10 @@ import {
   DISTRIBUTION_VALUES,
   EVIDENCE_SUPPORTED_TARGET_PROFILE_VALUES,
   EXECUTABLE_TARGET_PROFILE_VALUES,
+  FOCUSED_REQUIRED_TARGET_PROFILE_FAILURE_CLASS,
+  FOCUSED_REQUIRED_TARGET_PROFILE_POLICY,
   INTAKE_SUPPORTED_TARGET_PROFILE_VALUES,
+  REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE,
   SUBSTRATE_SOURCE_VALUES,
   TARGET_CLUSTER_VALUES,
   assertPlainSemverAtLeast,
@@ -1206,7 +1209,7 @@ function buildTargetProfileCoverageReport(targetProfiles) {
   const report = {
     scope: 'target_profile_coverage_intake_only',
     readiness: false,
-    required_policy: 'pre_ga_no_required_target_profiles',
+    required_policy: FOCUSED_REQUIRED_TARGET_PROFILE_POLICY,
     declarable_profiles: CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES.map(
       targetProfileFromValue
     ),
@@ -1223,7 +1226,7 @@ function buildTargetProfileCoverageReport(targetProfiles) {
   };
 
   if (forbiddenRequiredProfiles.length > 0) {
-    report.failure_class = 'pre_ga_required_target_profile';
+    report.failure_class = FOCUSED_REQUIRED_TARGET_PROFILE_FAILURE_CLASS;
   }
 
   return report;
@@ -1275,7 +1278,7 @@ async function main() {
   const targetProfileCoverageReport = buildTargetProfileCoverageReport(targetProfiles);
   await writeTargetProfileCoverageReport(args.outputDir, targetProfileCoverageReport);
   if (targetProfileCoverageReport.status === 'failed') {
-    fail('target_profiles.required must be false during pre-GA');
+    fail(`target_profiles.required ${REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE}`);
   }
   const targetProfile = assertTargetProfile(targetProfiles, args.targetProfile);
   const provenance = assertProvenance(contract, deployTemplatePackage, releaseGitSha);

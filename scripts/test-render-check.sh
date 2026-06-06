@@ -76,7 +76,7 @@ expect_target_profile_fail() {
     fail "expected canonical target profile message for: $label"
   fi
 
-  pass "canonical profiles only; non-canonical pre-GA name or synonym axis rejected: $label"
+  pass "canonical profiles only; non-canonical diagnostic name or synonym axis rejected: $label"
 }
 
 mutate_contract_target_profile() {
@@ -92,8 +92,9 @@ const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
 switch (mutation) {
   case 'noncanonical-extra-kind-external-declared':
     contract.target_profiles.push({
-      ...contract.target_profiles[2],
+      target_cluster: 'kind_rehearsal',
       substrate_source: 'external_declared',
+      distribution: 'online',
       required: false
     });
     break;

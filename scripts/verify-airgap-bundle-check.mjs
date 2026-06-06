@@ -8,6 +8,7 @@ import {
   CANONICAL_DECLARABLE_TARGET_PROFILE_SET,
   CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES,
   DISTRIBUTION_VALUES,
+  REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE,
   SUBSTRATE_SOURCE_VALUES,
   TARGET_CLUSTER_VALUES
 } from './lib/release-kit-version-policy.mjs';
@@ -680,7 +681,7 @@ function assertContractTargetProfiles(contract, targetProfile) {
     }
     const required = requireBoolean(profile.required, `${label}.required`);
     if (required) {
-      fail(`${label}.required must be false during pre-GA`);
+      fail(`${label}.required ${REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE}`);
     }
     if (seen.has(tuple)) {
       fail(`${label} duplicates target profile tuple declared at ${seen.get(tuple)}`);

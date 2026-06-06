@@ -7,7 +7,8 @@ import {
   CANONICAL_DECLARABLE_TARGET_PROFILE_SET,
   CANONICAL_DECLARABLE_TARGET_PROFILE_VALUES,
   IMAGE_MAP_TARGET_PROFILE_SET,
-  IMAGE_MAP_TARGET_PROFILE_VALUES
+  IMAGE_MAP_TARGET_PROFILE_VALUES,
+  REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE
 } from './lib/release-kit-version-policy.mjs';
 import {
   imageDigestSuffix,
@@ -262,7 +263,7 @@ function assertContractTargetProfile(contract, targetProfile) {
     );
     if (required) {
       fail(
-        `release_contract.target_profiles[${index}].required must be false during pre-GA`
+        `release_contract.target_profiles[${index}].required ${REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE}`
       );
     }
     if (seen.has(profileTuple)) {

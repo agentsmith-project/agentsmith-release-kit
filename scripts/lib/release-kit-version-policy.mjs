@@ -42,8 +42,14 @@ export const EVIDENCE_SUPPORTED_TARGET_PROFILE_SET = new Set(
   EVIDENCE_SUPPORTED_TARGET_PROFILE_VALUES
 );
 
-// Pre-GA contracts may declare canonical targets, but no target is mandatory
-// until the executable/evidence gates for that path exist.
+// Focused diagnostics may inspect canonical targets, but final GA required
+// coverage is asserted only by the final aggregate over path-level evidence.
+export const FOCUSED_REQUIRED_TARGET_PROFILE_POLICY =
+  'focused_diagnostics_no_required_target_profiles';
+export const FOCUSED_REQUIRED_TARGET_PROFILE_FAILURE_CLASS =
+  'focused_required_target_profile_not_accepted';
+export const REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE =
+  'is only accepted by final GA release contract/final aggregate mode, not focused diagnostics';
 export const REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_VALUES = [];
 
 export const REQUIRED_PROFILE_COVERAGE_TARGET_PROFILE_SET = new Set(
@@ -155,7 +161,7 @@ export function validateContractTargetProfileEntry(value, fail, label) {
   }
   const required = requireProfileBoolean(profile.required, `${label}.required`, fail);
   if (required) {
-    fail(`${label}.required must be false during pre-GA`);
+    fail(`${label}.required ${REQUIRED_TARGET_PROFILE_FOCUSED_DIAGNOSTIC_MESSAGE}`);
   }
 
   return {

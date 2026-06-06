@@ -67,7 +67,7 @@ expect_target_profile_fail() {
     fail "expected invalid target profile to fail: $label"
   fi
 
-  pass "canonical profiles only; non-canonical pre-GA name or synonym axis rejected: $label"
+  pass "canonical profiles only; non-canonical diagnostic name or synonym axis rejected: $label"
 }
 
 assert_pass_report() {

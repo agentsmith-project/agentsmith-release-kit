@@ -998,7 +998,7 @@ if (
   !executableValues.has('existing_kubernetes/kit_installed/online') ||
   !executableValues.has('existing_kubernetes/kit_installed/airgap')
 ) {
-  throw new Error('current focused deployment profiles must be listed as executable in pre-GA');
+  throw new Error('current focused deployment profiles must be listed as executable diagnostics');
 }
 for (const value of ['kind_rehearsal/kit_installed/online']) {
   if (executableValues.has(value)) {
@@ -1007,7 +1007,7 @@ for (const value of ['kind_rehearsal/kit_installed/online']) {
 }
 const evidenceValues = new Set((report.evidence_supported_profiles || []).map((profile) => profile.value));
 if (evidenceValues.size !== 3) {
-  throw new Error('pre-GA evidence-supported profile set must stay narrow');
+  throw new Error('focused evidence-supported profile set must stay narrow');
 }
 for (const value of [
   'existing_kubernetes/external_declared/online',
@@ -1036,7 +1036,7 @@ if (expectedStatus === 'pass' && report.forbidden_required_profiles.length !== 0
   throw new Error('passing target profile coverage report must not list forbidden required profiles');
 }
 if (expectedStatus === 'failed') {
-  if (report.failure_class !== 'pre_ga_required_target_profile') {
+  if (report.failure_class !== 'focused_required_target_profile_not_accepted') {
     throw new Error(`unexpected failure_class: ${report.failure_class}`);
   }
   const forbiddenValues = new Set(report.forbidden_required_profiles.map((profile) => profile.value));
@@ -1047,25 +1047,25 @@ if (expectedStatus === 'failed') {
 NODE
 }
 
-expect_pre_ga_required_target_profile() {
-  local contract="$TMP_DIR/pre-ga-required-target-profile.release-contract.json"
-  local output_dir="$TMP_DIR/out-pre-ga-required-target-profile"
+expect_focused_required_target_profile() {
+  local contract="$TMP_DIR/focused-required-target-profile.release-contract.json"
+  local output_dir="$TMP_DIR/out-focused-required-target-profile"
 
   mutate_contract pre-ga-required-target-profile "$contract"
 
   if run_inputs "$contract" "$VALID_DEPLOY_TEMPLATE_PACKAGE" "$output_dir" \
-    >"$TMP_DIR/pre-ga-required-target-profile.out" \
-    2>"$TMP_DIR/pre-ga-required-target-profile.err"; then
-    cat "$TMP_DIR/pre-ga-required-target-profile.out" >&2
-    cat "$TMP_DIR/pre-ga-required-target-profile.err" >&2
-    fail "expected pre-GA required target profile to fail"
+    >"$TMP_DIR/focused-required-target-profile.out" \
+    2>"$TMP_DIR/focused-required-target-profile.err"; then
+    cat "$TMP_DIR/focused-required-target-profile.out" >&2
+    cat "$TMP_DIR/focused-required-target-profile.err" >&2
+    fail "expected focused required target profile to fail"
   fi
 
   assert_coverage_report \
     "$output_dir" \
     failed \
     existing_kubernetes/external_declared/online
-  pass "pre-GA required target profile rejected with coverage report"
+  pass "focused required target profile rejected with coverage report"
 }
 
 expect_kind_required_target_profile() {
@@ -1082,14 +1082,14 @@ expect_kind_required_target_profile() {
     fail "expected kind required target profile to fail"
   fi
 
-  if ! grep -q 'target_profiles.required must be false during pre-GA' \
+  if ! grep -q 'target_profiles.required is only accepted by final GA release contract/final aggregate mode, not focused diagnostics' \
     "$TMP_DIR/kind-required-target-profile.err"; then
     cat "$TMP_DIR/kind-required-target-profile.out" >&2
     cat "$TMP_DIR/kind-required-target-profile.err" >&2
-    fail "kind required target profile failure must explain pre-GA required policy"
+    fail "kind required target profile failure must explain focused diagnostic required policy"
   fi
 
-  pass "kind rehearsal required target profile rejected by pre-GA policy"
+  pass "kind rehearsal required target profile rejected by focused diagnostic policy"
 }
 
 VALID_OUT="$TMP_DIR/valid"
@@ -1184,7 +1184,7 @@ assert_outputs "$EMPTY_OPTIONAL_OUT" "$TARGET_PROFILE" false "$EMPTY_OPTIONAL_CO
 assert_coverage_report "$EMPTY_OPTIONAL_OUT"
 pass "empty optional non-product image groups do not make release-kit intake fail"
 
-expect_pre_ga_required_target_profile
+expect_focused_required_target_profile
 expect_kind_required_target_profile
 
 expect_target_profile_fail "noncanonical-target-profile-local-kind" \
