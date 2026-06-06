@@ -71,6 +71,15 @@ done
 
 download_count="$(grep -Fc "uses: actions/download-artifact@v4" "$WORKFLOW")"
 [[ "$download_count" -eq 7 ]] || fail "ga-release workflow must download exactly 7 required input artifacts"
+download_best_effort_count="$(
+  awk '
+    /uses: actions\/download-artifact@v4/ { in_download = 1; next }
+    in_download && /continue-on-error: true/ { count += 1; in_download = 0; next }
+    in_download && /^[[:space:]]+with:/ { in_download = 0; next }
+    END { print count + 0 }
+  ' "$WORKFLOW"
+)"
+[[ "$download_best_effort_count" -eq 7 ]] || fail "ga-release workflow artifact downloads must continue so final failure report can be written"
 
 require_text "$WORKFLOW" "secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token"
 require_text "$WORKFLOW" "find_one_file"
