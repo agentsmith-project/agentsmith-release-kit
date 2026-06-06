@@ -44,6 +44,9 @@ if (mutation === 'duplicate-required-image-id') {
 if (mutation === 'contract-image-inventory-closure-drift') {
   contract.deploy_image_inventory = contract.deploy_image_inventory.slice(0, -1);
 }
+for (const profile of contract.target_profiles) {
+  profile.required = true;
+}
 
 function digest(buffer) {
   return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
@@ -896,6 +899,9 @@ substrateInstall(
 );
 
 function provenance(subjectName) {
+  const artifactUri = subjectName === 'product-readiness-report'
+    ? 'gh-artifact://agentsmith-project/agentsmith/agentsmith-product-readiness/10001/product-readiness/product-readiness-report.json'
+    : `gh-artifact://agentsmith-project/agentsmith/agentsmith-${subjectName}/10001/${subjectName}/${subjectName}.json`;
   return {
     schema_version: 'agentsmith.artifact-provenance/v1',
     provenance_kind: 'ci_artifact',
@@ -910,7 +916,7 @@ function provenance(subjectName) {
     run_attempt: '1',
     run_url: 'https://github.com/agentsmith-project/agentsmith/actions/runs/10001/attempts/1',
     job: subjectName,
-    artifact_uri: `gh-artifact://agentsmith/${subjectName}/10001/${subjectName}.json`,
+    artifact_uri: artifactUri,
     artifact_sha256: sha(`${subjectName}:artifact`),
     generated_at: '2026-05-31T12:00:00.000Z',
     generator_command: 'focused fixture',
