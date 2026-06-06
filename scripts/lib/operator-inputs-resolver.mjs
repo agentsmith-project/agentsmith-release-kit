@@ -2396,7 +2396,7 @@ function packageReadmeForManifest(manifest) {
     'bash scripts/operator-release.sh --operator-inputs <this-package> --run',
     '```',
     '',
-    '## Final Report',
+    '## Final GA Report',
     '',
     'A package run produces path-level evidence only. The formal GA result is written later by:',
     '',

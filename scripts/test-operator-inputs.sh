@@ -1290,6 +1290,9 @@ if (!readme.includes('bash scripts/operator-release.sh --operator-inputs <this-p
 if (!readme.includes('bash scripts/operator-release.sh --ga-report')) {
   throw new Error('init package README must show the final GA report command');
 }
+if (!readme.includes('## Final GA Report')) {
+  throw new Error('init package README must label the final GA report section');
+}
 if (!readme.includes('ga-release-report.json')) {
   throw new Error('init package README must point to ga-release-report.json');
 }
