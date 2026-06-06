@@ -12,6 +12,7 @@ VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 VALID_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-package.valid.json"
 
 TMP_DIR="$(mktemp -d)"
+VALID_PROVENANCE="$TMP_DIR/evidence-provenance.valid.json"
 SERVER_PID=""
 SERVER_PORT=""
 SERVER_LOG=""
@@ -160,6 +161,27 @@ contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract
 fs.writeFileSync(packageOutput, `${JSON.stringify(deployTemplatePackage, null, 2)}\n`);
 fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
 NODE
+}
+
+write_valid_provenance() {
+  cat >"$VALID_PROVENANCE" <<'JSON'
+{
+  "schema_version": "agentsmith.artifact-provenance/v1",
+  "provenance_kind": "ci_artifact",
+  "producer_repo": "github.com/agentsmith-project/agentsmith-release-kit",
+  "normalized_remote": "github.com/agentsmith-project/agentsmith-release-kit",
+  "commit_sha": "fedcba9876543210fedcba9876543210fedcba98",
+  "artifact_uri": "gh-artifact://agentsmith-release-kit/evidence/20001/online-deployment-gate-evidence.tgz",
+  "generated_at": "2026-05-23T12:00:00.000Z",
+  "generator_command": "focused online deployment gate producer fixture",
+  "generator_version": "0.1.0",
+  "attestation": "none",
+  "workflow_name": "online-operator-focused-diagnostic",
+  "run_id": "20001",
+  "run_attempt": "1",
+  "job": "online-operator-focused-diagnostic"
+}
+JSON
 }
 
 update_airgap_bundle_component_digests() {
@@ -522,7 +544,6 @@ run_gate() {
 require_file "$EXAMPLE_DIR/render-values.example.json"
 require_file "$EXAMPLE_DIR/substrate-truth.example.json"
 require_file "$EXAMPLE_DIR/target-prerequisites.example.json"
-require_file "$EXAMPLE_DIR/evidence-provenance.example.json"
 
 ARCHIVE="$TMP_DIR/operator-example.tgz"
 CONTRACT_MATERIAL="$TMP_DIR/release-contract.material.json"
@@ -530,6 +551,7 @@ PACKAGE_MATERIAL="$TMP_DIR/deploy-template-package.material.json"
 manifest_sha="$(create_archive "$ARCHIVE")"
 archive_sha="$(sha256_file "$ARCHIVE")"
 write_materials "$manifest_sha" "$archive_sha" "$CONTRACT_MATERIAL" "$PACKAGE_MATERIAL"
+write_valid_provenance
 
 KUBECTL_LOG="$TMP_DIR/kubectl.log"
 FAKE_KUBECTL="$TMP_DIR/kubectl"
@@ -586,7 +608,7 @@ run_gate "$CONTRACT_MATERIAL" "$PACKAGE_MATERIAL" "$ARCHIVE" "$apply_output" \
   --allow-http \
   --allow-localhost \
   --evidence-root "$evidence_root" \
-  --evidence-provenance "$EXAMPLE_DIR/evidence-provenance.example.json" >/dev/null
+  --evidence-provenance "$VALID_PROVENANCE" >/dev/null
 after_smoke="$(hit_count)"
 if grep -q -- '--dry-run=server' "$KUBECTL_LOG"; then
   cat "$KUBECTL_LOG" >&2
