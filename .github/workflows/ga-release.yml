@@ -13,12 +13,20 @@ on:
         required: true
         type: string
       product_reports_repository:
-        description: Repository containing AgentSmith product readiness and smoke artifacts.
+        description: Repository containing AgentSmith product-side artifacts.
         required: true
         default: agentsmith-project/agentsmith
         type: string
-      product_reports_run_id:
-        description: Workflow run id that produced AgentSmith product readiness and smoke artifacts.
+      product_readiness_run_id:
+        description: Workflow run id that produced the AgentSmith product readiness artifact.
+        required: true
+        type: string
+      online_post_deploy_product_smoke_run_id:
+        description: Workflow run id that produced the online post-deploy product smoke artifact.
+        required: true
+        type: string
+      airgap_post_deploy_product_smoke_run_id:
+        description: Workflow run id that produced the airgap post-deploy product smoke artifact.
         required: true
         type: string
       online_use_existing_artifact:
@@ -115,7 +123,7 @@ jobs:
         with:
           github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
           repository: ${{ inputs.product_reports_repository }}
-          run-id: ${{ inputs.product_reports_run_id }}
+          run-id: ${{ inputs.product_readiness_run_id }}
           name: ${{ inputs.product_readiness_artifact }}
           path: ${{ runner.temp }}/ga-release-inputs/product-readiness
 
@@ -124,7 +132,7 @@ jobs:
         with:
           github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
           repository: ${{ inputs.product_reports_repository }}
-          run-id: ${{ inputs.product_reports_run_id }}
+          run-id: ${{ inputs.online_post_deploy_product_smoke_run_id }}
           name: ${{ inputs.online_post_deploy_product_smoke_artifact }}
           path: ${{ runner.temp }}/ga-release-inputs/post-deploy-product-smoke-online
 
@@ -133,7 +141,7 @@ jobs:
         with:
           github-token: ${{ secrets.AGENTSMITH_ARTIFACT_READ_TOKEN || github.token }}
           repository: ${{ inputs.product_reports_repository }}
-          run-id: ${{ inputs.product_reports_run_id }}
+          run-id: ${{ inputs.airgap_post_deploy_product_smoke_run_id }}
           name: ${{ inputs.airgap_post_deploy_product_smoke_artifact }}
           path: ${{ runner.temp }}/ga-release-inputs/post-deploy-product-smoke-airgap
 

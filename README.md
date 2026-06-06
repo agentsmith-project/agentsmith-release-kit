@@ -145,8 +145,9 @@ A blocked final aggregate overwrites stale pass outputs with `status=fail`,
 `formal_verdict=not_issued`, and blockers in that same report.
 The repository also provides a manual `ga-release-aggregate` GitHub workflow
 for final aggregation. It is `workflow_dispatch` only, downloads the seven
-already-produced operator/product artifact groups by repository, run id, and
-artifact name, runs the
+already-produced operator/product artifact groups by repository, artifact
+name, the operator package run id, and separate AgentSmith Product Readiness /
+online smoke / airgap smoke run ids. It runs the
 same `operator-release.sh --ga-report` facade, and uploads the final
 operator report plus archive attachments. It does not rerun product,
 deployment, airgap, or operator package producers.

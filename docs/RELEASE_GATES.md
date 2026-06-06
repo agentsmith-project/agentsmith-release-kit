@@ -129,7 +129,9 @@ as a verdict.
 `bash scripts/test-ga-release-workflow.sh` is the companion lightweight guard
 for the manual GitHub workflow. It asserts that `.github/workflows/ga-release.yml`
 is `workflow_dispatch` only, downloads exactly the four operator-inputs
-package artifacts plus the two AgentSmith product-side artifacts, runs the
+package artifacts plus the three AgentSmith product-side report artifacts,
+binds Product Readiness, online smoke, and airgap smoke to separate
+AgentSmith product-side run ids, runs the
 operator-facing `--ga-report` facade, uploads the final GA report, summary,
 and evidence index files even when the aggregate is blocked, and does not rerun
 package or product producers.
@@ -1607,6 +1609,11 @@ Missing either distribution fails fast.
 When Product Readiness provides an `artifact_uri`, it must be the canonical
 AgentSmith `agentsmith-product-readiness` GitHub artifact URI and its run id
 must match `artifact_provenance.run_id`.
+The manual `ga-release-aggregate` workflow therefore asks for one product
+reports repository, three AgentSmith product-side run ids, and the seven
+required input artifact names. This prevents a stale Product Readiness artifact
+from being paired with newer online or airgap post-deploy smoke artifacts that
+were produced by different AgentSmith workflow runs.
 
 Each post-deploy product smoke input must be an AgentSmith canonical report:
 `schema_version: agentsmith.post-deploy-product-smoke-report/v1`, `producer:

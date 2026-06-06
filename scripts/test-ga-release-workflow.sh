@@ -55,7 +55,9 @@ for input in \
   operator_packages_repository \
   operator_packages_run_id \
   product_reports_repository \
-  product_reports_run_id \
+  product_readiness_run_id \
+  online_post_deploy_product_smoke_run_id \
+  airgap_post_deploy_product_smoke_run_id \
   online_use_existing_artifact \
   online_install_substrates_artifact \
   airgap_use_existing_artifact \
@@ -83,6 +85,9 @@ require_text "$WORKFLOW" "default: agentsmith-product-readiness"
 require_text "$WORKFLOW" "default: agentsmith-post-deploy-product-smoke-report"
 require_text "$WORKFLOW" "default: agentsmith-post-deploy-product-smoke-airgap-report"
 require_text "$WORKFLOW" "default: agentsmith-ga-release-report"
+require_text "$WORKFLOW" 'run-id: ${{ inputs.product_readiness_run_id }}'
+require_text "$WORKFLOW" 'run-id: ${{ inputs.online_post_deploy_product_smoke_run_id }}'
+require_text "$WORKFLOW" 'run-id: ${{ inputs.airgap_post_deploy_product_smoke_run_id }}'
 require_text "$WORKFLOW" "post-deploy-product-smoke-report.json"
 require_text "$WORKFLOW" "AgentSmith online post-deploy product smoke report"
 require_text "$WORKFLOW" "AgentSmith airgap post-deploy product smoke report"
@@ -103,6 +108,7 @@ require_text "$WORKFLOW" "ga-release-summary.md"
 require_text "$WORKFLOW" "ga-evidence-index.json"
 require_text "$WORKFLOW" "if-no-files-found: error"
 require_text "$ROOT_DIR/docs/RELEASE_GATES.md" "seven required input artifact names"
+require_text "$ROOT_DIR/docs/RELEASE_GATES.md" "three AgentSmith product-side run ids"
 require_text "$ROOT_DIR/docs/RELEASE_GATES.md" "agentsmith-post-deploy-product-smoke-report"
 require_text "$ROOT_DIR/docs/RELEASE_GATES.md" "agentsmith-post-deploy-product-smoke-airgap-report"
 require_text "$ROOT_DIR/docs/RELEASE_GATES.md" "agentsmith-ga-release-report"
@@ -110,6 +116,7 @@ require_text "$ROOT_DIR/docs/RELEASE_GATES.md" "agentsmith-ga-release-report"
 reject_text "$WORKFLOW" "bash scripts/verify-release.sh --ga-release"
 reject_text "$WORKFLOW" "operator-release.sh --operator-inputs"
 reject_text "$WORKFLOW" "agentsmith-product-readiness-report"
+reject_text "$WORKFLOW" "product_reports_run_id"
 reject_text "$WORKFLOW" "--run"
 reject_text "$WORKFLOW" "if-no-files-found: warn"
 reject_text "$ROOT_DIR/docs/RELEASE_GATES.md" "the six artifact names"
