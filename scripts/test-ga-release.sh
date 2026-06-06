@@ -1761,6 +1761,16 @@ if (mutation === 'missing-install-confirmation') {
 } else if (mutation === 'airgap-download') {
   report.airgap_offline.public_internet_downloads_observed_by_release_kit = true;
   report.airgap_offline.public_internet_downloads = true;
+} else if (mutation === 'airgap-offline-missing') {
+  delete report.airgap_offline;
+} else if (mutation === 'airgap-offline-image-load-digest-mismatch') {
+  report.airgap_offline.image_load_report_digest = digest(
+    Buffer.from('wrong-airgap-offline-image-load-report')
+  );
+} else if (mutation === 'airgap-offline-render-digest-mismatch') {
+  report.airgap_offline.offline_render_report_digest = digest(
+    Buffer.from('wrong-airgap-offline-render-report')
+  );
 } else if (mutation === 'airgap-missing-target-preflight') {
   report.steps = report.steps.filter((step) => step.name !== 'target-preflight');
   report.source_evidence.finalized_steps = report.source_evidence.finalized_steps.filter(
@@ -3804,6 +3814,39 @@ fi
 grep -Fq "reports public internet downloads observed by release-kit" "$TMP_DIR/ga-release-airgap-download.out" || \
   fail "airgap offline failure message did not explain blocker"
 pass "airgap public download fails fast"
+
+AIRGAP_INSTALL_OFFLINE_DIR="$TMP_DIR/airgap-install-offline"
+write_fixture_set "$AIRGAP_INSTALL_OFFLINE_DIR" valid
+generate_path_bundles "$AIRGAP_INSTALL_OFFLINE_DIR" "$TMP_DIR/path-airgap-install-offline"
+mutate_path_report "$TMP_DIR/path-airgap-install-offline/airgap-install-substrates/deployment-path-report.json" airgap-offline-missing
+if run_ga_release "$AIRGAP_INSTALL_OFFLINE_DIR" "$TMP_DIR/path-airgap-install-offline" "$TMP_DIR/out-airgap-install-offline" >"$TMP_DIR/ga-release-airgap-install-offline.out" 2>&1; then
+  fail "airgap install_substrates missing offline closure should fail"
+fi
+grep -Fq "deployment_path_report.airgap_offline must be an object" "$TMP_DIR/ga-release-airgap-install-offline.out" || \
+  fail "airgap install_substrates missing offline closure failure message did not explain blocker"
+pass "GA aggregate requires airgap install_substrates offline closure"
+
+AIRGAP_INSTALL_IMAGE_LOAD_DIR="$TMP_DIR/airgap-install-image-load-binding"
+write_fixture_set "$AIRGAP_INSTALL_IMAGE_LOAD_DIR" valid
+generate_path_bundles "$AIRGAP_INSTALL_IMAGE_LOAD_DIR" "$TMP_DIR/path-airgap-install-image-load-binding"
+mutate_path_report "$TMP_DIR/path-airgap-install-image-load-binding/airgap-install-substrates/deployment-path-report.json" airgap-offline-image-load-digest-mismatch
+if run_ga_release "$AIRGAP_INSTALL_IMAGE_LOAD_DIR" "$TMP_DIR/path-airgap-install-image-load-binding" "$TMP_DIR/out-airgap-install-image-load-binding" >"$TMP_DIR/ga-release-airgap-install-image-load.out" 2>&1; then
+  fail "airgap install_substrates offline image-load digest drift should fail"
+fi
+grep -Fq "deployment_path_report.airgap_offline.image_load_report_digest must match image-load step" "$TMP_DIR/ga-release-airgap-install-image-load.out" || \
+  fail "airgap install_substrates image-load digest failure message did not explain blocker"
+pass "GA aggregate binds airgap install_substrates offline image-load evidence"
+
+AIRGAP_INSTALL_RENDER_DIR="$TMP_DIR/airgap-install-render-binding"
+write_fixture_set "$AIRGAP_INSTALL_RENDER_DIR" valid
+generate_path_bundles "$AIRGAP_INSTALL_RENDER_DIR" "$TMP_DIR/path-airgap-install-render-binding"
+mutate_path_report "$TMP_DIR/path-airgap-install-render-binding/airgap-install-substrates/deployment-path-report.json" airgap-offline-render-digest-mismatch
+if run_ga_release "$AIRGAP_INSTALL_RENDER_DIR" "$TMP_DIR/path-airgap-install-render-binding" "$TMP_DIR/out-airgap-install-render-binding" >"$TMP_DIR/ga-release-airgap-install-render.out" 2>&1; then
+  fail "airgap install_substrates offline render digest drift should fail"
+fi
+grep -Fq "deployment_path_report.airgap_offline.offline_render_report_digest must match offline-render-check step" "$TMP_DIR/ga-release-airgap-install-render.out" || \
+  fail "airgap install_substrates offline render digest failure message did not explain blocker"
+pass "GA aggregate binds airgap install_substrates offline render evidence"
 
 AIRGAP_PREFLIGHT_DIR="$TMP_DIR/airgap-missing-target-preflight"
 write_fixture_set "$AIRGAP_PREFLIGHT_DIR" valid
