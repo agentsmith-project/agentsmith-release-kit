@@ -1901,8 +1901,19 @@ function validateProductSmokeCoverage(productSmokeSummaries, deploymentPaths) {
     ...summary,
     deployment_path_binding: validateProductSmokeDeploymentPathBinding(summary, deploymentPaths)
   }));
+  const seenReportDigests = new Set();
+  const seenOperatorPaths = new Set();
   const byDistribution = new Map();
   for (const report of reports) {
+    if (seenReportDigests.has(report.report_digest)) {
+      fail(`duplicate post_deploy_product_smoke report digest: ${report.report_digest}`);
+    }
+    seenReportDigests.add(report.report_digest);
+    const operatorPath = report.deployment_path_binding.operator_path;
+    if (seenOperatorPaths.has(operatorPath)) {
+      fail(`duplicate post_deploy_product_smoke deployment path: ${operatorPath}`);
+    }
+    seenOperatorPaths.add(operatorPath);
     const distribution = report.deployment_path_binding.distribution;
     if (!byDistribution.has(distribution)) {
       byDistribution.set(distribution, []);
