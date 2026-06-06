@@ -143,25 +143,13 @@ digest matches the finalized deployment truth for the package it is bound to;
 smoke evidence from a different deployed substrate blocks GA.
 A blocked final aggregate overwrites stale pass outputs with `status=fail`,
 `formal_verdict=not_issued`, and blockers in that same report.
-It also writes `ga-evidence-index.json`, a derived archive index that binds
-the final report digest to the path evidence, product readiness, post-deploy
-smoke, and blockers without issuing another verdict. The index mirrors the
-Product Readiness `runtime_readiness` block, including the runtime
-pending/readiness convergence policy for Files, Agent Task sandbox, AFSCP
-workspace binding, and read export, and exposes post-deploy product smoke
-coverage for archive lookup.
-The sibling `ga-release-summary.md` is the human-readable view of the same
-final report. It shows Product runtime readiness classification, evidence
-path, and adaptive wait intervals so the runtime pending/readiness closure is
-visible without opening schema details; it is not a third verdict.
 The repository also provides a manual `ga-release-aggregate` GitHub workflow
 for final aggregation. It is `workflow_dispatch` only, downloads the seven
 already-produced operator/product artifact groups by repository, run id, and
 artifact name, runs the
 same `operator-release.sh --ga-report` facade, and uploads the final
-`ga-release-report.json`, `ga-release-summary.md`, and
-`ga-evidence-index.json`. It does not rerun product, deployment, airgap, or
-operator package producers.
+operator report plus archive attachments. It does not rerun product,
+deployment, airgap, or operator package producers.
 These paths are still release-kit installer and package evidence flows;
 they are not cloud provisioning for clusters, databases, buckets, IAM,
 networks, or OIDC realms.
@@ -213,6 +201,14 @@ manual diagnostics, and `docs/RELEASE_GATES.md` for the full gate contract.
 Those references are not the operator copy-paste path, not package readiness,
 not operator readiness, and not a separate GA signoff surface.
 Legacy compatibility aliases are maintainer/internal only; removal target: release-kit v1.0.0 GA cut.
+
+Archive attachments written next to the final report are maintainer/reference
+artifacts, not operator verdicts. `ga-evidence-index.json` is a derived archive
+index that binds the final report digest to path evidence, Product Readiness,
+post-deploy smoke, blockers, Product runtime readiness, and adaptive wait
+intervals without issuing another verdict. `ga-release-summary.md` is a
+human-readable archive view of the same final report, also not a third
+verdict.
 
 The root README intentionally keeps the default path to `operator-inputs`,
 `scripts/operator-release.sh`, `ga-release-report.json`, and the concise

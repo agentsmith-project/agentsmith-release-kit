@@ -62,15 +62,8 @@ and product-side reports are available, use `--ga-report` to write the final
 The repository's manual `ga-release-aggregate` GitHub workflow can also
 download already-produced artifacts and run this same final aggregate. That
 workflow is aggregate-only; it does
-not rerun package, product, deployment, or airgap producers. Both paths also
-write `ga-evidence-index.json` for release archive lookup; it is derived from
-the final report and does not issue another verdict. On pass the index mirrors
-the Product Readiness runtime convergence policy and Files restore continuation
-evidence, plus post-deploy product smoke coverage.
-The sibling `ga-release-summary.md` is the human-readable view. It includes
-Product runtime readiness classification, the Files restore continuation
-runtime evidence path, and adaptive wait intervals; use it for quick review,
-then use `ga-release-report.json` for the formal pass/fail result.
+not rerun package, product, deployment, or airgap producers. Use
+`ga-release-report.json` for the formal pass/fail result.
 
 ### 4. What is the final report?
 
@@ -88,14 +81,6 @@ matches the finalized deployment truth for the package it is bound to; smoke
 evidence from a different deployed substrate is a blocker.
 On pass the report has `formal_verdict=issued`; when blocked it replaces stale
 pass outputs with `status=fail`, `formal_verdict=not_issued`, and blockers.
-The sibling `ga-evidence-index.json` binds that source report digest to the
-archived path and product evidence for later review. Its
-`product_runtime_readiness` and `post_deploy_product_smoke_coverage` entries
-are archive lookup fields, not separate release verdicts.
-The sibling `ga-release-summary.md` repeats the Product runtime readiness
-classification, runtime evidence path, and adaptive wait intervals for quick
-review. It is derived from the same final report and is not a separate release
-verdict.
 
 ## Operator Package Matrix
 
@@ -172,3 +157,11 @@ producer diagnostics, and use `docs/RELEASE_GATES.md` for the full gate
 contract. This page intentionally keeps the operator path limited to
 `operator-inputs`, `scripts/operator-release.sh`, and the final
 `ga-release-report.json`.
+
+Archive attachments written next to the final report are maintainer/reference
+artifacts. `ga-evidence-index.json` binds the source report digest to archived
+path and product evidence, including Product runtime readiness and
+post-deploy product smoke coverage lookup fields. `ga-release-summary.md`
+repeats the same final report in a human-readable form, including runtime
+readiness classification and adaptive wait intervals. Neither attachment is a
+separate release verdict.

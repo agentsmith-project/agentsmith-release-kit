@@ -216,7 +216,9 @@ assert_root_readme_operator_surface_slim() {
     'external_declared' \
     'kit_installed' \
     'existing_kubernetes' \
-    'kind_rehearsal'; do
+    'kind_rehearsal' \
+    'ga-evidence-index[.]json' \
+    'ga-release-summary[.]md'; do
     if grep -Eiq -- "$forbidden" <<<"$first_screen"; then
       printf '%s\n' "$first_screen" | grep -Ein -- "$forbidden" >&2 || true
       fail "root README operator first screen exposes legacy aliases, internal paths, machine profiles, or maintainer diagnostics"
@@ -257,7 +259,9 @@ assert_operator_runbook_first_screen_slim() {
     'focused' \
     'diagnostic' \
     'maintainer/internal' \
-    'producer catalog'; do
+    'producer catalog' \
+    'ga-evidence-index[.]json' \
+    'ga-release-summary[.]md'; do
     if grep -Eiq -- "$forbidden" <<<"$first_screen"; then
       printf '%s\n' "$first_screen" | grep -Ein -- "$forbidden" >&2 || true
       fail "operator runbook first screen exposes maintainer diagnostics or focused producer language"
@@ -409,10 +413,11 @@ require_text README.md 'bash scripts/operator-release.sh --operator-inputs <dir-
 require_text README.md "Formal release success"
 require_text README.md 'final `ga-release-report.json` issued by'
 require_text README.md 'issued by `--ga-report`'
-require_text README.md '`ga-evidence-index.json`, a derived archive index'
-require_text README.md "without issuing another verdict"
-require_text README.md '`ga-release-summary.md` is the human-readable view'
-require_text README.md 'Product runtime readiness classification'
+require_text README.md 'Archive attachments written next to the final report are maintainer/reference'
+require_text README.md '`ga-evidence-index.json` is a derived archive'
+require_text README.md 'without issuing another verdict'
+require_text README.md '`ga-release-summary.md` is a'
+require_text README.md 'adaptive wait'
 require_text README.md "smoke report's substrate truth"
 require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
@@ -423,10 +428,9 @@ require_text README.md 'docs/maintainer-diagnostics.md'
 require_text docs/runbooks/README.md "Use the single operator facade"
 require_text docs/runbooks/README.md "Formal release success or failure is represented only by the final"
 require_text docs/runbooks/README.md '`ga-release-report.json` issued by `operator-release.sh --ga-report`'
-require_text docs/runbooks/README.md 'write `ga-evidence-index.json` for release archive lookup'
-require_text docs/runbooks/README.md "does not issue another verdict"
-require_text docs/runbooks/README.md '`ga-release-summary.md` is the human-readable view'
-require_text docs/runbooks/README.md 'Product runtime readiness classification'
+require_text docs/runbooks/README.md 'Archive attachments written next to the final report are maintainer/reference'
+require_text docs/runbooks/README.md '`ga-evidence-index.json` binds the source report digest'
+require_text docs/runbooks/README.md '`ga-release-summary.md`'
 require_text docs/runbooks/README.md 'adaptive wait intervals'
 require_text docs/runbooks/README.md "smoke report's substrate truth digest"
 require_text docs/runbooks/README.md "## Operator Package Matrix"

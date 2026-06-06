@@ -73,7 +73,9 @@ assert_operator_success_contract_docs() {
     'internal execution plan' \
     'release finalizer|release captain|finalizer/captain' \
     'without `--run`' \
-    'bash scripts/operator-release[.]sh --operator-inputs <dir-or-json>$'; do
+    'bash scripts/operator-release[.]sh --operator-inputs <dir-or-json>$' \
+    'ga-evidence-index[.]json' \
+    'ga-release-summary[.]md'; do
     if grep -Eiq "$forbidden" "$first_screen"; then
       fail "operator runbook first screen must not present $forbidden as a success path"
     fi
@@ -113,7 +115,9 @@ assert_operator_success_contract_docs() {
     'internal execution plan' \
     'release finalizer|release captain|finalizer/captain' \
     'without `--run`' \
-    'bash scripts/operator-release[.]sh --operator-inputs <dir-or-json>$'; do
+    'bash scripts/operator-release[.]sh --operator-inputs <dir-or-json>$' \
+    'ga-evidence-index[.]json' \
+    'ga-release-summary[.]md'; do
     if grep -Eiq "$forbidden" "$root_first_screen"; then
       fail "root README operator first screen must not expose legacy aliases, internal paths, machine profiles, or maintainer diagnostics: $forbidden"
     fi
