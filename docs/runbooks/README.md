@@ -26,11 +26,11 @@ Prepare one directory or JSON manifest containing `operator-inputs.json` for
 the selected deployment path. Keep secrets as references, not raw values. For
 airgap packages, release/material inputs consumed from the bundle are
 bundle-local. Package-local executable tools such as `kubectl`,
-`archive_probe`, and `image_loader` can live outside the bundle while still
-being referenced by the operator package. Post-deploy product smoke is
-produced after the runtime check; it is not an operator input package field.
-You can scaffold the package first, then fill in the package-local refs and
-confirmations.
+`archive_probe`, `image_loader`, and online `registry_probe` can live outside
+the bundle while still being referenced by the operator package. Post-deploy
+product smoke is produced after the runtime check; it is not an operator input
+package field. You can scaffold the package first, then fill in the
+package-local refs and confirmations.
 
 ### 3. What do I run?
 
@@ -61,6 +61,9 @@ path-level evidence for the final GA report; do not treat intermediate files
 as the formal release verdict. After all four package runs and product-side
 reports are available, use `--ga-report` to write the final
 `ga-release-report.json`.
+When doctor fails, its human output groups the blockers as release materials,
+operator target facts, operator tools, and operator confirmations before the
+raw field list.
 The repository's manual `ga-release-aggregate` GitHub workflow can also
 download already-produced artifacts and run this same final aggregate. That
 workflow is aggregate-only; it does
@@ -101,11 +104,14 @@ confirmation. It uses installer-generated substrate truth for the airgap
 deployment gate and does not require `routability_probe` or bundle/package
 `substrate_truth`. `installed_by` stays a provenance marker, not installer
 proof.
+For both online paths, an apply package may also set `target_registry` and
+provide a package-local `registry_probe`; the registry must already contain
+digest refs for the release images.
 
 | `deployment_path` | Package must include | Current run result |
 | --- | --- | --- |
-| `online/use_existing` | Release contract, deploy template package and archive, render values, target substrate truth, target prerequisites, namespace, optional package-local `kubectl`. | Validates the package. With `--run` and `mode: apply`, executes the online path and writes path-level evidence for finalization. |
-| `online/install_substrates` | Release contract, deploy template package and archive, render values, target prerequisites, substrate pack manifest, substrate install inputs, required `kubectl` and `context`, package-local `routability_probe`, and explicit install confirmation. No package-local `substrate_truth`. | Validates installer inputs. With `--run` and `mode: apply`, runs substrate-install first, uses the installer output truth for the online gate, and writes path-level evidence for finalization. |
+| `online/use_existing` | Release contract, deploy template package and archive, render values, target substrate truth, target prerequisites, namespace, optional target registry plus package-local `registry_probe`, optional package-local `kubectl`. | Validates the package. With `--run` and `mode: apply`, executes the online path and writes path-level evidence for finalization. |
+| `online/install_substrates` | Release contract, deploy template package and archive, render values, target prerequisites, substrate pack manifest, substrate install inputs, required `kubectl` and `context`, package-local `routability_probe`, optional target registry plus package-local `registry_probe`, and explicit install confirmation. No package-local `substrate_truth`. | Validates installer inputs. With `--run` and `mode: apply`, runs substrate-install first, uses the installer output truth for the online gate, and writes path-level evidence for finalization. |
 | `airgap/use_existing` | Bundle-local release contract, deploy template package and archive, render values, substrate truth, and target prerequisites; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL for runtime route-smoke evidence. | Validates the bundle reference. With `--run` and `mode: apply`, runs airgap consume/deployment checks and writes path-level evidence for finalization. |
 | `airgap/install_substrates` | Bundle-local release contract, deploy template package and archive, render values, and target prerequisites; substrate pack manifest; substrate install inputs; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL; explicit install confirmation. No bundle/package `substrate_truth`. | Validates installer and bundle references. With `--run` and `mode: apply`, runs substrate-install first, uses the installer output truth for airgap deployment, and writes path-level evidence for finalization. |
 

@@ -20,7 +20,9 @@ Run `--init-operator-inputs` to create a fresh package skeleton, then copy or
 replace the example materials. Run `--doctor` to list missing package
 refs/fields plus static package blockers before execution. A passing doctor
 only means package static intake is clean; it is not runnable readiness or a GA
-verdict. Run `--run` only when the package is ready to execute.
+verdict. When doctor fails, the human output groups blockers as release
+materials, operator target facts, operator tools, and operator confirmations.
+Run `--run` only when the package is ready to execute.
 
 Available examples:
 
@@ -29,9 +31,10 @@ Available examples:
 - `airgap-use-existing/`: `airgap/use_existing`
 - `airgap-install-substrates/`: `airgap/install_substrates`
 
-The online examples also include optional
+Both online examples also include optional
 `operator-inputs.target-registry.apply.example.json` variants for package-local
-read-only registry probes.
+read-only registry probes. The target registry must already contain digest refs
+for the release images.
 
 After all four packages have been run with `--run` and AgentSmith
 product-side reports are available, use the final GA facade with the four

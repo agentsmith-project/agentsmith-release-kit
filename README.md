@@ -27,8 +27,9 @@ AgentSmith Release Kit consumes:
 - AgentSmith deploy template package.
 - Operator inputs through `operator-inputs` packages that reference release
   contract, deploy template, render values, use-existing substrate truth,
-  target prerequisites, bundle, installer, and probe/loader materials without
-  inlining business truth or secrets.
+  target prerequisites, optional online target registry facts, bundle,
+  installer, and probe/loader materials without inlining business truth or
+  secrets.
 
 AgentSmith Release Kit owns:
 
@@ -83,6 +84,9 @@ static package blockers checked without executing the selected path. A passing
 doctor only means package static intake is clean; it is not runnable readiness
 or a GA verdict. Add `--run` when the package is ready to execute the selected
 path.
+When doctor fails, the human output groups blockers as release materials,
+operator target facts, operator tools, and operator confirmations before the
+raw field list.
 
 The package contains one `operator-inputs.json` for one selected deployment
 path. It is not a four-path manifest. The four accepted `deployment_path`
@@ -95,6 +99,11 @@ values are:
 
 The GA operator substrate choices are `use_existing` and
 `install_substrates`.
+For `online/use_existing` and `online/install_substrates` apply packages, an
+operator may set `target_registry` and provide a package-local `registry_probe`
+executable. The target registry must already contain digest refs for the
+release images; release-kit does not mirror images, push images, or perform
+registry login.
 
 Post-deploy smoke reports are runtime evidence and are not operator-inputs.
 

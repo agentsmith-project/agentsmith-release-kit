@@ -507,11 +507,14 @@ runs inputs, target-preflight, substrate-pack-check, template-package,
 substrate-routability, render, render-check, apply, and apply-mode rollout plus
 optional smoke.
 Default `server-dry-run` does not run rollout, smoke, or registry-presence and
-rejects `--smoke-url` and `--registry-probe`. Kit-installed online rejects
-`--target-registry`, and external-declared online rejects the kit-only
-substrate args. Confirmed apply requires exact `--confirm-apply
+rejects `--smoke-url` and `--registry-probe`. The legacy direct/focused gate
+keeps profile-specific substrate argument rules; package-driven
+`online/use_existing` and `online/install_substrates` apply packages are the GA
+operator intake for `target_registry` plus a package-local `registry_probe`.
+External-declared online still rejects the kit-only substrate args. Confirmed
+apply requires exact `--confirm-apply
 <matching-target-profile>` and `--operator-run-id <id>` before Kubernetes
-calls. External confirmed apply with `--target-registry` also requires
+calls. Confirmed apply with `--target-registry` also requires
 `--registry-probe <executable>` and runs `--registry-presence` after image-map
 and before render, apply, smoke, or evidence closure. Its
 `online-deployment-gate-report.json` must keep
@@ -530,8 +533,9 @@ and secret-looking fields fail before Kubernetes. The gate computes
 `online-deployment-gate-report.json` as managed evidence files, and validates
 the root through the existing `--evidence` diagnostic. This evidence root is
 supported for both external-declared online confirmed apply and kit-installed
-online confirmed apply; target-registry behavior remains exclusive to
-external-declared online.
+online confirmed apply. Direct/focused target-registry behavior remains
+limited by the legacy gate arguments; package-driven online use-existing and
+install-substrates target registry apply is covered by `operator-inputs`.
 It does not provision cloud resources, mirror images, build airgap bundles,
 import images into kind, roll back changes, run product flows, or claim deploy
 or release readiness. `--target-registry` only makes the gate generate an

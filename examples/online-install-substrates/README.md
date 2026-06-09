@@ -44,10 +44,12 @@ mkdir -p "$PKG/tools"
 cp "$EXAMPLE_DIR/tools/registry-probe" "$PKG/tools/registry-probe"
 ```
 
-The target registry must already contain digest refs for the release images.
-`registry_probe` is a package-local read-only executable invoked as
-`tools/registry-probe <target-image> <expected-digest>`; stdout must be exactly
-the matching `sha256:<64>` digest.
+For package-driven `online/install_substrates`, the target registry variant is
+supported when the registry already contains digest refs for the release
+images. `registry_probe` is a package-local read-only executable invoked as
+`tools/registry-probe <target-image> <expected-digest>`; stdout must be
+exactly the matching `sha256:<64>` digest. The package run does not mirror
+images, push images, or perform registry login.
 
 Replace `tools/kubectl` and `tools/routability-probe` with operator-approved
 package-local executables before `--run`. When using the target registry
@@ -69,7 +71,9 @@ bash scripts/operator-release.sh --operator-inputs "$PKG" --run
 ```
 
 The package run writes path-level evidence for the final GA facade. It does
-not issue `ga-release-report.json`.
+not issue `ga-release-report.json`. When doctor fails, the human output groups
+blockers as release materials, operator target facts, operator tools, and
+operator confirmations.
 
 ## Final GA Report
 

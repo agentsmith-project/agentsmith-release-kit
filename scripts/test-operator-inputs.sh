@@ -1605,6 +1605,43 @@ grep -Fq -- '- target_prerequisites' "$TMP_DIR/doctor-facade.out" ||
   fail "operator-inputs doctor must not write an intake plan"
 pass "operator-inputs doctor lists multiple missing package inputs without writing a plan"
 
+doctor_category_dir="$TMP_DIR/doctor-category-online-install"
+mkdir -p "$doctor_category_dir"
+write_package_files "$doctor_category_dir"
+write_manifest "$doctor_category_dir" online/install_substrates apply
+remove_manifest_fields \
+  "$doctor_category_dir" \
+  release_contract \
+  target_prerequisites \
+  substrate_pack_manifest \
+  substrate_install_inputs \
+  kubectl \
+  routability_probe \
+  install_confirmation \
+  deploy_confirmation
+if bash "$ROOT_DIR/scripts/operator-release.sh" \
+  --operator-inputs "$doctor_category_dir" \
+  --doctor >"$TMP_DIR/doctor-category.out" 2>"$TMP_DIR/doctor-category.err"; then
+  fail "operator facade doctor should fail when category-owned inputs are missing"
+fi
+grep -Fq 'Missing or blocking inputs by category:' "$TMP_DIR/doctor-category.out" ||
+  fail "operator facade doctor did not print blocker category summary"
+grep -Fq -- '- release materials: release_contract' "$TMP_DIR/doctor-category.out" ||
+  fail "operator facade doctor did not group missing release materials"
+grep -Fq -- '- operator target facts: target_prerequisites, substrate_pack_manifest, substrate_install_inputs' "$TMP_DIR/doctor-category.out" ||
+  fail "operator facade doctor did not group missing target facts"
+grep -Fq -- '- operator tools: kubectl, routability_probe' "$TMP_DIR/doctor-category.out" ||
+  fail "operator facade doctor did not group missing operator tools"
+grep -Fq -- '- operator confirmations: install_confirmation, deploy_confirmation' "$TMP_DIR/doctor-category.out" ||
+  fail "operator facade doctor did not group missing confirmations"
+if grep -Eq 'formal_verdict=issued|readiness=true|ga-release-report[.]json' \
+  "$TMP_DIR/doctor-category.out" "$TMP_DIR/doctor-category.err"; then
+  fail "operator facade doctor category output must not issue readiness or a GA verdict"
+fi
+[[ ! -e "$doctor_category_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
+  fail "operator-inputs doctor category output must not write an intake plan"
+pass "operator-inputs doctor groups missing inputs by category without a verdict"
+
 missing_release_contract_run_dir="$TMP_DIR/run-missing-release-contract"
 copy_valid_package "$base_online" "$missing_release_contract_run_dir"
 write_stale_path_evidence "$missing_release_contract_run_dir"

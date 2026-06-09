@@ -92,6 +92,92 @@ function printInstallParametersSha256(plan) {
   }
 }
 
+const DOCTOR_BLOCKER_CATEGORIES = [
+  {
+    label: 'release materials',
+    fields: new Set([
+      'release_contract',
+      'deploy_template_package',
+      'deploy_template_archive',
+      'airgap_bundle',
+      'airgap_bundle_manifest'
+    ])
+  },
+  {
+    label: 'operator target facts',
+    fields: new Set([
+      'render_values',
+      'substrate_truth',
+      'target_prerequisites',
+      'substrate_pack_manifest',
+      'substrate_install_inputs',
+      'target_registry',
+      'namespace',
+      'context'
+    ])
+  },
+  {
+    label: 'operator tools',
+    fields: new Set([
+      'kubectl',
+      'registry_probe',
+      'routability_probe',
+      'archive_probe',
+      'image_loader'
+    ])
+  },
+  {
+    label: 'operator confirmations',
+    fields: new Set([
+      'deploy_confirmation',
+      'install_confirmation'
+    ])
+  },
+  {
+    label: 'other package fields',
+    fields: new Set()
+  }
+];
+
+function doctorCategoryForField(field) {
+  const rootField = String(field || '').split('.')[0];
+  return DOCTOR_BLOCKER_CATEGORIES.find((category) => category.fields.has(rootField)) ??
+    DOCTOR_BLOCKER_CATEGORIES[DOCTOR_BLOCKER_CATEGORIES.length - 1];
+}
+
+function printDoctorBlockerCategories(report) {
+  const grouped = new Map(
+    DOCTOR_BLOCKER_CATEGORIES.map((category) => [category.label, new Set()])
+  );
+  const addField = (field) => {
+    if (!field) {
+      return;
+    }
+    grouped.get(doctorCategoryForField(field).label).add(field);
+  };
+
+  for (const field of report.missing || []) {
+    addField(field);
+  }
+  for (const ref of report.missing_refs || []) {
+    addField(ref.field);
+  }
+  for (const issue of report.static_issues || []) {
+    addField(issue.field);
+  }
+
+  const visibleGroups = [...grouped.entries()].filter(([, fields]) => fields.size > 0);
+  if (visibleGroups.length === 0) {
+    return;
+  }
+
+  console.log('Missing or blocking inputs by category:');
+  for (const [label, fields] of visibleGroups) {
+    console.log(`- ${label}: ${[...fields].join(', ')}`);
+  }
+  console.log('Raw blockers:');
+}
+
 try {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -122,6 +208,7 @@ try {
       console.log(report.next_action);
     } else {
       console.log(`operator-inputs doctor found blockers for ${report.deployment_path}:`);
+      printDoctorBlockerCategories(report);
       for (const field of report.missing) {
         console.log(`- ${field}`);
       }
