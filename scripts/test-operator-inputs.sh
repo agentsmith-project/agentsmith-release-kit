@@ -1399,6 +1399,98 @@ assert_plan \
   online/use_existing
 pass "resolve-operator-inputs accepts online use_existing example package"
 
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$example_online_package" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-pass.json"
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-pass.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.status !== 'pass') {
+  throw new Error('doctor static pass package must pass');
+}
+if (report.readiness !== false || report.formal_verdict !== 'not_issued') {
+  throw new Error('doctor static pass must not issue readiness or formal verdict');
+}
+if (!Array.isArray(report.static_issues) || report.static_issues.length !== 0) {
+  throw new Error('doctor static pass must include empty static_issues');
+}
+if (!String(report.next_action).includes('not readiness or a GA verdict')) {
+  throw new Error('doctor pass messaging must not imply runnable readiness');
+}
+NODE
+pass "operator-inputs doctor pass remains non-readiness after static checks"
+
+doctor_static_invalid_dir="$TMP_DIR/doctor-static-invalid-online"
+copy_valid_package "$example_online_package" "$doctor_static_invalid_dir"
+"$NODE_BIN" --input-type=module - "$doctor_static_invalid_dir/render-values.example.json" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.source_path = '/tmp/release-kit-local-site-env.json';
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_invalid_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-invalid.json"; then
+  fail "operator-inputs doctor should fail when existing refs contain static package blockers"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-invalid.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.status !== 'fail' || report.readiness !== false || report.formal_verdict !== 'not_issued') {
+  throw new Error('doctor static blocker must fail without readiness or formal verdict');
+}
+if (report.missing.length !== 0 || report.missing_refs.length !== 0) {
+  throw new Error('doctor static blocker fixture should have no missing refs');
+}
+const renderIssue = report.static_issues.find((issue) => issue.field === 'render_values');
+if (!renderIssue || !/local or source URI/.test(renderIssue.reason)) {
+  throw new Error('doctor static blocker must explain render_values local/source URI');
+}
+NODE
+if bash "$ROOT_DIR/scripts/operator-release.sh" \
+  --operator-inputs "$doctor_static_invalid_dir" \
+  --doctor >"$TMP_DIR/doctor-static-invalid-facade.out" 2>"$TMP_DIR/doctor-static-invalid-facade.err"; then
+  fail "operator facade doctor should fail for static package blockers"
+fi
+grep -Fq -- '- render_values:' "$TMP_DIR/doctor-static-invalid-facade.out" ||
+  fail "operator facade doctor did not list render_values static blocker"
+[[ ! -e "$doctor_static_invalid_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
+  fail "operator-inputs doctor static checks must not write an intake plan"
+pass "operator-inputs doctor fails existing refs with static package blockers without writing a plan"
+
+doctor_static_schema_dir="$TMP_DIR/doctor-static-invalid-target-prerequisites"
+copy_valid_package "$example_online_package" "$doctor_static_schema_dir"
+"$NODE_BIN" --input-type=module - "$doctor_static_schema_dir/target-prerequisites.example.json" <<'NODE'
+import fs from 'node:fs';
+
+const [prerequisitesPath] = process.argv.slice(2);
+const prerequisites = JSON.parse(fs.readFileSync(prerequisitesPath, 'utf8'));
+prerequisites.schema_version = 'fixture.target-prerequisites/v1';
+fs.writeFileSync(prerequisitesPath, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_schema_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-schema.json"; then
+  fail "operator-inputs doctor should fail when target prerequisites schema is incompatible"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-schema.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const issue = report.static_issues.find((entry) => entry.field === 'target_prerequisites');
+if (!issue || !/schema_version must be agentsmith.target-prerequisites.truth\/v1/.test(issue.reason)) {
+  throw new Error('doctor static schema blocker must explain target_prerequisites schema');
+}
+NODE
+pass "operator-inputs doctor fails incompatible target prerequisites schema before run"
+
 base_online="$TMP_DIR/base-online"
 mkdir -p "$base_online"
 write_package_files "$base_online"

@@ -14,8 +14,9 @@ function usage() {
 This is an internal/test helper for operator-inputs intake. It writes
 .release-kit-internal/operator-inputs-plan.json by default. Alternate output
 dirs must stay inside .release-kit-internal. Init mode writes a package
-skeleton. Doctor mode prints a missing input diagnostic only. None of these
-outputs is a GA verdict, release readiness report, or runtime evidence.`;
+skeleton. Doctor mode prints missing refs plus static package blockers only.
+None of these outputs is a GA verdict, release readiness report, or runtime
+evidence.`;
 }
 
 function readArgValue(argv, index, arg) {
@@ -120,12 +121,15 @@ try {
       console.log(`operator-inputs doctor passed for ${report.deployment_path}`);
       console.log(report.next_action);
     } else {
-      console.log(`operator-inputs doctor found missing inputs for ${report.deployment_path}:`);
+      console.log(`operator-inputs doctor found blockers for ${report.deployment_path}:`);
       for (const field of report.missing) {
         console.log(`- ${field}`);
       }
       for (const ref of report.missing_refs) {
         console.log(`- ${ref.field}: ${ref.path ?? '<unset>'} (${ref.reason})`);
+      }
+      for (const issue of report.static_issues || []) {
+        console.log(`- ${issue.field}: ${issue.reason}`);
       }
       console.log(report.next_action);
     }

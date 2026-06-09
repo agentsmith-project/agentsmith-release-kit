@@ -6,6 +6,12 @@ import { fileURLToPath } from 'node:url';
 
 import { validateSubstrateInstallInputs } from './substrate-install-input-validation.mjs';
 import { resolveSubstrateInstallParameters } from './substrate-install-parameters.mjs';
+import { validateSubstratePackManifest } from './substrate-pack-manifest-validation.mjs';
+import {
+  assertNoUnsafeSubstratePayload,
+  validateSubstrateConnectionTruth,
+  validateTargetPrerequisitesTruth
+} from './substrate-truth-validation.mjs';
 
 const MANIFEST_FILE = 'operator-inputs.json';
 const PACKAGE_README_FILE = 'README.md';
@@ -211,6 +217,11 @@ const DEPLOYMENT_PATH_CONFIG = new Map([
 const INTERNAL_REPORT_KEY_RE = /(^|[_-])(?:operator[_-]release[_-]surface[_-]report|adoption[_-]report|candidate[_-]intake|deployment[_-]path[_-]report|release[_-]engineering[_-]gate[_-]intake[_-]report)([_-]|$)/i;
 const INTERNAL_REPORT_BASENAME_RE = /(?:^|[-_. ])(?:operator[-_ ]release[-_ ]surface[-_ ]report|adoption[-_ ]report|candidate[-_ ]intake|deployment[-_ ]path[-_ ]report|release[-_ ]engineering[-_ ]gate[-_ ]intake[-_ ]report)(?:[-_. ]|$)/i;
 const FORBIDDEN_ROUTE_TEXT_RE = /(?:required_product_flows|product_flows|product_flow_results|deploy_readiness|release_verdict|\bverdict\b|\bkubeconfig\b)/i;
+const STATIC_LOCAL_URI_RE = /\b(?:file|local|source|git\+file):\/\//i;
+const STATIC_LOCALHOST_URI_RE = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]?|host\.docker\.internal)(?::\d+)?(?:[/?#]|$)/i;
+const STATIC_RELATIVE_URI_RE = /(^|[\s"'(=])\.\.?\//;
+const STATIC_ABSOLUTE_LOCAL_PATH_RE = /(^|[\s"'(=])(?:~\/|\/(?:Users|home|tmp|var|private|workspace|workspaces|mnt|opt|etc)\/|[A-Za-z]:[\\/])/;
+const STATIC_SOURCE_LIKE_LABEL_RE = /(?:^|\.)(?:source_uri|source_path|artifact_uri|package_uri|local_path|path|file|dir|kubeconfig)$/;
 const SECRET_KEY_RE = /(^|[_-])(access[_-]?key|api[_-]?key|client[_-]?secret|credential|kubeconfig|kube[_-]?config|password|private[_-]?key|refresh[_-]?token|secret|session[_-]?token|token)([_-]|$)/i;
 const SECRET_VALUE_RE = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/i,
@@ -519,6 +530,58 @@ function scanManifestForForbiddenContent(value, label, pathParts = []) {
         fail(`${label} must not contain secret-like payload at ${currentPath}`);
       }
     }
+  }
+}
+
+function isRelativeStaticSourcePath(value, label) {
+  const trimmed = value.trim();
+  return (
+    STATIC_SOURCE_LIKE_LABEL_RE.test(label) &&
+    !URI_SCHEME_RE.test(trimmed) &&
+    /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/.test(trimmed)
+  );
+}
+
+function scanStaticInputString(value, label, issues) {
+  if (
+    STATIC_LOCAL_URI_RE.test(value) ||
+    STATIC_LOCALHOST_URI_RE.test(value) ||
+    STATIC_ABSOLUTE_LOCAL_PATH_RE.test(value) ||
+    STATIC_RELATIVE_URI_RE.test(value) ||
+    isRelativeStaticSourcePath(value, label)
+  ) {
+    issues.push(`${label} contains a local or source URI`);
+  }
+
+  if (SECRET_VALUE_RE.some((pattern) => pattern.test(value))) {
+    issues.push(`${label} contains a secret-looking value`);
+  }
+}
+
+function scanStaticInputForForbiddenContent(value, label, pathParts = [], issues = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      scanStaticInputForForbiddenContent(item, label, [...pathParts, String(index)], issues)
+    );
+    return issues;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, nested] of Object.entries(value)) {
+      scanStaticInputString(key, `${label}.${[...pathParts, key].join('.')} key`, issues);
+      scanStaticInputForForbiddenContent(nested, label, [...pathParts, key], issues);
+    }
+    return issues;
+  }
+  if (typeof value === 'string') {
+    scanStaticInputString(value, `${label}.${pathParts.join('.') || '<root>'}`, issues);
+  }
+  return issues;
+}
+
+function assertNoStaticInputForbiddenContent(value, label) {
+  const issues = scanStaticInputForForbiddenContent(value, label);
+  if (issues.length > 0) {
+    fail(issues[0]);
   }
 }
 
@@ -1731,6 +1794,126 @@ async function resolveInstallParameters({ manifest, refs, config }) {
   return installParameters;
 }
 
+function staticIssue(field, error) {
+  return {
+    field,
+    reason: error?.message || String(error)
+  };
+}
+
+async function validateDoctorRenderValues(refs) {
+  if (!refs.render_values) {
+    return;
+  }
+  const input = await readJson(refs.render_values.absolute_path, 'render_values');
+  requirePlainObject(input.value, 'render_values');
+  assertNoStaticInputForbiddenContent(input.value, 'render_values');
+}
+
+async function validateDoctorUseExistingTruth({ refs, targetProfile }) {
+  const input = await readJson(refs.substrate_truth.absolute_path, 'substrate_truth');
+  assertNoUnsafeSubstratePayload(input.value, 'substrate_truth', input.raw);
+  const { truth } = validateSubstrateConnectionTruth(input.value, targetProfile, {
+    label: 'substrate_truth'
+  });
+  return truth;
+}
+
+async function validateDoctorTargetPrerequisites({
+  refs,
+  targetProfile,
+  substrateTruth,
+  namespace
+}) {
+  const input = await readJson(refs.target_prerequisites.absolute_path, 'target_prerequisites');
+  assertNoUnsafeSubstratePayload(input.value, 'target_prerequisites', input.raw);
+  validateTargetPrerequisitesTruth(input.value, targetProfile, substrateTruth, {
+    label: 'target_prerequisites',
+    expectedNamespace: namespace
+  });
+}
+
+async function validateDoctorSubstratePack({ refs, targetProfile }) {
+  const input = await readJson(refs.substrate_pack_manifest.absolute_path, 'substrate_pack_manifest');
+  validateSubstratePackManifest(input.value, targetProfile, { fail });
+}
+
+async function validateDoctorInstallInputs({ manifest, refs, targetProfile }) {
+  const installInput = await readJson(
+    refs.substrate_install_inputs.absolute_path,
+    'substrate_install_inputs'
+  );
+  const installSummary = validateSubstrateInstallInputs(
+    installInput.value,
+    targetProfile,
+    {
+      fail,
+      raw: installInput.raw
+    }
+  );
+  const installParameters = await resolveSubstrateInstallParameters({
+    installInput,
+    installSummary,
+    namespace: manifest.namespace,
+    readJson,
+    fail
+  });
+  const legacyDigest = manifest.install_confirmation?.install_parameters_sha256;
+  if (
+    legacyDigest !== undefined &&
+    legacyDigest !== installParameters.installParametersDigest
+  ) {
+    fail('install_confirmation.install_parameters_sha256 must match computed install parameters sha256');
+  }
+  return installSummary.substrateTruth;
+}
+
+async function collectStaticDoctorIssues({ manifest, refs, config }) {
+  const issues = [];
+  const targetProfile = targetProfileObject(config.targetProfile);
+  let substrateTruth;
+
+  try {
+    await validateDoctorRenderValues(refs);
+  } catch (error) {
+    issues.push(staticIssue('render_values', error));
+  }
+
+  if (config.installSubstrates) {
+    try {
+      await validateDoctorSubstratePack({ refs, targetProfile });
+    } catch (error) {
+      issues.push(staticIssue('substrate_pack_manifest', error));
+    }
+    try {
+      substrateTruth = await validateDoctorInstallInputs({ manifest, refs, targetProfile });
+    } catch (error) {
+      issues.push(staticIssue('substrate_install_inputs', error));
+    }
+  } else {
+    try {
+      substrateTruth = await validateDoctorUseExistingTruth({ refs, targetProfile });
+    } catch (error) {
+      issues.push(staticIssue('substrate_truth', error));
+    }
+  }
+
+  if (substrateTruth) {
+    try {
+      await validateDoctorTargetPrerequisites({
+        refs,
+        targetProfile,
+        substrateTruth,
+        namespace: manifest.namespace
+      });
+    } catch (error) {
+      issues.push(staticIssue('target_prerequisites', error));
+    }
+  }
+
+  return issues;
+}
+
 function buildInternalExpected({ manifest, config, outputRoot, mode, installParameters }) {
   const outputBase = deploymentPathOutputBase(outputRoot, manifest.deployment_path);
   const substrateInstallOutputDir = config.installSubstrates
@@ -2216,10 +2399,24 @@ export async function diagnoseOperatorInputs({ inputPath } = {}) {
     baseDir: packageRoot,
     requiredInputs
   });
+  let staticIssues = [];
+  if (missing.length === 0 && missingRefs.length === 0) {
+    const refs = await resolveRefs({ manifest, baseDir: packageRoot });
+    try {
+      await validateAirgapBundleRefs({ manifest, refs, config });
+    } catch (error) {
+      staticIssues.push(staticIssue('airgap_bundle_manifest', error));
+    }
+    staticIssues.push(...await collectStaticDoctorIssues({ manifest, refs, config }));
+  }
+  const passed =
+    missing.length === 0 &&
+    missingRefs.length === 0 &&
+    staticIssues.length === 0;
   const report = {
     schema_version: 'agentsmith.operator-inputs-doctor/v1',
-    scope: 'operator_inputs_missing_input_diagnostic_only',
-    status: missing.length === 0 && missingRefs.length === 0 ? 'pass' : 'fail',
+    scope: 'operator_inputs_doctor_diagnostic_only',
+    status: passed ? 'pass' : 'fail',
     readiness: false,
     formal_verdict: 'not_issued',
     deployment_path: manifest.deployment_path,
@@ -2241,8 +2438,9 @@ export async function diagnoseOperatorInputs({ inputPath } = {}) {
     },
     missing,
     missing_refs: missingRefs,
-    next_action: missing.length === 0 && missingRefs.length === 0
-      ? 'Run bash scripts/operator-release.sh --operator-inputs <package-or-json> --run when ready to execute.'
+    static_issues: staticIssues,
+    next_action: passed
+      ? 'Static doctor passed; this is not readiness or a GA verdict. Run bash scripts/operator-release.sh --operator-inputs <package-or-json> --run when ready to execute.'
       : 'Update operator-inputs.json and package-local refs, then rerun doctor.'
   };
   return report;
