@@ -13,7 +13,7 @@
     },
     {
       "kind": "deploy_template_archive",
-      "path": "components/deploy-template-package.tgz",
+      "path": "components/agentsmith-deploy-template-package.tgz",
       "sha256": "sha256:01745693f1d187223fdd521c3af5d27b9e83f6325e935aeeaed85616562c5164"
     },
     {

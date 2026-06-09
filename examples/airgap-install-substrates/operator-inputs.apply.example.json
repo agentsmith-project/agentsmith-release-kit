@@ -4,7 +4,7 @@
   "deployment_path": "airgap/install_substrates",
   "release_contract": "airgap-bundle/components/release-contract.json",
   "deploy_template_package": "airgap-bundle/components/deploy-template-package.json",
-  "deploy_template_archive": "airgap-bundle/components/deploy-template-package.tgz",
+  "deploy_template_archive": "airgap-bundle/components/agentsmith-deploy-template-package.tgz",
   "render_values": "airgap-bundle/operator-inputs/render-values.example.json",
   "target_prerequisites": "airgap-bundle/operator-inputs/target-prerequisites.example.json",
   "substrate_pack_manifest": "airgap-bundle/components/substrate-pack-manifest.example.json",

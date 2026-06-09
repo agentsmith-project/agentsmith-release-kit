@@ -2265,7 +2265,7 @@ function skeletonManifestForDeploymentPath(deploymentPath) {
       ? 'airgap-bundle/components/deploy-template-package.json'
       : 'deploy-template-package.json',
     deploy_template_archive: isAirgap
-      ? 'airgap-bundle/components/deploy-template-package.tgz'
+      ? 'airgap-bundle/components/agentsmith-deploy-template-package.tgz'
       : 'deploy-template-package.tgz',
     render_values: isAirgap
       ? 'airgap-bundle/operator-inputs/render-values.json'

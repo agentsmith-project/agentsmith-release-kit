@@ -1351,7 +1351,7 @@ writeJson(path.join(packageDir, 'substrate-install-inputs.json'), { schema_versi
 for (const [source, destination] of [
   ['release-contract.json', 'bundle/components/release-contract.json'],
   ['deploy-template-package.json', 'bundle/components/deploy-template-package.json'],
-  ['deploy-template-package.tgz', 'bundle/components/deploy-template-package.tgz'],
+  ['deploy-template-package.tgz', 'bundle/components/agentsmith-deploy-template-package.tgz'],
   ['image-map.json', 'bundle/components/image-map.json'],
   ['substrate-pack-manifest.json', 'bundle/components/substrate-pack-manifest.json'],
   ['render-values.json', 'bundle/operator-inputs/render-values.json'],
@@ -1379,7 +1379,7 @@ writeJson(path.join(packageDir, 'bundle/airgap-bundle-manifest.json'), {
   components: [
     component('release_contract', 'components/release-contract.json'),
     component('deploy_template_package', 'components/deploy-template-package.json'),
-    component('deploy_template_archive', 'components/deploy-template-package.tgz'),
+    component('deploy_template_archive', 'components/agentsmith-deploy-template-package.tgz'),
     component('image_map', 'components/image-map.json'),
     component('substrate_pack_manifest', 'components/substrate-pack-manifest.json')
   ]
@@ -1395,7 +1395,7 @@ writeJson(path.join(packageDir, 'operator-inputs.json'), {
   deployment_path: 'airgap/install_substrates',
   release_contract: 'bundle/components/release-contract.json',
   deploy_template_package: 'bundle/components/deploy-template-package.json',
-  deploy_template_archive: 'bundle/components/deploy-template-package.tgz',
+  deploy_template_archive: 'bundle/components/agentsmith-deploy-template-package.tgz',
   render_values: 'bundle/operator-inputs/render-values.json',
   target_prerequisites: 'bundle/operator-inputs/target-prerequisites.json',
   substrate_pack_manifest: 'bundle/components/substrate-pack-manifest.json',

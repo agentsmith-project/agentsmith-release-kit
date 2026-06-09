@@ -256,7 +256,7 @@ stage_operator_example() {
     airgap/*)
       cp "$CONTRACT_MATERIAL" "$package_dir/airgap-bundle/components/release-contract.json"
       cp "$PACKAGE_MATERIAL" "$package_dir/airgap-bundle/components/deploy-template-package.json"
-      cp "$ARCHIVE" "$package_dir/airgap-bundle/components/deploy-template-package.tgz"
+      cp "$ARCHIVE" "$package_dir/airgap-bundle/components/agentsmith-deploy-template-package.tgz"
       chmod +x "$package_dir"/tools/*
       update_airgap_bundle_component_digests "$package_dir/airgap-bundle"
       ;;

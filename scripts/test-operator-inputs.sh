@@ -294,7 +294,7 @@ if (deploymentPath.startsWith('airgap/')) {
   );
   manifest.deploy_template_archive = copyPackageFileIntoBundle(
     'deploy-template-package.tgz',
-    'components/deploy-template-package.tgz'
+    'components/agentsmith-deploy-template-package.tgz'
   );
   copyPackageFileIntoBundle('image-map.json', 'components/image-map.json');
   manifest.render_values = copyPackageFileIntoBundle(
@@ -315,7 +315,7 @@ if (deploymentPath.startsWith('airgap/')) {
   const components = [
     bundleComponent('release_contract', 'components/release-contract.json'),
     bundleComponent('deploy_template_package', 'components/deploy-template-package.json'),
-    bundleComponent('deploy_template_archive', 'components/deploy-template-package.tgz'),
+    bundleComponent('deploy_template_archive', 'components/agentsmith-deploy-template-package.tgz'),
     bundleComponent('image_map', 'components/image-map.json')
   ];
   if (installsSubstrates) {
@@ -1280,6 +1280,12 @@ if (deploymentPath.endsWith('/install_substrates') && manifest.substrate_truth !
 }
 if (deploymentPath.startsWith('airgap/') && manifest.airgap_bundle !== 'airgap-bundle') {
   throw new Error('init airgap manifest must include airgap bundle refs');
+}
+if (
+  deploymentPath.startsWith('airgap/') &&
+  manifest.deploy_template_archive !== 'airgap-bundle/components/agentsmith-deploy-template-package.tgz'
+) {
+  throw new Error('init airgap manifest must use the canonical bundle deploy template archive ref');
 }
 if (!readme.includes(`Deployment path: \`${deploymentPath}\``)) {
   throw new Error('init package README must identify the selected deployment path');
