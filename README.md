@@ -78,9 +78,11 @@ bash scripts/operator-release.sh --ga-report \
 ```
 
 Run `--init-operator-inputs` when you want a scaffolded input package for one
-deployment path. Run `--doctor` when you want a missing-input checklist
-without executing the selected path. Add `--run` when the package is ready to
-execute the selected path.
+deployment path. Run `--doctor` when you want missing package refs/fields plus
+static package blockers checked without executing the selected path. A passing
+doctor only means package static intake is clean; it is not runnable readiness
+or a GA verdict. Add `--run` when the package is ready to execute the selected
+path.
 
 The package contains one `operator-inputs.json` for one selected deployment
 path. It is not a four-path manifest. The four accepted `deployment_path`
@@ -96,9 +98,9 @@ The GA operator substrate choices are `use_existing` and
 
 Post-deploy smoke reports are runtime evidence and are not operator-inputs.
 
-With `--doctor`, the facade reports all currently missing package fields for
-the selected deployment path and exits without executing producers or issuing a
-verdict.
+With `--doctor`, the facade reports missing package refs/fields plus static
+package blockers for the selected deployment path and exits without executing
+producers or issuing a verdict.
 
 With `--init-operator-inputs <deployment_path> --output-dir <dir>`, the facade
 creates a skeleton package for one of the four GA deployment paths and refuses
@@ -183,8 +185,9 @@ bash scripts/operator-release.sh --ga-report \
   --output-dir <dir>
 ```
 
-Use `--init-operator-inputs` for a scaffolded package, use `--doctor` for a
-missing-input checklist, and add `--run` when the package is ready to execute.
+Use `--init-operator-inputs` for a scaffolded package, use `--doctor` for
+missing package refs/fields plus static package blockers, and add `--run` when
+the package is ready to execute.
 The package-driven `--run` path writes finalized deployment-path handoff
 evidence for the final GA report when it executes an apply manifest.
 It does not issue a formal GA verdict. Formal release success or failure is

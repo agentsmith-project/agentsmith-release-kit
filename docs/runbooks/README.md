@@ -53,11 +53,13 @@ bash scripts/operator-release.sh --ga-report \
 
 The init command writes a package skeleton for one deployment path and refuses
 to overwrite an existing `operator-inputs.json`. The doctor command lists
-missing package inputs without executing the selected path. Add `--run` only
-when the package is ready to execute the selected apply path. A passing `--run`
-produces path-level evidence for the final GA report; do not treat
-intermediate files as the formal release verdict. After all four package runs
-and product-side reports are available, use `--ga-report` to write the final
+missing package refs/fields plus static package blockers without executing the
+selected path. A passing doctor only means package static intake is clean; it
+is not runnable readiness or a GA verdict. Add `--run` only when the package is
+ready to execute the selected apply path. A passing `--run` produces
+path-level evidence for the final GA report; do not treat intermediate files
+as the formal release verdict. After all four package runs and product-side
+reports are available, use `--ga-report` to write the final
 `ga-release-report.json`.
 The repository's manual `ga-release-aggregate` GitHub workflow can also
 download already-produced artifacts and run this same final aggregate. That

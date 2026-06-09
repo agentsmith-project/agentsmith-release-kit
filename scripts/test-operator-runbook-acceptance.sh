@@ -42,6 +42,10 @@ assert_operator_success_contract_docs() {
     fail "operator-release help must name the formal success boundary"
   grep -q -- 'final ga-release-report.json written by --ga-report' "$help_output" ||
     fail "operator-release help must point formal success to ga-release-report.json"
+  grep -q -- 'static package blockers' "$help_output" ||
+    fail "operator-release help must describe doctor static package blockers"
+  grep -q -- 'not runnable readiness' "$help_output" ||
+    fail "operator-release help must bound doctor pass semantics"
   if grep -q -- 'verify-release.sh' "$help_output"; then
     fail "operator-release help must not expose finalizer command details"
   fi
@@ -149,6 +153,14 @@ assert_operator_success_contract_docs() {
   fi
   grep -q -- 'Formal release success' "$root_readme" ||
     fail "root README must name the formal GA success boundary"
+  grep -q -- 'static package blockers' "$root_readme" ||
+    fail "root README must describe doctor static package blockers"
+  grep -q -- 'not runnable readiness' "$root_readme" ||
+    fail "root README must bound doctor pass semantics"
+  grep -q -- 'static package blockers' "$first_screen" ||
+    fail "operator runbook first screen must describe doctor static package blockers"
+  grep -q -- 'not runnable readiness' "$first_screen" ||
+    fail "operator runbook first screen must bound doctor pass semantics"
   grep -q -- 'or failure is represented only by the' "$root_readme" ||
     fail "root README must point formal success to the GA report"
   grep -q -- 'final `ga-release-report.json` issued by' "$root_readme" ||
@@ -165,6 +177,10 @@ assert_operator_success_contract_docs() {
     if grep -q -- '--post-deploy-product-smoke-report <json>' "$example_readme"; then
       fail "${example_readme#$ROOT_DIR/} must not document a single generic product smoke report for --ga-report"
     fi
+    grep -q -- 'static package blockers' "$example_readme" ||
+      fail "${example_readme#$ROOT_DIR/} must describe doctor static package blockers"
+    grep -q -- 'not runnable readiness' "$example_readme" ||
+      fail "${example_readme#$ROOT_DIR/} must bound doctor pass semantics"
   done
   for example_readme in "$ROOT_DIR"/examples/README.md "$ROOT_DIR"/examples/*/README.md; do
     while IFS= read -r line; do

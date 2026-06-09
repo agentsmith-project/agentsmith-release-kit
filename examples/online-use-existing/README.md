@@ -69,8 +69,9 @@ Edit `"$PKG/operator-inputs.json"` before apply:
 bash scripts/operator-release.sh --operator-inputs "$PKG" --doctor
 ```
 
-This lists missing package inputs without executing the selected path. It is
-not runtime evidence and does not issue a GA verdict.
+This lists missing package refs/fields plus static package blockers without
+executing the selected path. A passing doctor only means package static intake
+is clean; it is not runnable readiness or a GA verdict.
 
 ## Apply
 

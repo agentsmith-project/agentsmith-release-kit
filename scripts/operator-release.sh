@@ -27,7 +27,9 @@ Operator facade:
 
 Operator-inputs intake:
   --init-operator-inputs creates a package skeleton for one deployment_path.
-  Add --doctor to list missing package inputs without executing the path.
+  Add --doctor to list missing package refs/fields plus static package blockers
+  without executing the path. A passing doctor only means static package intake
+  is clean; it is not runnable readiness or a GA verdict.
   Add --run when the package is ready to execute the selected path.
 
 Operator-inputs run:
