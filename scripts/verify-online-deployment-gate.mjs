@@ -1179,6 +1179,7 @@ async function writeAndValidateEvidenceRoot({
       stagingRoot,
       '--target-profile',
       args.targetProfile.value,
+      '--allow-required-target-profiles',
       '--output-dir',
       outputSubdir(args, 'evidence-validation')
     ]);

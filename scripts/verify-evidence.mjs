@@ -381,7 +381,8 @@ function usage() {
     --release-contract <json> \\
     --evidence-root <dir> \\
     --target-profile <target_cluster>/<substrate_source>/<distribution> \\
-    --output-dir <dir>`;
+    --output-dir <dir> \\
+    [--allow-required-target-profiles]`;
 }
 
 function cliFail(message) {
@@ -422,6 +423,9 @@ function parseArgs(argv) {
         break;
       case '--output-dir':
         parsed.outputDir = nextValue();
+        break;
+      case '--allow-required-target-profiles':
+        parsed.allowRequiredTargetProfiles = true;
         break;
       case '--help':
       case '-h':
@@ -1230,7 +1234,7 @@ function assertProvenance(evidence, evidenceSubjectDigest) {
   };
 }
 
-function assertReleaseIdentity(evidence, releaseContractInput) {
+function assertReleaseIdentity(evidence, releaseContractInput, options = {}) {
   const releaseContractDigest = requireDigest(
     evidence.release_contract_digest,
     'evidence.release_contract_digest'
@@ -1252,15 +1256,22 @@ function assertReleaseIdentity(evidence, releaseContractInput) {
     fail('evidence.git_sha must match release contract git_sha');
   }
 
-  assertReleaseContractTargetProfiles(contract);
+  assertReleaseContractTargetProfiles(contract, {
+    allowRequiredTargetProfiles: options.allowRequiredTargetProfiles === true
+  });
 }
 
-function assertReleaseContractTargetProfiles(contract) {
+function assertReleaseContractTargetProfiles(
+  contract,
+  { allowRequiredTargetProfiles = false } = {}
+) {
   const profiles = requireArray(contract.target_profiles, 'release_contract.target_profiles');
   const seen = new Map();
   for (const [index, value] of profiles.entries()) {
     const label = `release_contract.target_profiles[${index}]`;
-    const profile = validateContractTargetProfileEntry(value, fail, label);
+    const profile = validateContractTargetProfileEntry(value, fail, label, {
+      allowRequired: allowRequiredTargetProfiles
+    });
     if (seen.has(profile.value)) {
       fail(`${label} duplicates target profile tuple declared at ${seen.get(profile.value)}`);
     }
@@ -2533,7 +2544,9 @@ async function main() {
     EVIDENCE_SUBJECT_SCHEMA,
     'evidence_subject.schema_version'
   );
-  assertReleaseIdentity(evidence, releaseContractInput);
+  assertReleaseIdentity(evidence, releaseContractInput, {
+    allowRequiredTargetProfiles: args.allowRequiredTargetProfiles === true
+  });
   assertTarget(evidence, targetProfile);
   assertReleaseContractIncludesTargetProfile(releaseContractInput.value, targetProfile);
   assertReleaseKitOutputTarget(releaseKitOutput, targetProfile);

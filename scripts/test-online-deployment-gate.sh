@@ -446,6 +446,53 @@ fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
 NODE
 }
 
+write_all_required_contract() {
+  local contract_input="$1"
+  local contract_output="$2"
+
+  "$NODE_BIN" --input-type=module - "$contract_input" "$contract_output" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [contractInput, contractOutput] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function subjectDigest(value) {
+  const { artifact_provenance: _artifactProvenance, ...subject } = value;
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(subject))).digest('hex')}`;
+}
+
+function artifactProjectionDigest(value) {
+  const { artifact_sha256: _artifactSha256, ...artifactProvenance } = value.artifact_provenance;
+  const projection = { ...value, artifact_provenance: artifactProvenance };
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(projection))).digest('hex')}`;
+}
+
+contract.target_profiles = contract.target_profiles.map((profile) => ({
+  ...profile,
+  required: true
+}));
+contract.artifact_provenance.subject_sha256 = subjectDigest(contract);
+contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
+
+fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
 prepare_archive_case() {
   local label="$1"
   local mutation="$2"
@@ -826,12 +873,18 @@ run_evidence() {
   local evidence_root="$2"
   local output_dir="$3"
   local target_profile="${4:-$TARGET_PROFILE}"
+  if [[ "$#" -ge 4 ]]; then
+    shift 4
+  else
+    shift "$#"
+  fi
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --evidence \
     --release-contract "$release_contract" \
     --evidence-root "$evidence_root" \
     --target-profile "$target_profile" \
-    --output-dir "$output_dir"
+    --output-dir "$output_dir" \
+    "$@"
 }
 
 run_gate() {
@@ -1235,6 +1288,7 @@ VALID_KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-online.v
 VALID_VALUES="$TMP_DIR/render-values.valid.json"
 VALID_ARCHIVE="$TMP_DIR/valid.tgz"
 VALID_CONTRACT_MATERIAL="$TMP_DIR/release-contract.valid-material.json"
+ALL_REQUIRED_CONTRACT_MATERIAL="$TMP_DIR/release-contract.all-required-material.json"
 VALID_PACKAGE_MATERIAL="$TMP_DIR/deploy-template-package.valid-material.json"
 INVALID_ARCHIVE="$TMP_DIR/invalid-render.tgz"
 INVALID_CONTRACT_MATERIAL="$TMP_DIR/release-contract.invalid-render.json"
@@ -1259,6 +1313,7 @@ write_prerequisites "$INVALID_PREFLIGHT_PREREQUISITES" missing_namespace
 write_kit_substrate_pack_manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" "$KIT_ONLINE_PROFILE"
 write_render_values "$VALID_VALUES"
 prepare_archive_case valid valid "$VALID_ARCHIVE" "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL"
+write_all_required_contract "$VALID_CONTRACT_MATERIAL" "$ALL_REQUIRED_CONTRACT_MATERIAL"
 prepare_archive_case invalid-render unknown_variable "$INVALID_ARCHIVE" "$INVALID_CONTRACT_MATERIAL" "$INVALID_PACKAGE_MATERIAL"
 write_evidence_provenance "$VALID_PROVENANCE" valid
 write_evidence_provenance "$LOCAL_URI_PROVENANCE" local_uri
@@ -1273,6 +1328,22 @@ write_evidence_provenance "$SIGNED_CLI_MISMATCH_OPERATOR_PROVENANCE" signed_oper
 write_evidence_provenance "$SIGNED_UNBOUND_OPERATOR_PROVENANCE" signed_unbound_operator_run_uri
 start_server
 BASE_URL="http://127.0.0.1:$SERVER_PORT"
+
+all_required_inputs_output="$TMP_DIR/out-all-required-inputs-naked"
+if bash "$ROOT_DIR/scripts/verify-release.sh" --inputs \
+  --release-contract "$ALL_REQUIRED_CONTRACT_MATERIAL" \
+  --deploy-template-package "$VALID_PACKAGE_MATERIAL" \
+  --target-profile "$TARGET_PROFILE" \
+  --output-dir "$all_required_inputs_output" >"$TMP_DIR/all-required-inputs-naked.out" 2>"$TMP_DIR/all-required-inputs-naked.err"; then
+  fail "expected naked inputs to reject final-required target profiles"
+fi
+if ! grep -Fq 'target_profiles.required is only accepted by final GA release contract/final aggregate mode, not focused diagnostics' \
+  "$TMP_DIR/all-required-inputs-naked.err"; then
+  cat "$TMP_DIR/all-required-inputs-naked.out" >&2
+  cat "$TMP_DIR/all-required-inputs-naked.err" >&2
+  fail "naked inputs required target profile failure must explain focused diagnostic policy"
+fi
+pass "naked inputs keeps rejecting final-required target profiles"
 
 parse_unknown_root="$TMP_DIR/evidence-parse-unknown"
 write_stale_evidence_files "$parse_unknown_root"
@@ -1579,6 +1650,29 @@ assert_generated_evidence "$apply_evidence_root"
 run_evidence "$VALID_CONTRACT_MATERIAL" "$apply_evidence_root" "$apply_evidence_validation" >/dev/null
 [[ -f "$apply_evidence_output/evidence-validation/evidence-validation-report.json" ]] || fail "apply evidence gate did not internally validate evidence root"
 pass "confirmed apply rollout smoke can generate signed operator-run-bound online gate evidence root"
+
+all_required_evidence_output="$TMP_DIR/out-apply-all-required-evidence"
+all_required_evidence_root="$TMP_DIR/evidence-apply-all-required"
+all_required_evidence_validation="$TMP_DIR/out-apply-all-required-evidence-validation"
+write_stale_evidence_files "$all_required_evidence_root"
+reset_kubectl_log
+reset_registry_probe_log
+run_gate "$ALL_REQUIRED_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$all_required_evidence_output" "$TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$TARGET_PROFILE" \
+  --operator-run-id operator-run-all-required-evidence \
+  --timeout 120s \
+  --evidence-root "$all_required_evidence_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >/dev/null
+assert_registry_probe_not_called
+[[ -f "$all_required_evidence_root/evidence.json" ]] || fail "all-required evidence gate did not write evidence.json"
+[[ -f "$all_required_evidence_root/evidence-subject.json" ]] || fail "all-required evidence gate did not write evidence-subject.json"
+[[ -f "$all_required_evidence_root/online-deployment-gate-report.json" ]] || fail "all-required evidence gate did not write evidence root gate report"
+assert_gate_report "$all_required_evidence_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout" operator-run-all-required-evidence
+assert_generated_evidence "$all_required_evidence_root"
+run_evidence "$ALL_REQUIRED_CONTRACT_MATERIAL" "$all_required_evidence_root" "$all_required_evidence_validation" "$TARGET_PROFILE" --allow-required-target-profiles >/dev/null
+[[ -f "$all_required_evidence_output/evidence-validation/evidence-validation-report.json" ]] || fail "all-required evidence gate did not internally validate evidence root"
+pass "online deployment evidence root accepts final-required target profiles only through producer/evidence allow path"
 
 target_registry_apply_evidence_output="$TMP_DIR/out-apply-target-registry-evidence"
 target_registry_apply_evidence_root="$TMP_DIR/evidence-apply-target-registry"
