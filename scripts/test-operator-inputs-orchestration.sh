@@ -2779,10 +2779,10 @@ delete manifest.allow_localhost;
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 write_stale_finalizer "$missing_smoke_airgap_package" airgap-use-existing
-expect_fail_matching missing_smoke_airgap 'airgap-consume-rehearsal producer argv must include --smoke-url' \
+expect_fail_matching missing_smoke_airgap 'missing required operator-inputs field for airgap/use_existing: smoke_url' \
   run_airgap_operator_inputs "$missing_smoke_airgap_package" missing-smoke-airgap
 assert_no_path_evidence "$missing_smoke_airgap_package" airgap-use-existing
-pass "operator-inputs airgap path requires smoke_url and clears stale finalizer evidence"
+pass "operator-inputs airgap path requires smoke_url at intake and clears stale finalizer evidence"
 
 wrong_install_digest_package="$TMP_DIR/wrong-install-digest"
 prepare_online_install_package "$wrong_install_digest_package" apply /ok wrong

@@ -941,6 +941,7 @@ function validateConfirmations({ manifest, config, mode }) {
 
 function requiredInputsFor({ manifest, config, mode }) {
   const requiredCommands = [...config.requiredCommands];
+  const requiredScalars = [...config.requiredScalars];
   if (config.producer === 'airgap' && mode === 'apply') {
     requiredCommands.push('archive_probe', 'image_loader');
   }
@@ -951,11 +952,14 @@ function requiredInputsFor({ manifest, config, mode }) {
   ) {
     requiredCommands.push('registry_probe');
   }
+  if (mode === 'apply') {
+    requiredScalars.push('smoke_url');
+  }
   return {
     files: config.requiredFiles,
     dirs: config.requiredDirs,
     commands: requiredCommands,
-    scalars: config.requiredScalars
+    scalars: requiredScalars
   };
 }
 

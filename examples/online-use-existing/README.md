@@ -79,12 +79,13 @@ same package.
 Edit `"$PKG/operator-inputs.json"` before apply:
 
 - Keep `deployment_path` as `online/use_existing`.
+- Set `smoke_url` to the HTTPS route smoke endpoint for this target.
 - Set `deploy_confirmation.operator_run_id` to the real operator run id.
 - When using the target registry variant, replace the placeholder
   `tools/registry-probe` before `--run`; it intentionally exits non-zero until
   replaced.
-- Optional route smoke can add `smoke_url`, `expected_status`, `timeout`, and
-  `timeout_ms`; keep them omitted when route smoke is not in scope.
+- Use `expected_status`, `timeout`, and `timeout_ms` only when the route smoke
+  needs non-default checks.
 
 ## Doctor
 

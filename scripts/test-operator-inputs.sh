@@ -717,6 +717,7 @@ switch (caseName) {
       confirmed: true,
       operator_run_id: 'operator-inputs-deploy-1002'
     };
+    manifest.smoke_url = 'https://release.example/ok';
     manifest.target_registry = 'registry.release.example/agentsmith';
     break;
   case 'target_registry_server_dry_run_with_probe':
@@ -729,6 +730,7 @@ switch (caseName) {
       confirmed: true,
       operator_run_id: 'operator-inputs-deploy-1002'
     };
+    manifest.smoke_url = 'https://release.example/ok';
     manifest.target_registry = 'registry.release.example/agentsmith';
     manifest.registry_probe = 'tools/registry-probe';
     break;
@@ -1319,6 +1321,51 @@ for deployment_path in "${valid_paths[@]}"; do
 done
 
 for deployment_path in "${valid_paths[@]}"; do
+  missing_smoke_dir="$TMP_DIR/invalid-${deployment_path//\//-}-apply-missing-smoke-url"
+  mkdir -p "$missing_smoke_dir"
+  write_package_files "$missing_smoke_dir"
+  write_manifest "$missing_smoke_dir" "$deployment_path" apply
+  remove_manifest_fields \
+    "$missing_smoke_dir" \
+    smoke_url \
+    expected_status \
+    timeout_ms \
+    allow_http \
+    allow_localhost
+  expect_fail_matching \
+    "${deployment_path//\//-}-apply-missing-smoke-url" \
+    "missing required operator-inputs field for $deployment_path: smoke_url" \
+    "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_smoke_dir"
+  if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+    --operator-inputs "$missing_smoke_dir" \
+    --doctor \
+    --stdout >"$TMP_DIR/doctor-missing-smoke-${deployment_path//\//-}.json"; then
+    fail "operator-inputs doctor should fail when apply smoke_url is missing: $deployment_path"
+  fi
+  "$NODE_BIN" --input-type=module - \
+    "$TMP_DIR/doctor-missing-smoke-${deployment_path//\//-}.json" \
+    "$deployment_path" <<'NODE'
+import fs from 'node:fs';
+
+const [doctorFile, deploymentPath] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(doctorFile, 'utf8'));
+if (report.deployment_path !== deploymentPath || report.mode !== 'apply') {
+  throw new Error('doctor missing smoke_url fixture must stay on the apply deployment path');
+}
+if (report.status !== 'fail' || report.readiness !== false || report.formal_verdict !== 'not_issued') {
+  throw new Error('doctor missing smoke_url must fail without readiness or formal verdict');
+}
+if (!report.missing.includes('smoke_url')) {
+  throw new Error('doctor missing list did not include smoke_url');
+}
+if (!report.required?.scalar_fields?.includes('smoke_url')) {
+  throw new Error('doctor required scalar_fields did not include smoke_url');
+}
+NODE
+done
+pass "operator-inputs apply requires smoke_url across deployment paths"
+
+for deployment_path in "${valid_paths[@]}"; do
   init_dir="$TMP_DIR/init-${deployment_path//\//-}"
   bash "$ROOT_DIR/scripts/operator-release.sh" \
     --init-operator-inputs "$deployment_path" \
@@ -1617,6 +1664,9 @@ remove_manifest_fields \
   substrate_install_inputs \
   kubectl \
   routability_probe \
+  smoke_url \
+  expected_status \
+  timeout_ms \
   install_confirmation \
   deploy_confirmation
 if bash "$ROOT_DIR/scripts/operator-release.sh" \
@@ -1628,7 +1678,7 @@ grep -Fq 'Missing or blocking inputs by category:' "$TMP_DIR/doctor-category.out
   fail "operator facade doctor did not print blocker category summary"
 grep -Fq -- '- release materials: release_contract' "$TMP_DIR/doctor-category.out" ||
   fail "operator facade doctor did not group missing release materials"
-grep -Fq -- '- operator target facts: target_prerequisites, substrate_pack_manifest, substrate_install_inputs' "$TMP_DIR/doctor-category.out" ||
+grep -Fq -- '- operator target facts: target_prerequisites, substrate_pack_manifest, substrate_install_inputs, smoke_url' "$TMP_DIR/doctor-category.out" ||
   fail "operator facade doctor did not group missing target facts"
 grep -Fq -- '- operator tools: kubectl, routability_probe' "$TMP_DIR/doctor-category.out" ||
   fail "operator facade doctor did not group missing operator tools"

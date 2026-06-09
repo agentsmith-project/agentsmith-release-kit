@@ -54,7 +54,8 @@ images, push images, or perform registry login.
 Replace `tools/kubectl` and `tools/routability-probe` with operator-approved
 package-local executables before `--run`. When using the target registry
 variant, replace `tools/registry-probe` too; it intentionally exits non-zero
-until replaced.
+until replaced. Set `smoke_url` to the HTTPS route smoke endpoint for this
+target before apply.
 
 ## Confirm Install Parameters
 

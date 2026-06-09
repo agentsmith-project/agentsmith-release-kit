@@ -10,6 +10,7 @@
   "target_prerequisites": "target-prerequisites.example.json",
   "namespace": "agentsmith",
   "mode": "apply",
+  "smoke_url": "https://agentsmith.online.example.com/healthz",
   "deploy_confirmation": {
     "confirmed": true,
     "operator_run_id": "operator-run-20260523-001"

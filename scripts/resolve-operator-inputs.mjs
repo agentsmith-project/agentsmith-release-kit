@@ -113,7 +113,8 @@ const DOCTOR_BLOCKER_CATEGORIES = [
       'substrate_install_inputs',
       'target_registry',
       'namespace',
-      'context'
+      'context',
+      'smoke_url'
     ])
   },
   {
