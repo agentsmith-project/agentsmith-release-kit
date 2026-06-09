@@ -35,8 +35,24 @@ cp "$DEPLOY_TEMPLATE_PACKAGE" "$PKG/deploy-template-package.json"
 cp "$DEPLOY_TEMPLATE_ARCHIVE" "$PKG/deploy-template-package.tgz"
 ```
 
+For the target registry variant, run this after the block above to swap the
+manifest and include the probe placeholder:
+
+```bash
+cp "$EXAMPLE_DIR/operator-inputs.target-registry.apply.example.json" "$PKG/operator-inputs.json"
+mkdir -p "$PKG/tools"
+cp "$EXAMPLE_DIR/tools/registry-probe" "$PKG/tools/registry-probe"
+```
+
+The target registry must already contain digest refs for the release images.
+`registry_probe` is a package-local read-only executable invoked as
+`tools/registry-probe <target-image> <expected-digest>`; stdout must be exactly
+the matching `sha256:<64>` digest.
+
 Replace `tools/kubectl` and `tools/routability-probe` with operator-approved
-package-local executables before `--run`.
+package-local executables before `--run`. When using the target registry
+variant, replace `tools/registry-probe` too; it intentionally exits non-zero
+until replaced.
 
 ## Confirm Install Parameters
 

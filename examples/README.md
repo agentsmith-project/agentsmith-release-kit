@@ -29,6 +29,10 @@ Available examples:
 - `airgap-use-existing/`: `airgap/use_existing`
 - `airgap-install-substrates/`: `airgap/install_substrates`
 
+The online examples also include optional
+`operator-inputs.target-registry.apply.example.json` variants for package-local
+read-only registry probes.
+
 After all four packages have been run with `--run` and AgentSmith
 product-side reports are available, use the final GA facade with the four
 package paths. Operators do not pass internal deployment path report files.

@@ -9,6 +9,7 @@ TARGET_PROFILE="existing_kubernetes/external_declared/online"
 KIT_ONLINE_TARGET_PROFILE="existing_kubernetes/kit_installed/online"
 AIRGAP_PROFILE="existing_kubernetes/external_declared/airgap"
 KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
+ONLINE_TARGET_REGISTRY="registry.release.example/agentsmith"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 mapfile -t RELEASE_IMAGE_IDS < <(
   "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
@@ -594,8 +595,8 @@ JSON
   fi
 
   if [[ "$get_target" == "pods" ]]; then
-    live_image="ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111"
-    live_image_id="docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    live_image="\${FAKE_KUBECTL_LIVE_IMAGE:-ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
+    live_image_id="\${FAKE_KUBECTL_LIVE_IMAGE_ID:-docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
     cat <<JSON
 {"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"$live_image","imageID":"$live_image_id"}],"containerStatuses":[{"name":"web","image":"$live_image","imageID":"$live_image_id"}]}}]}
 JSON
@@ -608,6 +609,25 @@ exit 2
 `
 );
 fs.chmodSync(fakeKubectl, 0o755);
+NODE
+}
+
+write_fake_registry_probe() {
+  local fake_probe="$1"
+
+  "$NODE_BIN" --input-type=module - "$fake_probe" <<'NODE'
+import fs from 'node:fs';
+
+const [fakeProbe] = process.argv.slice(2);
+fs.writeFileSync(
+  fakeProbe,
+  `#!/usr/bin/env bash
+set -euo pipefail
+target_digest="\${2:?target digest required}"
+printf '%s\\n' "$target_digest"
+`
+);
+fs.chmodSync(fakeProbe, 0o755);
 NODE
 }
 
@@ -812,6 +832,7 @@ prepare_online_package() {
   write_truth "$package_dir/substrate-truth.json" "$TARGET_PROFILE"
   write_prerequisites "$package_dir/target-prerequisites.json" "$TARGET_PROFILE"
   write_fake_kubectl "$package_dir/tools/kubectl"
+  write_fake_registry_probe "$package_dir/tools/registry-probe"
   write_online_operator_inputs "$package_dir" "$mode" "$smoke_path"
 }
 
@@ -835,6 +856,7 @@ prepare_online_install_package() {
   write_prerequisites "$package_dir/target-prerequisites.json" "$KIT_ONLINE_TARGET_PROFILE"
   write_substrate_install_materials "$package_dir" "$KIT_ONLINE_TARGET_PROFILE"
   write_fake_kubectl "$package_dir/tools/kubectl"
+  write_fake_registry_probe "$package_dir/tools/registry-probe"
   write_fake_routability_probe "$package_dir/tools/routability-probe"
 
   local install_parameters_sha256=""
@@ -993,6 +1015,10 @@ if (!mapping) {
 }
 console.log(mapping.target_image);
 NODE
+}
+
+online_target_registry_app_image() {
+  printf '%s\n' "$ONLINE_TARGET_REGISTRY/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 }
 
 write_fake_airgap_archive_probe() {
@@ -2347,8 +2373,17 @@ NODE
 run_operator_inputs() {
   local package_dir="$1"
   local label="$2"
-  FAKE_KUBECTL_LOG="$TMP_DIR/$label-kubectl.log" \
-    bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" --run
+  local live_image="${3:-}"
+
+  if [[ -n "$live_image" ]]; then
+    FAKE_KUBECTL_LOG="$TMP_DIR/$label-kubectl.log" \
+      FAKE_KUBECTL_LIVE_IMAGE="$live_image" \
+      FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$live_image" \
+      bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" --run
+  else
+    FAKE_KUBECTL_LOG="$TMP_DIR/$label-kubectl.log" \
+      bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" --run
+  fi
 }
 
 run_airgap_operator_inputs() {
@@ -2419,6 +2454,103 @@ fs.writeFileSync(installInputsPath, `${JSON.stringify(installInputs, null, 2)}\n
 NODE
 }
 
+enable_online_target_registry() {
+  local package_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$package_dir/operator-inputs.json" "$ONLINE_TARGET_REGISTRY" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath, targetRegistry] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+manifest.target_registry = targetRegistry;
+manifest.registry_probe = 'tools/registry-probe';
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+assert_online_target_registry_orchestration() {
+  local package_dir="$1"
+  local slug="$2"
+  local expected_gate_steps="$3"
+  local expected_plan_steps="$4"
+
+  "$NODE_BIN" --input-type=module - \
+    "$package_dir/.release-kit-internal/operator-inputs-plan.json" \
+    "$package_dir/.release-kit-internal/$slug/online-deployment-gate/online-deployment-gate-report.json" \
+    "$package_dir/.release-kit-internal/$slug/deployment-path/deployment-path-report.json" \
+    "$package_dir/.release-kit-internal/$slug/deployment-path/deployment-path-finalizer-manifest.json" \
+    "$expected_gate_steps" \
+    "$expected_plan_steps" \
+    "$ONLINE_TARGET_REGISTRY" <<'NODE'
+import fs from 'node:fs';
+
+const [
+  planFile,
+  gateReportFile,
+  pathReportFile,
+  finalizerManifestFile,
+  expectedGateSteps,
+  expectedPlanSteps,
+  targetRegistry
+] = process.argv.slice(2);
+
+const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
+const gateReport = JSON.parse(fs.readFileSync(gateReportFile, 'utf8'));
+const pathReport = JSON.parse(fs.readFileSync(pathReportFile, 'utf8'));
+const finalizerManifest = JSON.parse(fs.readFileSync(finalizerManifestFile, 'utf8'));
+const planStepNames = (plan.producer_argv || []).map((step) => step.name).join(',');
+const gateStepNames = (gateReport.steps || []).map((step) => step.name).join(',');
+const pathStepNames = (pathReport.steps || []).map((step) => step.name).join(',');
+
+if (planStepNames !== expectedPlanSteps) {
+  throw new Error(`unexpected producer argv steps: ${planStepNames}`);
+}
+if (gateStepNames !== expectedGateSteps) {
+  throw new Error(`unexpected online gate steps: ${gateStepNames}`);
+}
+if (pathStepNames.includes('image-map') || pathStepNames.includes('registry-presence')) {
+  throw new Error('deployment path finalizer must not promote online registry diagnostics in this slice');
+}
+if (gateReport.formal_verdict !== undefined || pathReport.formal_verdict !== undefined) {
+  throw new Error('target_registry orchestration must not issue a separate operator verdict');
+}
+if (plan._internal?.expected?.target_registry !== targetRegistry) {
+  throw new Error('plan expected target_registry must bind operator-inputs target_registry');
+}
+
+const onlineStep = (plan.producer_argv || []).find((step) => step.name === 'online-deployment-gate');
+if (!onlineStep) {
+  throw new Error('plan must include online-deployment-gate producer');
+}
+const argv = onlineStep.argv || [];
+const targetIndex = argv.indexOf('--target-registry');
+if (targetIndex === -1 || argv[targetIndex + 1] !== targetRegistry) {
+  throw new Error('online gate producer argv must include --target-registry');
+}
+const probeIndex = argv.indexOf('--registry-probe');
+const probeRef = plan.input_refs?.registry_probe;
+if (!probeRef || probeRef.kind !== 'file' || !/^sha256:[0-9a-f]{64}$/.test(probeRef.sha256 || '')) {
+  throw new Error('plan must bind registry_probe as a digest-bound file ref');
+}
+if (probeIndex === -1 || argv[probeIndex + 1] !== probeRef.absolute_path) {
+  throw new Error('online gate producer argv must include digest-bound --registry-probe');
+}
+const installStep = (plan.producer_argv || []).find((step) => step.name === 'substrate-install');
+if (installStep && ((installStep.argv || []).includes('--target-registry') || (installStep.argv || []).includes('--registry-probe'))) {
+  throw new Error('substrate-install producer must not receive registry target/probe args');
+}
+const sourceEvidencePaths = new Set((finalizerManifest.source_evidence_files || []).map((entry) => entry.path));
+for (const forbidden of [
+  'source-evidence/image-map-report.json',
+  'source-evidence/registry-presence-report.json'
+]) {
+  if (sourceEvidencePaths.has(forbidden)) {
+    throw new Error(`${forbidden} must remain inside online gate evidence for this slice`);
+  }
+}
+NODE
+}
+
 if [[ "${AGENTSMITH_OPERATOR_INPUTS_ORCHESTRATION_LIB_ONLY:-}" == "1" ]]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -2434,6 +2566,24 @@ run_operator_inputs "$positive_package" positive >"$TMP_DIR/positive.out" 2>"$TM
 assert_path_evidence "$positive_package"
 pass "operator-inputs --run executes online/use_existing apply with operator-facing substrate truth and prerequisites"
 
+positive_target_registry_package="$TMP_DIR/positive-online-target-registry"
+prepare_online_package "$positive_target_registry_package" apply /ok
+make_operator_facing_substrate_truth "$positive_target_registry_package"
+make_operator_facing_target_prerequisites "$positive_target_registry_package"
+enable_online_target_registry "$positive_target_registry_package"
+write_stale_finalizer "$positive_target_registry_package"
+run_operator_inputs \
+  "$positive_target_registry_package" \
+  positive-target-registry \
+  "$(online_target_registry_app_image)" >"$TMP_DIR/positive-target-registry.out" 2>"$TMP_DIR/positive-target-registry.err"
+assert_path_evidence "$positive_target_registry_package"
+assert_online_target_registry_orchestration \
+  "$positive_target_registry_package" \
+  online-use-existing \
+  "inputs,target-preflight,template-package,image-map,registry-presence,render,render-check,apply,rollout,smoke" \
+  "online-deployment-gate"
+pass "operator-inputs --run forwards target_registry apply to online/use_existing gate without a separate registry verdict"
+
 positive_install_package="$TMP_DIR/positive-online-install"
 prepare_online_install_package "$positive_install_package" apply /ok
 make_operator_facing_target_prerequisites "$positive_install_package"
@@ -2442,6 +2592,24 @@ write_stale_finalizer "$positive_install_package" online-install-substrates
 run_operator_inputs "$positive_install_package" positive-install >"$TMP_DIR/positive-install.out" 2>"$TMP_DIR/positive-install.err"
 assert_install_path_evidence "$positive_install_package"
 pass "operator-inputs --run executes online/install_substrates apply with operator-facing prerequisites and install inputs"
+
+positive_install_target_registry_package="$TMP_DIR/positive-online-install-target-registry"
+prepare_online_install_package "$positive_install_target_registry_package" apply /ok
+make_operator_facing_target_prerequisites "$positive_install_target_registry_package"
+make_operator_facing_install_inputs "$positive_install_target_registry_package"
+enable_online_target_registry "$positive_install_target_registry_package"
+write_stale_finalizer "$positive_install_target_registry_package" online-install-substrates
+run_operator_inputs \
+  "$positive_install_target_registry_package" \
+  positive-install-target-registry \
+  "$(online_target_registry_app_image)" >"$TMP_DIR/positive-install-target-registry.out" 2>"$TMP_DIR/positive-install-target-registry.err"
+assert_install_path_evidence "$positive_install_target_registry_package"
+assert_online_target_registry_orchestration \
+  "$positive_install_target_registry_package" \
+  online-install-substrates \
+  "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,image-map,registry-presence,render,render-check,apply,rollout,smoke" \
+  "substrate-install,online-deployment-gate"
+pass "operator-inputs --run forwards target_registry apply to online/install_substrates gate without expanding substrate-install"
 
 positive_airgap_package="$TMP_DIR/positive-airgap"
 prepare_airgap_package "$positive_airgap_package" apply /ok

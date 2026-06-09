@@ -19,7 +19,10 @@ const IMAGE_MAP_SCHEMA = 'agentsmith.image-map/v1';
 const IMAGE_MAP_SCOPE = 'image_map_only';
 const REPORT_SCHEMA = 'agentsmith.registry-presence/v1';
 const REPORT_SCOPE = 'registry_presence_only';
-const SUPPORTED_TARGET_PROFILE = 'existing_kubernetes/external_declared/online';
+const SUPPORTED_TARGET_PROFILES = new Set([
+  'existing_kubernetes/external_declared/online',
+  'existing_kubernetes/kit_installed/online'
+]);
 const PROBE_TIMEOUT_MS = 5000;
 const IMAGE_ARRAY_SOURCES = [
   'product_images',
@@ -234,8 +237,8 @@ function parseTargetProfile(value) {
 
   const [targetCluster, substrateSource, distribution] = tuple;
   const normalized = `${targetCluster}/${substrateSource}/${distribution}`;
-  if (normalized !== SUPPORTED_TARGET_PROFILE) {
-    fail(`--registry-presence only accepts ${SUPPORTED_TARGET_PROFILE}`);
+  if (!SUPPORTED_TARGET_PROFILES.has(normalized)) {
+    fail(`--registry-presence only accepts ${[...SUPPORTED_TARGET_PROFILES].join(' or ')}`);
   }
 
   return {

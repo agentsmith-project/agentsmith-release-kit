@@ -708,6 +708,30 @@ switch (caseName) {
   case 'registry_probe':
     manifest.registry_probe = 'tools/registry-probe';
     break;
+  case 'target_registry':
+    manifest.target_registry = 'registry.release.example/agentsmith';
+    break;
+  case 'target_registry_apply_without_probe':
+    manifest.mode = 'apply';
+    manifest.deploy_confirmation = {
+      confirmed: true,
+      operator_run_id: 'operator-inputs-deploy-1002'
+    };
+    manifest.target_registry = 'registry.release.example/agentsmith';
+    break;
+  case 'target_registry_server_dry_run_with_probe':
+    manifest.target_registry = 'registry.release.example/agentsmith';
+    manifest.registry_probe = 'tools/registry-probe';
+    break;
+  case 'target_registry_apply_with_probe':
+    manifest.mode = 'apply';
+    manifest.deploy_confirmation = {
+      confirmed: true,
+      operator_run_id: 'operator-inputs-deploy-1002'
+    };
+    manifest.target_registry = 'registry.release.example/agentsmith';
+    manifest.registry_probe = 'tools/registry-probe';
+    break;
   case 'smoke_endpoint':
     manifest.smoke_endpoint = '/healthz';
     break;
@@ -760,6 +784,7 @@ const existingArgPathFlags = new Set([
   '--bundle-root',
   '--bundle-manifest',
   '--kubectl',
+  '--registry-probe',
   '--routability-probe',
   '--archive-probe',
   '--image-loader'
@@ -903,6 +928,7 @@ if (installsSubstrates) {
 }
 for (const key of [
   'kubectl',
+  'registry_probe',
   'routability_probe',
   'archive_probe',
   'image_loader'
@@ -1213,6 +1239,48 @@ assert_no_path_evidence() {
     fail "unexpected deployment-path-finalizer-manifest.json remained for $package_dir"
   [[ ! -e "$path_dir/source-evidence" ]] ||
     fail "unexpected source-evidence remained for $package_dir"
+}
+
+assert_target_registry_plan() {
+  local plan_path="$1"
+  local expect_probe="$2"
+
+"$NODE_BIN" --input-type=module - "$plan_path" "$expect_probe" <<'NODE'
+import fs from 'node:fs';
+
+const [planPath, expectProbe] = process.argv.slice(2);
+const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+const gateStep = (plan.producer_argv || []).find((step) => step.name === 'online-deployment-gate');
+if (!gateStep) {
+  throw new Error('target_registry plan must include online-deployment-gate producer');
+}
+const argv = gateStep.argv || [];
+const targetIndex = argv.indexOf('--target-registry');
+if (targetIndex === -1 || argv[targetIndex + 1] !== 'registry.release.example/agentsmith') {
+  throw new Error('online gate argv must bind target_registry');
+}
+if (plan._internal?.expected?.target_registry !== 'registry.release.example/agentsmith') {
+  throw new Error('plan expected target_registry must bind operator-inputs target_registry');
+}
+
+const probeIndex = argv.indexOf('--registry-probe');
+if (expectProbe === 'yes') {
+  const ref = plan.input_refs?.registry_probe;
+  if (!ref || ref.kind !== 'file' || !/^sha256:[0-9a-f]{64}$/.test(ref.sha256 || '')) {
+    throw new Error('target_registry apply plan must digest-bind registry_probe');
+  }
+  if (probeIndex === -1 || argv[probeIndex + 1] !== ref.absolute_path) {
+    throw new Error('online gate argv must bind registry_probe input ref');
+  }
+} else {
+  if (plan.input_refs?.registry_probe) {
+    throw new Error('target_registry server-dry-run plan must not bind registry_probe');
+  }
+  if (probeIndex !== -1) {
+    throw new Error('target_registry server-dry-run online gate argv must not include registry_probe');
+  }
+}
+NODE
 }
 
 remove_manifest_fields() {
@@ -1619,8 +1687,38 @@ expect_fail_matching online_use_existing_missing_substrate_truth 'missing requir
 registry_probe_dir="$TMP_DIR/invalid-registry-probe"
 copy_valid_package "$base_online" "$registry_probe_dir"
 mutate_manifest "$registry_probe_dir" registry_probe
-expect_fail_matching registry_probe 'registry_probe is not supported.*target_registry is not modeled' \
+expect_fail_matching registry_probe_without_target_registry 'registry_probe requires target_registry' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$registry_probe_dir"
+
+target_registry_apply_without_probe_dir="$TMP_DIR/invalid-target-registry-apply-without-probe"
+copy_valid_package "$base_online" "$target_registry_apply_without_probe_dir"
+mutate_manifest "$target_registry_apply_without_probe_dir" target_registry_apply_without_probe
+expect_fail_matching target_registry_apply_without_registry_probe 'target_registry requires registry_probe with mode apply' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$target_registry_apply_without_probe_dir"
+
+target_registry_server_dry_run_probe_dir="$TMP_DIR/invalid-target-registry-server-dry-run-probe"
+copy_valid_package "$base_online" "$target_registry_server_dry_run_probe_dir"
+mutate_manifest "$target_registry_server_dry_run_probe_dir" target_registry_server_dry_run_with_probe
+expect_fail_matching target_registry_server_dry_run_with_registry_probe 'registry_probe is only accepted with mode apply' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$target_registry_server_dry_run_probe_dir"
+
+target_registry_server_dry_run_dir="$TMP_DIR/valid-target-registry-server-dry-run"
+copy_valid_package "$base_online" "$target_registry_server_dry_run_dir"
+mutate_manifest "$target_registry_server_dry_run_dir" target_registry
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$target_registry_server_dry_run_dir" >/dev/null
+assert_plan "$target_registry_server_dry_run_dir/.release-kit-internal/operator-inputs-plan.json" online/use_existing
+assert_target_registry_plan "$target_registry_server_dry_run_dir/.release-kit-internal/operator-inputs-plan.json" no
+pass "resolve-operator-inputs accepts target_registry server-dry-run without registry_probe"
+
+target_registry_apply_dir="$TMP_DIR/valid-target-registry-apply"
+copy_valid_package "$base_online" "$target_registry_apply_dir"
+mutate_manifest "$target_registry_apply_dir" target_registry_apply_with_probe
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$target_registry_apply_dir" >/dev/null
+assert_plan "$target_registry_apply_dir/.release-kit-internal/operator-inputs-plan.json" online/use_existing
+assert_target_registry_plan "$target_registry_apply_dir/.release-kit-internal/operator-inputs-plan.json" yes
+pass "resolve-operator-inputs accepts target_registry apply with digest-bound registry_probe"
 
 manifest_symlink_dir="$TMP_DIR/invalid-manifest-symlink"
 copy_valid_package "$base_online" "$manifest_symlink_dir"

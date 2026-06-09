@@ -16,11 +16,15 @@ bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir>
 
 - `operator-inputs.apply.example.json`: package manifest for
   `online/use_existing` apply.
+- `operator-inputs.target-registry.apply.example.json`: apply manifest variant
+  that enables the target registry check.
 - `render-values.example.json`: namespace and replica values consumed by the
   deploy template package.
 - `substrate-truth.example.json`: external substrate connection truth.
 - `target-prerequisites.example.json`: namespace, RBAC, ingress, registry pull
   secret, storage, and matching substrate secret refs.
+- `tools/registry-probe`: placeholder package-local read-only probe for the
+  target registry variant.
 
 The example truth and prerequisite files are already bound to
 `online/use_existing`. Keep `deployment_path` set to `online/use_existing`.
@@ -52,6 +56,20 @@ cp "$DEPLOY_TEMPLATE_PACKAGE" "$PKG/deploy-template-package.json"
 cp "$DEPLOY_TEMPLATE_ARCHIVE" "$PKG/deploy-template-package.tgz"
 ```
 
+For the target registry variant, run this after the block above to swap the
+manifest and include the probe placeholder:
+
+```bash
+cp "$EXAMPLE_DIR/operator-inputs.target-registry.apply.example.json" "$PKG/operator-inputs.json"
+mkdir -p "$PKG/tools"
+cp "$EXAMPLE_DIR/tools/registry-probe" "$PKG/tools/registry-probe"
+```
+
+The target registry must already contain digest refs for the release images.
+`registry_probe` is a package-local read-only executable invoked as
+`tools/registry-probe <target-image> <expected-digest>`; stdout must be exactly
+the matching `sha256:<64>` digest.
+
 `operator-inputs.json` uses package-relative refs. Real release artifacts must
 be copied into the package, or the manifest refs must point to files inside the
 same package.
@@ -60,6 +78,9 @@ Edit `"$PKG/operator-inputs.json"` before apply:
 
 - Keep `deployment_path` as `online/use_existing`.
 - Set `deploy_confirmation.operator_run_id` to the real operator run id.
+- When using the target registry variant, replace the placeholder
+  `tools/registry-probe` before `--run`; it intentionally exits non-zero until
+  replaced.
 - Optional route smoke can add `smoke_url`, `expected_status`, `timeout`, and
   `timeout_ms`; keep them omitted when route smoke is not in scope.
 

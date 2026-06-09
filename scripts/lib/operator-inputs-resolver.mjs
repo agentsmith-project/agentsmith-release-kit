@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { validateSubstrateInstallInputs } from './substrate-install-input-validation.mjs';
 import { resolveSubstrateInstallParameters } from './substrate-install-parameters.mjs';
+import { validateTargetRegistry as validateTargetRegistryValue } from './image-map-validation.mjs';
 import { validateSubstratePackManifest } from './substrate-pack-manifest-validation.mjs';
 import {
   assertNoUnsafeSubstratePayload,
@@ -55,6 +56,7 @@ const TOP_LEVEL_FIELDS = new Set([
   'render_values',
   'substrate_truth',
   'target_prerequisites',
+  'target_registry',
   'namespace',
   'airgap_bundle',
   'airgap_bundle_manifest',
@@ -100,6 +102,7 @@ const BOOLEAN_FIELDS = new Set(['allow_http', 'allow_localhost']);
 const STRING_FIELDS = new Set([
   'schema_version',
   'deployment_path',
+  'target_registry',
   'namespace',
   'mode',
   'context',
@@ -811,9 +814,31 @@ function validateSmokeRuntimeFields(manifest, mode) {
   }
 }
 
-function validateUnsupportedInputs(manifest) {
-  if (Object.hasOwn(manifest, 'registry_probe')) {
-    fail('registry_probe is not supported by operator-inputs intake because target_registry is not modeled; omit registry_probe');
+function validateRegistryInputs({ manifest, config, mode }) {
+  const hasTargetRegistry = Object.hasOwn(manifest, 'target_registry');
+  const hasRegistryProbe = Object.hasOwn(manifest, 'registry_probe');
+
+  if (hasRegistryProbe && !hasTargetRegistry) {
+    fail('registry_probe requires target_registry');
+  }
+  if (!hasTargetRegistry) {
+    return;
+  }
+  if (config.producer !== 'online') {
+    fail('target_registry is accepted only for online deployment_path');
+  }
+
+  try {
+    validateTargetRegistryValue(manifest.target_registry, 'target_registry');
+  } catch (error) {
+    fail(error.message);
+  }
+
+  if (hasRegistryProbe && mode !== 'apply') {
+    fail('registry_probe is only accepted with mode apply');
+  }
+  if (mode === 'apply' && !hasRegistryProbe) {
+    fail('target_registry requires registry_probe with mode apply');
   }
 }
 
@@ -914,10 +939,17 @@ function validateConfirmations({ manifest, config, mode }) {
   }
 }
 
-function requiredInputsFor({ config, mode }) {
+function requiredInputsFor({ manifest, config, mode }) {
   const requiredCommands = [...config.requiredCommands];
   if (config.producer === 'airgap' && mode === 'apply') {
     requiredCommands.push('archive_probe', 'image_loader');
+  }
+  if (
+    config.producer === 'online' &&
+    mode === 'apply' &&
+    Object.hasOwn(manifest, 'target_registry')
+  ) {
+    requiredCommands.push('registry_probe');
   }
   return {
     files: config.requiredFiles,
@@ -928,7 +960,7 @@ function requiredInputsFor({ config, mode }) {
 }
 
 function collectMissingRequiredInputs({ manifest, config, mode }) {
-  const requiredInputs = requiredInputsFor({ config, mode });
+  const requiredInputs = requiredInputsFor({ manifest, config, mode });
   const missing = [];
   for (const key of [
     ...requiredInputs.files,
@@ -1927,6 +1959,7 @@ function buildInternalExpected({ manifest, config, outputRoot, mode, installPara
     schema_version: INTERNAL_EXPECTED_SCHEMA,
     deployment_path: manifest.deployment_path,
     target_profile: config.targetProfile,
+    target_registry: Object.hasOwn(manifest, 'target_registry') ? manifest.target_registry : null,
     namespace: manifest.namespace,
     context: Object.hasOwn(manifest, 'context') ? manifest.context : null,
     mode,
@@ -2031,6 +2064,10 @@ function addCommonDeploymentArgs({
   );
   addOptional(argv, '--context', manifest.context);
   addOptional(argv, '--kubectl', refPath(refs, 'kubectl'));
+  addOptional(argv, '--target-registry', manifest.target_registry);
+  if (mode === 'apply' && Object.hasOwn(manifest, 'target_registry')) {
+    argv.push('--registry-probe', refPath(refs, 'registry_probe'));
+  }
   addApplyRuntimeArgs({ argv, refs, manifest, targetProfile, mode });
 }
 
@@ -2291,8 +2328,8 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
   const mode = validateSchemaAndPath(manifest);
   validateSmokeRuntimeFields(manifest, mode);
   validateSmokeUrlField(manifest);
-  validateUnsupportedInputs(manifest);
   const config = DEPLOYMENT_PATH_CONFIG.get(manifest.deployment_path);
+  validateRegistryInputs({ manifest, config, mode });
   validatePathSpecificUnsupportedInputs({ manifest, config });
   const requiredInputs = requireFields({ manifest, config, mode });
   validateConfirmations({ manifest, config, mode });
@@ -2390,8 +2427,8 @@ export async function diagnoseOperatorInputs({ inputPath } = {}) {
   const mode = validateSchemaAndPath(manifest);
   validateSmokeRuntimeFields(manifest, mode);
   validateSmokeUrlField(manifest);
-  validateUnsupportedInputs(manifest);
   const config = DEPLOYMENT_PATH_CONFIG.get(manifest.deployment_path);
+  validateRegistryInputs({ manifest, config, mode });
   validatePathSpecificUnsupportedInputs({ manifest, config });
   const { requiredInputs, missing } = collectMissingRequiredInputs({ manifest, config, mode });
   const missingRefs = await collectMissingRequiredRefs({

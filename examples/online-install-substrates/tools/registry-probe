@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+set -eu
+echo "replace tools/registry-probe with an operator-approved read-only registry probe" >&2
+echo "usage: tools/registry-probe <target-image> <expected-sha256-digest>" >&2
+exit 2

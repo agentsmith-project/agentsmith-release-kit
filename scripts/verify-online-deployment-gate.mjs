@@ -423,12 +423,6 @@ function validateArgs(args) {
   }
 
   if (isKitOnline(args)) {
-    if (args.targetRegistry) {
-      cliFail('--target-registry is not supported for existing_kubernetes/kit_installed/online');
-    }
-    if (args.registryProbe) {
-      cliFail('--registry-probe is not supported for existing_kubernetes/kit_installed/online');
-    }
     if (!args.substratePackManifest) {
       cliFail('--target-profile existing_kubernetes/kit_installed/online requires --substrate-pack-manifest <json>');
     }

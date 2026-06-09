@@ -439,7 +439,7 @@ expect_fail \
   "$valid_image_map" \
   "$UNSUPPORTED_PROFILE" \
   "$pass_probe" \
-  "--registry-presence only accepts $TARGET_PROFILE"
+  "image_map.target_profile must match CLI target_profile"
 
 stale_contract="$TMP_DIR/contract-stale-required.json"
 stale_image_map="$TMP_DIR/image-map-stale-required.json"

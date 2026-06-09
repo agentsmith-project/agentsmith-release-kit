@@ -105,7 +105,8 @@ const SUPPORTED_INPUT_REFS = new Set([
   ...USE_EXISTING_INPUT_REFS,
   ...INSTALL_INPUT_REFS,
   ...AIRGAP_USE_EXISTING_INPUT_REFS,
-  'kubectl'
+  'kubectl',
+  'registry_probe'
 ]);
 const ONLINE_GATE_REQUIRED_VALUE_FLAGS = new Set([
   '--release-contract',
@@ -129,7 +130,9 @@ const ONLINE_GATE_OPTIONAL_VALUE_FLAGS = new Set([
   '--expected-status',
   '--timeout-ms',
   '--substrate-pack-manifest',
-  '--routability-probe'
+  '--routability-probe',
+  '--target-registry',
+  '--registry-probe'
 ]);
 const ONLINE_GATE_BOOLEAN_FLAGS = new Set(['--allow-http', '--allow-localhost']);
 const SUBSTRATE_INSTALL_REQUIRED_VALUE_FLAGS = new Set([
@@ -703,7 +706,7 @@ function isAirgapInstallSubstratesPath(deploymentPath) {
   return deploymentPath === AIRGAP_INSTALL_SUBSTRATES_PATH;
 }
 
-function inputRefsForDeploymentPath(deploymentPath, mode) {
+function inputRefsForDeploymentPath(deploymentPath, mode, operatorManifest = {}) {
   const required = isInstallSubstratesPath(deploymentPath)
     ? [...COMMON_INPUT_REFS]
     : [...USE_EXISTING_INPUT_REFS];
@@ -723,6 +726,13 @@ function inputRefsForDeploymentPath(deploymentPath, mode) {
     }
   } else {
     optional.push('kubectl');
+  }
+  if (
+    (deploymentPath === ONLINE_USE_EXISTING_PATH || deploymentPath === ONLINE_INSTALL_SUBSTRATES_PATH) &&
+    mode === SUPPORTED_MODE &&
+    Object.hasOwn(operatorManifest, 'target_registry')
+  ) {
+    required.push('registry_probe');
   }
   return {
     required,
@@ -1241,7 +1251,11 @@ async function validatePackageRefs(plan, operatorInputsRoot) {
     typeof operatorManifest.mode === 'string' ? operatorManifest.mode : 'server-dry-run';
 
   const refs = requireObject(plan.input_refs, 'plan.input_refs');
-  const expectedRefs = inputRefsForDeploymentPath(manifestDeploymentPath, manifestMode);
+  const expectedRefs = inputRefsForDeploymentPath(
+    manifestDeploymentPath,
+    manifestMode,
+    operatorManifest
+  );
   for (const key of Object.keys(refs)) {
     if (!SUPPORTED_INPUT_REFS.has(key)) {
       fail(`operator-inputs --run does not support input ref: ${key}`);
@@ -1492,6 +1506,10 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
   const smoke = requireObject(expected.smoke, 'plan._internal.expected.smoke');
   const namespace = requireString(expected.namespace, 'plan._internal.expected.namespace');
   const context = optionalExpectedString(expected.context, 'plan._internal.expected.context');
+  const targetRegistry = optionalExpectedString(
+    expected.target_registry,
+    'plan._internal.expected.target_registry'
+  );
   const operatorRunId = requireString(
     expected.operator_run_id,
     'plan._internal.expected.operator_run_id'
@@ -1564,6 +1582,14 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
   if (manifestContext !== context) {
     fail('plan._internal.expected.context must match operator-inputs manifest');
   }
+  const manifestTargetRegistry = optionalManifestString(
+    operatorManifest,
+    'target_registry',
+    'operator-inputs manifest.target_registry'
+  );
+  if (manifestTargetRegistry !== targetRegistry) {
+    fail('plan._internal.expected.target_registry must match operator-inputs manifest');
+  }
   const deployConfirmation = requireObject(
     operatorManifest.deploy_confirmation,
     'operator-inputs manifest.deploy_confirmation'
@@ -1616,6 +1642,7 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
     mode: expected.mode,
     namespace,
     context,
+    targetRegistry,
     operatorRunId,
     install: expectedInstall,
     generatedRefs: {
@@ -1825,6 +1852,13 @@ function validateOnlineDeploymentGateStep(step, refs, expected) {
   assertBoundValue(parsed, '--operator-run-id', expected.operatorRunId, step.name);
   assertOptionalBoundValue(parsed, '--context', expected.context, step.name);
   assertOptionalBoundValue(parsed, '--kubectl', refs.kubectl?.absolute_path, step.name);
+  assertOptionalBoundValue(parsed, '--target-registry', expected.targetRegistry, step.name);
+  assertOptionalBoundValue(
+    parsed,
+    '--registry-probe',
+    expected.targetRegistry ? refs.registry_probe?.absolute_path : undefined,
+    step.name
+  );
   assertOptionalBoundValue(parsed, '--timeout', expected.smoke.timeout, step.name);
   assertOptionalBoundValue(parsed, '--smoke-url', expected.smoke.smokeUrl, step.name);
   assertOptionalBoundValue(parsed, '--expected-status', expected.smoke.expectedStatus, step.name);

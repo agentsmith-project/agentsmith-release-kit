@@ -1,0 +1,28 @@
+{
+  "schema_version": "agentsmith.operator-inputs/v1",
+  "operator_inputs_version": 1,
+  "deployment_path": "online/install_substrates",
+  "release_contract": "release-contract.json",
+  "deploy_template_package": "deploy-template-package.json",
+  "deploy_template_archive": "deploy-template-package.tgz",
+  "render_values": "render-values.example.json",
+  "target_prerequisites": "target-prerequisites.example.json",
+  "target_registry": "registry.example.internal/agentsmith",
+  "substrate_pack_manifest": "substrate-pack-manifest.example.json",
+  "substrate_install_inputs": "substrate-install-inputs.example.json",
+  "namespace": "agentsmith",
+  "mode": "apply",
+  "context": "agentsmith-prod",
+  "kubectl": "tools/kubectl",
+  "registry_probe": "tools/registry-probe",
+  "routability_probe": "tools/routability-probe",
+  "install_confirmation": {
+    "confirmed": true,
+    "confirm_current_install_parameters": true,
+    "operator_run_id": "operator-install-20260523-001"
+  },
+  "deploy_confirmation": {
+    "confirmed": true,
+    "operator_run_id": "operator-deploy-20260523-001"
+  }
+}

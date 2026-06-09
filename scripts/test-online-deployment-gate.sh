@@ -1845,17 +1845,17 @@ kit_target_registry_output="$TMP_DIR/out-kit-online-target-registry"
 reset_kubectl_log
 reset_registry_probe_log
 reset_routability_probe_log
-if TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_target_registry_output" "$KIT_ONLINE_PROFILE" \
+TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_target_registry_output" "$KIT_ONLINE_PROFILE" \
   --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
   --routability-probe "$PASS_ROUTABILITY_PROBE" \
-  --target-registry "$target_registry" >"$TMP_DIR/kit-online-target-registry.out" 2>"$TMP_DIR/kit-online-target-registry.err"; then
-  fail "expected kit online with target-registry to fail"
-fi
-assert_kubectl_not_called
+  --target-registry "$target_registry" >/dev/null
 assert_registry_probe_not_called
-assert_no_gate_report "$kit_target_registry_output"
-[[ ! -e "$kit_target_registry_output/image-map/image-map.json" ]] || fail "kit target-registry must fail before image-map"
-pass "kit online rejects target-registry before registry presence or kubectl"
+assert_routability_probe_called 5
+[[ -f "$kit_target_registry_output/image-map/image-map.json" ]] || fail "kit target-registry dry-run must write image-map"
+[[ ! -e "$kit_target_registry_output/registry-presence/registry-presence-report.json" ]] || fail "kit target-registry dry-run must not write registry-presence report"
+assert_gate_report "$kit_target_registry_output/online-deployment-gate-report.json" server-dry-run "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,image-map,render,render-check,apply" "" "$KIT_ONLINE_PROFILE"
+assert_gate_rendered_target_registry "$kit_target_registry_output" "$target_registry"
+pass "kit online target-registry dry-run reuses image-map/render path without registry probe"
 
 kit_registry_probe_output="$TMP_DIR/out-kit-online-registry-probe"
 reset_kubectl_log
@@ -1875,6 +1875,34 @@ assert_no_gate_report "$kit_registry_probe_output"
 [[ ! -e "$kit_registry_probe_output/render/manifest-render-report.json" ]] || fail "kit registry probe must fail before render"
 [[ ! -e "$kit_registry_probe_output/apply/apply-report.json" ]] || fail "kit registry probe must fail before apply"
 pass "kit online rejects registry probe before probe/kubectl"
+
+kit_target_registry_apply_output="$TMP_DIR/out-kit-online-target-registry-apply"
+reset_kubectl_log
+reset_registry_probe_log
+reset_routability_probe_log
+before_kit_target_registry_apply="$(hit_count)"
+FAKE_KUBECTL_LIVE_IMAGE="$target_registry_app_image" \
+FAKE_KUBECTL_LIVE_IMAGE_ID="docker-pullable://$target_registry_app_image" \
+TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_KIT_TRUTH" "$kit_target_registry_apply_output" "$KIT_ONLINE_PROFILE" \
+  --mode apply \
+  --confirm-apply "$KIT_ONLINE_PROFILE" \
+  --operator-run-id operator-run-kit-online-target-registry \
+  --timeout 120s \
+  --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
+  --routability-probe "$PASS_ROUTABILITY_PROBE" \
+  --target-registry "$target_registry" \
+  --registry-probe "$PASS_REGISTRY_PROBE" \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost >/dev/null
+after_kit_target_registry_apply="$(hit_count)"
+[[ "$after_kit_target_registry_apply" -eq $((before_kit_target_registry_apply + 1)) ]] || fail "kit target-registry apply smoke should issue one request"
+assert_routability_probe_called 5
+assert_registry_probe_called "$RELEASE_IMAGE_COUNT"
+[[ -f "$kit_target_registry_apply_output/registry-presence/registry-presence-report.json" ]] || fail "kit target-registry apply must write registry-presence report"
+assert_gate_report "$kit_target_registry_apply_output/online-deployment-gate-report.json" apply "inputs,target-preflight,substrate-pack-check,template-package,substrate-routability,image-map,registry-presence,render,render-check,apply,rollout,smoke" operator-run-kit-online-target-registry "$KIT_ONLINE_PROFILE"
+assert_gate_rendered_target_registry "$kit_target_registry_apply_output" "$target_registry"
+pass "kit online target-registry apply reuses image-map, registry-presence, render, and rollout adoption path"
 
 kit_evidence_root="$TMP_DIR/evidence-kit-online"
 kit_evidence_output="$TMP_DIR/out-kit-online-evidence"

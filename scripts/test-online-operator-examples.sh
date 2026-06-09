@@ -210,11 +210,22 @@ NODE
 assert_operator_inputs_plan() {
   local plan_file="$1"
   local expected_path="$2"
+  local expected_target_registry="${3:-}"
+  local expected_registry_probe_path="${4:-}"
 
-  "$NODE_BIN" --input-type=module - "$plan_file" "$expected_path" <<'NODE'
+  "$NODE_BIN" --input-type=module - \
+    "$plan_file" \
+    "$expected_path" \
+    "$expected_target_registry" \
+    "$expected_registry_probe_path" <<'NODE'
 import fs from 'node:fs';
 
-const [planFile, expectedPath] = process.argv.slice(2);
+const [
+  planFile,
+  expectedPath,
+  expectedTargetRegistry,
+  expectedRegistryProbePath
+] = process.argv.slice(2);
 const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
 
 if (plan.schema_version !== 'agentsmith.operator-inputs-plan/v1') {
@@ -232,6 +243,29 @@ if (plan.deployment_path !== expectedPath) {
 if ('formal_verdict' in plan || 'readiness' in plan) {
   throw new Error('operator-inputs validation plan must not issue readiness or verdict');
 }
+const actualTargetRegistry = plan._internal?.expected?.target_registry ?? null;
+if (expectedTargetRegistry) {
+  if (actualTargetRegistry !== expectedTargetRegistry) {
+    throw new Error(`unexpected target registry: ${actualTargetRegistry}`);
+  }
+  const registryProbeRef = plan.input_refs?.registry_probe;
+  if (!registryProbeRef || registryProbeRef.kind !== 'file') {
+    throw new Error('target registry plan must digest-bind registry_probe');
+  }
+  if (registryProbeRef.path !== expectedRegistryProbePath) {
+    throw new Error(`unexpected registry_probe path: ${registryProbeRef.path}`);
+  }
+  if (!/^sha256:[0-9a-f]{64}$/.test(registryProbeRef.sha256 || '')) {
+    throw new Error('target registry plan must include registry_probe sha256');
+  }
+} else {
+  if (actualTargetRegistry !== null) {
+    throw new Error(`unexpected target registry: ${actualTargetRegistry}`);
+  }
+  if (plan.input_refs?.registry_probe) {
+    throw new Error('registry_probe must be omitted when target_registry is omitted');
+  }
+}
 NODE
 }
 
@@ -239,10 +273,11 @@ stage_operator_example() {
   local example_dir="$1"
   local package_dir="$2"
   local deployment_path="$3"
+  local manifest_file="${4:-operator-inputs.apply.example.json}"
 
   mkdir -p "$package_dir"
   cp -R "$example_dir/." "$package_dir/"
-  cp "$package_dir/operator-inputs.apply.example.json" "$package_dir/operator-inputs.json"
+  cp "$package_dir/$manifest_file" "$package_dir/operator-inputs.json"
 
   case "$deployment_path" in
     online/*)
@@ -271,13 +306,18 @@ validate_operator_example_package() {
   local package_dir="$2"
   local deployment_path="$3"
   local label="$4"
+  local manifest_file="${5:-operator-inputs.apply.example.json}"
+  local expected_target_registry="${6:-}"
+  local expected_registry_probe_path="${7:-}"
 
-  stage_operator_example "$example_dir" "$package_dir" "$deployment_path"
+  stage_operator_example "$example_dir" "$package_dir" "$deployment_path" "$manifest_file"
   bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$package_dir" \
     >"$TMP_DIR/$label.operator-inputs.out"
   assert_operator_inputs_plan \
     "$package_dir/.release-kit-internal/operator-inputs-plan.json" \
-    "$deployment_path"
+    "$deployment_path" \
+    "$expected_target_registry" \
+    "$expected_registry_probe_path"
   pass "operator-inputs validation accepts $label example package"
 }
 
@@ -563,10 +603,26 @@ validate_operator_example_package \
   online/use_existing \
   online-use-existing
 validate_operator_example_package \
+  "$EXAMPLE_DIR" \
+  "$TMP_DIR/example-online-use-existing-target-registry" \
+  online/use_existing \
+  online-use-existing-target-registry \
+  operator-inputs.target-registry.apply.example.json \
+  registry.example.internal/agentsmith \
+  tools/registry-probe
+validate_operator_example_package \
   "$EXAMPLE_ONLINE_INSTALL_DIR" \
   "$TMP_DIR/example-online-install-substrates" \
   online/install_substrates \
   online-install-substrates
+validate_operator_example_package \
+  "$EXAMPLE_ONLINE_INSTALL_DIR" \
+  "$TMP_DIR/example-online-install-substrates-target-registry" \
+  online/install_substrates \
+  online-install-substrates-target-registry \
+  operator-inputs.target-registry.apply.example.json \
+  registry.example.internal/agentsmith \
+  tools/registry-probe
 validate_operator_example_package \
   "$EXAMPLE_AIRGAP_USE_EXISTING_DIR" \
   "$TMP_DIR/example-airgap-use-existing" \
