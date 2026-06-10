@@ -477,6 +477,7 @@ pass "scope and non-goals"
 
 require_text docs/RELEASE_GATES.md "The quick gate is not release readiness"
 require_text docs/RELEASE_GATES.md "Deployment Path Report Finalization Focused Diagnostic"
+require_text docs/RELEASE_GATES.md "Release Engineering Gate Intake Retirement Guard"
 require_text docs/RELEASE_GATES.md "The GA release aggregate gate is the repo-local final verdict authority"
 require_text docs/RELEASE_GATES.md "consumes finalized deployment path reports"
 require_text docs/RELEASE_GATES.md '`ga-evidence-index.json` outputs'
@@ -487,6 +488,9 @@ require_text docs/contracts/README.md 'generated_at` matches the source report t
 require_text scripts/verify-release.sh "--ga-release is the release-kit final GA aggregate"
 require_text scripts/verify-release.sh "formal_verdict=issued"
 require_text scripts/verify-release.sh "does not rerun producers"
+require_text scripts/verify-release.sh "--release-engineering-gate-intake is retired"
+require_text scripts/verify-release-engineering-gate-intake.mjs "Retired compatibility guard"
+require_text scripts/verify-release-engineering-gate-intake.mjs "does not write"
 require_text scripts/verify-release.sh "--operator-signoff-intake is maintainer-only for explicit GA or compliance trigger work"
 if bash scripts/verify-release.sh >/dev/null 2>&1; then
   fail "verify-release.sh without an explicit mode must fail"

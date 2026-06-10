@@ -1133,7 +1133,7 @@ claims. This is repo-local focused candidate preparation only, not a deploy
 capability, provider matrix, cloud provisioning flow, operator signoff, full
 release gate, or AgentSmith `release:ready` input.
 
-## Release Engineering Gate Intake Focused Diagnostic
+## Release Engineering Gate Intake Retirement Guard
 
 Run:
 
@@ -1141,31 +1141,20 @@ Run:
 bash scripts/test-release-engineering-gate-intake.sh
 ```
 
-This focused guard exercises `bash scripts/verify-release.sh
---release-engineering-gate-intake`. It is a maintainer-only repo-local
-candidate intake boundary for explicit GA or compliance trigger work. It
-consumes the existing focused `online-adoption-report.json` plus two existing
-focused `airgap-adoption-report.json` files for `airgap/use_existing` and
-internal `airgap/kit_provided`; it does not consume producer reports directly.
+This guard verifies that `bash scripts/verify-release.sh
+--release-engineering-gate-intake` is retired. The command remains only as a
+compatibility guard: `--help` explains the retirement and ordinary invocation
+fails fast. It no longer consumes `online-adoption-report.json` or
+`airgap-adoption-report.json`, and it no longer writes
+`release-engineering-gate-intake-report.json`.
 
-The intake requires all four maintainer/internal legacy diagnostic
-combinations: `online/use_existing`, internal `online/kit_provided`,
-`airgap/use_existing`, and internal `airgap/kit_provided`. Release id, git sha,
-release contract raw digest, release contract subject/provenance, online
-adoption provenance summaries, and airgap adoption digest chains must bind to
-the supplied release contract.
-Inputs containing `readiness: true`, `release_verdict`, `operator_verdict`,
-`deploy_readiness`, or `package_readiness` fail fast.
-
-The generated `release-engineering-gate-intake-report.json` uses `schema:
-agentsmith.release-engineering-gate-intake/v1`, `scope:
-release_engineering_gate_candidate_intake_only`, `readiness: false`, `status:
-pass`, and `formal_verdict: not_issued`. It lists missing inputs for the final
-`--ga-release` aggregate, including package-driven path evidence, airgap
-offline path evidence, and AgentSmith product-side reports. It is not an
-operator verdict, evidence-envelope output, offline package readiness, deploy
-readiness, release readiness, registry mirror action, rollback flow, cloud
-provisioning flow, product flow, backend-real check, or AgentSmith handoff.
+The replacement GA path is package-driven: run one `operator-inputs` package per
+operator-facing deployment path, then call `bash scripts/operator-release.sh
+--ga-report` with the four package paths and AgentSmith product-side reports.
+This retired guard is not an operator verdict, evidence-envelope output, offline
+package readiness, deploy readiness, release readiness, registry mirror action,
+rollback flow, cloud provisioning flow, product flow, backend-real check,
+AgentSmith handoff, or GA input.
 
 ## Operator Signoff Intake Focused Diagnostic
 
@@ -1651,8 +1640,8 @@ The gate does not rerun producers. It requires each finalized deployment path
 report to have the sibling finalizer manifest and `source-evidence/` files
 that bind the maintainer/internal `source_evidence` ledger; a hand-written
 single report JSON is not accepted. `operator-release-surface-report.json`,
-adoption reports, candidate intake reports, runbook acceptance reports, and
-other producer outputs remain internal evidence unless wrapped by a finalized
+adoption reports, retired intake reports, runbook acceptance reports, and other
+producer outputs remain internal evidence unless wrapped by a finalized
 `deployment-path-report.json`.
 When operator-inputs plans are supplied, the aggregate also re-reads each
 package-local release contract and deploy template package descriptor from the

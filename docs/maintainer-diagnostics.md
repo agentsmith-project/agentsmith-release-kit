@@ -135,10 +135,12 @@ Default PR/push CI follows the quick/core path only:
 `test-ga-release-workflow.sh`.
 
 Maintainer diagnostics such as adoption aggregation, operator signoff intake,
-airgap image load, substrate routability, and release-engineering intake are
-manual checks. They are useful while changing those producers, but they are
-not default operator quick-path evidence and still do not issue deploy,
-package, or release readiness.
+airgap image load, and substrate routability are manual checks. They are useful
+while changing those producers, but they are not default operator quick-path
+evidence and still do not issue deploy, package, or release readiness.
+Release-engineering gate intake is retired and remains only as a compatibility
+guard that points maintainers to package-driven `operator-inputs` runs followed
+by `operator-release.sh --ga-report`.
 
 Runbooks must avoid raw secrets. They should describe secret refs, redacted
 fingerprints, prerequisites, and explicit operator inputs.

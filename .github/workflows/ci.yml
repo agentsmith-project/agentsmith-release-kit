@@ -87,7 +87,7 @@ jobs:
         run: bash scripts/test-online-deployment-gate.sh
       - name: Online adoption aggregation focused guard
         run: bash scripts/test-online-adoption.sh
-      - name: Release engineering gate intake focused guard
+      - name: Release engineering gate intake retirement guard
         run: bash scripts/test-release-engineering-gate-intake.sh
       - name: Online operator example focused guard
         run: bash scripts/test-online-operator-examples.sh

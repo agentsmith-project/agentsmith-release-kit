@@ -58,14 +58,12 @@ confirmed-apply airgap operator surface summaries for legacy substrate
 strategies (`use_existing` or internal `kit_provided`) plus an explicit release
 contract and bundle manifest. It writes a digest-only
 `airgap-adoption-report.json` with `readiness: false`.
-`--release-engineering-gate-intake` consumes only existing focused online and
-airgap adoption reports, requires the four legacy online/airgap diagnostic
-combinations (`online/use_existing`, internal `online/kit_provided`,
-`airgap/use_existing`, internal `airgap/kit_provided`), and writes
-`release-engineering-gate-intake-report.json` with `readiness: false`,
-`status: pass`, and `formal_verdict: not_issued`. This maintainer-only path is
-for explicit GA or compliance trigger work; it lists the missing inputs for the
-final `--ga-release` aggregate and is not release readiness.
+`--release-engineering-gate-intake` is retired. It remains only as a
+compatibility guard: `--help` points maintainers to the four package-driven
+`operator-inputs` runs followed by `bash scripts/operator-release.sh
+--ga-report`, while ordinary invocation fails fast. It no longer consumes
+online or airgap adoption reports, no longer writes
+`release-engineering-gate-intake-report.json`, and must not be used as GA input.
 
 ## Development Principles
 
