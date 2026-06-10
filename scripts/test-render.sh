@@ -271,6 +271,123 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: agentsmith-web
+  namespace: ${{ values.namespace }}
+  labels:
+    distribution: ${{ target.distribution }}
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+          env:
+            - name: POSTGRES_HOST
+              value: ${{ substrate.services.postgresql.host }}
+YAML
+      ;;
+    afscp_workload_mount_secret_refs)
+      cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afscp-config
+data:
+  AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS: workspace=agentsmith/afscp-workload-mounts,task_cache=agentsmith/task-cache
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
+  namespace: ${{ values.namespace }}
+  labels:
+    distribution: ${{ target.distribution }}
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+          env:
+            - name: POSTGRES_HOST
+              value: ${{ substrate.services.postgresql.host }}
+YAML
+      ;;
+    afscp_workload_mount_secret_refs_missing_name)
+      cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afscp-config
+data:
+  AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS: workspace=agentsmith
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+YAML
+      ;;
+    afscp_workload_mount_secret_refs_path_escape)
+      cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afscp-config
+data:
+  AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS: workspace=../secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+YAML
+      ;;
+    afscp_workload_mount_secret_refs_token_volume)
+      cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afscp-config
+data:
+  AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS: token=agentsmith/something
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+YAML
+      ;;
+    afscp_workload_mount_secret_refs_reserved_name)
+      cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afscp-config
+data:
+  AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS: workspace=agentsmith/password-token-value
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
 spec:
   template:
     spec:
@@ -1160,6 +1277,46 @@ expect_fail_case secret-payload \
   "$SECRET_ARCHIVE" \
   "$VALID_VALUES" \
   "$VALID_TRUTH"
+
+AFSCP_SECRET_REFS_ARCHIVE="$TMP_DIR/afscp-workload-mount-secret-refs.tgz"
+AFSCP_SECRET_REFS_MANIFEST_SHA="$(create_render_archive afscp-workload-mount-secret-refs "$AFSCP_SECRET_REFS_ARCHIVE" afscp_workload_mount_secret_refs)"
+AFSCP_SECRET_REFS_ARCHIVE_SHA="$(sha256_file "$AFSCP_SECRET_REFS_ARCHIVE")"
+AFSCP_SECRET_REFS_CONTRACT="$TMP_DIR/release-contract.afscp-workload-mount-secret-refs.json"
+AFSCP_SECRET_REFS_PACKAGE="$TMP_DIR/deploy-template-package.afscp-workload-mount-secret-refs.json"
+AFSCP_SECRET_REFS_OUT="$TMP_DIR/out-afscp-workload-mount-secret-refs"
+write_materials \
+  "$AFSCP_SECRET_REFS_MANIFEST_SHA" \
+  "$AFSCP_SECRET_REFS_ARCHIVE_SHA" \
+  "$AFSCP_SECRET_REFS_CONTRACT" \
+  "$AFSCP_SECRET_REFS_PACKAGE"
+run_render \
+  "$AFSCP_SECRET_REFS_CONTRACT" \
+  "$AFSCP_SECRET_REFS_PACKAGE" \
+  "$AFSCP_SECRET_REFS_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$AFSCP_SECRET_REFS_OUT" >/dev/null
+assert_pass_report "$AFSCP_SECRET_REFS_OUT/manifest-render-report.json" "$AFSCP_SECRET_REFS_OUT/rendered-manifests"
+pass "AFSCP workload mount secret refs accepted"
+
+for mutation in \
+  afscp_workload_mount_secret_refs_missing_name \
+  afscp_workload_mount_secret_refs_path_escape \
+  afscp_workload_mount_secret_refs_token_volume \
+  afscp_workload_mount_secret_refs_reserved_name; do
+  bad_archive="$TMP_DIR/$mutation.tgz"
+  bad_manifest_sha="$(create_render_archive "$mutation" "$bad_archive" "$mutation")"
+  bad_archive_sha="$(sha256_file "$bad_archive")"
+  bad_contract="$TMP_DIR/release-contract.$mutation.json"
+  bad_package="$TMP_DIR/deploy-template-package.$mutation.json"
+  write_materials "$bad_manifest_sha" "$bad_archive_sha" "$bad_contract" "$bad_package"
+  expect_fail_case "$mutation" \
+    "$bad_contract" \
+    "$bad_package" \
+    "$bad_archive" \
+    "$VALID_VALUES" \
+    "$VALID_TRUTH"
+done
 
 FORBIDDEN_ROOT="$TMP_DIR/forbidden-product-source"
 mkdir -p "$FORBIDDEN_ROOT"

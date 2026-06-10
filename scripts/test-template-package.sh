@@ -332,6 +332,60 @@ fs.writeFileSync(packageOutput, `${JSON.stringify(deployTemplatePackage, null, 2
 NODE
 }
 
+mutate_afscp_workload_mount_secret_refs() {
+  local contract_input="$1"
+  local package_input="$2"
+  local contract_output="$3"
+  local package_output="$4"
+  local value="$5"
+
+  "$NODE_BIN" --input-type=module - "$contract_input" "$package_input" "$contract_output" "$package_output" "$value" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [contractInput, packageInput, contractOutput, packageOutput, value] =
+  process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+const deployTemplatePackage = JSON.parse(fs.readFileSync(packageInput, 'utf8'));
+
+function stableJson(input) {
+  if (Array.isArray(input)) {
+    return input.map(stableJson);
+  }
+  if (input && typeof input === 'object') {
+    return Object.fromEntries(
+      Object.keys(input)
+        .sort()
+        .map((key) => [key, stableJson(input[key])])
+    );
+  }
+  return input;
+}
+
+function subjectDigest(input) {
+  const { artifact_provenance: _artifactProvenance, ...subject } = input;
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(subject))).digest('hex')}`;
+}
+
+function artifactProjectionDigest(input) {
+  const { artifact_sha256: _artifactSha256, ...artifactProvenance } =
+    input.artifact_provenance;
+  const projection = { ...input, artifact_provenance: artifactProvenance };
+  return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(projection))).digest('hex')}`;
+}
+
+deployTemplatePackage.AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS = value;
+deployTemplatePackage.artifact_provenance.subject_sha256 =
+  subjectDigest(deployTemplatePackage);
+contract.deploy_template_package = deployTemplatePackage;
+contract.artifact_provenance.subject_sha256 = subjectDigest(contract);
+contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
+
+fs.writeFileSync(packageOutput, `${JSON.stringify(deployTemplatePackage, null, 2)}\n`);
+fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
 mutate_required_image_ids() {
   local contract_input="$1"
   local package_input="$2"
@@ -486,6 +540,44 @@ if ('release_verdict' in report || 'verdict' in report) {
 }
 NODE
 pass "valid template package accepted with focused non-readiness report"
+
+AFSCP_SECRET_REFS_CONTRACT="$TMP_DIR/release-contract.afscp-workload-mount-secret-refs.json"
+AFSCP_SECRET_REFS_PACKAGE="$TMP_DIR/deploy-template-package.afscp-workload-mount-secret-refs.json"
+AFSCP_SECRET_REFS_OUT="$TMP_DIR/out-afscp-workload-mount-secret-refs"
+mutate_afscp_workload_mount_secret_refs \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$AFSCP_SECRET_REFS_CONTRACT" \
+  "$AFSCP_SECRET_REFS_PACKAGE" \
+  "workspace=agentsmith/afscp-workload-mounts,task_cache=agentsmith/task-cache"
+run_template_package \
+  "$AFSCP_SECRET_REFS_CONTRACT" \
+  "$AFSCP_SECRET_REFS_PACKAGE" \
+  "$VALID_ARCHIVE" \
+  "$AFSCP_SECRET_REFS_OUT" >/dev/null
+pass "AFSCP workload mount secret refs accepted"
+
+for afscp_case in \
+  "missing-name|workspace=agentsmith" \
+  "path-escape|workspace=../secret" \
+  "token-volume|token=agentsmith/something" \
+  "reserved-name|workspace=agentsmith/password-token-value"; do
+  afscp_label="${afscp_case%%|*}"
+  afscp_value="${afscp_case#*|}"
+  AFSCP_BAD_CONTRACT="$TMP_DIR/release-contract.afscp-workload-mount-secret-refs-$afscp_label.json"
+  AFSCP_BAD_PACKAGE="$TMP_DIR/deploy-template-package.afscp-workload-mount-secret-refs-$afscp_label.json"
+  mutate_afscp_workload_mount_secret_refs \
+    "$VALID_CONTRACT_MATERIAL" \
+    "$VALID_PACKAGE_MATERIAL" \
+    "$AFSCP_BAD_CONTRACT" \
+    "$AFSCP_BAD_PACKAGE" \
+    "$afscp_value"
+  expect_fail \
+    "afscp-workload-mount-secret-refs-$afscp_label" \
+    "$AFSCP_BAD_CONTRACT" \
+    "$AFSCP_BAD_PACKAGE" \
+    "$VALID_ARCHIVE"
+done
 
 DRIFT_ARCHIVE="$TMP_DIR/archive-drift.tgz"
 create_plain_archive archive-drift "$DRIFT_ARCHIVE" notes.txt >/dev/null

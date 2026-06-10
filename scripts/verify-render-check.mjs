@@ -30,6 +30,14 @@ const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const SECRET_REF_PREFIX = 'secretRef:';
 const SECRET_KEY_RE = /(^|[_-])(password|passwd|pwd|token|secret|client_secret|private_key|kubeconfig|access_key|api_key)([_-]|$)/i;
+const AFSCP_WORKLOAD_MOUNT_SECRET_REFS_KEY = 'AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS';
+const AFSCP_VOLUME_ID_RE = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/;
+const KUBERNETES_DNS_LABEL_RE = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/;
+const KUBERNETES_DNS_SUBDOMAIN_RE = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*$/;
+const SECRET_REF_RESERVED_WORD_RE = /(^|[-_])(password|passwd|pwd|token|secret|client[-_]?secret|private[-_]?key|kubeconfig|access[-_]?key|api[-_]?key)([-_]|$)/i;
+const AFSCP_WORKLOAD_MOUNT_SECRET_REFS_LINE_RE = /(?:^|\n)[ \t]*AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS[ \t]*:[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\r\n#]*))/g;
+const KUBERNETES_SECRET_KIND_RE = /^kind:[ \t]*Secret[ \t]*(?:#.*)?$/m;
+const KUBERNETES_SECRET_DATA_FIELD_RE = /^(?:data|stringData|binaryData):[ \t]*(?:#.*)?$/m;
 const YAML_IMAGE_KEY_RE = /(?:^|[{,\s\[])\s*(?:-\s*)?image\s*:\s*(?:"([^"]+)"|'([^']+)'|([^,\]}\s#]+))/g;
 const SECRET_KEY_VALUE_RE = /(?:^|[{,\s\[])[ \t]*["']?([A-Za-z0-9_.-]+)["']?[ \t]*[:=][ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^,}\]\r\n#]*))/g;
 const SECRET_VALUE_RE = [
@@ -389,6 +397,45 @@ function isSafeSecretReference(value) {
   );
 }
 
+function hasSecretRefReservedWord(value) {
+  return SECRET_REF_RESERVED_WORD_RE.test(value);
+}
+
+function isAllowedAfscpWorkloadMountSecretRefs(key, value) {
+  if (key !== AFSCP_WORKLOAD_MOUNT_SECRET_REFS_KEY || typeof value !== 'string') {
+    return false;
+  }
+
+  const refs = value.trim().split(',');
+  if (refs.length === 0 || refs.some((ref) => ref.trim() === '')) {
+    return false;
+  }
+
+  return refs.every((rawRef) => {
+    const ref = rawRef.trim();
+    const parts = ref.split('=');
+    if (parts.length !== 2) {
+      return false;
+    }
+
+    const [volumeId, secretRef] = parts;
+    const secretRefParts = secretRef.split('/');
+    if (secretRefParts.length !== 2) {
+      return false;
+    }
+
+    const [namespace, name] = secretRefParts;
+    return (
+      AFSCP_VOLUME_ID_RE.test(volumeId) &&
+      !hasSecretRefReservedWord(volumeId) &&
+      KUBERNETES_DNS_LABEL_RE.test(namespace) &&
+      !hasSecretRefReservedWord(namespace) &&
+      KUBERNETES_DNS_SUBDOMAIN_RE.test(name) &&
+      !hasSecretRefReservedWord(name)
+    );
+  });
+}
+
 function stripInlineComment(value) {
   return value.replace(/\s+#.*$/, '').trim();
 }
@@ -408,7 +455,36 @@ function normalizedScalar(value) {
   return stripQuotes(value.trim().replace(/[,\]}]\s*$/, '').trim());
 }
 
+function scanAfscpWorkloadMountSecretRefsLines(raw, label, issues) {
+  for (const match of raw.matchAll(AFSCP_WORKLOAD_MOUNT_SECRET_REFS_LINE_RE)) {
+    const value = normalizedScalar(match[1] || match[2] || match[3] || '');
+    if (!isAllowedAfscpWorkloadMountSecretRefs(AFSCP_WORKLOAD_MOUNT_SECRET_REFS_KEY, value)) {
+      issues.push(`${label} contains an invalid AFSCP workload mount secret reference`);
+    }
+  }
+}
+
+function scanKubernetesSecretData(raw, label, issues) {
+  const documents = raw.split(/(?:^|\n)---[^\n]*(?:\n|$)/);
+  if (
+    documents.some(
+      (document) =>
+        KUBERNETES_SECRET_KIND_RE.test(document) &&
+        KUBERNETES_SECRET_DATA_FIELD_RE.test(document)
+    )
+  ) {
+    issues.push(`${label} contains Kubernetes Secret data`);
+  }
+}
+
 function assertNoSecretPayload(raw, label) {
+  const issues = [];
+  scanAfscpWorkloadMountSecretRefsLines(raw, label, issues);
+  scanKubernetesSecretData(raw, label, issues);
+  if (issues.length > 0) {
+    fail(issues[0]);
+  }
+
   for (const pattern of SECRET_VALUE_RE) {
     if (pattern.test(raw)) {
       fail(`${label} contains a secret-looking value`);
@@ -423,6 +499,7 @@ function assertNoSecretPayload(raw, label) {
       value !== '' &&
       value !== '{}' &&
       value !== '[]' &&
+      !isAllowedAfscpWorkloadMountSecretRefs(key, value) &&
       !isSafeSecretReference(value)
     ) {
       fail(`${label} contains a secret-looking payload`);

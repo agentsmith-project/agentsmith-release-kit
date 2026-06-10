@@ -30,6 +30,11 @@ const ARCHIVE_CONTENT_ABSOLUTE_LOCAL_PATH_RE = /(^|[\s"'(=])(?:~\/|\/(?:Users|ho
 const SOURCE_LIKE_LABEL_RE = /(?:^|\.)(?:source_uri|source_path|artifact_uri|package_uri|local_path|path|file|dir|kubeconfig)$/;
 const WORKSPACE_SOURCE_RE = /\/home\/[^/]+\/works\/[^/]+\/agent(?:smith)?(?:\/|$)/i;
 const SECRET_KEY_RE = /(^|[_-])(password|passwd|pwd|token|secret|client_secret|private_key|kubeconfig|access_key|api_key)([_-]|$)/i;
+const AFSCP_WORKLOAD_MOUNT_SECRET_REFS_KEY = 'AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS';
+const AFSCP_VOLUME_ID_RE = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/;
+const KUBERNETES_DNS_LABEL_RE = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/;
+const KUBERNETES_DNS_SUBDOMAIN_RE = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*$/;
+const SECRET_REF_RESERVED_WORD_RE = /(^|[-_])(password|passwd|pwd|token|secret|client[-_]?secret|private[-_]?key|kubeconfig|access[-_]?key|api[-_]?key)([-_]|$)/i;
 const SAFE_REDACTED_SECRET_RE = /^(redacted|\*+)$/i;
 const SAFE_SECRET_REF_VALUE_RE = /^[A-Za-z0-9_.-]*secret_ref$/;
 const SECRET_REF_PREFIX = 'secretRef:';
@@ -227,6 +232,45 @@ function isSafeSecretReference(value) {
   );
 }
 
+function hasSecretRefReservedWord(value) {
+  return SECRET_REF_RESERVED_WORD_RE.test(value);
+}
+
+function isAllowedAfscpWorkloadMountSecretRefs(key, value) {
+  if (key !== AFSCP_WORKLOAD_MOUNT_SECRET_REFS_KEY || typeof value !== 'string') {
+    return false;
+  }
+
+  const refs = value.trim().split(',');
+  if (refs.length === 0 || refs.some((ref) => ref.trim() === '')) {
+    return false;
+  }
+
+  return refs.every((rawRef) => {
+    const ref = rawRef.trim();
+    const parts = ref.split('=');
+    if (parts.length !== 2) {
+      return false;
+    }
+
+    const [volumeId, secretRef] = parts;
+    const secretRefParts = secretRef.split('/');
+    if (secretRefParts.length !== 2) {
+      return false;
+    }
+
+    const [namespace, name] = secretRefParts;
+    return (
+      AFSCP_VOLUME_ID_RE.test(volumeId) &&
+      !hasSecretRefReservedWord(volumeId) &&
+      KUBERNETES_DNS_LABEL_RE.test(namespace) &&
+      !hasSecretRefReservedWord(namespace) &&
+      KUBERNETES_DNS_SUBDOMAIN_RE.test(name) &&
+      !hasSecretRefReservedWord(name)
+    );
+  });
+}
+
 function isRelativeSourcePath(value, label) {
   const trimmed = value.trim();
   return (
@@ -278,6 +322,7 @@ function scanForUnsafePayload(value, label, issues = []) {
       if (
         SECRET_KEY_RE.test(key) &&
         typeof nested === 'string' &&
+        !isAllowedAfscpWorkloadMountSecretRefs(key, nested) &&
         !isSafeSecretReference(nested)
       ) {
         issues.push(`${nestedLabel} contains a secret-looking payload`);

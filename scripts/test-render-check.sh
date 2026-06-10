@@ -362,6 +362,33 @@ data:
   );
 }
 
+const afscpSecretRefsCases = new Map([
+  [
+    'afscp_workload_mount_secret_refs',
+    'workspace=agentsmith/afscp-workload-mounts,task_cache=agentsmith/task-cache'
+  ],
+  ['afscp_workload_mount_secret_refs_missing_name', 'workspace=agentsmith'],
+  ['afscp_workload_mount_secret_refs_path_escape', 'workspace=../secret'],
+  ['afscp_workload_mount_secret_refs_token_volume', 'token=agentsmith/something'],
+  [
+    'afscp_workload_mount_secret_refs_reserved_name',
+    'workspace=agentsmith/password-token-value'
+  ]
+]);
+
+if (afscpSecretRefsCases.has(mutation)) {
+  fs.writeFileSync(
+    path.join(renderedManifests, 'afscp-secret-refs.yaml'),
+    `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afscp-config
+data:
+  AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS: ${afscpSecretRefsCases.get(mutation)}
+`
+  );
+}
+
 if (mutation === 'yaml_list_unknown_image') {
   fs.writeFileSync(
     path.join(renderedManifests, 'list.yaml'),
@@ -465,6 +492,13 @@ run_render_check "$safe_secret_manifests" "$safe_secret_output"
 assert_pass_report "$safe_secret_output/render-report.json"
 pass "safe secretRef and redacted manifest values accepted"
 
+afscp_secret_refs_manifests="$TMP_DIR/manifests-afscp-secret-refs"
+afscp_secret_refs_output="$TMP_DIR/out-afscp-secret-refs"
+write_manifests "$afscp_secret_refs_manifests" afscp_workload_mount_secret_refs
+run_render_check "$afscp_secret_refs_manifests" "$afscp_secret_refs_output"
+assert_pass_report "$afscp_secret_refs_output/render-report.json"
+pass "AFSCP workload mount secret refs accepted"
+
 expect_fail unknown_image
 expect_fail tag_only_image
 expect_fail digest_mismatch
@@ -478,6 +512,10 @@ expect_contract_target_profile_fail \
   contract_noncanonical_extra_kind_external_declared \
   noncanonical-extra-kind-external-declared
 expect_fail secret_payload
+expect_fail afscp_workload_mount_secret_refs_missing_name
+expect_fail afscp_workload_mount_secret_refs_path_escape
+expect_fail afscp_workload_mount_secret_refs_token_volume
+expect_fail afscp_workload_mount_secret_refs_reserved_name
 expect_fail symlink_escape
 expect_forbidden_root_cli_fail missing_forbidden_root
 expect_source_path_fail release_contract_source_path release_contract
