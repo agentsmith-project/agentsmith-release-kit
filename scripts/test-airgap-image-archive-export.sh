@@ -281,6 +281,8 @@ NODE
 
 "$NODE_BIN" "$EXPORT_SCRIPT" --help | grep -q 'Maintainer-only helper' ||
   fail "help output should describe maintainer-only usage"
+"$NODE_BIN" "$EXPORT_SCRIPT" --help | grep -q 'registry access and local skopeo' ||
+  fail "help output should describe skopeo and output-dir requirements"
 pass "help output is available"
 
 fake_skopeo="$TMP_DIR/fake-skopeo"
@@ -290,6 +292,18 @@ valid_contract="$TMP_DIR/release-contract.valid.json"
 valid_output="$TMP_DIR/export-valid"
 valid_log="$TMP_DIR/export-valid.log"
 write_contract "$valid_contract" valid
+
+missing_skopeo_output="$TMP_DIR/export-missing-skopeo"
+if run_export "$valid_contract" "$missing_skopeo_output" "$TMP_DIR/missing-skopeo" "$TMP_DIR/export-missing-skopeo.log" \
+  >"$TMP_DIR/missing-skopeo.out" 2>"$TMP_DIR/missing-skopeo.err"; then
+  fail "expected export to fail when skopeo is missing"
+fi
+grep -F 'skopeo not found; install skopeo or pass --skopeo <path>' "$TMP_DIR/missing-skopeo.err" >/dev/null ||
+  fail "missing skopeo failure should explain maintainer action"
+[[ ! -e "$missing_skopeo_output" ]] ||
+  fail "missing skopeo failure must not create output dir"
+pass "missing skopeo fails clearly without creating output dir"
+
 run_export "$valid_contract" "$valid_output" "$fake_skopeo" "$valid_log" \
   >"$TMP_DIR/export-valid.out"
 assert_success_receipt "$valid_contract" "$valid_output" "$valid_log"

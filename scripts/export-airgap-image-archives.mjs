@@ -38,7 +38,9 @@ function usage() {
 
 Maintainer-only helper. Exports release contract image refs into local OCI layout
 tar archives for later --bundle-create consumption. It pulls from registries via
-skopeo and is not an operator path or release readiness verdict.`;
+skopeo and is not an operator path or release readiness verdict. Requires
+registry access and local skopeo (or --skopeo <path>); --output-dir must be a
+new/non-existing directory.`;
 }
 
 function cliFail(message) {
@@ -356,6 +358,11 @@ function runCommand(command, args, label, options = {}) {
     stdio: options.stdio
   });
   if (result.error) {
+    if (result.error.code === 'ENOENT' && label.includes('skopeo')) {
+      fail(
+        `skopeo not found; install skopeo or pass --skopeo <path>: ${result.error.message}`
+      );
+    }
     fail(`${label} failed to start: ${result.error.message}`);
   }
   if (result.signal) {
@@ -464,10 +471,10 @@ async function main() {
     return;
   }
 
-  const outputDir = await canonicalOutputDir(args.outputDir);
   const contractInput = await readJson(args.releaseContract, 'release contract');
   const specs = normalizeInventory(contractInput.value);
   const skopeoVersion = readSkopeoVersion(args.skopeo);
+  const outputDir = await canonicalOutputDir(args.outputDir);
 
   const images = [];
   for (const spec of specs) {
