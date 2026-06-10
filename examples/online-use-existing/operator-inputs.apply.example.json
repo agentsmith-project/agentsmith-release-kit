@@ -10,6 +10,8 @@
   "target_prerequisites": "target-prerequisites.example.json",
   "namespace": "agentsmith",
   "mode": "apply",
+  "kubectl": "tools/kubectl",
+  "context": "agentsmith-online-context",
   "smoke_url": "https://agentsmith.online.example.com/healthz",
   "deploy_confirmation": {
     "confirmed": true,

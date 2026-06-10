@@ -69,7 +69,8 @@ currently executes `online/use_existing`, `online/install_substrates`,
 The runner validates the plan digest,
 absolute refs, package-root locality, and manifest-to-plan ref binding.
 `online/use_existing` runs the existing
-`online-deployment-gate` producer. `online/install_substrates` first runs
+`online-deployment-gate` producer; apply packages must provide package-local
+`kubectl` plus an explicit `context`. `online/install_substrates` first runs
 substrate-install, then runs the online gate bound to the installer output
 substrate truth. `airgap/use_existing` runs `airgap-consume-rehearsal`, safely
 extracts the nested `airgap-bundle-check` and `airgap-deployment-gate`
@@ -94,8 +95,10 @@ Server-dry-run modes also fail fast.
 The intake rejects unknown fields, path escapes, missing path-specific inputs,
 missing install confirmation, airgap paths without an airgap bundle, internal
 producer vocabulary, post-deploy smoke reports, kubeconfig/token/private-key
-payloads, and inline truth-like payloads. `install_substrates` is represented
-as namespace-scoped installer producer/finalizer evidence with explicit
+payloads, and inline truth-like payloads. For `install_substrates`, doctor and
+the install producer also sanity-check substrate pack material paths and
+sha256s before runtime execution. `install_substrates` is represented as
+namespace-scoped installer producer/finalizer evidence with explicit
 confirmation; it is not cloud provisioning. Kind remains rehearsal-only.
 
 ## Package-Driven GA Smoke Focused Guard

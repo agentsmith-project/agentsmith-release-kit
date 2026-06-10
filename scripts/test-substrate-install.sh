@@ -80,6 +80,7 @@ write_fixture_set() {
   local profile="${3:-$TARGET_PROFILE}"
 
   "$NODE_BIN" --input-type=module - "$dir" "$profile" "$mutation" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -100,6 +101,22 @@ const ownerAnnotations = {
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function writePackText(relativePath, content) {
+  const file = path.join(outDir, relativePath);
+  const bytes = Buffer.from(content);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+  return digestBuffer(bytes);
+}
+
+function writePackJson(relativePath, value) {
+  return writePackText(relativePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function service(name, host) {
@@ -223,6 +240,22 @@ if (mutation === 'operator_facing_install_inputs') {
   delete substrateTruth.distribution;
 }
 
+const installPlanDigest = writePackJson('payload/install-substrates.json', {
+  schema_version: 'agentsmith.substrate-install-plan.fixture/v1',
+  target_profile: profile,
+  installation_id: 'kit-install-10001',
+  resources: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc']
+});
+writePackText('templates/postgresql.yaml', 'kind: StatefulSet\nmetadata:\n  name: postgresql\n');
+writePackText('templates/mongodb.yaml', 'kind: StatefulSet\nmetadata:\n  name: mongodb\n');
+writePackText('templates/redis.yaml', 'kind: Deployment\nmetadata:\n  name: redis\n');
+writePackText('templates/object-storage.yaml', 'kind: Deployment\nmetadata:\n  name: object-storage\n');
+writePackText('templates/oidc.yaml', 'kind: Deployment\nmetadata:\n  name: oidc\n');
+const checksDigest = writePackText(
+  'tools/substrate-checks.txt',
+  'postgresql tls\nmongodb tls\nredis ping\nobject-storage head-bucket\noidc discovery\n'
+);
+
 const manifest = {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
   release_kit_version: '0.1.0',
@@ -238,7 +271,7 @@ const manifest = {
   payload: {
     install_plan: {
       path: 'payload/install-substrates.json',
-      sha256: digest('6')
+      sha256: installPlanDigest
     }
   },
   templates: {
@@ -251,7 +284,7 @@ const manifest = {
   tools: {
     checks: {
       path: 'tools/substrate-checks.txt',
-      sha256: digest('7')
+      sha256: checksDigest
     }
   },
   checksums: {
@@ -266,6 +299,12 @@ if (mutation === 'operator_facing_pack_manifest' || mutation === 'operator_facin
     ? (deploymentPath === 'online/install_substrates' ? 'airgap/install_substrates' : 'online/install_substrates')
     : deploymentPath;
   delete manifest.target_profile;
+}
+if (mutation === 'pack_missing_material') {
+  fs.rmSync(path.join(outDir, 'payload/install-substrates.json'), { force: true });
+}
+if (mutation === 'pack_material_sha_mismatch') {
+  manifest.payload.install_plan.sha256 = digest('9');
 }
 
 function kitMetadata(name) {
@@ -1106,6 +1145,16 @@ assert_install_rejected_before_kubectl \
   operator_facing_pack_manifest_mismatch \
   "substrate_pack_manifest.deployment_path must match the selected install_substrates target" \
   "operator-facing substrate pack manifest deployment_path mismatch"
+
+assert_install_rejected_before_kubectl \
+  pack_missing_material \
+  "substrate_pack_manifest.payload.install_plan.path must reference an existing file in substrate pack" \
+  "substrate pack manifest missing material"
+
+assert_install_rejected_before_kubectl \
+  pack_material_sha_mismatch \
+  "substrate_pack_manifest.payload.install_plan.sha256 must match referenced file sha256" \
+  "substrate pack manifest material sha mismatch"
 
 reset_kubectl_log
 if run_install "$valid_dir" "$TMP_DIR/out-missing-confirm" \

@@ -7,7 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { validateSubstrateInstallInputs } from './substrate-install-input-validation.mjs';
 import { resolveSubstrateInstallParameters } from './substrate-install-parameters.mjs';
 import { validateTargetRegistry as validateTargetRegistryValue } from './image-map-validation.mjs';
-import { validateSubstratePackManifest } from './substrate-pack-manifest-validation.mjs';
+import {
+  validateSubstratePackManifest,
+  validateSubstratePackManifestMateriality
+} from './substrate-pack-manifest-validation.mjs';
 import {
   assertNoUnsafeSubstratePayload,
   validateSubstrateConnectionTruth,
@@ -959,6 +962,10 @@ function validateConfirmations({ manifest, config, mode }) {
 function requiredInputsFor({ manifest, config, mode }) {
   const requiredCommands = [...config.requiredCommands];
   const requiredScalars = [...config.requiredScalars];
+  if (manifest.deployment_path === 'online/use_existing' && mode === 'apply') {
+    requiredCommands.push('kubectl');
+    requiredScalars.push('context');
+  }
   if (config.producer === 'airgap' && mode === 'apply') {
     requiredCommands.push('archive_probe', 'image_loader');
   }
@@ -1903,6 +1910,11 @@ async function validateDoctorTargetPrerequisites({
 async function validateDoctorSubstratePack({ refs, targetProfile }) {
   const input = await readJson(refs.substrate_pack_manifest.absolute_path, 'substrate_pack_manifest');
   validateSubstratePackManifest(input.value, targetProfile, { fail });
+  await validateSubstratePackManifestMateriality(input.value, {
+    fail,
+    label: 'substrate_pack_manifest',
+    packRoot: path.dirname(refs.substrate_pack_manifest.absolute_path)
+  });
 }
 
 async function validateDoctorInstallInputs({ manifest, refs, targetProfile }) {
@@ -2573,9 +2585,12 @@ function skeletonManifestForDeploymentPath(deploymentPath) {
     manifest.timeout_ms = 60000;
   }
 
-  if (deploymentPath === 'online/install_substrates') {
+  if (deploymentPath === 'online/use_existing' || deploymentPath === 'online/install_substrates') {
     manifest.context = 'replace-with-kube-context';
     manifest.kubectl = 'tools/kubectl';
+  }
+
+  if (deploymentPath === 'online/install_substrates') {
     manifest.routability_probe = 'tools/routability-probe';
   }
 
@@ -2617,6 +2632,12 @@ function packageReadmeForManifest(manifest) {
       '- Provide package-local kubectl, archive_probe, and image_loader executables before run.'
     ]
     : [];
+  const kubectlNote =
+    deploymentPath.startsWith('airgap/') || deploymentPath === 'online/use_existing'
+      ? [
+        '- Provide package-local kubectl and set context before apply.'
+      ]
+      : [];
   const installConfirmationSnippet = deploymentPath.endsWith('/install_substrates')
     ? [
       'Add this only after checking the namespace-scoped installer inputs:',
@@ -2642,6 +2663,7 @@ function packageReadmeForManifest(manifest) {
     '- Replace package-local refs with the real release contract, deploy template package, render values, and target prerequisites.',
     ...installNote,
     ...airgapNote,
+    ...kubectlNote,
     '- Replace scaffold scalar placeholders such as context: replace-with-kube-context and smoke_url: https://agentsmith.example.com/healthz if present.',
     '- Add deploy_confirmation only when this package is ready to execute.',
     '- Keep secrets as references, not raw secret values.',

@@ -5,7 +5,8 @@ import path from 'node:path';
 
 import {
   SUBSTRATE_PACK_MANIFEST_SCHEMA,
-  validateSubstratePackManifest
+  validateSubstratePackManifest,
+  validateSubstratePackManifestMateriality
 } from './lib/substrate-pack-manifest-validation.mjs';
 import {
   TARGET_PREREQUISITES_SCHEMA,
@@ -773,6 +774,11 @@ async function main() {
     args.targetProfile,
     { fail }
   );
+  await validateSubstratePackManifestMateriality(packInput.value, {
+    fail,
+    label: 'substrate_pack_manifest',
+    packRoot: path.dirname(path.resolve(args.substratePackManifest))
+  });
   const installSummary = validateSubstrateInstallInputs(
     installInput.value,
     args.targetProfile,

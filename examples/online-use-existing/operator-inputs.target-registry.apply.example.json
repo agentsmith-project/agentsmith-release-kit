@@ -11,6 +11,8 @@
   "target_registry": "registry.example.internal/agentsmith",
   "namespace": "agentsmith",
   "mode": "apply",
+  "kubectl": "tools/kubectl",
+  "context": "agentsmith-online-context",
   "smoke_url": "https://agentsmith.online.example.com/healthz",
   "registry_probe": "tools/registry-probe",
   "deploy_confirmation": {

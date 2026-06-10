@@ -114,12 +114,102 @@ function digestFile(file) {
   return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
 }
 
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function writePackageText(relativePath, content) {
+  const file = path.join(packageRoot, relativePath);
+  const bytes = Buffer.from(content);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+  return digestBuffer(bytes);
+}
+
+function writePackageJson(relativePath, value) {
+  return writePackageText(relativePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function writeSubstratePackManifest(profileValue) {
+  const digest = (char) => `sha256:${char.repeat(64)}`;
+  const image = (name, tag, char) =>
+    `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+  const payloadDigest = writePackageJson('payload/install-substrates.json', {
+    schema_version: 'agentsmith.substrate-install-plan.fixture/v1',
+    target_profile: profileValue,
+    installation_id: `operator-inputs-${profileValue.split('/')[2]}-install`,
+    resources: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc']
+  });
+  writePackageText('templates/postgresql.yaml', 'kind: StatefulSet\nmetadata:\n  name: postgresql\n');
+  writePackageText('templates/mongodb.yaml', 'kind: StatefulSet\nmetadata:\n  name: mongodb\n');
+  writePackageText('templates/redis.yaml', 'kind: Deployment\nmetadata:\n  name: redis\n');
+  writePackageText('templates/object-storage.yaml', 'kind: Deployment\nmetadata:\n  name: object-storage\n');
+  writePackageText('templates/oidc.yaml', 'kind: Deployment\nmetadata:\n  name: oidc\n');
+  const checksDigest = writePackageText(
+    'tools/substrate-checks.txt',
+    'postgresql tls\nmongodb tls\nredis ping\nobject-storage head-bucket\noidc discovery\n'
+  );
+  const manifest = {
+    schema_version: 'agentsmith.substrate-pack-manifest/v1',
+    release_kit_version: '0.1.0',
+    installed_by: 'agentsmith-release-kit',
+    target_profile: profileValue,
+    images: {
+      postgresql: image('postgresql', '16.3', '1'),
+      mongodb: image('mongodb', '7.0', '2'),
+      redis: image('redis', '7.2', '3'),
+      object_storage: image('object-storage', '2026.05', '4'),
+      oidc: image('keycloak', '25.0', '5')
+    },
+    payload: {
+      install_plan: {
+        path: 'payload/install-substrates.json',
+        sha256: payloadDigest
+      }
+    },
+    templates: {
+      postgresql: 'templates/postgresql.yaml',
+      mongodb: 'templates/mongodb.yaml',
+      redis: 'templates/redis.yaml',
+      object_storage: 'templates/object-storage.yaml',
+      oidc: 'templates/oidc.yaml'
+    },
+    tools: {
+      checks: {
+        path: 'tools/substrate-checks.txt',
+        sha256: checksDigest
+      }
+    },
+    checksums: {
+      manifest: digest('8')
+    }
+  };
+  fs.writeFileSync(
+    path.join(packageRoot, 'substrate-pack-manifest.json'),
+    `${JSON.stringify(manifest, null, 2)}\n`
+  );
+}
+
 function copyPackageFileIntoBundle(sourceRelativePath, bundleRelativePath) {
   const source = path.join(packageRoot, sourceRelativePath);
   const destination = path.join(packageRoot, 'bundle', bundleRelativePath);
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.copyFileSync(source, destination);
   return `bundle/${bundleRelativePath}`;
+}
+
+function copySubstratePackMaterialsIntoBundle() {
+  for (const relativePath of [
+    'payload/install-substrates.json',
+    'templates/postgresql.yaml',
+    'templates/mongodb.yaml',
+    'templates/redis.yaml',
+    'templates/object-storage.yaml',
+    'templates/oidc.yaml',
+    'tools/substrate-checks.txt'
+  ]) {
+    copyPackageFileIntoBundle(relativePath, `components/${relativePath}`);
+  }
 }
 
 function bundleComponent(kind, bundleRelativePath) {
@@ -274,11 +364,11 @@ if (mode === 'apply') {
 }
 
 if (installsSubstrates) {
-  writeSubstrateInstallInputs(
-    deploymentPath.startsWith('airgap/')
-      ? 'existing_kubernetes/kit_installed/airgap'
-      : 'existing_kubernetes/kit_installed/online'
-  );
+  const installTargetProfile = deploymentPath.startsWith('airgap/')
+    ? 'existing_kubernetes/kit_installed/airgap'
+    : 'existing_kubernetes/kit_installed/online';
+  writeSubstratePackManifest(installTargetProfile);
+  writeSubstrateInstallInputs(installTargetProfile);
 }
 
 if (deploymentPath.startsWith('airgap/')) {
@@ -323,6 +413,7 @@ if (deploymentPath.startsWith('airgap/')) {
       'substrate-pack-manifest.json',
       'components/substrate-pack-manifest.json'
     );
+    copySubstratePackMaterialsIntoBundle();
     manifest.substrate_install_inputs = copyPackageFileIntoBundle(
       'substrate-install-inputs.json',
       'operator-inputs/substrate-install-inputs.json'
@@ -693,6 +784,25 @@ switch (caseName) {
     delete installInputs.substrate_truth.substrate_source;
     delete installInputs.substrate_truth.distribution;
     fs.writeFileSync(installInputsPath, `${JSON.stringify(installInputs, null, 2)}\n`);
+    break;
+  }
+  case 'substrate_pack_missing_material': {
+    const packageRoot = path.dirname(manifestPath);
+    const packManifestPath = path.join(packageRoot, manifest.substrate_pack_manifest);
+    const packManifest = JSON.parse(fs.readFileSync(packManifestPath, 'utf8'));
+    fs.rmSync(
+      path.join(path.dirname(packManifestPath), packManifest.payload.install_plan.path),
+      { force: true }
+    );
+    break;
+  }
+  case 'substrate_pack_material_sha_mismatch': {
+    const packageRoot = path.dirname(manifestPath);
+    const packManifestPath = path.join(packageRoot, manifest.substrate_pack_manifest);
+    const packManifest = JSON.parse(fs.readFileSync(packManifestPath, 'utf8'));
+    packManifest.payload.install_plan.sha256 =
+      'sha256:9999999999999999999999999999999999999999999999999999999999999999';
+    fs.writeFileSync(packManifestPath, `${JSON.stringify(packManifest, null, 2)}\n`);
     break;
   }
   case 'airgap_bundle_manifest_existing_mismatch':
@@ -1444,6 +1554,14 @@ if (deploymentPath.endsWith('/install_substrates')) {
 if (deploymentPath.startsWith('airgap/') && !readme.includes('airgap-bundle/')) {
   throw new Error('airgap README must explain bundle-local materials');
 }
+if (deploymentPath === 'online/use_existing') {
+  if (manifest.kubectl !== 'tools/kubectl' || manifest.context !== 'replace-with-kube-context') {
+    throw new Error('online/use_existing init manifest must require package-local kubectl and context');
+  }
+  if (!readme.includes('package-local kubectl')) {
+    throw new Error('online/use_existing README must mention package-local kubectl');
+  }
+}
 if (/[.]release-kit-internal|operator-inputs-plan|operator-release-surface-report|adoption report|candidate intake|release-engineering|operator-signoff|--target-profile|verify-release[.]sh|target_cluster|substrate_source|external_declared|kit_installed|existing_kubernetes|kind_rehearsal/u.test(readme)) {
   throw new Error('init package README must not expose internal release-kit vocabulary');
 }
@@ -1471,7 +1589,7 @@ if (!report.missing.includes('deploy_confirmation')) {
 if (deploymentPath.endsWith('/install_substrates') && !report.missing.includes('install_confirmation')) {
   throw new Error('init doctor must require explicit install_confirmation');
 }
-if (deploymentPath.startsWith('airgap/')) {
+if (deploymentPath.startsWith('airgap/') || deploymentPath === 'online/use_existing') {
   for (const field of ['context', 'smoke_url']) {
     if (!report.missing.includes(field)) {
       throw new Error(`init doctor must treat scaffold placeholder ${field} as missing`);
@@ -1827,6 +1945,23 @@ mutate_manifest "$missing_online_truth_dir" missing_substrate_truth
 expect_fail_matching online_use_existing_missing_substrate_truth 'missing required operator-inputs field for online/use_existing: substrate_truth' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_online_truth_dir"
 
+base_online_apply="$TMP_DIR/base-online-apply"
+mkdir -p "$base_online_apply"
+write_package_files "$base_online_apply"
+write_manifest "$base_online_apply" online/use_existing apply
+
+missing_online_apply_kubectl_dir="$TMP_DIR/invalid-online-use-existing-apply-missing-kubectl"
+copy_valid_package "$base_online_apply" "$missing_online_apply_kubectl_dir"
+mutate_manifest "$missing_online_apply_kubectl_dir" missing_kubectl
+expect_fail_matching online_use_existing_apply_missing_kubectl 'missing required operator-inputs field for online/use_existing: kubectl' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_online_apply_kubectl_dir"
+
+missing_online_apply_context_dir="$TMP_DIR/invalid-online-use-existing-apply-missing-context"
+copy_valid_package "$base_online_apply" "$missing_online_apply_context_dir"
+mutate_manifest "$missing_online_apply_context_dir" missing_context
+expect_fail_matching online_use_existing_apply_missing_context 'missing required operator-inputs field for online/use_existing: context' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_online_apply_context_dir"
+
 registry_probe_dir="$TMP_DIR/invalid-registry-probe"
 copy_valid_package "$base_online" "$registry_probe_dir"
 mutate_manifest "$registry_probe_dir" registry_probe
@@ -1936,6 +2071,24 @@ copy_valid_package "$base_install" "$missing_install_context_dir"
 mutate_manifest "$missing_install_context_dir" missing_context
 expect_fail_matching online_install_missing_context 'missing required operator-inputs field for online/install_substrates: context' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_install_context_dir"
+
+substrate_pack_missing_material_dir="$TMP_DIR/invalid-substrate-pack-missing-material"
+copy_valid_package "$base_install" "$substrate_pack_missing_material_dir"
+mutate_manifest "$substrate_pack_missing_material_dir" substrate_pack_missing_material
+expect_fail_matching substrate_pack_missing_material 'substrate_pack_manifest.*must reference an existing file in substrate pack' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+    --operator-inputs "$substrate_pack_missing_material_dir" \
+    --doctor \
+    --stdout
+
+substrate_pack_material_sha_mismatch_dir="$TMP_DIR/invalid-substrate-pack-material-sha-mismatch"
+copy_valid_package "$base_install" "$substrate_pack_material_sha_mismatch_dir"
+mutate_manifest "$substrate_pack_material_sha_mismatch_dir" substrate_pack_material_sha_mismatch
+expect_fail_matching substrate_pack_material_sha_mismatch 'substrate_pack_manifest.*sha256 must match referenced file sha256' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+    --operator-inputs "$substrate_pack_material_sha_mismatch_dir" \
+    --doctor \
+    --stdout
 
 slashless_routability_dir="$TMP_DIR/invalid-slashless-routability-probe"
 copy_valid_package "$base_install" "$slashless_routability_dir"

@@ -23,6 +23,7 @@ bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir>
 - `substrate-truth.example.json`: external substrate connection truth.
 - `target-prerequisites.example.json`: namespace, RBAC, ingress, registry pull
   secret, storage, and matching substrate secret refs.
+- `tools/kubectl`: placeholder package-local kubectl wrapper/binary for apply.
 - `tools/registry-probe`: placeholder package-local read-only probe for the
   target registry variant.
 
@@ -54,6 +55,8 @@ cp "$EXAMPLE_DIR/target-prerequisites.example.json" "$PKG/target-prerequisites.e
 cp "$RELEASE_CONTRACT" "$PKG/release-contract.json"
 cp "$DEPLOY_TEMPLATE_PACKAGE" "$PKG/deploy-template-package.json"
 cp "$DEPLOY_TEMPLATE_ARCHIVE" "$PKG/deploy-template-package.tgz"
+mkdir -p "$PKG/tools"
+cp "$EXAMPLE_DIR/tools/kubectl" "$PKG/tools/kubectl"
 ```
 
 For the target registry variant, run this after the block above to swap the
@@ -61,7 +64,6 @@ manifest and include the probe placeholder:
 
 ```bash
 cp "$EXAMPLE_DIR/operator-inputs.target-registry.apply.example.json" "$PKG/operator-inputs.json"
-mkdir -p "$PKG/tools"
 cp "$EXAMPLE_DIR/tools/registry-probe" "$PKG/tools/registry-probe"
 ```
 
@@ -79,6 +81,7 @@ same package.
 Edit `"$PKG/operator-inputs.json"` before apply:
 
 - Keep `deployment_path` as `online/use_existing`.
+- Replace `tools/kubectl` and set `context` to the target Kubernetes context.
 - Set `smoke_url` to the HTTPS route smoke endpoint for this target.
 - Set `deploy_confirmation.operator_run_id` to the real operator run id.
 - When using the target registry variant, replace the placeholder

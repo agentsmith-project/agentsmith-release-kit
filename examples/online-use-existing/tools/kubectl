@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+echo "replace tools/kubectl with the operator-approved kubectl wrapper/binary" >&2
+exit 2

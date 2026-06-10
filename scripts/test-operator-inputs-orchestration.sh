@@ -764,7 +764,8 @@ const manifest = {
   target_prerequisites: 'target-prerequisites.json',
   namespace: 'agentsmith',
   mode,
-  kubectl: 'tools/kubectl'
+  kubectl: 'tools/kubectl',
+  context: 'operator-inputs-context'
 };
 
 if (mode === 'apply') {
@@ -2693,6 +2694,38 @@ expect_fail_matching missing_online_substrate_truth 'missing required operator-i
 assert_no_path_evidence "$missing_online_truth_package"
 pass "operator-inputs online/use_existing still requires target substrate truth"
 
+missing_online_kubectl_package="$TMP_DIR/missing-online-kubectl"
+prepare_online_package "$missing_online_kubectl_package" apply /ok
+"$NODE_BIN" --input-type=module - "$missing_online_kubectl_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+delete manifest.kubectl;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+write_stale_finalizer "$missing_online_kubectl_package"
+expect_fail_matching missing_online_kubectl 'missing required operator-inputs field for online/use_existing: kubectl' \
+  run_operator_inputs "$missing_online_kubectl_package" missing-online-kubectl
+assert_no_path_evidence "$missing_online_kubectl_package"
+pass "operator-inputs online/use_existing apply requires package-local kubectl before orchestration"
+
+missing_online_context_package="$TMP_DIR/missing-online-context"
+prepare_online_package "$missing_online_context_package" apply /ok
+"$NODE_BIN" --input-type=module - "$missing_online_context_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestPath] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+delete manifest.context;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+write_stale_finalizer "$missing_online_context_package"
+expect_fail_matching missing_online_context 'missing required operator-inputs field for online/use_existing: context' \
+  run_operator_inputs "$missing_online_context_package" missing-online-context
+assert_no_path_evidence "$missing_online_context_package"
+pass "operator-inputs online/use_existing apply requires explicit context before orchestration"
+
 reserved_ref_package="$TMP_DIR/reserved-output-tree-ref"
 prepare_online_package "$reserved_ref_package" apply /ok
 write_stale_finalizer "$reserved_ref_package"
@@ -3014,24 +3047,17 @@ pass "operator-inputs direct runner clears stale path evidence before mode drift
 
 direct_manifest_extra_reserved_ref_package="$TMP_DIR/direct-manifest-extra-reserved-ref"
 prepare_online_package "$direct_manifest_extra_reserved_ref_package" apply /ok
-"$NODE_BIN" --input-type=module - "$direct_manifest_extra_reserved_ref_package/operator-inputs.json" <<'NODE'
-import fs from 'node:fs';
-
-const [manifestPath] = process.argv.slice(2);
-const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-delete manifest.kubectl;
-fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-NODE
 bash "$ROOT_DIR/scripts/operator-release.sh" --operator-inputs "$direct_manifest_extra_reserved_ref_package" >/dev/null
 write_stale_finalizer "$direct_manifest_extra_reserved_ref_package"
-extra_reserved_ref_path="$(deployment_path_dir "$direct_manifest_extra_reserved_ref_package")/source-evidence/kubectl"
-cp "$direct_manifest_extra_reserved_ref_package/tools/kubectl" "$extra_reserved_ref_path"
+extra_reserved_ref_path="$(deployment_path_dir "$direct_manifest_extra_reserved_ref_package")/source-evidence/airgap-bundle-manifest.json"
+cp "$direct_manifest_extra_reserved_ref_package/release-contract.json" "$extra_reserved_ref_path"
 "$NODE_BIN" --input-type=module - "$direct_manifest_extra_reserved_ref_package/operator-inputs.json" <<'NODE'
 import fs from 'node:fs';
 
 const [manifestPath] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-manifest.kubectl = '.release-kit-internal/online-use-existing/deployment-path/source-evidence/kubectl';
+manifest.airgap_bundle_manifest =
+  '.release-kit-internal/online-use-existing/deployment-path/source-evidence/airgap-bundle-manifest.json';
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 run_direct_plan_expect_fail \

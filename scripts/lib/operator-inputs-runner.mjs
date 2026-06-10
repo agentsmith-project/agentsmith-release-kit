@@ -724,6 +724,8 @@ function inputRefsForDeploymentPath(deploymentPath, mode, operatorManifest = {})
     if (mode === SUPPORTED_MODE) {
       required.push(...AIRGAP_APPLY_INPUT_REFS);
     }
+  } else if (deploymentPath === ONLINE_USE_EXISTING_PATH && mode === SUPPORTED_MODE) {
+    required.push('kubectl');
   } else {
     optional.push('kubectl');
   }
@@ -1579,6 +1581,9 @@ function validateInternalExpected(plan, internalRoot, operatorManifest) {
     'context',
     'operator-inputs manifest.context'
   );
+  if (operatorManifest.deployment_path === ONLINE_USE_EXISTING_PATH && context === undefined) {
+    fail('plan._internal.expected.context is required for online/use_existing apply');
+  }
   if (manifestContext !== context) {
     fail('plan._internal.expected.context must match operator-inputs manifest');
   }
