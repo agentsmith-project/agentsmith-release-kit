@@ -932,10 +932,141 @@ create_airgap_image_archives() {
   local contract="$2"
   local image_dir="$package_dir/image-archives"
 
+  retarget_release_contract_to_oci_fixture_digests "$contract"
   mkdir -p "$image_dir"
   "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
     --from-contract "$contract" \
     --output-dir "$image_dir"
+}
+
+retarget_release_contract_to_oci_fixture_digests() {
+  local contract="$1"
+
+  "$NODE_BIN" --input-type=module - "$contract" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [contractPath] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digest(value) {
+  return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+}
+
+function fixtureManifestDigest(imageId) {
+  const layerContent = Buffer.from(`fixture layer for ${imageId}\n`);
+  const layerDigest = digest(layerContent);
+  const config = {
+    architecture: 'amd64',
+    os: 'linux',
+    rootfs: {
+      type: 'layers',
+      diff_ids: [layerDigest]
+    },
+    config: {
+      Labels: {
+        'io.agentsmith.fixture.image_id': imageId
+      }
+    }
+  };
+  const configBuffer = Buffer.from(`${JSON.stringify(config)}\n`);
+  const configDigest = digest(configBuffer);
+  const manifest = {
+    schemaVersion: 2,
+    mediaType: 'application/vnd.oci.image.manifest.v1+json',
+    config: {
+      mediaType: 'application/vnd.oci.image.config.v1+json',
+      digest: configDigest,
+      size: configBuffer.length
+    },
+    layers: [
+      {
+        mediaType: 'application/vnd.oci.image.layer.v1.tar',
+        digest: layerDigest,
+        size: layerContent.length
+      }
+    ]
+  };
+  return digest(Buffer.from(`${JSON.stringify(manifest)}\n`));
+}
+
+function replaceImageDigest(image, nextDigest) {
+  if (!/@sha256:[0-9a-f]{64}$/.test(image)) {
+    throw new Error(`image must be digest-pinned: ${image}`);
+  }
+  return image.replace(/@sha256:[0-9a-f]{64}$/, `@${nextDigest}`);
+}
+
+function retargetImageItem(item, nextDigest) {
+  item.digest = nextDigest;
+  item.image = replaceImageDigest(item.image, nextDigest);
+  if (item.source_provenance?.artifact_sha256) {
+    item.source_provenance.artifact_sha256 = nextDigest;
+  }
+}
+
+function subjectDigest(value) {
+  const { artifact_provenance: _artifactProvenance, ...subject } = value;
+  return digest(JSON.stringify(stableJson(subject)));
+}
+
+function artifactProjectionDigest(value) {
+  const { artifact_sha256: _artifactSha256, ...artifactProvenance } = value.artifact_provenance;
+  const projection = { ...value, artifact_provenance: artifactProvenance };
+  return digest(JSON.stringify(stableJson(projection)));
+}
+
+const digestByInventoryId = new Map();
+for (const item of contract.deploy_image_inventory || []) {
+  const nextDigest = fixtureManifestDigest(item.id);
+  digestByInventoryId.set(item.id, nextDigest);
+  retargetImageItem(item, nextDigest);
+}
+
+for (const sourceName of [
+  'product_images',
+  'adopted_provider_images',
+  'release_kit_prerequisite_images'
+]) {
+  for (const item of contract[sourceName] || []) {
+    const inventoryItem = (contract.deploy_image_inventory || []).find(
+      (candidate) => candidate.source === sourceName && candidate.id === item.id
+    );
+    const nextDigest = digestByInventoryId.get(inventoryItem?.id || item.id);
+    if (!nextDigest) {
+      throw new Error(`missing fixture manifest digest for ${sourceName}.${item.id}`);
+    }
+    retargetImageItem(item, nextDigest);
+  }
+}
+
+if (contract.managed_runner_image) {
+  const nextDigest = digestByInventoryId.get('managed_runner');
+  if (!nextDigest) {
+    throw new Error('missing fixture manifest digest for managed_runner');
+  }
+  retargetImageItem(contract.managed_runner_image, nextDigest);
+}
+
+contract.artifact_provenance.subject_sha256 = subjectDigest(contract);
+contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
+
+fs.writeFileSync(contractPath, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
 }
 
 write_airgap_operator_prerequisites() {
@@ -1069,18 +1200,57 @@ write_fake_airgap_archive_probe() {
 #!/usr/bin/env node
 import fs from 'node:fs';
 
+const TAR_BLOCK_SIZE = 512;
 const archivePath = process.argv[2] || process.env.AGENTSMITH_IMAGE_ARCHIVE_PATH;
 if (!archivePath) {
   process.exit(2);
 }
-const body = fs.readFileSync(archivePath, 'utf8');
-const matches = [
-  ...body.matchAll(/"io\.agentsmith\.fixture\.target_digest"\s*:\s*"(sha256:[0-9a-f]{64})"/g)
-];
-if (matches.length !== 1) {
+
+function readTarString(block, start, length) {
+  const slice = block.subarray(start, start + length);
+  const end = slice.indexOf(0);
+  return slice.subarray(0, end === -1 ? slice.length : end).toString('utf8').trim();
+}
+
+function parseTarOctal(block, start, length) {
+  const raw = readTarString(block, start, length).trim();
+  return raw === '' ? 0 : Number.parseInt(raw, 8);
+}
+
+function readTarFile(buffer, wantedPath) {
+  for (let offset = 0; offset + TAR_BLOCK_SIZE <= buffer.length; ) {
+    const block = buffer.subarray(offset, offset + TAR_BLOCK_SIZE);
+    if (block.every((byte) => byte === 0)) {
+      break;
+    }
+    const name = readTarString(block, 0, 100);
+    const prefix = readTarString(block, 345, 155);
+    const entryPath = prefix ? `${prefix}/${name}` : name;
+    const size = parseTarOctal(block, 124, 12);
+    const contentStart = offset + TAR_BLOCK_SIZE;
+    const contentEnd = contentStart + size;
+    if (entryPath === wantedPath) {
+      return buffer.subarray(contentStart, contentEnd);
+    }
+    offset = contentStart + Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+  }
+  return undefined;
+}
+
+const body = fs.readFileSync(archivePath);
+const indexContent = readTarFile(body, 'index.json');
+if (!indexContent) {
   process.exit(3);
 }
-console.log(matches[0][1]);
+const index = JSON.parse(indexContent.toString('utf8'));
+if (!Array.isArray(index.manifests) || index.manifests.length !== 1) {
+  process.exit(4);
+}
+const digest = index.manifests[0]?.digest;
+if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
+  process.exit(5);
+}
+console.log(digest);
 NODE
   chmod +x "$fake_probe"
 }

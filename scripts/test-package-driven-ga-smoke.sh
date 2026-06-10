@@ -22,6 +22,7 @@ prepare_common_release_materials() {
     "$materials_dir/release-contract.json" \
     "$materials_dir/deploy-template-package.json" \
     true
+  retarget_release_contract_to_oci_fixture_digests "$materials_dir/release-contract.json"
 }
 
 copy_common_release_materials() {
@@ -864,12 +865,32 @@ NODE
 run_online_package() {
   local package_dir="$1"
   local label="$2"
+  local live_image
 
-  if ! run_operator_inputs "$package_dir" "$label" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
+  live_image="$(contract_image_for_id "$package_dir/release-contract.json" agentsmith_app)"
+
+  if ! run_operator_inputs "$package_dir" "$label" "$live_image" >"$TMP_DIR/$label.out" 2>"$TMP_DIR/$label.err"; then
     cat "$TMP_DIR/$label.out" >&2
     cat "$TMP_DIR/$label.err" >&2
     fail "package-driven run failed: $label"
   fi
+}
+
+contract_image_for_id() {
+  local release_contract="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" --input-type=module - "$release_contract" "$image_id" <<'NODE'
+import fs from 'node:fs';
+
+const [releaseContractFile, imageId] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(releaseContractFile, 'utf8'));
+const image = contract.deploy_image_inventory?.find((entry) => entry.id === imageId);
+if (!image?.image) {
+  throw new Error(`missing release contract image: ${imageId}`);
+}
+console.log(image.image);
+NODE
 }
 
 run_airgap_package() {
