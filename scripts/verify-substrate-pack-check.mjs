@@ -10,7 +10,8 @@ import {
 } from './lib/substrate-truth-validation.mjs';
 import {
   SUBSTRATE_PACK_MANIFEST_SCHEMA,
-  validateSubstratePackManifest
+  validateSubstratePackManifest,
+  validateSubstratePackManifestMateriality
 } from './lib/substrate-pack-manifest-validation.mjs';
 
 const REQUIRED_ARGS = [
@@ -222,6 +223,21 @@ async function main() {
     targetProfile,
     { fail }
   );
+  const { materialitySummary } = await validateSubstratePackManifestMateriality(
+    manifestInput.value,
+    {
+      fail,
+      packRoot: path.dirname(path.resolve(args.substratePackManifest))
+    }
+  );
+  for (const [section, sectionSummary] of Object.entries(
+    materialitySummary.material_sections
+  )) {
+    manifestSummary.material_sections[section] = {
+      ...manifestSummary.material_sections[section],
+      ...sectionSummary
+    };
+  }
   assertNoUnsafeSubstratePayload(
     substrateInput.value,
     'substrate_truth',

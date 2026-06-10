@@ -51,12 +51,42 @@ write_manifest() {
   local mutation="${3:-valid}"
 
   "$NODE_BIN" --input-type=module - "$output" "$profile" "$mutation" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const [output, profile, mutation] = process.argv.slice(2);
-const digest = (char) => `sha256:${char.repeat(64)}`;
+const packRoot = path.dirname(output);
+const digest = (bytes) => `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
+const placeholderDigest = (char) => `sha256:${char.repeat(64)}`;
 const image = (name, tag, char) =>
-  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${placeholderDigest(char)}`;
+
+function writePackFile(relativePath, content) {
+  const file = path.join(packRoot, relativePath);
+  const bytes = Buffer.from(content);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+  return digest(bytes);
+}
+
+const payloadDigest = writePackFile(
+  'payload/install-substrates.json',
+  `${JSON.stringify({
+    schema_version: 'agentsmith.substrate-install-plan/v1',
+    target_profile: profile,
+    services: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc']
+  }, null, 2)}\n`
+);
+writePackFile('templates/postgresql.yaml', 'kind: StatefulSet\nmetadata:\n  name: postgresql\n');
+writePackFile('templates/mongodb.yaml', 'kind: StatefulSet\nmetadata:\n  name: mongodb\n');
+writePackFile('templates/redis.yaml', 'kind: Deployment\nmetadata:\n  name: redis\n');
+writePackFile('templates/object-storage.yaml', 'kind: Deployment\nmetadata:\n  name: object-storage\n');
+writePackFile('templates/oidc.yaml', 'kind: Deployment\nmetadata:\n  name: oidc\n');
+const toolsDigest = writePackFile(
+  'tools/substrate-checks.txt',
+  'postgresql tls\nmongodb tls\nredis ping\nobject-storage head-bucket\noidc discovery\n'
+);
 
 const manifest = {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
@@ -73,7 +103,7 @@ const manifest = {
   payload: {
     install_plan: {
       path: 'payload/install-substrates.json',
-      sha256: digest('6')
+      sha256: payloadDigest
     }
   },
   templates: {
@@ -86,11 +116,11 @@ const manifest = {
   tools: {
     checks: {
       path: 'tools/substrate-checks.txt',
-      sha256: digest('7')
+      sha256: toolsDigest
     }
   },
   checksums: {
-    manifest: digest('8')
+    manifest: placeholderDigest('8')
   }
 };
 
@@ -117,13 +147,15 @@ switch (mutation) {
     break;
   case 'latest_image':
     manifest.images.redis =
-      'ghcr.io/agentsmith-project/substrates/redis:' + 'late' + 'st@' + digest('3');
+      'ghcr.io/agentsmith-project/substrates/redis:' + 'late' + 'st@' + placeholderDigest('3');
     break;
   case 'localhost_image':
-    manifest.images.postgresql = 'localhost:5000/substrates/postgresql:16.3@' + digest('1');
+    manifest.images.postgresql =
+      'localhost:5000/substrates/postgresql:16.3@' + placeholderDigest('1');
     break;
   case 'ipv6_loopback_image':
-    manifest.images.postgresql = '[::1]:5000/substrates/postgresql:16.3@' + digest('1');
+    manifest.images.postgresql = '[::1]:5000/substrates/postgresql:16.3@' +
+      placeholderDigest('1');
     break;
   case 'unsafe_path':
     manifest.payload.install_plan.path = '../payload/install-substrates.json';
@@ -150,10 +182,34 @@ switch (mutation) {
   case 'missing_required_section':
     delete manifest.tools;
     break;
+  case 'missing_payload_file':
+    manifest.payload.install_plan.path = 'payload/missing-install-substrates.json';
+    break;
+  case 'missing_template_file':
+    manifest.templates.postgresql = 'templates/missing-postgresql.yaml';
+    break;
+  case 'missing_tool_file':
+    manifest.tools.checks.path = 'tools/missing-substrate-checks.txt';
+    break;
+  case 'payload_sha_mismatch':
+    manifest.payload.install_plan.sha256 = placeholderDigest('9');
+    break;
+  case 'payload_sha_path_value':
+    writePackFile('checksums/not-a-digest', 'this file exists but is not a digest value\n');
+    manifest.payload.install_plan.sha256 = 'checksums/not-a-digest';
+    break;
+  case 'symlink_escape_template': {
+    const outsideFile = path.join(path.dirname(packRoot), 'outside-postgresql.yaml');
+    fs.writeFileSync(outsideFile, 'kind: ConfigMap\nmetadata:\n  name: outside\n');
+    fs.rmSync(path.join(packRoot, manifest.templates.postgresql), { force: true });
+    fs.symlinkSync(outsideFile, path.join(packRoot, manifest.templates.postgresql));
+    break;
+  }
   default:
     throw new Error(`unknown manifest mutation: ${mutation}`);
 }
 
+fs.mkdirSync(path.dirname(output), { recursive: true });
 fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
@@ -315,8 +371,25 @@ for (const section of ['payload', 'templates', 'tools', 'checksums']) {
     throw new Error(`missing material section summary: ${section}`);
   }
 }
+const materialSections = report.summary?.material_sections ?? {};
+const expectedMateriality = {
+  payload: { materialized_path_count: 1, digest_only_count: 0, sha256_checked_count: 1 },
+  templates: { materialized_path_count: 5, digest_only_count: 0, sha256_checked_count: 0 },
+  tools: { materialized_path_count: 1, digest_only_count: 0, sha256_checked_count: 1 },
+  checksums: { materialized_path_count: 0, digest_only_count: 1, sha256_checked_count: 0 }
+};
+for (const [section, counts] of Object.entries(expectedMateriality)) {
+  for (const [field, expected] of Object.entries(counts)) {
+    if (materialSections[section]?.[field] !== expected) {
+      throw new Error(`unexpected ${section}.${field}: ${materialSections[section]?.[field]}`);
+    }
+  }
+}
 if (/release_verdict|deploy_readiness|product_flow|kubeconfig|Bearer/i.test(serialized)) {
   throw new Error('substrate pack report must not contain verdict, deploy readiness, product flow, kubeconfig, or raw secret content');
+}
+if (/payload\/install-substrates|templates\/postgresql|tools\/substrate-checks/.test(serialized)) {
+  throw new Error('substrate pack report must not leak pack-relative material paths');
 }
 NODE
 }
@@ -328,7 +401,7 @@ expect_fail() {
   local target_profile="${4:-$KIT_ONLINE_PROFILE}"
   local manifest_profile="${5:-$target_profile}"
   local truth_profile="${6:-$target_profile}"
-  local manifest_file="$TMP_DIR/manifest-$label.json"
+  local manifest_file="$TMP_DIR/pack-$label/substrate-pack-manifest.json"
   local truth_file="$TMP_DIR/truth-$label.json"
   local output_dir="$TMP_DIR/out-$label"
 
@@ -396,7 +469,7 @@ NODE
   pass "substrate pack check report rejected by evidence intake"
 }
 
-ONLINE_MANIFEST="$TMP_DIR/manifest-online-valid.json"
+ONLINE_MANIFEST="$TMP_DIR/pack-online-valid/substrate-pack-manifest.json"
 ONLINE_TRUTH="$TMP_DIR/truth-online-valid.json"
 ONLINE_OUT="$TMP_DIR/out-online-valid"
 write_manifest "$ONLINE_MANIFEST" "$KIT_ONLINE_PROFILE" valid
@@ -405,7 +478,7 @@ run_pack_check "$KIT_ONLINE_PROFILE" "$ONLINE_MANIFEST" "$ONLINE_TRUTH" "$ONLINE
 assert_report "$ONLINE_OUT/$REPORT_FILE" "$KIT_ONLINE_PROFILE"
 pass "valid existing_kubernetes/kit_installed/online substrate pack accepted"
 
-AIRGAP_MANIFEST="$TMP_DIR/manifest-airgap-valid.json"
+AIRGAP_MANIFEST="$TMP_DIR/pack-airgap-valid/substrate-pack-manifest.json"
 AIRGAP_TRUTH="$TMP_DIR/truth-airgap-valid.json"
 AIRGAP_OUT="$TMP_DIR/out-airgap-valid"
 write_manifest "$AIRGAP_MANIFEST" "$KIT_AIRGAP_PROFILE" valid
@@ -443,6 +516,12 @@ expect_fail public-download public_download
 expect_fail public-download-key public_download_key
 expect_fail empty-tools empty_tools
 expect_fail missing-required-section missing_required_section
+expect_fail missing-payload-file missing_payload_file
+expect_fail missing-template-file missing_template_file
+expect_fail missing-tool-file missing_tool_file
+expect_fail payload-sha-mismatch payload_sha_mismatch
+expect_fail payload-sha-path-value payload_sha_path_value
+expect_fail symlink-escape-template symlink_escape_template
 expect_fail truth-profile-mismatch valid valid "$KIT_ONLINE_PROFILE" "$KIT_ONLINE_PROFILE" "$KIT_AIRGAP_PROFILE"
 expect_fail truth-wrong-installed-by valid wrong_installed_by
 expect_fail truth-raw-kubeconfig valid raw_kubeconfig

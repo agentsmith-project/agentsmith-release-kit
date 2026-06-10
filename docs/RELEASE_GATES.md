@@ -1367,6 +1367,12 @@ repository path segments. `payload`, `templates`, `tools`, and `checksums`
 must contain only sha256 digests or safe relative pack paths. Public-download
 wording, `file://`, `local://`, `source://`, absolute paths, workspace source
 paths, kubeconfig text, and credential/secret-looking values fail fast.
+For this focused diagnostic, the manifest file's directory is the substrate
+pack root. Safe relative pack paths in `payload`, `templates`, `tools`, and
+`checksums` must resolve inside that root without symlink escape, exist, and be
+regular files. Objects shaped as `{ "path": "...", "sha256": "sha256:..." }`
+must match the referenced file digest; digest-only `sha256:...` leaves remain
+pure declarations and do not require files.
 
 The substrate truth input is then validated through the shared
 `validateSubstrateConnectionTruth` path with required substrate source

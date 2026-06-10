@@ -1,3 +1,7 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
 import { requirePlainSemver } from './release-kit-version-policy.mjs';
 
 export const SUBSTRATE_PACK_MANIFEST_SCHEMA = 'agentsmith.substrate-pack-manifest/v1';
@@ -261,6 +265,184 @@ function validateMaterialSection(value, label, fail) {
     );
   }
   fail(`${label} must contain sha256 digests or safe relative substrate pack paths`);
+}
+
+function zeroMaterialityCounts() {
+  return {
+    materialized_path_count: 0,
+    digest_only_count: 0,
+    sha256_checked_count: 0
+  };
+}
+
+function addMaterialityCounts(left, right) {
+  return {
+    materialized_path_count: left.materialized_path_count + right.materialized_path_count,
+    digest_only_count: left.digest_only_count + right.digest_only_count,
+    sha256_checked_count: left.sha256_checked_count + right.sha256_checked_count
+  };
+}
+
+function isInsideDirectory(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function realpathPackRoot(packRoot, label, fail) {
+  try {
+    return await fs.realpath(packRoot);
+  } catch (error) {
+    fail(`${label} must be an existing substrate pack root (${error.code || 'fs error'})`);
+  }
+}
+
+async function sha256File(file, label, fail) {
+  let bytes;
+  try {
+    bytes = await fs.readFile(file);
+  } catch (error) {
+    fail(`${label} cannot be read from substrate pack (${error.code || 'fs error'})`);
+  }
+  return `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
+}
+
+async function assertMaterialFilePath(value, label, context) {
+  const relativePackPath = assertSafeRelativePackPath(value, label, context.fail);
+  const resolvedPath = path.resolve(context.packRoot, relativePackPath);
+  if (!isInsideDirectory(context.packRoot, resolvedPath)) {
+    context.fail(`${label} must resolve inside substrate pack root`);
+  }
+
+  let realPath;
+  try {
+    realPath = await fs.realpath(resolvedPath);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      context.fail(`${label} must reference an existing file in substrate pack`);
+    }
+    context.fail(`${label} cannot be resolved in substrate pack (${error.code || 'fs error'})`);
+  }
+  if (!isInsideDirectory(context.realPackRoot, realPath)) {
+    context.fail(`${label} must resolve inside substrate pack root`);
+  }
+
+  let stats;
+  try {
+    stats = await fs.stat(realPath);
+  } catch (error) {
+    context.fail(`${label} cannot be inspected in substrate pack (${error.code || 'fs error'})`);
+  }
+  if (!stats.isFile()) {
+    context.fail(`${label} must reference a file in substrate pack`);
+  }
+  return realPath;
+}
+
+async function validateMaterialStringMateriality(value, label, context) {
+  const material = assertMaterialString(value, label, context.fail);
+  if (material.kind === 'digest') {
+    return {
+      ...zeroMaterialityCounts(),
+      digest_only_count: 1
+    };
+  }
+  await assertMaterialFilePath(value, label, context);
+  return {
+    ...zeroMaterialityCounts(),
+    materialized_path_count: 1
+  };
+}
+
+async function validatePathAndShaMateriality(value, label, context) {
+  const realPath = await assertMaterialFilePath(value.path, `${label}.path`, context);
+  const expectedDigest = requireString(value.sha256, `${label}.sha256`, context.fail);
+  if (!DIGEST_RE.test(expectedDigest)) {
+    context.fail(`${label}.sha256 must be a sha256 digest`);
+  }
+  const actualDigest = await sha256File(realPath, `${label}.path`, context.fail);
+  if (actualDigest !== expectedDigest) {
+    context.fail(`${label}.sha256 must match referenced file sha256`);
+  }
+
+  let counts = {
+    ...zeroMaterialityCounts(),
+    materialized_path_count: 1,
+    sha256_checked_count: 1
+  };
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === 'path' || key === 'sha256') {
+      continue;
+    }
+    counts = addMaterialityCounts(
+      counts,
+      await validateMaterialSectionMateriality(nested, `${label}.${key}`, context)
+    );
+  }
+  return counts;
+}
+
+async function validateMaterialSectionMateriality(value, label, context) {
+  if (typeof value === 'string') {
+    return validateMaterialStringMateriality(value, label, context);
+  }
+  if (Array.isArray(value)) {
+    let counts = zeroMaterialityCounts();
+    for (const [index, item] of value.entries()) {
+      counts = addMaterialityCounts(
+        counts,
+        await validateMaterialSectionMateriality(item, `${label}[${index}]`, context)
+      );
+    }
+    return counts;
+  }
+  if (value && typeof value === 'object') {
+    if (
+      Object.prototype.hasOwnProperty.call(value, 'path') &&
+      Object.prototype.hasOwnProperty.call(value, 'sha256') &&
+      typeof value.path === 'string' &&
+      typeof value.sha256 === 'string'
+    ) {
+      return validatePathAndShaMateriality(value, label, context);
+    }
+
+    let counts = zeroMaterialityCounts();
+    for (const [key, nested] of Object.entries(value)) {
+      counts = addMaterialityCounts(
+        counts,
+        await validateMaterialSectionMateriality(nested, `${label}.${key}`, context)
+      );
+    }
+    return counts;
+  }
+  return zeroMaterialityCounts();
+}
+
+export async function validateSubstratePackManifestMateriality(value, options = {}) {
+  const fail = options.fail || defaultFail;
+  const label = options.label || 'substrate_pack_manifest';
+  const manifest = requireObject(value, label, fail);
+  const packRoot = path.resolve(requireString(options.packRoot, `${label}.pack_root`, fail));
+  const realPackRoot = await realpathPackRoot(packRoot, `${label}.pack_root`, fail);
+  const context = {
+    packRoot,
+    realPackRoot,
+    fail
+  };
+
+  const materialSections = {};
+  for (const section of MATERIAL_SECTIONS) {
+    materialSections[section] = await validateMaterialSectionMateriality(
+      manifest[section],
+      `${label}.${section}`,
+      context
+    );
+  }
+
+  return {
+    materialitySummary: {
+      material_sections: materialSections
+    }
+  };
 }
 
 function imageDigestSuffix(image, label, fail) {
