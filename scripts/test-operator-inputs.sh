@@ -1544,6 +1544,9 @@ if (!readme.includes('"deploy_confirmation": {') || !readme.includes('"operator_
 if (deploymentPath.endsWith('/install_substrates') && !readme.includes('namespace-scoped installer')) {
   throw new Error('install_substrates README must explain the installer boundary');
 }
+if (deploymentPath.endsWith('/install_substrates') && !readme.includes('payload/templates/tools material tree')) {
+  throw new Error('install_substrates README must explain substrate pack material tree placement');
+}
 if (deploymentPath.endsWith('/install_substrates')) {
   if (!readme.includes('"install_confirmation": {') || !readme.includes('"confirm_current_install_parameters": true')) {
     throw new Error('install_substrates README must include an install_confirmation JSON snippet');

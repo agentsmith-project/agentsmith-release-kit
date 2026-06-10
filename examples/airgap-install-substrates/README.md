@@ -14,6 +14,9 @@ The bundle manifest and bundle-local install inputs are already bound to
 `airgap/install_substrates`. Keep `deployment_path` set to
 `airgap/install_substrates`. Replace bundle components, component checksums,
 namespace, service refs, package-local tools, and confirmation fields.
+Provide the substrate pack manifest together with its referenced `payload/`,
+`templates/`, and `tools/` material tree; paths are relative to the manifest's
+directory.
 The installer chooses the path from `deployment_path`; do not add extra
 deployment selection fields to the bundle-local target prerequisites or install
 inputs.
@@ -35,6 +38,9 @@ bundle-local release contract, deploy template package, deploy template
 archive, image map, and substrate pack manifest. Update
 `airgap-bundle/airgap-bundle-manifest.json` component sha256 values after
 replacement. Replace package-local tools before `--run`.
+Because the airgap substrate pack manifest is under
+`airgap-bundle/components/`, put its referenced material tree under that same
+directory, or update the manifest paths to match.
 If this package started from init scaffold, replace
 `context: replace-with-kube-context` and
 `smoke_url: https://agentsmith.example.com/healthz`; doctor treats those

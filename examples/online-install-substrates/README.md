@@ -10,6 +10,9 @@ The example pack, prerequisites, and install-input files are already bound to
 `online/install_substrates`. Keep `deployment_path` set to
 `online/install_substrates`. Replace namespace, storage values, service refs,
 package-local tools, and confirmation fields.
+Provide the substrate pack manifest together with its referenced `payload/`,
+`templates/`, and `tools/` material tree; paths are relative to the manifest's
+directory.
 The installer chooses the path from `deployment_path`; do not add extra
 deployment selection fields to `target-prerequisites.example.json` or
 `substrate-install-inputs.example.json`.
@@ -56,6 +59,8 @@ package-local executables before `--run`. When using the target registry
 variant, replace `tools/registry-probe` too; it intentionally exits non-zero
 until replaced. Set `smoke_url` to the HTTPS route smoke endpoint for this
 target before apply.
+When replacing `substrate-pack-manifest.example.json`, also copy the real
+pack material tree next to it, or update the manifest paths to match.
 
 ## Confirm Install Parameters
 

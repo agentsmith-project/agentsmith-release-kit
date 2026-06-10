@@ -110,6 +110,9 @@ confirmation. It uses installer-generated substrate truth for the airgap
 deployment gate and does not require `routability_probe` or bundle/package
 `substrate_truth`. `installed_by` stays a provenance marker, not installer
 proof.
+For install paths, the substrate pack is the manifest plus its referenced
+`payload/`, `templates/`, and `tools/` material tree; those paths are relative
+to the manifest's directory.
 For both online paths, an apply package may also set `target_registry` and
 provide a package-local `registry_probe`; the registry must already contain
 digest refs for the release images.

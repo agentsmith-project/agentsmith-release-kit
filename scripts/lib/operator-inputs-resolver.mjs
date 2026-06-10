@@ -2621,6 +2621,7 @@ function packageReadmeForManifest(manifest) {
   const installNote = deploymentPath.endsWith('/install_substrates')
     ? [
       '- Fill install_confirmation only after checking the namespace-scoped installer inputs.',
+      '- Provide the substrate pack manifest with its payload/templates/tools material tree; paths are relative to the manifest directory.',
       '- Keep substrate_truth out of this package; the run uses installer-generated truth.'
     ]
     : [
