@@ -64,7 +64,7 @@ Mode status:
   --registry-presence checks target registry digest-ref presence through an operator probe only; it is not release readiness.
   --bundle-create assembles a local airgap bundle and immediately runs airgap-bundle-check only; optional external-declared or kit-installed airgap evidence output is an unsigned focused envelope, not release readiness.
   --airgap-bundle-check checks an airgap bundle manifest, deploy template archive digest, payload/tool declarations, and declared file digests only; it is not release readiness.
-  --airgap-image-archive-check checks already assembled airgap image archive file materiality through a local read-only probe only; it is not package, load/import, offline install, deploy, registry, or release readiness.
+  --airgap-image-archive-check checks already assembled OCI layout archive structure/digest sanity plus local read-only probe materiality only; it is not package, load/import, offline install, deploy, registry, or release readiness.
   --airgap-image-load runs existing airgap image archive materiality first, then calls an operator-provided image loader once per image archive only; it is not offline install, deploy, package, registry, or release readiness.
   --bundle-load-plan checks an already assembled airgap bundle through airgap-bundle-check and writes a read-only load plan summary only; it is not release readiness or registry execution.
   --airgap-bundle-render-check renders an already assembled airgap bundle offline and runs rendered manifest image inventory check only; it is not package, offline install, deploy, registry, apply, smoke, or release readiness.

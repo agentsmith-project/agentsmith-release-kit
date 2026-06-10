@@ -34,6 +34,7 @@ const REPORT_FILE = 'airgap-image-archive-check-report.json';
 const SELF_CHECK_DIR = 'airgap-bundle-check';
 const SELF_CHECK_REPORT_FILE = 'airgap-bundle-check-report.json';
 const PROBE_TIMEOUT_MS = 5000;
+const TAR_BLOCK_SIZE = 512;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -176,6 +177,215 @@ function findOutputDirArg(argv) {
 
 function digestBuffer(buffer) {
   return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function readTarString(block, start, length) {
+  const slice = block.subarray(start, start + length);
+  const end = slice.indexOf(0);
+  return slice.subarray(0, end === -1 ? slice.length : end).toString('utf8').trim();
+}
+
+function parseTarOctal(block, start, length, label) {
+  const raw = readTarString(block, start, length).trim();
+  if (raw === '') {
+    return 0;
+  }
+  if (!/^[0-7]+$/.test(raw)) {
+    fail(`${label} has invalid tar size`);
+  }
+  return Number.parseInt(raw, 8);
+}
+
+function isZeroBlock(block) {
+  return block.every((byte) => byte === 0);
+}
+
+function normalizeArchiveEntryPath(entryPath, label) {
+  if (entryPath.includes('\\')) {
+    fail(`${label} entry path must use POSIX separators: ${entryPath}`);
+  }
+  if (entryPath.startsWith('/') || WINDOWS_DRIVE_RE.test(entryPath)) {
+    fail(`${label} entry path must be relative: ${entryPath}`);
+  }
+
+  const parts = entryPath.split('/');
+  const normalizedParts = [];
+  for (const part of parts) {
+    if (part === '' || part === '.') {
+      continue;
+    }
+    if (part === '..') {
+      fail(`${label} entry path must not escape archive root: ${entryPath}`);
+    }
+    normalizedParts.push(part);
+  }
+
+  const normalized = normalizedParts.join('/');
+  if (!normalized) {
+    fail(`${label} entry path must not be empty`);
+  }
+  return normalized;
+}
+
+function parseTarArchive(buffer, label) {
+  const files = new Map();
+  let offset = 0;
+  let zeroBlocks = 0;
+
+  while (offset + TAR_BLOCK_SIZE <= buffer.length) {
+    const block = buffer.subarray(offset, offset + TAR_BLOCK_SIZE);
+    if (isZeroBlock(block)) {
+      zeroBlocks += 1;
+      offset += TAR_BLOCK_SIZE;
+      if (zeroBlocks >= 2) {
+        break;
+      }
+      continue;
+    }
+    zeroBlocks = 0;
+
+    const name = readTarString(block, 0, 100);
+    const prefix = readTarString(block, 345, 155);
+    const entryPath = normalizeArchiveEntryPath(prefix ? `${prefix}/${name}` : name, label);
+    const typeFlag = block[156] === 0 ? '0' : String.fromCharCode(block[156]);
+    const size = parseTarOctal(block, 124, 12, `${label} entry ${entryPath}`);
+    const contentStart = offset + TAR_BLOCK_SIZE;
+    const contentEnd = contentStart + size;
+    if (contentEnd > buffer.length) {
+      fail(`${label} entry is truncated: ${entryPath}`);
+    }
+
+    if (typeFlag === '2') {
+      fail(`${label} symlink entries are not allowed: ${entryPath}`);
+    }
+    if (typeFlag === '1') {
+      fail(`${label} hardlink entries are not allowed: ${entryPath}`);
+    }
+    if (['x', 'g', 'L', 'K'].includes(typeFlag)) {
+      fail(`${label} extended tar metadata is not allowed: ${entryPath}`);
+    }
+    if (!['0', '5'].includes(typeFlag)) {
+      fail(`${label} entry type is not allowed: ${entryPath}`);
+    }
+
+    if (typeFlag === '0') {
+      if (files.has(entryPath)) {
+        fail(`${label} contains duplicate entry: ${entryPath}`);
+      }
+      files.set(entryPath, buffer.subarray(contentStart, contentEnd));
+    }
+
+    offset = contentStart + Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+  }
+
+  if (files.size === 0) {
+    fail(`${label} must contain OCI layout files`);
+  }
+  return files;
+}
+
+function parseJsonBuffer(buffer, label) {
+  try {
+    return requireObject(JSON.parse(buffer.toString('utf8')), label);
+  } catch (error) {
+    fail(`${label} must be valid JSON: ${error.message}`);
+  }
+}
+
+function requireDescriptor(value, label) {
+  const descriptor = requireObject(value, label);
+  const digest = requireDigest(descriptor.digest, `${label}.digest`);
+  return {
+    digest,
+    path: `blobs/sha256/${digest.slice('sha256:'.length)}`
+  };
+}
+
+function readDescriptorBlob(files, descriptor, label, role) {
+  const content = files.get(descriptor.path);
+  if (!content) {
+    fail(`${label} missing ${role} blob: ${descriptor.path}`);
+  }
+  const actualDigest = digestBuffer(content);
+  if (actualDigest !== descriptor.digest) {
+    fail(`${label} ${role} blob digest mismatch: ${descriptor.path}`);
+  }
+  return content;
+}
+
+async function validateOciLayoutArchive({ archivePath, id }) {
+  let archiveBuffer;
+  try {
+    archiveBuffer = await fs.readFile(archivePath);
+  } catch (error) {
+    fail(`cannot read image archive for image id ${id}: ${error.message}`);
+  }
+
+  const label = `OCI image archive ${id}`;
+  const files = parseTarArchive(archiveBuffer, label);
+  const layoutContent = files.get('oci-layout');
+  if (!layoutContent) {
+    fail(`${label} is missing oci-layout`);
+  }
+  const indexContent = files.get('index.json');
+  if (!indexContent) {
+    fail(`${label} is missing index.json`);
+  }
+
+  const layout = parseJsonBuffer(layoutContent, `${label} oci-layout`);
+  assertStringEquals(layout.imageLayoutVersion, '1.0.0', `${label} oci-layout.imageLayoutVersion`);
+
+  const index = parseJsonBuffer(indexContent, `${label} index.json`);
+  const manifests = requireArray(index.manifests, `${label} index.json.manifests`);
+  if (manifests.length === 0) {
+    fail(`${label} index.json.manifests must not be empty`);
+  }
+
+  let layerBlobCount = 0;
+  for (const [manifestIndex, manifestValue] of manifests.entries()) {
+    const manifestLabel = `${label} index.json.manifests[${manifestIndex}]`;
+    const manifestDescriptor = requireDescriptor(manifestValue, manifestLabel);
+    const manifestContent = readDescriptorBlob(
+      files,
+      manifestDescriptor,
+      manifestLabel,
+      'manifest'
+    );
+    const manifest = parseJsonBuffer(
+      manifestContent,
+      `${label} manifest ${manifestDescriptor.digest}`
+    );
+    const configDescriptor = requireDescriptor(
+      manifest.config,
+      `${label} manifest ${manifestDescriptor.digest}.config`
+    );
+    readDescriptorBlob(files, configDescriptor, `${label} manifest ${manifestDescriptor.digest}`, 'config');
+
+    const layers = requireArray(
+      manifest.layers,
+      `${label} manifest ${manifestDescriptor.digest}.layers`
+    );
+    if (layers.length === 0) {
+      fail(`${label} manifest ${manifestDescriptor.digest} must declare at least one layer blob`);
+    }
+    for (const [layerIndex, layerValue] of layers.entries()) {
+      const layerDescriptor = requireDescriptor(
+        layerValue,
+        `${label} manifest ${manifestDescriptor.digest}.layers[${layerIndex}]`
+      );
+      readDescriptorBlob(
+        files,
+        layerDescriptor,
+        `${label} manifest ${manifestDescriptor.digest}`,
+        'layer'
+      );
+      layerBlobCount += 1;
+    }
+  }
+
+  if (layerBlobCount === 0) {
+    fail(`${label} must contain at least one layer blob`);
+  }
 }
 
 async function readJson(file, label) {
@@ -722,6 +932,7 @@ async function assertImageArtifactDeclarations({
     if (actualArchiveSha256 !== archiveSha256) {
       fail(`${label}.sha256 must match image artifact file sha256`);
     }
+    await validateOciLayoutArchive({ archivePath, id });
 
     const probeDigest = runArchiveProbe({ archiveProbe, archivePath, id });
     if (probeDigest !== targetDigest) {

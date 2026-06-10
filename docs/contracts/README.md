@@ -244,13 +244,17 @@ image archive materiality diagnostic only. It consumes the same already
 assembled bundle inputs as `--airgap-bundle-check`, accepts
 `existing_kubernetes/external_declared/airgap` and
 `existing_kubernetes/kit_installed/airgap`, and first runs the existing bundle
-check. It then invokes an explicit local `--archive-probe <executable>`
-once per `bundle_manifest.image_artifact_declarations[]` archive path. The
-probe receives the archive path as argv and env, and stdout must contain
-exactly one `sha256:<64>` digest. The digest must match the corresponding
-image-map `target_digest`; bundle-check has already bound that digest to the
-release contract inventory. `--archive-probe` is an operator-owned trusted
-local executable; release-kit does not sandbox it or prove the probe itself
+check. It then validates each declared `oci_layout_tar` as an OCI layout tar:
+`oci-layout`, `index.json`, descriptor-addressed manifest/config/layer blobs,
+matching blob sha256 values, and at least one layer blob are required. After
+that structure sanity check, it invokes an explicit local
+`--archive-probe <executable>` once per
+`bundle_manifest.image_artifact_declarations[]` archive path. The probe
+receives the archive path as argv and env, and stdout must contain exactly one
+`sha256:<64>` digest. The digest must match the corresponding image-map
+`target_digest`; bundle-check has already bound that digest to the release
+contract inventory. `--archive-probe` is an operator-owned trusted local
+executable; release-kit does not sandbox it or prove the probe itself
 trustworthy, and only validates stdout digest alignment with the release
 contract, image-map, and bundle manifest.
 Its `airgap-image-archive-check-report.json` uses `schema:
@@ -259,9 +263,9 @@ agentsmith.airgap-image-archive-check-report/v1`, `readiness: false`, and
 release identity, target profile, input/report digests, image ids, counts, and
 digest summaries. It is not a release-kit evidence envelope output and must
 not claim image load/import success, registry execution, offline install,
-package, deploy, or release readiness. It must not include absolute paths,
-probe path, raw probe output, target registry topology, operator refs,
-locations, proofs, or secrets.
+offline deploy proof, package, deploy, or release readiness. It must not
+include absolute paths, probe path, raw probe output, target registry topology,
+operator refs, locations, proofs, or secrets.
 
 The current `--bundle-load-plan` validator is a focused read-only plan
 diagnostic only. It consumes the same already assembled bundle inputs as

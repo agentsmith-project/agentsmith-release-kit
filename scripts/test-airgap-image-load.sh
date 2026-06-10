@@ -187,24 +187,9 @@ JSON
 
 create_image_archives() {
   mkdir -p "$IMAGE_DIR"
-  "$NODE_BIN" --input-type=module - "$VALID_CONTRACT" "$IMAGE_DIR" <<'NODE'
-import fs from 'node:fs';
-import path from 'node:path';
-
-const [contractInput, imageDir] = process.argv.slice(2);
-const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
-for (const image of contract.deploy_image_inventory) {
-  fs.writeFileSync(
-    path.join(imageDir, `${image.id}.oci-layout.tar`),
-    [
-      'local oci layout tar fixture',
-      `id=${image.id}`,
-      `target_digest=${image.digest}`,
-      ''
-    ].join('\n')
-  );
-}
-NODE
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --from-contract "$VALID_CONTRACT" \
+    --output-dir "$IMAGE_DIR"
 }
 
 write_operator_prerequisites() {
@@ -335,7 +320,9 @@ if (!archivePath) {
   process.exit(2);
 }
 const body = fs.readFileSync(archivePath, 'utf8');
-const matches = [...body.matchAll(/^target_digest=(sha256:[0-9a-f]{64})$/gm)];
+const matches = [
+  ...body.matchAll(/"io\.agentsmith\.fixture\.target_digest"\s*:\s*"(sha256:[0-9a-f]{64})"/g)
+];
 if (matches.length !== 1) {
   process.exit(3);
 }
@@ -352,7 +339,9 @@ if (!archivePath || !targetImage || !targetDigest) {
   process.exit(2);
 }
 const body = fs.readFileSync(archivePath, 'utf8');
-const matches = [...body.matchAll(/^target_digest=(sha256:[0-9a-f]{64})$/gm)];
+const matches = [
+  ...body.matchAll(/"io\.agentsmith\.fixture\.target_digest"\s*:\s*"(sha256:[0-9a-f]{64})"/g)
+];
 if (matches.length !== 1 || matches[0][1] !== targetDigest) {
   process.exit(3);
 }

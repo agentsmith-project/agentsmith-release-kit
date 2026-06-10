@@ -687,16 +687,20 @@ or smoke.
 The diagnostic requires `--archive-probe <executable>`. The probe must be a
 local executable and is invoked once per
 `bundle_manifest.image_artifact_declarations[]` archive file under the bundle
-root. The archive path is provided as argv and env. Probe stdout must be
-exactly one `sha256:<64>` digest and stderr must be empty. The probe digest
-must match the image-map `target_digest`; bundle-check has already aligned
-that digest with `release_contract.deploy_image_inventory`. This proves only
-local archive digest materiality through the chosen probe. `--archive-probe`
-is an operator-owned trusted local executable; release-kit does not sandbox it
-or prove the probe itself trustworthy, and only validates stdout digest
-alignment with the release contract, image-map, and bundle manifest. It is not
-a registry mirror, image import, image load, offline install, package, deploy,
-or release readiness check.
+root. Declared `oci_layout_tar` archives must be readable OCI layout tars with
+`oci-layout`, `index.json`, descriptor-addressed manifest/config/layer blobs,
+matching blob sha256 values, and at least one layer blob, so manifest-only or
+empty archives fail before the probe runs. The archive path is provided as argv
+and env. Probe stdout must be exactly one `sha256:<64>` digest and stderr must
+be empty. The probe digest must match the image-map `target_digest`;
+bundle-check has already aligned that digest with
+`release_contract.deploy_image_inventory`. This proves only local OCI archive
+structure/digest sanity plus digest materiality through the chosen probe.
+`--archive-probe` is an operator-owned trusted local executable; release-kit
+does not sandbox it or prove the probe itself trustworthy, and only validates
+stdout digest alignment with the release contract, image-map, and bundle
+manifest. It is not a registry mirror, image import, image load, offline
+install, package, deploy, or release readiness check.
 
 The generated `airgap-image-archive-check-report.json` must keep `schema:
 agentsmith.airgap-image-archive-check-report/v1`, `scope:

@@ -169,24 +169,9 @@ JSON
 
 create_image_archives() {
   mkdir -p "$IMAGE_DIR"
-  "$NODE_BIN" --input-type=module - "$VALID_CONTRACT" "$IMAGE_DIR" <<'NODE'
-import fs from 'node:fs';
-import path from 'node:path';
-
-const [contractInput, imageDir] = process.argv.slice(2);
-const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
-for (const image of contract.deploy_image_inventory) {
-  fs.writeFileSync(
-    path.join(imageDir, `${image.id}.oci-layout.tar`),
-    [
-      'local oci layout tar fixture',
-      `id=${image.id}`,
-      `target_digest=${image.digest}`,
-      ''
-    ].join('\n')
-  );
-}
-NODE
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --from-contract "$VALID_CONTRACT" \
+    --output-dir "$IMAGE_DIR"
 }
 
 write_operator_prerequisites() {
@@ -317,7 +302,9 @@ if (!archivePath) {
   process.exit(2);
 }
 const body = fs.readFileSync(archivePath, 'utf8');
-const matches = [...body.matchAll(/^target_digest=(sha256:[0-9a-f]{64})$/gm)];
+const matches = [
+  ...body.matchAll(/"io\.agentsmith\.fixture\.target_digest"\s*:\s*"(sha256:[0-9a-f]{64})"/g)
+];
 if (matches.length !== 1) {
   process.exit(3);
 }
@@ -458,31 +445,30 @@ mutate_image_archive_digest() {
   local image_id="$2"
   local digest="$3"
 
-  "$NODE_BIN" --input-type=module - "$bundle_root" "$image_id" "$digest" <<'NODE'
-import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-
-const [bundleRoot, imageId, digest] = process.argv.slice(2);
-const manifestPath = path.join(bundleRoot, 'airgap-bundle-manifest.json');
-const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-const declaration = manifest.image_artifact_declarations.find((item) => item.id === imageId);
-if (!declaration) {
-  throw new Error(`missing image declaration: ${imageId}`);
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --bundle-root "$bundle_root" \
+    --image-id "$image_id" \
+    --target-digest "$digest"
 }
-const archivePath = path.join(bundleRoot, ...declaration.path.split('/'));
-fs.writeFileSync(
-  archivePath,
-  [
-    'local oci layout tar fixture',
-    `id=${imageId}`,
-    `target_digest=${digest}`,
-    ''
-  ].join('\n')
-);
-declaration.sha256 = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(archivePath)).digest('hex')}`;
-fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-NODE
+
+mutate_image_archive_missing_layer() {
+  local bundle_root="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --bundle-root "$bundle_root" \
+    --image-id "$image_id" \
+    --variant missing-layer
+}
+
+mutate_image_archive_manifest_only() {
+  local bundle_root="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --bundle-root "$bundle_root" \
+    --image-id "$image_id" \
+    --variant manifest-only
 }
 
 mutate_image_archive_placeholder() {
@@ -693,6 +679,28 @@ copy_valid_bundle "$wrong_digest_bundle"
 mutate_image_archive_digest "$wrong_digest_bundle" agentsmith_app "sha256:7777777777777777777777777777777777777777777777777777777777777777"
 expect_check_fail "probe-target-digest-mismatch" "$TMP_DIR/out-wrong-digest" \
   run_image_archive_check "$wrong_digest_bundle" "$TMP_DIR/out-wrong-digest"
+
+missing_layer_bundle="$TMP_DIR/bundle-missing-layer"
+copy_valid_bundle "$missing_layer_bundle"
+mutate_image_archive_missing_layer "$missing_layer_bundle" afscp
+expect_check_fail "missing-layer-blob" "$TMP_DIR/out-missing-layer" \
+  run_image_archive_check "$missing_layer_bundle" "$TMP_DIR/out-missing-layer"
+if ! grep -Fq 'missing layer blob' "$TMP_DIR/missing-layer-blob.err"; then
+  cat "$TMP_DIR/missing-layer-blob.err" >&2
+  fail "missing layer blob failure must explain the missing layer/blob"
+fi
+pass "OCI archive structure check rejected missing layer blob"
+
+manifest_only_bundle="$TMP_DIR/bundle-manifest-only"
+copy_valid_bundle "$manifest_only_bundle"
+mutate_image_archive_manifest_only "$manifest_only_bundle" asbcp
+expect_check_fail "manifest-only-archive" "$TMP_DIR/out-manifest-only" \
+  run_image_archive_check "$manifest_only_bundle" "$TMP_DIR/out-manifest-only"
+if ! grep -Fq 'must declare at least one layer blob' "$TMP_DIR/manifest-only-archive.err"; then
+  cat "$TMP_DIR/manifest-only-archive.err" >&2
+  fail "manifest-only failure must explain the missing layer/blob"
+fi
+pass "OCI archive structure check rejected manifest-only archive"
 
 placeholder_bundle="$TMP_DIR/bundle-placeholder"
 copy_valid_bundle "$placeholder_bundle"
