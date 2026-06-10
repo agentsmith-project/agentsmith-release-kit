@@ -79,16 +79,22 @@ JSON
 write_materials() {
   local manifest_sha="$1"
   local archive_sha="$2"
+  local contract_output="${3:-$VALID_CONTRACT}"
+  local package_output="${4:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
+  local fixture_variant="${5:-valid}"
 
   "$NODE_BIN" --input-type=module - \
     "$FIXTURE_CONTRACT" \
     "$FIXTURE_DEPLOY_TEMPLATE_PACKAGE" \
     "$manifest_sha" \
     "$archive_sha" \
-    "$VALID_CONTRACT" \
-    "$VALID_DEPLOY_TEMPLATE_PACKAGE" <<'NODE'
+    "$contract_output" \
+    "$package_output" \
+    "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    "$fixture_variant" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 const [
   contractInput,
@@ -96,7 +102,9 @@ const [
   manifestSha,
   archiveSha,
   contractOutput,
-  packageOutput
+  packageOutput,
+  fixtureHelper,
+  fixtureVariant
 ] = process.argv.slice(2);
 
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
@@ -120,41 +128,30 @@ function digest(value) {
   return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 }
 
-function fixtureManifestDigest(imageId) {
-  const layerContent = Buffer.from(`fixture layer for ${imageId}\n`);
-  const layerDigest = digest(layerContent);
-  const config = {
-    architecture: 'amd64',
-    os: 'linux',
-    rootfs: {
-      type: 'layers',
-      diff_ids: [layerDigest]
-    },
-    config: {
-      Labels: {
-        'io.agentsmith.fixture.image_id': imageId
-      }
-    }
-  };
-  const configBuffer = Buffer.from(`${JSON.stringify(config)}\n`);
-  const configDigest = digest(configBuffer);
-  const manifest = {
-    schemaVersion: 2,
-    mediaType: 'application/vnd.oci.image.manifest.v1+json',
-    config: {
-      mediaType: 'application/vnd.oci.image.config.v1+json',
-      digest: configDigest,
-      size: configBuffer.length
-    },
-    layers: [
-      {
-        mediaType: 'application/vnd.oci.image.layer.v1.tar',
-        digest: layerDigest,
-        size: layerContent.length
-      }
-    ]
-  };
-  return digest(Buffer.from(`${JSON.stringify(manifest)}\n`));
+function fixtureTargetDigest(imageId) {
+  const result = spawnSync(
+    process.execPath,
+    [
+      fixtureHelper,
+      '--print-target-digest',
+      '--image-id',
+      imageId,
+      '--variant',
+      fixtureVariant
+    ],
+    { encoding: 'utf8' }
+  );
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(result.stderr || `fixture digest failed for ${imageId}`);
+  }
+  const value = result.stdout.trim();
+  if (!/^sha256:[0-9a-f]{64}$/.test(value)) {
+    throw new Error(`fixture digest returned invalid digest for ${imageId}: ${value}`);
+  }
+  return value;
 }
 
 function replaceImageDigest(image, nextDigest) {
@@ -165,7 +162,7 @@ function replaceImageDigest(image, nextDigest) {
 }
 
 function retargetImageItem(item, imageId) {
-  const nextDigest = fixtureManifestDigest(imageId);
+  const nextDigest = fixtureTargetDigest(imageId);
   item.digest = nextDigest;
   item.image = replaceImageDigest(item.image, nextDigest);
   if (item.source_provenance?.artifact_sha256) {
@@ -236,10 +233,15 @@ JSON
 }
 
 create_image_archives() {
-  mkdir -p "$IMAGE_DIR"
+  local image_dir="${1:-$IMAGE_DIR}"
+  local contract="${2:-$VALID_CONTRACT}"
+  local fixture_variant="${3:-valid}"
+
+  mkdir -p "$image_dir"
   "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
-    --from-contract "$VALID_CONTRACT" \
-    --output-dir "$IMAGE_DIR"
+    --from-contract "$contract" \
+    --output-dir "$image_dir" \
+    --variant "$fixture_variant"
 }
 
 write_operator_prerequisites() {
@@ -457,12 +459,15 @@ run_bundle_create() {
   local output_dir="$2"
   local target_profile="${3:-$AIRGAP_PROFILE}"
   local substrate_pack_manifest="${4:-}"
+  local release_contract="${5:-$VALID_CONTRACT}"
+  local deploy_template_package="${6:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
+  local image_dir="${7:-$IMAGE_DIR}"
   local image_archive_args=()
   local substrate_pack_args=()
 
   while IFS= read -r id; do
-    image_archive_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
-  done < <("$NODE_BIN" --input-type=module - "$VALID_CONTRACT" <<'NODE'
+    image_archive_args+=(--image-archive "$id=$image_dir/$id.oci-layout.tar")
+  done < <("$NODE_BIN" --input-type=module - "$release_contract" <<'NODE'
 import fs from 'node:fs';
 
 const [contractInput] = process.argv.slice(2);
@@ -477,8 +482,8 @@ NODE
   fi
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
-    --release-contract "$VALID_CONTRACT" \
-    --deploy-template-package "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+    --release-contract "$release_contract" \
+    --deploy-template-package "$deploy_template_package" \
     --archive "$VALID_ARCHIVE" \
     --target-profile "$target_profile" \
     --target-registry "$AIRGAP_REGISTRY" \
@@ -520,10 +525,12 @@ run_image_archive_check_full() {
   local bundle_manifest="$4"
   local archive_probe="$5"
   local output_dir="$6"
+  local release_contract="${7:-$VALID_CONTRACT}"
+  local deploy_template_package="${8:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --airgap-image-archive-check \
-    --release-contract "$VALID_CONTRACT" \
-    --deploy-template-package "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+    --release-contract "$release_contract" \
+    --deploy-template-package "$deploy_template_package" \
     --archive "$VALID_ARCHIVE" \
     --image-map "$image_map" \
     --target-profile "$target_profile" \
@@ -640,6 +647,46 @@ mutate_image_archive_manifest_only() {
     --bundle-root "$bundle_root" \
     --image-id "$image_id" \
     --variant manifest-only
+}
+
+mutate_image_archive_nested_missing_layer() {
+  local bundle_root="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --bundle-root "$bundle_root" \
+    --image-id "$image_id" \
+    --variant nested-missing-layer
+}
+
+mutate_image_archive_nested_missing_config() {
+  local bundle_root="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --bundle-root "$bundle_root" \
+    --image-id "$image_id" \
+    --variant nested-missing-config
+}
+
+mutate_image_archive_nested_empty_index() {
+  local bundle_root="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --bundle-root "$bundle_root" \
+    --image-id "$image_id" \
+    --variant nested-empty-index
+}
+
+mutate_image_archive_unknown_media_type() {
+  local bundle_root="$1"
+  local image_id="$2"
+
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --bundle-root "$bundle_root" \
+    --image-id "$image_id" \
+    --variant unknown-media-type
 }
 
 mutate_image_archive_placeholder() {
@@ -818,6 +865,46 @@ run_bundle_create \
   "$KIT_AIRGAP_PROFILE" \
   "$KIT_SUBSTRATE_PACK_MANIFEST" >"$TMP_DIR/create-kit-valid.out"
 
+TOP_INDEX_CONTRACT="$TMP_DIR/release-contract.top-index.json"
+TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE="$TMP_DIR/deploy-template-package.top-index.json"
+TOP_INDEX_IMAGE_DIR="$TMP_DIR/image-archives-top-index"
+TOP_INDEX_BUNDLE_ROOT="$TMP_DIR/bundle-top-index-valid"
+write_materials \
+  "$manifest_sha" \
+  "$archive_sha" \
+  "$TOP_INDEX_CONTRACT" \
+  "$TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE" \
+  top-level-index
+create_image_archives "$TOP_INDEX_IMAGE_DIR" "$TOP_INDEX_CONTRACT" top-level-index
+run_bundle_create \
+  "$TOP_INDEX_BUNDLE_ROOT" \
+  "$TMP_DIR/out-create-top-index-valid" \
+  "$AIRGAP_PROFILE" \
+  "" \
+  "$TOP_INDEX_CONTRACT" \
+  "$TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE" \
+  "$TOP_INDEX_IMAGE_DIR" >"$TMP_DIR/create-top-index-valid.out"
+
+NESTED_INDEX_CONTRACT="$TMP_DIR/release-contract.nested-index.json"
+NESTED_INDEX_DEPLOY_TEMPLATE_PACKAGE="$TMP_DIR/deploy-template-package.nested-index.json"
+NESTED_INDEX_IMAGE_DIR="$TMP_DIR/image-archives-nested-index"
+NESTED_INDEX_BUNDLE_ROOT="$TMP_DIR/bundle-nested-index-valid"
+write_materials \
+  "$manifest_sha" \
+  "$archive_sha" \
+  "$NESTED_INDEX_CONTRACT" \
+  "$NESTED_INDEX_DEPLOY_TEMPLATE_PACKAGE" \
+  nested-index
+create_image_archives "$NESTED_INDEX_IMAGE_DIR" "$NESTED_INDEX_CONTRACT" nested-index
+run_bundle_create \
+  "$NESTED_INDEX_BUNDLE_ROOT" \
+  "$TMP_DIR/out-create-nested-index-valid" \
+  "$AIRGAP_PROFILE" \
+  "" \
+  "$NESTED_INDEX_CONTRACT" \
+  "$NESTED_INDEX_DEPLOY_TEMPLATE_PACKAGE" \
+  "$NESTED_INDEX_IMAGE_DIR" >"$TMP_DIR/create-nested-index-valid.out"
+
 shim_dir="$TMP_DIR/shims"
 mkdir -p "$shim_dir"
 for binary in docker skopeo oras kubectl curl wget; do
@@ -847,6 +934,32 @@ PATH="$shim_dir:$PATH" run_image_archive_check \
 assert_report "$kit_output_dir/$REPORT_FILE" "$KIT_AIRGAP_PROFILE"
 pass "valid kit airgap image archives matched target digests without calling registry tools"
 
+top_index_output_dir="$TMP_DIR/out-image-archive-top-index"
+PATH="$shim_dir:$PATH" run_image_archive_check_full \
+  "$TOP_INDEX_BUNDLE_ROOT/components/image-map.json" \
+  "$AIRGAP_PROFILE" \
+  "$TOP_INDEX_BUNDLE_ROOT" \
+  "$TOP_INDEX_BUNDLE_ROOT/airgap-bundle-manifest.json" \
+  "$GOOD_PROBE" \
+  "$top_index_output_dir" \
+  "$TOP_INDEX_CONTRACT" \
+  "$TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE" >"$TMP_DIR/image-archive-top-index.out"
+assert_report "$top_index_output_dir/$REPORT_FILE"
+pass "top-level OCI image index archives matched target digests"
+
+nested_index_output_dir="$TMP_DIR/out-image-archive-nested-index"
+PATH="$shim_dir:$PATH" run_image_archive_check_full \
+  "$NESTED_INDEX_BUNDLE_ROOT/components/image-map.json" \
+  "$AIRGAP_PROFILE" \
+  "$NESTED_INDEX_BUNDLE_ROOT" \
+  "$NESTED_INDEX_BUNDLE_ROOT/airgap-bundle-manifest.json" \
+  "$GOOD_PROBE" \
+  "$nested_index_output_dir" \
+  "$NESTED_INDEX_CONTRACT" \
+  "$NESTED_INDEX_DEPLOY_TEMPLATE_PACKAGE" >"$TMP_DIR/image-archive-nested-index.out"
+assert_report "$nested_index_output_dir/$REPORT_FILE"
+pass "nested OCI image index archives matched target digests"
+
 for profile_case in \
   "online:$ONLINE_PROFILE" \
   "kind:$KIND_PROFILE" \
@@ -868,9 +981,9 @@ copy_valid_bundle "$archive_manifest_mismatch_bundle"
 mutate_image_archive_manifest_digest_mismatch "$archive_manifest_mismatch_bundle" agentsmith_app
 expect_check_fail "archive-manifest-target-digest-mismatch" "$TMP_DIR/out-archive-manifest-mismatch" \
   run_image_archive_check "$archive_manifest_mismatch_bundle" "$TMP_DIR/out-archive-manifest-mismatch" "$TARGET_ANNOTATION_PROBE"
-if ! grep -Fq 'archive manifest digest must match image_map target_digest' "$TMP_DIR/archive-manifest-target-digest-mismatch.err"; then
+if ! grep -Fq 'archive top-level descriptor digest must match image_map target_digest' "$TMP_DIR/archive-manifest-target-digest-mismatch.err"; then
   cat "$TMP_DIR/archive-manifest-target-digest-mismatch.err" >&2
-  fail "archive manifest digest mismatch failure must explain target_digest alignment"
+  fail "archive top-level descriptor digest mismatch failure must explain target_digest alignment"
 fi
 pass "OCI archive descriptor digest check rejected probe target echo mismatch"
 
@@ -895,6 +1008,50 @@ if ! grep -Fq 'must declare at least one layer blob' "$TMP_DIR/manifest-only-arc
   fail "manifest-only failure must explain the missing layer/blob"
 fi
 pass "OCI archive structure check rejected manifest-only archive"
+
+nested_missing_layer_bundle="$TMP_DIR/bundle-nested-missing-layer"
+copy_valid_bundle "$nested_missing_layer_bundle"
+mutate_image_archive_nested_missing_layer "$nested_missing_layer_bundle" ingress_nginx_controller
+expect_check_fail "nested-missing-layer-blob" "$TMP_DIR/out-nested-missing-layer" \
+  run_image_archive_check "$nested_missing_layer_bundle" "$TMP_DIR/out-nested-missing-layer"
+if ! grep -Fq 'missing layer blob' "$TMP_DIR/nested-missing-layer-blob.err"; then
+  cat "$TMP_DIR/nested-missing-layer-blob.err" >&2
+  fail "nested missing layer failure must explain the missing layer/blob"
+fi
+pass "recursive OCI archive structure check rejected nested missing layer blob"
+
+nested_missing_config_bundle="$TMP_DIR/bundle-nested-missing-config"
+copy_valid_bundle "$nested_missing_config_bundle"
+mutate_image_archive_nested_missing_config "$nested_missing_config_bundle" ingress_nginx_certgen
+expect_check_fail "nested-missing-config-blob" "$TMP_DIR/out-nested-missing-config" \
+  run_image_archive_check "$nested_missing_config_bundle" "$TMP_DIR/out-nested-missing-config"
+if ! grep -Fq 'missing config blob' "$TMP_DIR/nested-missing-config-blob.err"; then
+  cat "$TMP_DIR/nested-missing-config-blob.err" >&2
+  fail "nested missing config failure must explain the missing config/blob"
+fi
+pass "recursive OCI archive structure check rejected nested missing config blob"
+
+nested_empty_index_bundle="$TMP_DIR/bundle-nested-empty-index"
+copy_valid_bundle "$nested_empty_index_bundle"
+mutate_image_archive_nested_empty_index "$nested_empty_index_bundle" managed_runner
+expect_check_fail "nested-empty-index" "$TMP_DIR/out-nested-empty-index" \
+  run_image_archive_check "$nested_empty_index_bundle" "$TMP_DIR/out-nested-empty-index"
+if ! grep -Fq 'manifests must not be empty' "$TMP_DIR/nested-empty-index.err"; then
+  cat "$TMP_DIR/nested-empty-index.err" >&2
+  fail "nested empty index failure must explain the empty manifests"
+fi
+pass "recursive OCI archive structure check rejected nested empty image index"
+
+unknown_media_type_bundle="$TMP_DIR/bundle-unknown-media-type"
+copy_valid_bundle "$unknown_media_type_bundle"
+mutate_image_archive_unknown_media_type "$unknown_media_type_bundle" agentsmith_app
+expect_check_fail "unknown-media-type" "$TMP_DIR/out-unknown-media-type" \
+  run_image_archive_check "$unknown_media_type_bundle" "$TMP_DIR/out-unknown-media-type"
+if ! grep -Fq 'mediaType is not a supported OCI/Docker image manifest or index' "$TMP_DIR/unknown-media-type.err"; then
+  cat "$TMP_DIR/unknown-media-type.err" >&2
+  fail "unknown mediaType failure must explain unsupported descriptor mediaType"
+fi
+pass "OCI archive structure check rejected unknown descriptor mediaType"
 
 placeholder_bundle="$TMP_DIR/bundle-placeholder"
 copy_valid_bundle "$placeholder_bundle"

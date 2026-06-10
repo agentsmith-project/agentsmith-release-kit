@@ -245,11 +245,14 @@ assembled bundle inputs as `--airgap-bundle-check`, accepts
 `existing_kubernetes/external_declared/airgap` and
 `existing_kubernetes/kit_installed/airgap`, and first runs the existing bundle
 check. It then validates each declared `oci_layout_tar` as an OCI layout tar:
-`oci-layout`, `index.json`, exactly one manifest descriptor,
-descriptor-addressed manifest/config/layer blobs, matching blob sha256 values,
-and at least one layer blob are required. The archive manifest descriptor digest
-must match the corresponding image-map `target_digest`. After that structure
-sanity check, it invokes an explicit local
+`oci-layout`, `index.json`, exactly one top-level descriptor,
+descriptor-addressed image manifest or image index/list blobs,
+descriptor-addressed config/layer blobs under every image manifest, matching
+blob sha256 values, at least one image manifest, and at least one layer blob
+are required. The archive top-level descriptor digest must match the
+corresponding image-map `target_digest`; the compatibility report field
+`archive_manifest_digest` carries that top-level descriptor digest. After that
+structure sanity check, it invokes an explicit local
 `--archive-probe <executable>` once per
 `bundle_manifest.image_artifact_declarations[]` archive path. The probe
 receives the archive path as argv and env, and stdout must contain exactly one

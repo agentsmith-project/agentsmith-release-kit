@@ -5,7 +5,23 @@ import path from 'node:path';
 
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const TAR_BLOCK_SIZE = 512;
-const VARIANTS = new Set(['valid', 'missing-layer', 'manifest-only']);
+const OCI_IMAGE_MANIFEST = 'application/vnd.oci.image.manifest.v1+json';
+const OCI_IMAGE_INDEX = 'application/vnd.oci.image.index.v1+json';
+const OCI_IMAGE_CONFIG = 'application/vnd.oci.image.config.v1+json';
+const OCI_IMAGE_LAYER = 'application/vnd.oci.image.layer.v1.tar';
+const UNKNOWN_MEDIA_TYPE = 'application/vnd.agentsmith.fixture.unknown.v1+json';
+const VARIANTS = new Set([
+  'valid',
+  'missing-layer',
+  'manifest-only',
+  'top-level-index',
+  'nested-index',
+  'nested-missing-layer',
+  'nested-missing-config',
+  'nested-empty-index',
+  'empty-index',
+  'unknown-media-type'
+]);
 
 function fail(message) {
   console.error(`FAIL: ${message}`);
@@ -15,8 +31,11 @@ function fail(message) {
 function usage() {
   return `Usage:
   node scripts/lib/test-oci-layout-fixture.mjs --from-contract <json> --output-dir <dir>
-  node scripts/lib/test-oci-layout-fixture.mjs --archive <tar> --image-id <id> --target-digest <sha256> [--variant valid|missing-layer|manifest-only]
-  node scripts/lib/test-oci-layout-fixture.mjs --bundle-root <dir> --image-id <id> [--target-digest <sha256>] [--variant valid|missing-layer|manifest-only]`;
+  node scripts/lib/test-oci-layout-fixture.mjs --archive <tar> --image-id <id> --target-digest <sha256> [--variant <variant>]
+  node scripts/lib/test-oci-layout-fixture.mjs --bundle-root <dir> --image-id <id> [--target-digest <sha256>] [--variant <variant>]
+  node scripts/lib/test-oci-layout-fixture.mjs --print-target-digest --image-id <id> [--variant <variant>]
+
+Variants: ${[...VARIANTS].join(', ')}`;
 }
 
 function readArgValue(argv, index, arg) {
@@ -57,6 +76,9 @@ function parseArgs(argv) {
         break;
       case '--variant':
         args.variant = nextValue();
+        break;
+      case '--print-target-digest':
+        args.printTargetDigest = true;
         break;
       case '--help':
       case '-h':
@@ -120,12 +142,38 @@ function blobPath(digest) {
   return `blobs/sha256/${digest.slice('sha256:'.length)}`;
 }
 
-function writeOciLayoutArchive({ archivePath, imageId, targetDigest, variant }) {
-  if (!DIGEST_RE.test(targetDigest)) {
-    fail(`invalid target digest for ${imageId}: ${targetDigest}`);
-  }
+function jsonBuffer(value) {
+  return Buffer.from(`${JSON.stringify(value)}\n`);
+}
 
-  const layerContent = Buffer.from(`fixture layer for ${imageId}\n`);
+function descriptorFor(mediaType, buffer, extra = {}) {
+  return {
+    mediaType,
+    digest: digestBuffer(buffer),
+    size: buffer.length,
+    ...extra
+  };
+}
+
+function withPlatform(descriptor, architecture) {
+  return {
+    ...descriptor,
+    platform: {
+      os: 'linux',
+      architecture
+    }
+  };
+}
+
+function imageManifestMaterial({
+  imageId,
+  suffix = '',
+  manifestOnly = false,
+  missingLayerBlob = false,
+  missingConfigBlob = false
+}) {
+  const materialId = suffix ? `${imageId}-${suffix}` : imageId;
+  const layerContent = Buffer.from(`fixture layer for ${materialId}\n`);
   const layerDigest = digestBuffer(layerContent);
   const config = {
     architecture: 'amd64',
@@ -136,62 +184,227 @@ function writeOciLayoutArchive({ archivePath, imageId, targetDigest, variant }) 
     },
     config: {
       Labels: {
-        'io.agentsmith.fixture.image_id': imageId
+        'io.agentsmith.fixture.image_id': materialId
       }
     }
   };
-  const configBuffer = Buffer.from(`${JSON.stringify(config)}\n`);
+  const configBuffer = jsonBuffer(config);
   const configDigest = digestBuffer(configBuffer);
   const layers =
-    variant === 'manifest-only'
+    manifestOnly
       ? []
       : [
           {
-            mediaType: 'application/vnd.oci.image.layer.v1.tar',
+            mediaType: OCI_IMAGE_LAYER,
             digest: layerDigest,
             size: layerContent.length
           }
         ];
   const manifest = {
     schemaVersion: 2,
-    mediaType: 'application/vnd.oci.image.manifest.v1+json',
+    mediaType: OCI_IMAGE_MANIFEST,
     config: {
-      mediaType: 'application/vnd.oci.image.config.v1+json',
+      mediaType: OCI_IMAGE_CONFIG,
       digest: configDigest,
       size: configBuffer.length
     },
     layers
   };
-  const manifestBuffer = Buffer.from(`${JSON.stringify(manifest)}\n`);
-  const manifestDigest = digestBuffer(manifestBuffer);
+  const manifestBuffer = jsonBuffer(manifest);
+  const descriptor = descriptorFor(OCI_IMAGE_MANIFEST, manifestBuffer);
+  const blobs = [
+    {
+      digest: descriptor.digest,
+      content: manifestBuffer
+    }
+  ];
+  if (!missingConfigBlob) {
+    blobs.push({
+      digest: configDigest,
+      content: configBuffer
+    });
+  }
+  if (!manifestOnly && !missingLayerBlob) {
+    blobs.push({
+      digest: layerDigest,
+      content: layerContent
+    });
+  }
+
+  return {
+    descriptor,
+    blobs
+  };
+}
+
+function imageIndexMaterial({ manifests, refName }) {
   const index = {
     schemaVersion: 2,
-    mediaType: 'application/vnd.oci.image.index.v1+json',
-    manifests: [
-      {
-        mediaType: 'application/vnd.oci.image.manifest.v1+json',
-        digest: manifestDigest,
-        size: manifestBuffer.length,
-        annotations: {
-          'org.opencontainers.image.ref.name': imageId,
-          'io.agentsmith.fixture.target_digest': targetDigest
+    mediaType: OCI_IMAGE_INDEX,
+    manifests: manifests.map((item) => item.descriptor)
+  };
+  const indexBuffer = jsonBuffer(index);
+  const descriptor = descriptorFor(
+    OCI_IMAGE_INDEX,
+    indexBuffer,
+    refName
+      ? {
+          annotations: {
+            'org.opencontainers.image.ref.name': refName
+          }
         }
+      : {}
+  );
+  return {
+    descriptor,
+    blobs: [
+      {
+        digest: descriptor.digest,
+        content: indexBuffer
+      },
+      ...manifests.flatMap((item) => item.blobs)
+    ]
+  };
+}
+
+function unknownMediaTypeMaterial() {
+  const content = jsonBuffer({
+    schemaVersion: 2,
+    mediaType: UNKNOWN_MEDIA_TYPE
+  });
+  const descriptor = descriptorFor(UNKNOWN_MEDIA_TYPE, content);
+  return {
+    descriptor,
+    blobs: [
+      {
+        digest: descriptor.digest,
+        content
       }
     ]
+  };
+}
+
+function buildRootMaterial({ imageId, variant }) {
+  if (variant === 'valid') {
+    return imageManifestMaterial({ imageId });
+  }
+  if (variant === 'missing-layer') {
+    return imageManifestMaterial({ imageId, missingLayerBlob: true });
+  }
+  if (variant === 'manifest-only') {
+    return imageManifestMaterial({ imageId, manifestOnly: true });
+  }
+  if (variant === 'top-level-index') {
+    const amd64 = imageManifestMaterial({ imageId, suffix: 'amd64' });
+    const arm64 = imageManifestMaterial({ imageId, suffix: 'arm64' });
+    return imageIndexMaterial({
+      refName: imageId,
+      manifests: [
+        { ...amd64, descriptor: withPlatform(amd64.descriptor, 'amd64') },
+        { ...arm64, descriptor: withPlatform(arm64.descriptor, 'arm64') }
+      ]
+    });
+  }
+  if (variant === 'nested-index') {
+    const amd64 = imageManifestMaterial({ imageId, suffix: 'nested-amd64' });
+    const arm64 = imageManifestMaterial({ imageId, suffix: 'nested-arm64' });
+    const nested = imageIndexMaterial({
+      refName: `${imageId}-nested`,
+      manifests: [
+        { ...amd64, descriptor: withPlatform(amd64.descriptor, 'amd64') },
+        { ...arm64, descriptor: withPlatform(arm64.descriptor, 'arm64') }
+      ]
+    });
+    return imageIndexMaterial({
+      refName: imageId,
+      manifests: [nested]
+    });
+  }
+  if (variant === 'nested-missing-layer') {
+    const child = imageManifestMaterial({
+      imageId,
+      suffix: 'nested-missing-layer',
+      missingLayerBlob: true
+    });
+    return imageIndexMaterial({
+      refName: imageId,
+      manifests: [child]
+    });
+  }
+  if (variant === 'nested-missing-config') {
+    const child = imageManifestMaterial({
+      imageId,
+      suffix: 'nested-missing-config',
+      missingConfigBlob: true
+    });
+    return imageIndexMaterial({
+      refName: imageId,
+      manifests: [child]
+    });
+  }
+  if (variant === 'nested-empty-index') {
+    const nested = imageIndexMaterial({
+      refName: `${imageId}-empty`,
+      manifests: []
+    });
+    return imageIndexMaterial({
+      refName: imageId,
+      manifests: [nested]
+    });
+  }
+  if (variant === 'empty-index') {
+    return imageIndexMaterial({
+      refName: imageId,
+      manifests: []
+    });
+  }
+  if (variant === 'unknown-media-type') {
+    return unknownMediaTypeMaterial();
+  }
+  fail(`unsupported fixture variant: ${variant}`);
+}
+
+function fixtureTargetDigest({ imageId, variant }) {
+  return buildRootMaterial({ imageId, variant }).descriptor.digest;
+}
+
+function writeOciLayoutArchive({ archivePath, imageId, targetDigest, variant }) {
+  if (!DIGEST_RE.test(targetDigest)) {
+    fail(`invalid target digest for ${imageId}: ${targetDigest}`);
+  }
+
+  const rootMaterial = buildRootMaterial({ imageId, variant });
+  const rootDescriptor = {
+    ...rootMaterial.descriptor,
+    annotations: {
+      ...(rootMaterial.descriptor.annotations || {}),
+      'org.opencontainers.image.ref.name': imageId,
+      'io.agentsmith.fixture.target_digest': targetDigest
+    }
+  };
+  const index = {
+    schemaVersion: 2,
+    mediaType: OCI_IMAGE_INDEX,
+    manifests: [rootDescriptor]
   };
   const layout = {
     imageLayoutVersion: '1.0.0'
   };
 
+  const blobEntries = [];
+  const seenBlobs = new Set();
+  for (const blob of rootMaterial.blobs) {
+    if (seenBlobs.has(blob.digest)) {
+      continue;
+    }
+    seenBlobs.add(blob.digest);
+    blobEntries.push(tarEntry(blobPath(blob.digest), blob.content));
+  }
   const entries = [
     tarEntry('oci-layout', `${JSON.stringify(layout)}\n`),
     tarEntry('index.json', `${JSON.stringify(index)}\n`),
-    tarEntry(blobPath(manifestDigest), manifestBuffer),
-    tarEntry(blobPath(configDigest), configBuffer)
+    ...blobEntries
   ];
-  if (variant === 'valid') {
-    entries.push(tarEntry(blobPath(layerDigest), layerContent));
-  }
 
   fs.mkdirSync(path.dirname(archivePath), { recursive: true });
   fs.writeFileSync(archivePath, Buffer.concat([...entries, Buffer.alloc(TAR_BLOCK_SIZE * 2, 0)]));
@@ -265,6 +478,13 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     console.log(usage());
+    return;
+  }
+  if (args.printTargetDigest) {
+    if (!args.imageId) {
+      fail('--print-target-digest requires --image-id');
+    }
+    console.log(fixtureTargetDigest({ imageId: args.imageId, variant: args.variant }));
     return;
   }
   if (args.fromContract) {

@@ -96,16 +96,22 @@ JSON
 write_materials() {
   local manifest_sha="$1"
   local archive_sha="$2"
+  local contract_output="${3:-$VALID_CONTRACT}"
+  local package_output="${4:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
+  local fixture_variant="${5:-valid}"
 
   "$NODE_BIN" --input-type=module - \
     "$FIXTURE_CONTRACT" \
     "$FIXTURE_DEPLOY_TEMPLATE_PACKAGE" \
     "$manifest_sha" \
     "$archive_sha" \
-    "$VALID_CONTRACT" \
-    "$VALID_DEPLOY_TEMPLATE_PACKAGE" <<'NODE'
+    "$contract_output" \
+    "$package_output" \
+    "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    "$fixture_variant" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 const [
   contractInput,
@@ -113,7 +119,9 @@ const [
   manifestSha,
   archiveSha,
   contractOutput,
-  packageOutput
+  packageOutput,
+  fixtureHelper,
+  fixtureVariant
 ] = process.argv.slice(2);
 
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
@@ -137,41 +145,30 @@ function digest(value) {
   return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 }
 
-function fixtureManifestDigest(imageId) {
-  const layerContent = Buffer.from(`fixture layer for ${imageId}\n`);
-  const layerDigest = digest(layerContent);
-  const config = {
-    architecture: 'amd64',
-    os: 'linux',
-    rootfs: {
-      type: 'layers',
-      diff_ids: [layerDigest]
-    },
-    config: {
-      Labels: {
-        'io.agentsmith.fixture.image_id': imageId
-      }
-    }
-  };
-  const configBuffer = Buffer.from(`${JSON.stringify(config)}\n`);
-  const configDigest = digest(configBuffer);
-  const manifest = {
-    schemaVersion: 2,
-    mediaType: 'application/vnd.oci.image.manifest.v1+json',
-    config: {
-      mediaType: 'application/vnd.oci.image.config.v1+json',
-      digest: configDigest,
-      size: configBuffer.length
-    },
-    layers: [
-      {
-        mediaType: 'application/vnd.oci.image.layer.v1.tar',
-        digest: layerDigest,
-        size: layerContent.length
-      }
-    ]
-  };
-  return digest(Buffer.from(`${JSON.stringify(manifest)}\n`));
+function fixtureTargetDigest(imageId) {
+  const result = spawnSync(
+    process.execPath,
+    [
+      fixtureHelper,
+      '--print-target-digest',
+      '--image-id',
+      imageId,
+      '--variant',
+      fixtureVariant
+    ],
+    { encoding: 'utf8' }
+  );
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(result.stderr || `fixture digest failed for ${imageId}`);
+  }
+  const value = result.stdout.trim();
+  if (!/^sha256:[0-9a-f]{64}$/.test(value)) {
+    throw new Error(`fixture digest returned invalid digest for ${imageId}: ${value}`);
+  }
+  return value;
 }
 
 function replaceImageDigest(image, nextDigest) {
@@ -182,7 +179,7 @@ function replaceImageDigest(image, nextDigest) {
 }
 
 function retargetImageItem(item, imageId) {
-  const nextDigest = fixtureManifestDigest(imageId);
+  const nextDigest = fixtureTargetDigest(imageId);
   item.digest = nextDigest;
   item.image = replaceImageDigest(item.image, nextDigest);
   if (item.source_provenance?.artifact_sha256) {
@@ -253,10 +250,15 @@ JSON
 }
 
 create_image_archives() {
-  mkdir -p "$IMAGE_DIR"
+  local image_dir="${1:-$IMAGE_DIR}"
+  local contract="${2:-$VALID_CONTRACT}"
+  local fixture_variant="${3:-valid}"
+
+  mkdir -p "$image_dir"
   "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
-    --from-contract "$VALID_CONTRACT" \
-    --output-dir "$IMAGE_DIR"
+    --from-contract "$contract" \
+    --output-dir "$image_dir" \
+    --variant "$fixture_variant"
 }
 
 write_operator_prerequisites() {
@@ -456,19 +458,22 @@ run_bundle_create() {
   local output_dir="$2"
   local target_profile="${3:-$AIRGAP_PROFILE}"
   local substrate_pack_manifest="${4:-}"
+  local release_contract="${5:-$VALID_CONTRACT}"
+  local deploy_template_package="${6:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
+  local image_dir="${7:-$IMAGE_DIR}"
   local image_archive_args=()
   local substrate_pack_args=()
 
   for id in "${RELEASE_IMAGE_IDS[@]}"; do
-    image_archive_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
+    image_archive_args+=(--image-archive "$id=$image_dir/$id.oci-layout.tar")
   done
   if [[ -n "$substrate_pack_manifest" ]]; then
     substrate_pack_args+=(--substrate-pack-manifest "$substrate_pack_manifest")
   fi
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
-    --release-contract "$VALID_CONTRACT" \
-    --deploy-template-package "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+    --release-contract "$release_contract" \
+    --deploy-template-package "$deploy_template_package" \
     --archive "$VALID_ARCHIVE" \
     --target-profile "$target_profile" \
     --target-registry "$AIRGAP_REGISTRY" \
@@ -511,10 +516,12 @@ run_image_load_full() {
   local archive_probe="$5"
   local image_loader="$6"
   local output_dir="$7"
+  local release_contract="${8:-$VALID_CONTRACT}"
+  local deploy_template_package="${9:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --airgap-image-load \
-    --release-contract "$VALID_CONTRACT" \
-    --deploy-template-package "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+    --release-contract "$release_contract" \
+    --deploy-template-package "$deploy_template_package" \
     --archive "$VALID_ARCHIVE" \
     --image-map "$image_map" \
     --target-profile "$target_profile" \
@@ -751,6 +758,46 @@ run_bundle_create \
   "$KIT_AIRGAP_PROFILE" \
   "$KIT_SUBSTRATE_PACK_MANIFEST" >"$TMP_DIR/create-kit-valid.out"
 
+TOP_INDEX_CONTRACT="$TMP_DIR/release-contract.top-index.json"
+TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE="$TMP_DIR/deploy-template-package.top-index.json"
+TOP_INDEX_IMAGE_DIR="$TMP_DIR/image-archives-top-index"
+TOP_INDEX_BUNDLE_ROOT="$TMP_DIR/bundle-top-index-valid"
+write_materials \
+  "$manifest_sha" \
+  "$archive_sha" \
+  "$TOP_INDEX_CONTRACT" \
+  "$TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE" \
+  top-level-index
+create_image_archives "$TOP_INDEX_IMAGE_DIR" "$TOP_INDEX_CONTRACT" top-level-index
+run_bundle_create \
+  "$TOP_INDEX_BUNDLE_ROOT" \
+  "$TMP_DIR/out-create-top-index-valid" \
+  "$AIRGAP_PROFILE" \
+  "" \
+  "$TOP_INDEX_CONTRACT" \
+  "$TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE" \
+  "$TOP_INDEX_IMAGE_DIR" >"$TMP_DIR/create-top-index-valid.out"
+
+NESTED_INDEX_CONTRACT="$TMP_DIR/release-contract.nested-index.json"
+NESTED_INDEX_DEPLOY_TEMPLATE_PACKAGE="$TMP_DIR/deploy-template-package.nested-index.json"
+NESTED_INDEX_IMAGE_DIR="$TMP_DIR/image-archives-nested-index"
+NESTED_INDEX_BUNDLE_ROOT="$TMP_DIR/bundle-nested-index-valid"
+write_materials \
+  "$manifest_sha" \
+  "$archive_sha" \
+  "$NESTED_INDEX_CONTRACT" \
+  "$NESTED_INDEX_DEPLOY_TEMPLATE_PACKAGE" \
+  nested-index
+create_image_archives "$NESTED_INDEX_IMAGE_DIR" "$NESTED_INDEX_CONTRACT" nested-index
+run_bundle_create \
+  "$NESTED_INDEX_BUNDLE_ROOT" \
+  "$TMP_DIR/out-create-nested-index-valid" \
+  "$AIRGAP_PROFILE" \
+  "" \
+  "$NESTED_INDEX_CONTRACT" \
+  "$NESTED_INDEX_DEPLOY_TEMPLATE_PACKAGE" \
+  "$NESTED_INDEX_IMAGE_DIR" >"$TMP_DIR/create-nested-index-valid.out"
+
 shim_dir="$TMP_DIR/shims"
 mkdir -p "$shim_dir"
 for binary in docker skopeo oras kubectl curl wget; do
@@ -787,6 +834,44 @@ assert_report \
 kit_load_count="$(grep -c '^sha256:' "$LOAD_LOG")"
 [[ "$kit_load_count" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] || fail "kit image loader must run exactly once per image"
 pass "valid kit airgap image archives loaded through operator loader without release readiness"
+
+: >"$LOAD_LOG"
+top_index_output_dir="$TMP_DIR/out-image-load-top-index"
+PATH="$shim_dir:$PATH" AGENTSMITH_LOAD_LOG="$LOAD_LOG" run_image_load_full \
+  "$TOP_INDEX_BUNDLE_ROOT/components/image-map.json" \
+  "$AIRGAP_PROFILE" \
+  "$TOP_INDEX_BUNDLE_ROOT" \
+  "$TOP_INDEX_BUNDLE_ROOT/airgap-bundle-manifest.json" \
+  "$GOOD_PROBE" \
+  "$GOOD_LOADER" \
+  "$top_index_output_dir" \
+  "$TOP_INDEX_CONTRACT" \
+  "$TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE" >"$TMP_DIR/image-load-top-index.out"
+assert_report \
+  "$top_index_output_dir/$REPORT_FILE" \
+  "$top_index_output_dir/$ARCHIVE_CHECK_DIR/$ARCHIVE_CHECK_REPORT_FILE"
+top_index_load_count="$(grep -c '^sha256:' "$LOAD_LOG")"
+[[ "$top_index_load_count" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] || fail "top-level index image loader must run exactly once per image"
+pass "top-level OCI image index archives loaded through operator loader without release readiness"
+
+: >"$LOAD_LOG"
+nested_index_output_dir="$TMP_DIR/out-image-load-nested-index"
+PATH="$shim_dir:$PATH" AGENTSMITH_LOAD_LOG="$LOAD_LOG" run_image_load_full \
+  "$NESTED_INDEX_BUNDLE_ROOT/components/image-map.json" \
+  "$AIRGAP_PROFILE" \
+  "$NESTED_INDEX_BUNDLE_ROOT" \
+  "$NESTED_INDEX_BUNDLE_ROOT/airgap-bundle-manifest.json" \
+  "$GOOD_PROBE" \
+  "$GOOD_LOADER" \
+  "$nested_index_output_dir" \
+  "$NESTED_INDEX_CONTRACT" \
+  "$NESTED_INDEX_DEPLOY_TEMPLATE_PACKAGE" >"$TMP_DIR/image-load-nested-index.out"
+assert_report \
+  "$nested_index_output_dir/$REPORT_FILE" \
+  "$nested_index_output_dir/$ARCHIVE_CHECK_DIR/$ARCHIVE_CHECK_REPORT_FILE"
+nested_index_load_count="$(grep -c '^sha256:' "$LOAD_LOG")"
+[[ "$nested_index_load_count" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] || fail "nested index image loader must run exactly once per image"
+pass "nested OCI image index archives loaded through operator loader without release readiness"
 
 for profile_case in \
   "online:$ONLINE_PROFILE" \

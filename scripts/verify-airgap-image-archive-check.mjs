@@ -38,6 +38,14 @@ const TAR_BLOCK_SIZE = 512;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+const IMAGE_MANIFEST_MEDIA_TYPES = new Set([
+  'application/vnd.oci.image.manifest.v1+json',
+  'application/vnd.docker.distribution.manifest.v2+json'
+]);
+const IMAGE_INDEX_MEDIA_TYPES = new Set([
+  'application/vnd.oci.image.index.v1+json',
+  'application/vnd.docker.distribution.manifest.list.v2+json'
+]);
 const FORBIDDEN_PROBE_BASENAMES = new Set([
   'docker',
   'skopeo',
@@ -294,8 +302,10 @@ function parseJsonBuffer(buffer, label) {
 
 function requireDescriptor(value, label) {
   const descriptor = requireObject(value, label);
+  const mediaType = requireString(descriptor.mediaType, `${label}.mediaType`);
   const digest = requireDigest(descriptor.digest, `${label}.digest`);
   return {
+    mediaType,
     digest,
     path: `blobs/sha256/${digest.slice('sha256:'.length)}`
   };
@@ -311,6 +321,88 @@ function readDescriptorBlob(files, descriptor, label, role) {
     fail(`${label} ${role} blob digest mismatch: ${descriptor.path}`);
   }
   return content;
+}
+
+function validateImageManifestDescriptor({ files, descriptor, label, state }) {
+  const manifestContent = readDescriptorBlob(files, descriptor, label, 'manifest');
+  const manifest = parseJsonBuffer(
+    manifestContent,
+    `${label} manifest ${descriptor.digest}`
+  );
+  state.imageManifestCount += 1;
+
+  const configDescriptor = requireDescriptor(
+    manifest.config,
+    `${label} manifest ${descriptor.digest}.config`
+  );
+  readDescriptorBlob(files, configDescriptor, `${label} manifest ${descriptor.digest}`, 'config');
+
+  const layers = requireArray(
+    manifest.layers,
+    `${label} manifest ${descriptor.digest}.layers`
+  );
+  if (layers.length === 0) {
+    fail(`${label} manifest ${descriptor.digest} must declare at least one layer blob`);
+  }
+  for (const [layerIndex, layerValue] of layers.entries()) {
+    const layerDescriptor = requireDescriptor(
+      layerValue,
+      `${label} manifest ${descriptor.digest}.layers[${layerIndex}]`
+    );
+    readDescriptorBlob(
+      files,
+      layerDescriptor,
+      `${label} manifest ${descriptor.digest}`,
+      'layer'
+    );
+    state.layerBlobCount += 1;
+  }
+}
+
+function validateImageIndexDescriptor({ files, descriptor, label, visited, state }) {
+  const indexContent = readDescriptorBlob(files, descriptor, label, 'index');
+  const index = parseJsonBuffer(
+    indexContent,
+    `${label} index ${descriptor.digest}`
+  );
+  const manifests = requireArray(
+    index.manifests,
+    `${label} index ${descriptor.digest}.manifests`
+  );
+  if (manifests.length === 0) {
+    fail(`${label} index ${descriptor.digest}.manifests must not be empty`);
+  }
+
+  for (const [manifestIndex, manifestValue] of manifests.entries()) {
+    const childLabel = `${label} index ${descriptor.digest}.manifests[${manifestIndex}]`;
+    const childDescriptor = requireDescriptor(manifestValue, childLabel);
+    validateOciDescriptorTree({
+      files,
+      descriptor: childDescriptor,
+      label: childLabel,
+      visited,
+      state
+    });
+  }
+}
+
+function validateOciDescriptorTree({ files, descriptor, label, visited, state }) {
+  if (visited.has(descriptor.digest)) {
+    return;
+  }
+  visited.add(descriptor.digest);
+
+  if (IMAGE_MANIFEST_MEDIA_TYPES.has(descriptor.mediaType)) {
+    validateImageManifestDescriptor({ files, descriptor, label, state });
+    return;
+  }
+
+  if (IMAGE_INDEX_MEDIA_TYPES.has(descriptor.mediaType)) {
+    validateImageIndexDescriptor({ files, descriptor, label, visited, state });
+    return;
+  }
+
+  fail(`${label}.mediaType is not a supported OCI/Docker image manifest or index: ${descriptor.mediaType}`);
 }
 
 async function validateOciLayoutArchive({ archivePath, id }) {
@@ -338,58 +430,31 @@ async function validateOciLayoutArchive({ archivePath, id }) {
   const index = parseJsonBuffer(indexContent, `${label} index.json`);
   const manifests = requireArray(index.manifests, `${label} index.json.manifests`);
   if (manifests.length !== 1) {
-    fail(`${label} index.json.manifests must contain exactly one manifest descriptor`);
+    fail(`${label} index.json.manifests must contain exactly one top-level descriptor`);
   }
 
-  let layerBlobCount = 0;
-  let archiveManifestDigest;
-  for (const [manifestIndex, manifestValue] of manifests.entries()) {
-    const manifestLabel = `${label} index.json.manifests[${manifestIndex}]`;
-    const manifestDescriptor = requireDescriptor(manifestValue, manifestLabel);
-    archiveManifestDigest = manifestDescriptor.digest;
-    const manifestContent = readDescriptorBlob(
-      files,
-      manifestDescriptor,
-      manifestLabel,
-      'manifest'
-    );
-    const manifest = parseJsonBuffer(
-      manifestContent,
-      `${label} manifest ${manifestDescriptor.digest}`
-    );
-    const configDescriptor = requireDescriptor(
-      manifest.config,
-      `${label} manifest ${manifestDescriptor.digest}.config`
-    );
-    readDescriptorBlob(files, configDescriptor, `${label} manifest ${manifestDescriptor.digest}`, 'config');
+  const topLevelDescriptor = requireDescriptor(manifests[0], `${label} index.json.manifests[0]`);
+  const state = {
+    imageManifestCount: 0,
+    layerBlobCount: 0
+  };
+  validateOciDescriptorTree({
+    files,
+    descriptor: topLevelDescriptor,
+    label: `${label} index.json.manifests[0]`,
+    visited: new Set(),
+    state
+  });
 
-    const layers = requireArray(
-      manifest.layers,
-      `${label} manifest ${manifestDescriptor.digest}.layers`
-    );
-    if (layers.length === 0) {
-      fail(`${label} manifest ${manifestDescriptor.digest} must declare at least one layer blob`);
-    }
-    for (const [layerIndex, layerValue] of layers.entries()) {
-      const layerDescriptor = requireDescriptor(
-        layerValue,
-        `${label} manifest ${manifestDescriptor.digest}.layers[${layerIndex}]`
-      );
-      readDescriptorBlob(
-        files,
-        layerDescriptor,
-        `${label} manifest ${manifestDescriptor.digest}`,
-        'layer'
-      );
-      layerBlobCount += 1;
-    }
+  if (state.imageManifestCount === 0) {
+    fail(`${label} must contain at least one image manifest`);
   }
 
-  if (layerBlobCount === 0) {
+  if (state.layerBlobCount === 0) {
     fail(`${label} must contain at least one layer blob`);
   }
   return {
-    archiveManifestDigest
+    archiveManifestDigest: topLevelDescriptor.digest
   };
 }
 
@@ -940,7 +1005,7 @@ async function assertImageArtifactDeclarations({
     }
     const { archiveManifestDigest } = await validateOciLayoutArchive({ archivePath, id });
     if (archiveManifestDigest !== targetDigest) {
-      fail(`${label} archive manifest digest must match image_map target_digest`);
+      fail(`${label} archive top-level descriptor digest must match image_map target_digest`);
     }
 
     const probeDigest = runArchiveProbe({ archiveProbe, archivePath, id });
