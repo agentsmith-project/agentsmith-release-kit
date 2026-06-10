@@ -166,6 +166,136 @@ fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
 NODE
 }
 
+retarget_release_contract_to_oci_fixture_digests() {
+  local contract="$1"
+
+  "$NODE_BIN" --input-type=module - "$contract" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+
+const [contractPath] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digest(value) {
+  return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+}
+
+function fixtureManifestDigest(imageId) {
+  const layerContent = Buffer.from(`fixture layer for ${imageId}\n`);
+  const layerDigest = digest(layerContent);
+  const config = {
+    architecture: 'amd64',
+    os: 'linux',
+    rootfs: {
+      type: 'layers',
+      diff_ids: [layerDigest]
+    },
+    config: {
+      Labels: {
+        'io.agentsmith.fixture.image_id': imageId
+      }
+    }
+  };
+  const configBuffer = Buffer.from(`${JSON.stringify(config)}\n`);
+  const configDigest = digest(configBuffer);
+  const manifest = {
+    schemaVersion: 2,
+    mediaType: 'application/vnd.oci.image.manifest.v1+json',
+    config: {
+      mediaType: 'application/vnd.oci.image.config.v1+json',
+      digest: configDigest,
+      size: configBuffer.length
+    },
+    layers: [
+      {
+        mediaType: 'application/vnd.oci.image.layer.v1.tar',
+        digest: layerDigest,
+        size: layerContent.length
+      }
+    ]
+  };
+  return digest(Buffer.from(`${JSON.stringify(manifest)}\n`));
+}
+
+function replaceImageDigest(image, nextDigest) {
+  if (!/@sha256:[0-9a-f]{64}$/.test(image)) {
+    throw new Error(`image must be digest-pinned: ${image}`);
+  }
+  return image.replace(/@sha256:[0-9a-f]{64}$/, `@${nextDigest}`);
+}
+
+function retargetImageItem(item, nextDigest) {
+  item.digest = nextDigest;
+  item.image = replaceImageDigest(item.image, nextDigest);
+  if (item.source_provenance?.artifact_sha256) {
+    item.source_provenance.artifact_sha256 = nextDigest;
+  }
+}
+
+function subjectDigest(value) {
+  const { artifact_provenance: _artifactProvenance, ...subject } = value;
+  return digest(JSON.stringify(stableJson(subject)));
+}
+
+function artifactProjectionDigest(value) {
+  const { artifact_sha256: _artifactSha256, ...artifactProvenance } = value.artifact_provenance;
+  const projection = { ...value, artifact_provenance: artifactProvenance };
+  return digest(JSON.stringify(stableJson(projection)));
+}
+
+const digestByInventoryId = new Map();
+for (const item of contract.deploy_image_inventory || []) {
+  const nextDigest = fixtureManifestDigest(item.id);
+  digestByInventoryId.set(item.id, nextDigest);
+  retargetImageItem(item, nextDigest);
+}
+
+for (const sourceName of [
+  'product_images',
+  'adopted_provider_images',
+  'release_kit_prerequisite_images'
+]) {
+  for (const item of contract[sourceName] || []) {
+    const inventoryItem = (contract.deploy_image_inventory || []).find(
+      (candidate) => candidate.source === sourceName && candidate.id === item.id
+    );
+    const nextDigest = digestByInventoryId.get(inventoryItem?.id || item.id);
+    if (!nextDigest) {
+      throw new Error(`missing fixture manifest digest for ${sourceName}.${item.id}`);
+    }
+    retargetImageItem(item, nextDigest);
+  }
+}
+
+if (contract.managed_runner_image) {
+  const nextDigest = digestByInventoryId.get('managed_runner');
+  if (!nextDigest) {
+    throw new Error('missing fixture manifest digest for managed_runner');
+  }
+  retargetImageItem(contract.managed_runner_image, nextDigest);
+}
+
+contract.artifact_provenance.subject_sha256 = subjectDigest(contract);
+contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
+
+fs.writeFileSync(contractPath, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
 write_render_values() {
   local output="$1"
 
@@ -679,10 +809,11 @@ YAML
 
 create_image_archives() {
   local image_dir="$1"
+  local contract="$2"
 
   mkdir -p "$image_dir"
   "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
-    --from-contract "$FIXTURE_CONTRACT" \
+    --from-contract "$contract" \
     --output-dir "$image_dir"
 }
 
@@ -1263,6 +1394,8 @@ expect_operator_fail_before_airgap_consume_outputs() {
 VALID_ARCHIVE="$TMP_DIR/agentsmith-deploy-template-package.tgz"
 VALID_CONTRACT="$TMP_DIR/release-contract.valid-material.json"
 VALID_PACKAGE="$TMP_DIR/deploy-template-package.valid-material.json"
+VALID_AIRGAP_CONTRACT="$TMP_DIR/release-contract.valid-airgap-material.json"
+VALID_AIRGAP_PACKAGE="$TMP_DIR/deploy-template-package.valid-airgap-material.json"
 VALID_VALUES="$TMP_DIR/render-values.valid.json"
 EXTERNAL_TRUTH="$TMP_DIR/substrate-truth.external-online.json"
 KIT_TRUTH="$TMP_DIR/substrate-truth.kit-online.json"
@@ -1285,6 +1418,8 @@ KIT_AIRGAP_BUNDLE_PROVENANCE="$TMP_DIR/evidence-provenance.kit-airgap-bundle.jso
 manifest_sha="$(create_archive "$VALID_ARCHIVE")"
 archive_sha="$(sha256_file "$VALID_ARCHIVE")"
 write_materials "$manifest_sha" "$archive_sha" "$VALID_CONTRACT" "$VALID_PACKAGE"
+write_materials "$manifest_sha" "$archive_sha" "$VALID_AIRGAP_CONTRACT" "$VALID_AIRGAP_PACKAGE"
+retarget_release_contract_to_oci_fixture_digests "$VALID_AIRGAP_CONTRACT"
 write_render_values "$VALID_VALUES"
 write_truth "$EXTERNAL_TRUTH" "$EXTERNAL_ONLINE_PROFILE"
 write_truth "$KIT_TRUTH" "$KIT_ONLINE_PROFILE"
@@ -1295,7 +1430,7 @@ write_kit_substrate_pack_manifest "$KIT_AIRGAP_SUBSTRATE_PACK" "$KIT_AIRGAP_PROF
 write_fake_kubectl "$FAKE_KUBECTL"
 write_routability_probe "$ROUTABILITY_PROBE"
 create_payloads "$PAYLOAD_DIR" "$BUNDLED_TOOL"
-create_image_archives "$IMAGE_DIR"
+create_image_archives "$IMAGE_DIR" "$VALID_AIRGAP_CONTRACT"
 write_operator_prerequisites "$OPERATOR_PREREQUISITES" "$BUNDLED_TOOL"
 write_airgap_apply_tools
 write_evidence_provenance "$VALID_PROVENANCE" operator-run-1003
@@ -1507,8 +1642,8 @@ pass "operator online/kit_provided confirmed apply accepts operator confirmation
 airgap_output="$TMP_DIR/out-airgap-use-existing"
 airgap_bundle_root="$TMP_DIR/bundle-airgap-use-existing"
 bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle use_existing \
-  --release-contract "$VALID_CONTRACT" \
-  --deploy-template-package "$VALID_PACKAGE" \
+  --release-contract "$VALID_AIRGAP_CONTRACT" \
+  --deploy-template-package "$VALID_AIRGAP_PACKAGE" \
   --archive "$VALID_ARCHIVE" \
   --target-registry "$AIRGAP_REGISTRY" \
   "${image_args[@]}" \
@@ -1536,8 +1671,8 @@ kit_airgap_output="$TMP_DIR/out-airgap-bundle-kit-provided"
 kit_airgap_bundle_root="$TMP_DIR/bundle-airgap-kit-provided"
 kit_airgap_evidence_root="$TMP_DIR/evidence-airgap-bundle-kit-provided"
 bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle kit_provided \
-  --release-contract "$VALID_CONTRACT" \
-  --deploy-template-package "$VALID_PACKAGE" \
+  --release-contract "$VALID_AIRGAP_CONTRACT" \
+  --deploy-template-package "$VALID_AIRGAP_PACKAGE" \
   --archive "$VALID_ARCHIVE" \
   --target-registry "$AIRGAP_REGISTRY" \
   "${image_args[@]}" \
@@ -1613,7 +1748,7 @@ expect_operator_fail kit-airgap-evidence-missing-substrate-pack \
     --substrate-strategy kit_provided \
     --machine-profile "$KIT_AIRGAP_PROFILE" \
     --producer-mode bundle-create \
-    --release-contract "$VALID_CONTRACT" \
+    --release-contract "$VALID_AIRGAP_CONTRACT" \
     --bundle-root "$kit_airgap_bundle_root" \
     --target-registry "$AIRGAP_REGISTRY" \
     --evidence-root "$missing_substrate_pack_evidence_root" \
@@ -1669,7 +1804,7 @@ expect_operator_fail kit-airgap-evidence-missing-substrate-pack-subject \
     --substrate-strategy kit_provided \
     --machine-profile "$KIT_AIRGAP_PROFILE" \
     --producer-mode bundle-create \
-    --release-contract "$VALID_CONTRACT" \
+    --release-contract "$VALID_AIRGAP_CONTRACT" \
     --bundle-root "$kit_airgap_bundle_root" \
     --target-registry "$AIRGAP_REGISTRY" \
     --evidence-root "$missing_substrate_pack_subject_root" \
@@ -1739,7 +1874,7 @@ expect_operator_fail kit-airgap-evidence-stale-bundle-check-report \
     --substrate-strategy kit_provided \
     --machine-profile "$KIT_AIRGAP_PROFILE" \
     --producer-mode bundle-create \
-    --release-contract "$VALID_CONTRACT" \
+    --release-contract "$VALID_AIRGAP_CONTRACT" \
     --bundle-root "$kit_airgap_bundle_root" \
     --target-registry "$AIRGAP_REGISTRY" \
     --evidence-root "$stale_bundle_check_evidence_root" \
@@ -1809,7 +1944,7 @@ expect_operator_fail kit-airgap-evidence-stale-bundle-manifest \
     --substrate-strategy kit_provided \
     --machine-profile "$KIT_AIRGAP_PROFILE" \
     --producer-mode bundle-create \
-    --release-contract "$VALID_CONTRACT" \
+    --release-contract "$VALID_AIRGAP_CONTRACT" \
     --bundle-root "$kit_airgap_bundle_root" \
     --target-registry "$AIRGAP_REGISTRY" \
     --evidence-root "$stale_manifest_evidence_root" \
@@ -2248,8 +2383,8 @@ expect_operator_fail_before_airgap_consume_outputs \
 missing_pack_output="$TMP_DIR/out-airgap-bundle-kit-provided-missing-pack"
 expect_operator_fail_preserves_summary airgap-bundle-kit-provided-missing-pack "$missing_pack_output" \
   bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle kit_provided \
-    --release-contract "$VALID_CONTRACT" \
-    --deploy-template-package "$VALID_PACKAGE" \
+    --release-contract "$VALID_AIRGAP_CONTRACT" \
+    --deploy-template-package "$VALID_AIRGAP_PACKAGE" \
     --archive "$VALID_ARCHIVE" \
     --target-registry "$AIRGAP_REGISTRY" \
     "${image_args[@]}" \
