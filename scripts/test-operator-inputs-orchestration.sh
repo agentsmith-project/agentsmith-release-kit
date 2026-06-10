@@ -377,6 +377,7 @@ write_substrate_install_materials() {
   local profile="${2:-$KIT_ONLINE_TARGET_PROFILE}"
 
   "$NODE_BIN" --input-type=module - "$package_dir" "$profile" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -397,6 +398,22 @@ const ownerAnnotations = {
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function writePackText(relativePath, content) {
+  const file = path.join(packageDir, relativePath);
+  const bytes = Buffer.from(content);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+  return digestBuffer(bytes);
+}
+
+function writePackJson(relativePath, value) {
+  return writePackText(relativePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function service(name, host, port) {
@@ -470,6 +487,22 @@ const substrateTruth = {
   }
 };
 
+const payloadDigest = writePackJson('payload/install-substrates.json', {
+  schema_version: 'agentsmith.substrate-install-plan.fixture/v1',
+  target_profile: profile,
+  installation_id: 'kit-install-10001',
+  resources: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc']
+});
+writePackText('templates/postgresql.yaml', 'kind: StatefulSet\nmetadata:\n  name: postgresql\n');
+writePackText('templates/mongodb.yaml', 'kind: StatefulSet\nmetadata:\n  name: mongodb\n');
+writePackText('templates/redis.yaml', 'kind: Deployment\nmetadata:\n  name: redis\n');
+writePackText('templates/object-storage.yaml', 'kind: Deployment\nmetadata:\n  name: object-storage\n');
+writePackText('templates/oidc.yaml', 'kind: Deployment\nmetadata:\n  name: oidc\n');
+const toolsDigest = writePackText(
+  'tools/substrate-checks.txt',
+  'postgresql tls\nmongodb tls\nredis ping\nobject-storage head-bucket\noidc discovery\n'
+);
+
 writeJson(path.join(packageDir, 'substrate-pack-manifest.json'), {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
   release_kit_version: '0.1.0',
@@ -485,7 +518,7 @@ writeJson(path.join(packageDir, 'substrate-pack-manifest.json'), {
   payload: {
     install_plan: {
       path: 'payload/install-substrates.json',
-      sha256: digest('6')
+      sha256: payloadDigest
     }
   },
   templates: {
@@ -498,7 +531,7 @@ writeJson(path.join(packageDir, 'substrate-pack-manifest.json'), {
   tools: {
     checks: {
       path: 'tools/substrate-checks.txt',
-      sha256: digest('7')
+      sha256: toolsDigest
     }
   },
   checksums: {
@@ -988,6 +1021,28 @@ run_airgap_bundle_create() {
     --profile-values-schema "$payload_dir/profile-values.schema.json" \
     --profile-values-example "$payload_dir/profile-values.example.yaml" \
     --operator-prerequisites "$package_dir/operator-prerequisites.json"
+
+  if [[ -n "$substrate_pack_manifest" ]]; then
+    assert_bundled_substrate_pack_materials "$bundle_root"
+  fi
+}
+
+assert_bundled_substrate_pack_materials() {
+  local bundle_root="$1"
+
+  for material in \
+    payload/install-substrates.json \
+    templates/postgresql.yaml \
+    templates/mongodb.yaml \
+    templates/redis.yaml \
+    templates/object-storage.yaml \
+    templates/oidc.yaml \
+    tools/substrate-checks.txt; do
+    [[ -f "$bundle_root/components/$material" ]] ||
+      fail "bundle-create did not copy substrate pack material: $material"
+  done
+  [[ ! -e "$bundle_root/components/tools/kubectl" ]] ||
+    fail "bundle-create must not copy operator tools as substrate pack material"
 }
 
 write_bundle_operator_inputs() {

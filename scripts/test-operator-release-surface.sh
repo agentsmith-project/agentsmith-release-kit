@@ -459,12 +459,46 @@ write_kit_substrate_pack_manifest() {
   local profile="$2"
 
   "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const [output, profile] = process.argv.slice(2);
 const digest = (char) => `sha256:${char.repeat(64)}`;
 const image = (name, tag, char) =>
   `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+const packRoot = path.dirname(output);
+
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function writePackText(relativePath, content) {
+  const file = path.join(packRoot, relativePath);
+  const bytes = Buffer.from(content);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+  return digestBuffer(bytes);
+}
+
+function writePackJson(relativePath, value) {
+  return writePackText(relativePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+const payloadDigest = writePackJson('payload/kit-provided.json', {
+  schema_version: 'agentsmith.substrate-install-plan.fixture/v1',
+  installation_id: 'kit-install-10001',
+  resources: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc']
+});
+writePackText('templates/postgresql.yaml', 'kind: StatefulSet\nmetadata:\n  name: postgresql\n');
+writePackText('templates/mongodb.yaml', 'kind: StatefulSet\nmetadata:\n  name: mongodb\n');
+writePackText('templates/redis.yaml', 'kind: Deployment\nmetadata:\n  name: redis\n');
+writePackText('templates/object-storage.yaml', 'kind: Deployment\nmetadata:\n  name: object-storage\n');
+writePackText('templates/oidc.yaml', 'kind: Deployment\nmetadata:\n  name: oidc\n');
+const probeDigest = writePackText(
+  'tools/substrate-routability-probe.txt',
+  'postgresql tls\nmongodb tls\nredis ping\nobject-storage head-bucket\noidc discovery\n'
+);
 
 const manifest = {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
@@ -481,7 +515,7 @@ const manifest = {
   payload: {
     install_plan: {
       path: 'payload/kit-provided.json',
-      sha256: digest('6')
+      sha256: payloadDigest
     }
   },
   templates: {
@@ -494,7 +528,7 @@ const manifest = {
   tools: {
     routability_probe: {
       path: 'tools/substrate-routability-probe.txt',
-      sha256: digest('7')
+      sha256: probeDigest
     }
   },
   checksums: {
@@ -504,6 +538,24 @@ const manifest = {
 
 fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
+}
+
+assert_bundled_substrate_pack_materials() {
+  local bundle_root="$1"
+
+  for material in \
+    payload/kit-provided.json \
+    templates/postgresql.yaml \
+    templates/mongodb.yaml \
+    templates/redis.yaml \
+    templates/object-storage.yaml \
+    templates/oidc.yaml \
+    tools/substrate-routability-probe.txt; do
+    [[ -f "$bundle_root/components/$material" ]] ||
+      fail "bundle-create did not copy substrate pack material: $material"
+  done
+  [[ ! -e "$bundle_root/components/tools/kubectl" ]] ||
+    fail "bundle-create must not copy operator tools as substrate pack material"
 }
 
 write_routability_probe() {
@@ -1510,6 +1562,7 @@ bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle kit_provided \
   --output-dir "$kit_airgap_output" \
   --evidence-root "$kit_airgap_evidence_root" \
   --evidence-provenance "$KIT_AIRGAP_BUNDLE_PROVENANCE" >"$TMP_DIR/airgap-bundle-kit-provided.out"
+assert_bundled_substrate_pack_materials "$kit_airgap_bundle_root"
 
 [[ -f "$kit_airgap_output/$REPORT_FILE" ]] ||
   fail "operator airgap-bundle/kit_provided summary missing"

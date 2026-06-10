@@ -246,12 +246,46 @@ write_kit_substrate_pack_manifest() {
   local mutation="${3:-valid}"
 
   "$NODE_BIN" --input-type=module - "$output" "$profile" "$mutation" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const [output, profile, mutation] = process.argv.slice(2);
 const digest = (char) => `sha256:${char.repeat(64)}`;
 const image = (name, tag, char) =>
   `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+const packRoot = path.dirname(output);
+
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function writePackText(relativePath, content) {
+  const file = path.join(packRoot, relativePath);
+  const bytes = Buffer.from(content);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+  return digestBuffer(bytes);
+}
+
+function writePackJson(relativePath, value) {
+  return writePackText(relativePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+const payloadDigest = writePackJson('payload/install-substrates.json', {
+  schema_version: 'agentsmith.substrate-install-plan.fixture/v1',
+  installation_id: 'kit-install-10001',
+  resources: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc']
+});
+writePackText('templates/postgresql.yaml', 'kind: StatefulSet\nmetadata:\n  name: postgresql\n');
+writePackText('templates/mongodb.yaml', 'kind: StatefulSet\nmetadata:\n  name: mongodb\n');
+writePackText('templates/redis.yaml', 'kind: Deployment\nmetadata:\n  name: redis\n');
+writePackText('templates/object-storage.yaml', 'kind: Deployment\nmetadata:\n  name: object-storage\n');
+writePackText('templates/oidc.yaml', 'kind: Deployment\nmetadata:\n  name: oidc\n');
+const probeDigest = writePackText(
+  'tools/substrate-routability-probe.txt',
+  'postgresql tls\nmongodb tls\nredis ping\nobject-storage head-bucket\noidc discovery\n'
+);
 
 const manifest = {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
@@ -268,7 +302,7 @@ const manifest = {
   payload: {
     install_plan: {
       path: 'payload/install-substrates.json',
-      sha256: digest('6')
+      sha256: payloadDigest
     }
   },
   templates: {
@@ -281,7 +315,7 @@ const manifest = {
   tools: {
     routability_probe: {
       path: 'tools/substrate-routability-probe.txt',
-      sha256: digest('7')
+      sha256: probeDigest
     }
   },
   checksums: {
@@ -303,6 +337,12 @@ switch (mutation) {
     break;
   case 'missing_required_section':
     delete manifest.tools;
+    break;
+  case 'missing_material_file':
+    fs.rmSync(path.join(packRoot, 'payload/install-substrates.json'));
+    break;
+  case 'material_sha_mismatch':
+    manifest.payload.install_plan.sha256 = digest('6');
     break;
   default:
     throw new Error(`unknown substrate pack mutation: ${mutation}`);
@@ -775,6 +815,19 @@ const bundledPackDigest =
 const packComponent = manifest.components.find((component) => (
   component.kind === 'substrate_pack_manifest'
 ));
+const materialPaths = [
+  'payload/install-substrates.json',
+  'templates/postgresql.yaml',
+  'templates/mongodb.yaml',
+  'templates/redis.yaml',
+  'templates/object-storage.yaml',
+  'templates/oidc.yaml',
+  'tools/substrate-routability-probe.txt'
+];
+
+function fileDigest(file) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+}
 
 if (report.target_profile?.value !== 'existing_kubernetes/kit_installed/airgap') {
   throw new Error(`unexpected kit create target profile: ${report.target_profile?.value}`);
@@ -802,6 +855,16 @@ if (manifest.bindings?.substrate_pack_manifest_sha256 !== packDigest) {
 }
 if (report.components_count !== 5 || checkReport.components_count !== 5) {
   throw new Error('kit airgap reports must count the substrate pack component');
+}
+for (const relativePath of materialPaths) {
+  const source = path.join(path.dirname(substratePackManifest), relativePath);
+  const bundled = path.join(bundleRoot, 'components', relativePath);
+  if (!fs.statSync(bundled).isFile()) {
+    throw new Error(`missing bundled substrate pack material: ${relativePath}`);
+  }
+  if (fileDigest(source) !== fileDigest(bundled)) {
+    throw new Error(`bundled substrate pack material digest mismatch: ${relativePath}`);
+  }
 }
 NODE
 }
@@ -1011,7 +1074,7 @@ expect_create_fail external-declared-rejects-substrate-pack-manifest "$TMP_DIR/b
     "${common_payload_args[@]}" \
     --substrate-pack-manifest "$KIT_SUBSTRATE_PACK"
 
-for substrate_pack_case in secret_payload non_digest_image localhost_image missing_required_section; do
+for substrate_pack_case in secret_payload non_digest_image localhost_image missing_required_section missing_material_file material_sha_mismatch; do
   bad_substrate_pack="$TMP_DIR/substrate-pack-$substrate_pack_case.json"
   write_kit_substrate_pack_manifest "$bad_substrate_pack" "$KIT_AIRGAP_PROFILE" "$substrate_pack_case"
   expect_create_fail "kit-substrate-pack-$substrate_pack_case" "$TMP_DIR/bundle-kit-substrate-pack-$substrate_pack_case" "$TMP_DIR/out-kit-substrate-pack-$substrate_pack_case" \

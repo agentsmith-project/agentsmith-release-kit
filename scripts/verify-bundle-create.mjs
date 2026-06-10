@@ -5,7 +5,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { validateSubstratePackManifest } from './lib/substrate-pack-manifest-validation.mjs';
+import {
+  validateSubstratePackManifest,
+  validateSubstratePackManifestMateriality
+} from './lib/substrate-pack-manifest-validation.mjs';
 import { CURRENT_RELEASE_KIT_VERSION } from './lib/release-kit-version-policy.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -78,6 +81,8 @@ const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const OPERATOR_REF_URI_SCHEME_RE = /\b[a-z][a-z0-9+.-]*:\/\/[^\s]*/i;
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9_.-]+$/;
+const SAFE_RELATIVE_PACK_PATH_RE = /^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/;
+const SUBSTRATE_PACK_MATERIAL_SECTIONS = ['payload', 'templates', 'tools', 'checksums'];
 const BUNDLED_TOOL_KEYS = new Set(['name', 'version', 'source', 'path', 'sha256']);
 const OPERATOR_PREREQUISITE_TOOL_KEYS = new Set([
   'name',
@@ -556,6 +561,65 @@ async function assertSafePayloadFile(file, label) {
   }
 }
 
+function assertSafePackMaterialPath(value, label) {
+  const text = requireString(value, label);
+  if (
+    text !== text.trim() ||
+    text.startsWith('/') ||
+    WINDOWS_DRIVE_RE.test(text) ||
+    text.includes('\\') ||
+    text.includes('//') ||
+    text.split('/').some((part) => part === '' || part === '.' || part === '..') ||
+    URI_SCHEME_RE.test(text) ||
+    !SAFE_RELATIVE_PACK_PATH_RE.test(text)
+  ) {
+    fail(`${label} must be a safe relative substrate pack path`);
+  }
+  return text;
+}
+
+function collectSubstratePackMaterialPaths(value, label, paths) {
+  if (typeof value === 'string') {
+    if (!DIGEST_RE.test(value)) {
+      paths.add(assertSafePackMaterialPath(value, label));
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      collectSubstratePackMaterialPaths(item, `${label}[${index}]`, paths);
+    });
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+
+  const isPathAndShaObject =
+    Object.prototype.hasOwnProperty.call(value, 'path') &&
+    Object.prototype.hasOwnProperty.call(value, 'sha256') &&
+    typeof value.path === 'string' &&
+    typeof value.sha256 === 'string';
+  if (isPathAndShaObject) {
+    paths.add(assertSafePackMaterialPath(value.path, `${label}.path`));
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    if (isPathAndShaObject && (key === 'path' || key === 'sha256')) {
+      continue;
+    }
+    collectSubstratePackMaterialPaths(nested, `${label}.${key}`, paths);
+  }
+}
+
+function substratePackMaterialPaths(manifest) {
+  const paths = new Set();
+  for (const section of SUBSTRATE_PACK_MATERIAL_SECTIONS) {
+    collectSubstratePackMaterialPaths(manifest[section], `substrate_pack_manifest.${section}`, paths);
+  }
+  return [...paths].sort();
+}
+
 function assertOperatorRef(value, label) {
   const ref = requireString(value, label);
   if (ref.trim() !== ref) {
@@ -763,11 +827,18 @@ async function normalizeSubstratePackManifest(args, targetProfile) {
   );
   const input = await readJson(sourcePath, 'substrate pack manifest');
   validateSubstratePackManifest(input.value, targetProfile, { fail });
+  const sourcePackRoot = path.dirname(sourcePath);
+  await validateSubstratePackManifestMateriality(input.value, {
+    fail,
+    packRoot: sourcePackRoot
+  });
 
   return {
     sourcePath,
+    sourcePackRoot,
     bundlePath: 'components/substrate-pack-manifest.json',
-    inputDigest: input.inputDigest
+    inputDigest: input.inputDigest,
+    materialPaths: substratePackMaterialPaths(input.value)
   };
 }
 
@@ -840,6 +911,47 @@ async function copyInputFile(sourcePath, bundleRoot, relativePath) {
     path: relativePath,
     sha256: await digestFile(destination, relativePath)
   };
+}
+
+function isInsideDirectory(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function copySubstratePackMaterialFiles(substratePackManifest, bundleRoot) {
+  const destinationPackRoot = path.join(bundleRoot, 'components');
+
+  for (const relativePath of substratePackManifest.materialPaths) {
+    assertSafePackMaterialPath(relativePath, `substrate_pack_manifest material ${relativePath}`);
+    const source = path.resolve(substratePackManifest.sourcePackRoot, relativePath);
+    const destination = path.resolve(destinationPackRoot, relativePath);
+    if (!isInsideDirectory(substratePackManifest.sourcePackRoot, source)) {
+      fail(`substrate pack material ${relativePath} must resolve inside substrate pack root`);
+    }
+    if (!isInsideDirectory(destinationPackRoot, destination)) {
+      fail(`substrate pack material ${relativePath} must resolve inside bundle pack root`);
+    }
+
+    let destinationExists = false;
+    try {
+      await fs.lstat(destination);
+      destinationExists = true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        fail(`cannot inspect bundled substrate pack material ${relativePath}: ${error.message}`);
+      }
+    }
+    if (destinationExists) {
+      fail(`substrate pack material ${relativePath} collides with bundle component output`);
+    }
+
+    await fs.mkdir(path.dirname(destination), { recursive: true });
+    try {
+      await fs.copyFile(source, destination);
+    } catch (error) {
+      fail(`cannot copy substrate pack material ${relativePath}: ${error.message}`);
+    }
+  }
 }
 
 async function writeJsonFile(file, value) {
@@ -957,6 +1069,7 @@ async function assembleBundle({
         substratePackManifest.bundlePath
       ))
     });
+    await copySubstratePackMaterialFiles(substratePackManifest, bundleRoot);
   }
 
   const imageArchiveById = new Map(imageArchives.map((archive) => [archive.id, archive]));
