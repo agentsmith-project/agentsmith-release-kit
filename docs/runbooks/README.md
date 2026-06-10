@@ -61,6 +61,10 @@ path-level evidence for the final GA report; do not treat intermediate files
 as the formal release verdict. After all four package runs and product-side
 reports are available, use `--ga-report` to write the final
 `ga-release-report.json`.
+Replace scaffold scalar placeholders such as
+`context: replace-with-kube-context` and
+`smoke_url: https://agentsmith.example.com/healthz`; doctor reports them as
+blockers until they are real target facts.
 When doctor fails, its human output groups the blockers as release materials,
 operator target facts, operator tools, and operator confirmations before the
 raw field list.
@@ -84,6 +88,8 @@ groups and the `audit_usage_readback` binding to the canonical `audit` and
 The final report also verifies that each smoke report's substrate truth digest
 matches the finalized deployment truth for the package it is bound to; smoke
 evidence from a different deployed substrate is a blocker.
+`site.env` is not an operator-inputs field; AgentSmith's post-deploy product
+smoke report binds the deployed site facts for this final verifier.
 On pass the report has `formal_verdict=issued`; when blocked it replaces stale
 pass outputs with `status=fail`, `formal_verdict=not_issued`, and blockers.
 

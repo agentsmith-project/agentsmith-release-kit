@@ -23,6 +23,10 @@ only means package static intake is clean; it is not runnable readiness or a GA
 verdict. When doctor fails, the human output groups blockers as release
 materials, operator target facts, operator tools, and operator confirmations.
 Run `--run` only when the package is ready to execute.
+Replace scaffold scalar placeholders such as
+`context: replace-with-kube-context` and
+`smoke_url: https://agentsmith.example.com/healthz`; doctor keeps them as
+blockers until replaced.
 
 Available examples:
 
@@ -53,3 +57,5 @@ bash scripts/operator-release.sh --ga-report \
 ```
 
 The final operator-facing artifact is `ga-release-report.json`.
+`site.env` is not an operator-inputs field; it is bound through the
+AgentSmith post-deploy product smoke report used by the final GA verifier.

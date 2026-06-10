@@ -109,6 +109,12 @@ const STRING_FIELDS = new Set([
   'smoke_url',
   'timeout'
 ]);
+const PLACEHOLDER_SCALAR_VALUES = new Map([
+  ['context', new Set(['replace-with-kube-context'])],
+  ['smoke_url', new Set(['https://agentsmith.example.com/healthz'])],
+  ['deploy_confirmation.operator_run_id', new Set(['replace-with-deploy-run-id'])],
+  ['install_confirmation.operator_run_id', new Set(['replace-with-install-run-id'])]
+]);
 
 const COMMON_REQUIRED_FILES = [
   'release_contract',
@@ -814,6 +820,11 @@ function validateSmokeRuntimeFields(manifest, mode) {
   }
 }
 
+function isPlaceholderScalarValue(field, value) {
+  const placeholders = PLACEHOLDER_SCALAR_VALUES.get(field);
+  return placeholders?.has(typeof value === 'string' ? value.trim() : value) === true;
+}
+
 function validateRegistryInputs({ manifest, config, mode }) {
   const hasTargetRegistry = Object.hasOwn(manifest, 'target_registry');
   const hasRegistryProbe = Object.hasOwn(manifest, 'registry_probe');
@@ -867,6 +878,9 @@ function validateConfirmation(value, label, fields) {
     if (field.type === 'digest' && (typeof nestedValue !== 'string' || !DIGEST_RE.test(nestedValue))) {
       fail(`${label}.${field.name} must be a sha256 digest`);
     }
+    if (isPlaceholderScalarValue(`${label}.${field.name}`, nestedValue)) {
+      fail(`${label}.${field.name} must not be a scaffold placeholder`);
+    }
     if (field.type === 'run_id' && (typeof nestedValue !== 'string' || !OPERATOR_RUN_ID_RE.test(nestedValue))) {
       fail(`${label}.${field.name} must be a safe operator run id`);
     }
@@ -889,6 +903,9 @@ function validateInstallConfirmation(value, label) {
     !OPERATOR_RUN_ID_RE.test(confirmation.operator_run_id)
   ) {
     fail(`${label}.operator_run_id must be a safe operator run id`);
+  }
+  if (isPlaceholderScalarValue(`${label}.operator_run_id`, confirmation.operator_run_id)) {
+    fail(`${label}.operator_run_id must not be a scaffold placeholder`);
   }
 
   const hasCurrentConfirmation = Object.hasOwn(
@@ -973,7 +990,7 @@ function collectMissingRequiredInputs({ manifest, config, mode }) {
     ...requiredInputs.scalars,
     'namespace'
   ]) {
-    if (!Object.hasOwn(manifest, key)) {
+    if (!Object.hasOwn(manifest, key) || isPlaceholderScalarValue(key, manifest[key])) {
       missing.push(key);
     }
   }
@@ -985,6 +1002,13 @@ function collectMissingRequiredInputs({ manifest, config, mode }) {
         missing.push('install_confirmation.confirmed');
       }
       if (!Object.hasOwn(manifest.install_confirmation, 'operator_run_id')) {
+        missing.push('install_confirmation.operator_run_id');
+      } else if (
+        isPlaceholderScalarValue(
+          'install_confirmation.operator_run_id',
+          manifest.install_confirmation.operator_run_id
+        )
+      ) {
         missing.push('install_confirmation.operator_run_id');
       }
       if (
@@ -1003,6 +1027,13 @@ function collectMissingRequiredInputs({ manifest, config, mode }) {
         missing.push('deploy_confirmation.confirmed');
       }
       if (!Object.hasOwn(manifest.deploy_confirmation, 'operator_run_id')) {
+        missing.push('deploy_confirmation.operator_run_id');
+      } else if (
+        isPlaceholderScalarValue(
+          'deploy_confirmation.operator_run_id',
+          manifest.deploy_confirmation.operator_run_id
+        )
+      ) {
         missing.push('deploy_confirmation.operator_run_id');
       }
     }
@@ -2611,6 +2642,7 @@ function packageReadmeForManifest(manifest) {
     '- Replace package-local refs with the real release contract, deploy template package, render values, and target prerequisites.',
     ...installNote,
     ...airgapNote,
+    '- Replace scaffold scalar placeholders such as context: replace-with-kube-context and smoke_url: https://agentsmith.example.com/healthz if present.',
     '- Add deploy_confirmation only when this package is ready to execute.',
     '- Keep secrets as references, not raw secret values.',
     '',
@@ -2652,6 +2684,7 @@ function packageReadmeForManifest(manifest) {
     '```',
     '',
     'Success or failure is shown in ga-release-report.json.',
+    'site.env is not an operator-inputs field; it is bound through the AgentSmith post-deploy product smoke report.',
     ''
   ].join('\n')}\n`;
 }

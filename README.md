@@ -106,6 +106,8 @@ release images; release-kit does not mirror images, push images, or perform
 registry login.
 
 Post-deploy smoke reports are runtime evidence and are not operator-inputs.
+`site.env` is not an operator-inputs field; the AgentSmith post-deploy product
+smoke report binds the deployed site facts for the final GA verifier.
 
 With `--doctor`, the facade reports missing package refs/fields plus static
 package blockers for the selected deployment path and exits without executing
@@ -114,7 +116,10 @@ producers or issuing a verdict.
 With `--init-operator-inputs <deployment_path> --output-dir <dir>`, the facade
 creates a skeleton package for one of the four GA deployment paths and refuses
 to overwrite an existing `operator-inputs.json`. The scaffold intentionally
-does not prefill explicit deploy/install confirmations.
+does not prefill explicit deploy/install confirmations. Scaffold scalar
+placeholders such as `context: replace-with-kube-context` and
+`smoke_url: https://agentsmith.example.com/healthz` must be replaced; doctor
+treats them as blockers.
 
 With `--run`, the current orchestration slice supports `online/use_existing`,
 `online/install_substrates`, `airgap/use_existing`, and

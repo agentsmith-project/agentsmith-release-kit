@@ -574,11 +574,22 @@ switch (caseName) {
     };
     manifest.expected_status = 200;
     break;
+  case 'placeholder_deploy_run_id':
+    manifest.mode = 'apply';
+    manifest.deploy_confirmation = {
+      confirmed: true,
+      operator_run_id: 'replace-with-deploy-run-id'
+    };
+    manifest.smoke_url = 'https://release.example/ok';
+    break;
   case 'product_readiness_report':
     manifest.product_readiness_report = 'product-readiness-report.json';
     break;
   case 'missing_install_confirmation':
     delete manifest.install_confirmation;
+    break;
+  case 'placeholder_install_run_id':
+    manifest.install_confirmation.operator_run_id = 'replace-with-install-run-id';
     break;
   case 'missing_current_install_confirmation':
     delete manifest.install_confirmation.confirm_current_install_parameters;
@@ -1460,6 +1471,13 @@ if (!report.missing.includes('deploy_confirmation')) {
 if (deploymentPath.endsWith('/install_substrates') && !report.missing.includes('install_confirmation')) {
   throw new Error('init doctor must require explicit install_confirmation');
 }
+if (deploymentPath.startsWith('airgap/')) {
+  for (const field of ['context', 'smoke_url']) {
+    if (!report.missing.includes(field)) {
+      throw new Error(`init doctor must treat scaffold placeholder ${field} as missing`);
+    }
+  }
+}
 const missingRefFields = new Set(report.missing_refs.map((entry) => entry.field));
 for (const field of ['release_contract', 'deploy_template_package', 'deploy_template_archive']) {
   if (!missingRefFields.has(field)) {
@@ -1467,6 +1485,43 @@ for (const field of ['release_contract', 'deploy_template_package', 'deploy_temp
   }
 }
 NODE
+  if [[ "$deployment_path" == airgap/* ]]; then
+    "$NODE_BIN" --input-type=module - "$init_dir/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestFile] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+manifest.context = 'operator-inputs-context';
+manifest.smoke_url = 'https://release.example/healthz';
+fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+    if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+      --operator-inputs "$init_dir" \
+      --doctor \
+      --stdout >"$TMP_DIR/init-doctor-replaced-${deployment_path//\//-}.json"; then
+      fail "operator-inputs doctor should still fail for scaffold package missing refs: $deployment_path"
+    fi
+    "$NODE_BIN" --input-type=module - \
+      "$TMP_DIR/init-doctor-replaced-${deployment_path//\//-}.json" \
+      "$deployment_path" <<'NODE'
+import fs from 'node:fs';
+
+const [doctorFile, deploymentPath] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(doctorFile, 'utf8'));
+if (report.status !== 'fail' || report.deployment_path !== deploymentPath) {
+  throw new Error('init doctor replacement fixture must still be a scaffold failure');
+}
+for (const field of ['context', 'smoke_url']) {
+  if (report.missing.includes(field)) {
+    throw new Error(`doctor must not treat replaced ${field} as placeholder-missing`);
+  }
+}
+const missingRefFields = new Set(report.missing_refs.map((entry) => entry.field));
+if (!missingRefFields.has('release_contract')) {
+  throw new Error('replacement fixture must continue failing on real missing refs');
+}
+NODE
+  fi
   if bash "$ROOT_DIR/scripts/operator-release.sh" \
     --init-operator-inputs "$deployment_path" \
     --output-dir "$init_dir" >"$TMP_DIR/init-overwrite.out" 2>"$TMP_DIR/init-overwrite.err"; then
@@ -1753,6 +1808,7 @@ for case_name in \
   timeout_zero_duration \
   namespace_too_long \
   apply_smoke_modifier_without_url \
+  placeholder_deploy_run_id \
   product_readiness_report \
   slashless_kubectl \
   smoke_endpoint \
@@ -1856,6 +1912,12 @@ copy_valid_package "$base_install" "$missing_current_install_dir"
 mutate_manifest "$missing_current_install_dir" missing_current_install_confirmation
 expect_fail_matching missing_current_install_confirmation 'install_confirmation.confirm_current_install_parameters must be true' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_current_install_dir"
+
+placeholder_install_run_id_dir="$TMP_DIR/invalid-placeholder-install-run-id"
+copy_valid_package "$base_install" "$placeholder_install_run_id_dir"
+mutate_manifest "$placeholder_install_run_id_dir" placeholder_install_run_id
+expect_fail_matching placeholder_install_run_id 'install_confirmation.operator_run_id must not be a scaffold placeholder' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$placeholder_install_run_id_dir"
 
 missing_routability_dir="$TMP_DIR/invalid-missing-routability-probe"
 copy_valid_package "$base_install" "$missing_routability_dir"

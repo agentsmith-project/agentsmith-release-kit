@@ -34,6 +34,10 @@ bundle-local release contract, deploy template package, deploy template
 archive, and image map. Update `airgap-bundle/airgap-bundle-manifest.json`
 component sha256 values after replacement. Replace package-local tools before
 `--run`.
+If this package started from init scaffold, replace
+`context: replace-with-kube-context` and
+`smoke_url: https://agentsmith.example.com/healthz`; doctor treats those
+placeholder values as blockers.
 
 ## Doctor And Run
 
@@ -63,3 +67,5 @@ bash scripts/operator-release.sh --ga-report \
 ```
 
 The formal result is `ga-release-report.json`.
+`site.env` is supplied by the AgentSmith post-deploy product smoke report, not
+by operator-inputs.
