@@ -337,14 +337,16 @@ async function validateOciLayoutArchive({ archivePath, id }) {
 
   const index = parseJsonBuffer(indexContent, `${label} index.json`);
   const manifests = requireArray(index.manifests, `${label} index.json.manifests`);
-  if (manifests.length === 0) {
-    fail(`${label} index.json.manifests must not be empty`);
+  if (manifests.length !== 1) {
+    fail(`${label} index.json.manifests must contain exactly one manifest descriptor`);
   }
 
   let layerBlobCount = 0;
+  let archiveManifestDigest;
   for (const [manifestIndex, manifestValue] of manifests.entries()) {
     const manifestLabel = `${label} index.json.manifests[${manifestIndex}]`;
     const manifestDescriptor = requireDescriptor(manifestValue, manifestLabel);
+    archiveManifestDigest = manifestDescriptor.digest;
     const manifestContent = readDescriptorBlob(
       files,
       manifestDescriptor,
@@ -386,6 +388,9 @@ async function validateOciLayoutArchive({ archivePath, id }) {
   if (layerBlobCount === 0) {
     fail(`${label} must contain at least one layer blob`);
   }
+  return {
+    archiveManifestDigest
+  };
 }
 
 async function readJson(file, label) {
@@ -900,6 +905,7 @@ async function assertImageArtifactDeclarations({
   const seen = new Set();
   const imageSummaries = [];
   const archiveDigests = new Set();
+  const archiveManifestDigests = new Set();
   const probeDigests = new Set();
   for (const [index, value] of items.entries()) {
     const label = `bundle_manifest.image_artifact_declarations[${index}]`;
@@ -932,7 +938,10 @@ async function assertImageArtifactDeclarations({
     if (actualArchiveSha256 !== archiveSha256) {
       fail(`${label}.sha256 must match image artifact file sha256`);
     }
-    await validateOciLayoutArchive({ archivePath, id });
+    const { archiveManifestDigest } = await validateOciLayoutArchive({ archivePath, id });
+    if (archiveManifestDigest !== targetDigest) {
+      fail(`${label} archive manifest digest must match image_map target_digest`);
+    }
 
     const probeDigest = runArchiveProbe({ archiveProbe, archivePath, id });
     if (probeDigest !== targetDigest) {
@@ -940,11 +949,13 @@ async function assertImageArtifactDeclarations({
     }
 
     archiveDigests.add(archiveSha256);
+    archiveManifestDigests.add(archiveManifestDigest);
     probeDigests.add(probeDigest);
     imageSummaries.push({
       id,
       source_digest: sourceDigest,
       target_digest: targetDigest,
+      archive_manifest_digest: archiveManifestDigest,
       archive_sha256: archiveSha256,
       probe_digest: probeDigest
     });
@@ -961,6 +972,7 @@ async function assertImageArtifactDeclarations({
     images: imageSummaries,
     archiveCount: imageSummaries.length,
     uniqueArchiveSha256Count: archiveDigests.size,
+    uniqueArchiveManifestDigestCount: archiveManifestDigests.size,
     uniqueProbeDigestCount: probeDigests.size
   };
 }
@@ -995,6 +1007,8 @@ function buildReport({
       archive_count: archiveSummary.archiveCount,
       archive_sha256_count: archiveSummary.archiveCount,
       unique_archive_sha256_count: archiveSummary.uniqueArchiveSha256Count,
+      archive_manifest_digest_count: archiveSummary.archiveCount,
+      unique_archive_manifest_digest_count: archiveSummary.uniqueArchiveManifestDigestCount,
       probe_digest_count: archiveSummary.archiveCount,
       unique_probe_digest_count: archiveSummary.uniqueProbeDigestCount,
       image_map_target_digest_count: imageMapSummary.imageCount,

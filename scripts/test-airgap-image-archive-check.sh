@@ -24,6 +24,7 @@ IMAGE_DIR="$TMP_DIR/image-archives"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
 KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
 GOOD_PROBE="$TMP_DIR/probes/archive-digest-probe"
+TARGET_ANNOTATION_PROBE="$TMP_DIR/probes/target-annotation-probe"
 DOUBLE_OUTPUT_PROBE="$TMP_DIR/probes/double-output-probe"
 TIMEOUT_PROBE="$TMP_DIR/probes/timeout-probe"
 
@@ -119,6 +120,59 @@ function digest(value) {
   return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 }
 
+function fixtureManifestDigest(imageId) {
+  const layerContent = Buffer.from(`fixture layer for ${imageId}\n`);
+  const layerDigest = digest(layerContent);
+  const config = {
+    architecture: 'amd64',
+    os: 'linux',
+    rootfs: {
+      type: 'layers',
+      diff_ids: [layerDigest]
+    },
+    config: {
+      Labels: {
+        'io.agentsmith.fixture.image_id': imageId
+      }
+    }
+  };
+  const configBuffer = Buffer.from(`${JSON.stringify(config)}\n`);
+  const configDigest = digest(configBuffer);
+  const manifest = {
+    schemaVersion: 2,
+    mediaType: 'application/vnd.oci.image.manifest.v1+json',
+    config: {
+      mediaType: 'application/vnd.oci.image.config.v1+json',
+      digest: configDigest,
+      size: configBuffer.length
+    },
+    layers: [
+      {
+        mediaType: 'application/vnd.oci.image.layer.v1.tar',
+        digest: layerDigest,
+        size: layerContent.length
+      }
+    ]
+  };
+  return digest(Buffer.from(`${JSON.stringify(manifest)}\n`));
+}
+
+function replaceImageDigest(image, nextDigest) {
+  if (!/@sha256:[0-9a-f]{64}$/.test(image)) {
+    throw new Error(`image must be digest-pinned: ${image}`);
+  }
+  return image.replace(/@sha256:[0-9a-f]{64}$/, `@${nextDigest}`);
+}
+
+function retargetImageItem(item, imageId) {
+  const nextDigest = fixtureManifestDigest(imageId);
+  item.digest = nextDigest;
+  item.image = replaceImageDigest(item.image, nextDigest);
+  if (item.source_provenance?.artifact_sha256) {
+    item.source_provenance.artifact_sha256 = nextDigest;
+  }
+}
+
 function subjectDigest(value) {
   const { artifact_provenance: _artifactProvenance, ...subject } = value;
   return digest(JSON.stringify(stableJson(subject)));
@@ -129,6 +183,20 @@ function artifactProjectionDigest(value) {
   const projection = { ...value, artifact_provenance: artifactProvenance };
   return digest(JSON.stringify(stableJson(projection)));
 }
+
+for (const item of contract.deploy_image_inventory) {
+  retargetImageItem(item, item.id);
+}
+for (const item of contract.product_images) {
+  retargetImageItem(item, item.id);
+}
+for (const item of contract.adopted_provider_images) {
+  retargetImageItem(item, item.id);
+}
+for (const item of contract.release_kit_prerequisite_images) {
+  retargetImageItem(item, item.id);
+}
+retargetImageItem(contract.managed_runner_image, 'managed_runner');
 
 deployTemplatePackage.package_sha256 = archiveSha;
 deployTemplatePackage.manifest_sha256 = manifestSha;
@@ -297,6 +365,64 @@ write_probes() {
 #!/usr/bin/env node
 import fs from 'node:fs';
 
+const TAR_BLOCK_SIZE = 512;
+const archivePath = process.argv[2] || process.env.AGENTSMITH_IMAGE_ARCHIVE_PATH;
+if (!archivePath) {
+  process.exit(2);
+}
+
+function readTarString(block, start, length) {
+  const slice = block.subarray(start, start + length);
+  const end = slice.indexOf(0);
+  return slice.subarray(0, end === -1 ? slice.length : end).toString('utf8').trim();
+}
+
+function parseTarOctal(block, start, length) {
+  const raw = readTarString(block, start, length).trim();
+  return raw === '' ? 0 : Number.parseInt(raw, 8);
+}
+
+function readTarFile(buffer, wantedPath) {
+  for (let offset = 0; offset + TAR_BLOCK_SIZE <= buffer.length; ) {
+    const block = buffer.subarray(offset, offset + TAR_BLOCK_SIZE);
+    if (block.every((byte) => byte === 0)) {
+      break;
+    }
+    const name = readTarString(block, 0, 100);
+    const prefix = readTarString(block, 345, 155);
+    const entryPath = prefix ? `${prefix}/${name}` : name;
+    const size = parseTarOctal(block, 124, 12);
+    const contentStart = offset + TAR_BLOCK_SIZE;
+    const contentEnd = contentStart + size;
+    if (entryPath === wantedPath) {
+      return buffer.subarray(contentStart, contentEnd);
+    }
+    offset = contentStart + Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+  }
+  return undefined;
+}
+
+const body = fs.readFileSync(archivePath);
+const indexContent = readTarFile(body, 'index.json');
+if (!indexContent) {
+  process.exit(3);
+}
+const index = JSON.parse(indexContent.toString('utf8'));
+if (!Array.isArray(index.manifests) || index.manifests.length !== 1) {
+  process.exit(4);
+}
+const digest = index.manifests[0]?.digest;
+if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
+  process.exit(5);
+}
+console.log(digest);
+NODE
+  chmod +x "$GOOD_PROBE"
+
+  cat >"$TARGET_ANNOTATION_PROBE" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
 const archivePath = process.argv[2] || process.env.AGENTSMITH_IMAGE_ARCHIVE_PATH;
 if (!archivePath) {
   process.exit(2);
@@ -310,7 +436,7 @@ if (matches.length !== 1) {
 }
 console.log(matches[0][1]);
 NODE
-  chmod +x "$GOOD_PROBE"
+  chmod +x "$TARGET_ANNOTATION_PROBE"
 
   cat >"$DOUBLE_OUTPUT_PROBE" <<'NODE'
 #!/usr/bin/env node
@@ -451,6 +577,51 @@ mutate_image_archive_digest() {
     --target-digest "$digest"
 }
 
+mutate_image_archive_manifest_digest_mismatch() {
+  local bundle_root="$1"
+  local image_id="$2"
+  local archive_info=()
+
+  mapfile -t archive_info < <("$NODE_BIN" --input-type=module - "$bundle_root" "$image_id" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [bundleRoot, imageId] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(path.join(bundleRoot, 'airgap-bundle-manifest.json'), 'utf8'));
+const declaration = manifest.image_artifact_declarations.find((item) => item.id === imageId);
+if (!declaration) {
+  throw new Error(`missing image declaration: ${imageId}`);
+}
+console.log(path.join(bundleRoot, ...declaration.path.split('/')));
+console.log(declaration.target_digest);
+NODE
+)
+  local archive_path="${archive_info[0]}"
+  local target_digest="${archive_info[1]}"
+
+  "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    --archive "$archive_path" \
+    --image-id "${image_id}_archive_manifest_mismatch" \
+    --target-digest "$target_digest"
+
+  "$NODE_BIN" --input-type=module - "$bundle_root" "$image_id" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [bundleRoot, imageId] = process.argv.slice(2);
+const manifestPath = path.join(bundleRoot, 'airgap-bundle-manifest.json');
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const declaration = manifest.image_artifact_declarations.find((item) => item.id === imageId);
+if (!declaration) {
+  throw new Error(`missing image declaration: ${imageId}`);
+}
+const archivePath = path.join(bundleRoot, ...declaration.path.split('/'));
+declaration.sha256 = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(archivePath)).digest('hex')}`;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
 mutate_image_archive_missing_layer() {
   local bundle_root="$1"
   local image_id="$2"
@@ -569,10 +740,19 @@ for (const image of report.images) {
   if (!report.image_ids.includes(image.id)) {
     throw new Error(`unexpected image id in summary: ${image.id}`);
   }
-  for (const field of ['source_digest', 'target_digest', 'archive_sha256', 'probe_digest']) {
+  for (const field of [
+    'source_digest',
+    'target_digest',
+    'archive_manifest_digest',
+    'archive_sha256',
+    'probe_digest'
+  ]) {
     if (!digestRe.test(image[field])) {
       throw new Error(`image ${image.id} missing ${field}`);
     }
+  }
+  if (image.archive_manifest_digest !== image.target_digest) {
+    throw new Error(`archive manifest digest must match target digest for ${image.id}`);
   }
   if (image.probe_digest !== image.target_digest) {
     throw new Error(`probe digest must match target digest for ${image.id}`);
@@ -583,6 +763,9 @@ if (report.archive_digest_summary?.archive_count !== expectedImageCount) {
 }
 if (report.archive_digest_summary?.probe_digest_count !== expectedImageCount) {
   throw new Error('archive digest summary must count probe digests');
+}
+if (report.archive_digest_summary?.archive_manifest_digest_count !== expectedImageCount) {
+  throw new Error('archive digest summary must count archive manifest digests');
 }
 assertNoLeakKeys(report);
 if (/\/tmp\/|operator held|operator workstation|signed operator prerequisite/.test(serialized)) {
@@ -678,7 +861,18 @@ wrong_digest_bundle="$TMP_DIR/bundle-wrong-digest"
 copy_valid_bundle "$wrong_digest_bundle"
 mutate_image_archive_digest "$wrong_digest_bundle" agentsmith_app "sha256:7777777777777777777777777777777777777777777777777777777777777777"
 expect_check_fail "probe-target-digest-mismatch" "$TMP_DIR/out-wrong-digest" \
-  run_image_archive_check "$wrong_digest_bundle" "$TMP_DIR/out-wrong-digest"
+  run_image_archive_check "$wrong_digest_bundle" "$TMP_DIR/out-wrong-digest" "$TARGET_ANNOTATION_PROBE"
+
+archive_manifest_mismatch_bundle="$TMP_DIR/bundle-archive-manifest-mismatch"
+copy_valid_bundle "$archive_manifest_mismatch_bundle"
+mutate_image_archive_manifest_digest_mismatch "$archive_manifest_mismatch_bundle" agentsmith_app
+expect_check_fail "archive-manifest-target-digest-mismatch" "$TMP_DIR/out-archive-manifest-mismatch" \
+  run_image_archive_check "$archive_manifest_mismatch_bundle" "$TMP_DIR/out-archive-manifest-mismatch" "$TARGET_ANNOTATION_PROBE"
+if ! grep -Fq 'archive manifest digest must match image_map target_digest' "$TMP_DIR/archive-manifest-target-digest-mismatch.err"; then
+  cat "$TMP_DIR/archive-manifest-target-digest-mismatch.err" >&2
+  fail "archive manifest digest mismatch failure must explain target_digest alignment"
+fi
+pass "OCI archive descriptor digest check rejected probe target echo mismatch"
 
 missing_layer_bundle="$TMP_DIR/bundle-missing-layer"
 copy_valid_bundle "$missing_layer_bundle"

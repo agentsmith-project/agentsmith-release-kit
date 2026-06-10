@@ -245,13 +245,15 @@ assembled bundle inputs as `--airgap-bundle-check`, accepts
 `existing_kubernetes/external_declared/airgap` and
 `existing_kubernetes/kit_installed/airgap`, and first runs the existing bundle
 check. It then validates each declared `oci_layout_tar` as an OCI layout tar:
-`oci-layout`, `index.json`, descriptor-addressed manifest/config/layer blobs,
-matching blob sha256 values, and at least one layer blob are required. After
-that structure sanity check, it invokes an explicit local
+`oci-layout`, `index.json`, exactly one manifest descriptor,
+descriptor-addressed manifest/config/layer blobs, matching blob sha256 values,
+and at least one layer blob are required. The archive manifest descriptor digest
+must match the corresponding image-map `target_digest`. After that structure
+sanity check, it invokes an explicit local
 `--archive-probe <executable>` once per
 `bundle_manifest.image_artifact_declarations[]` archive path. The probe
 receives the archive path as argv and env, and stdout must contain exactly one
-`sha256:<64>` digest. The digest must match the corresponding image-map
+`sha256:<64>` digest. That probe digest must also match the image-map
 `target_digest`; bundle-check has already bound that digest to the release
 contract inventory. `--archive-probe` is an operator-owned trusted local
 executable; release-kit does not sandbox it or prove the probe itself

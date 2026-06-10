@@ -137,6 +137,59 @@ function digest(value) {
   return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 }
 
+function fixtureManifestDigest(imageId) {
+  const layerContent = Buffer.from(`fixture layer for ${imageId}\n`);
+  const layerDigest = digest(layerContent);
+  const config = {
+    architecture: 'amd64',
+    os: 'linux',
+    rootfs: {
+      type: 'layers',
+      diff_ids: [layerDigest]
+    },
+    config: {
+      Labels: {
+        'io.agentsmith.fixture.image_id': imageId
+      }
+    }
+  };
+  const configBuffer = Buffer.from(`${JSON.stringify(config)}\n`);
+  const configDigest = digest(configBuffer);
+  const manifest = {
+    schemaVersion: 2,
+    mediaType: 'application/vnd.oci.image.manifest.v1+json',
+    config: {
+      mediaType: 'application/vnd.oci.image.config.v1+json',
+      digest: configDigest,
+      size: configBuffer.length
+    },
+    layers: [
+      {
+        mediaType: 'application/vnd.oci.image.layer.v1.tar',
+        digest: layerDigest,
+        size: layerContent.length
+      }
+    ]
+  };
+  return digest(Buffer.from(`${JSON.stringify(manifest)}\n`));
+}
+
+function replaceImageDigest(image, nextDigest) {
+  if (!/@sha256:[0-9a-f]{64}$/.test(image)) {
+    throw new Error(`image must be digest-pinned: ${image}`);
+  }
+  return image.replace(/@sha256:[0-9a-f]{64}$/, `@${nextDigest}`);
+}
+
+function retargetImageItem(item, imageId) {
+  const nextDigest = fixtureManifestDigest(imageId);
+  item.digest = nextDigest;
+  item.image = replaceImageDigest(item.image, nextDigest);
+  if (item.source_provenance?.artifact_sha256) {
+    item.source_provenance.artifact_sha256 = nextDigest;
+  }
+}
+
 function subjectDigest(value) {
   const { artifact_provenance: _artifactProvenance, ...subject } = value;
   return digest(JSON.stringify(stableJson(subject)));
@@ -147,6 +200,20 @@ function artifactProjectionDigest(value) {
   const projection = { ...value, artifact_provenance: artifactProvenance };
   return digest(JSON.stringify(stableJson(projection)));
 }
+
+for (const item of contract.deploy_image_inventory) {
+  retargetImageItem(item, item.id);
+}
+for (const item of contract.product_images) {
+  retargetImageItem(item, item.id);
+}
+for (const item of contract.adopted_provider_images) {
+  retargetImageItem(item, item.id);
+}
+for (const item of contract.release_kit_prerequisite_images) {
+  retargetImageItem(item, item.id);
+}
+retargetImageItem(contract.managed_runner_image, 'managed_runner');
 
 deployTemplatePackage.package_sha256 = archiveSha;
 deployTemplatePackage.manifest_sha256 = manifestSha;

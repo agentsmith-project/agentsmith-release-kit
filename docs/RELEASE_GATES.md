@@ -691,12 +691,11 @@ The diagnostic requires `--archive-probe <executable>`. The probe must be a
 local executable and is invoked once per
 `bundle_manifest.image_artifact_declarations[]` archive file under the bundle
 root. Declared `oci_layout_tar` archives must be readable OCI layout tars with
-`oci-layout`, `index.json`, descriptor-addressed manifest/config/layer blobs,
-matching blob sha256 values, and at least one layer blob, so manifest-only or
-empty archives fail before the probe runs. The archive path is provided as argv
-and env. Probe stdout must be exactly one `sha256:<64>` digest and stderr must
-be empty. The probe digest must match the image-map `target_digest`;
-bundle-check has already aligned that digest with
+`oci-layout`, `index.json`, exactly one manifest descriptor, descriptor-addressed
+manifest/config/layer blobs, matching blob sha256 values, and at least one
+layer blob, so manifest-only or empty archives fail before the probe runs. The
+archive manifest descriptor digest and probe digest must both match the
+image-map `target_digest`; bundle-check has already aligned that digest with
 `release_contract.deploy_image_inventory`. This proves only local OCI archive
 structure/digest sanity plus digest materiality through the chosen probe.
 `--archive-probe` is an operator-owned trusted local executable; release-kit
