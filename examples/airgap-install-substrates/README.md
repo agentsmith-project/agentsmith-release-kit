@@ -10,13 +10,18 @@ outside the bundle.
 
 Secrets stay outside the package. Use `secretRef:` values only.
 
-The bundle manifest and bundle-local install inputs are already bound to
-`airgap/install_substrates`. Keep `deployment_path` set to
-`airgap/install_substrates`. Replace bundle components, component checksums,
-namespace, service refs, package-local tools, and confirmation fields.
-Provide the substrate pack manifest together with its referenced `payload/`,
-`templates/`, and `tools/` material tree; paths are relative to the manifest's
-directory.
+This package requires an already assembled airgap bundle. The bundle manifest
+must come from the assembled airgap bundle provided by the release package, and
+must include the release identity, bindings, image archive declarations, payload
+artifacts, and operator prerequisites. Do not update only `components` and
+component sha256 values in the checked-in manifest.
+
+Keep `deployment_path` set to `airgap/install_substrates`. Replace the whole
+`airgap-bundle/` directory from the assembled bundle, then provide or edit the
+bundle-local install inputs, namespace, service refs, package-local tools, and
+confirmation fields. Provide the substrate pack manifest together with its
+referenced `payload/`, `templates/`, and `tools/` material tree; paths are
+relative to the manifest's directory.
 The installer chooses the path from `deployment_path`; do not add extra
 deployment selection fields to the bundle-local target prerequisites or install
 inputs.
@@ -26,18 +31,22 @@ inputs.
 ```bash
 EXAMPLE_DIR="examples/airgap-install-substrates"
 PKG="out/operator-inputs/airgap-install-substrates"
+BUNDLE_ROOT="<path-to-assembled-airgap-bundle>"
 
 mkdir -p "$PKG"
 cp "$EXAMPLE_DIR/operator-inputs.apply.example.json" "$PKG/operator-inputs.json"
-cp -R "$EXAMPLE_DIR/airgap-bundle" "$PKG/airgap-bundle"
+rm -rf "$PKG/airgap-bundle"
+mkdir -p "$PKG/airgap-bundle"
+cp -R "$BUNDLE_ROOT"/. "$PKG/airgap-bundle"/
+mkdir -p "$PKG/airgap-bundle/operator-inputs"
+cp "$EXAMPLE_DIR/airgap-bundle/operator-inputs/"*.example.json \
+  "$PKG/airgap-bundle/operator-inputs/"
 cp -R "$EXAMPLE_DIR/tools" "$PKG/tools"
 ```
 
-Replace the files under `"$PKG/airgap-bundle/components"` with the real
-bundle-local release contract, deploy template package, deploy template
-archive, image map, and substrate pack manifest. Update
-`airgap-bundle/airgap-bundle-manifest.json` component sha256 values after
-replacement. Replace package-local tools before `--run`.
+`BUNDLE_ROOT` is the assembled bundle directory containing
+`airgap-bundle-manifest.json`. Keep that manifest from bundle assembly; it is
+not a components-only manifest. Replace package-local tools before `--run`.
 Because the airgap substrate pack manifest is under
 `airgap-bundle/components/`, put its referenced material tree under that same
 directory, or update the manifest paths to match.

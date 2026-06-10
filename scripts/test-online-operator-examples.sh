@@ -203,6 +203,32 @@ manifest.components = manifest.components.map((component) => ({
   sha256: digestFile(path.join(bundleRoot, component.path))
 }));
 
+const componentDigestByKind = Object.fromEntries(
+  manifest.components.map((component) => [component.kind, component.sha256])
+);
+const releaseContract = JSON.parse(
+  fs.readFileSync(path.join(bundleRoot, 'components/release-contract.json'), 'utf8')
+);
+const deployTemplatePackage = JSON.parse(
+  fs.readFileSync(path.join(bundleRoot, 'components/deploy-template-package.json'), 'utf8')
+);
+manifest.release_id = releaseContract.release_id;
+manifest.git_sha = releaseContract.git_sha;
+manifest.bindings = {
+  release_contract_sha256: componentDigestByKind.release_contract,
+  deploy_template_package_sha256: componentDigestByKind.deploy_template_package,
+  deploy_template_archive_sha256: componentDigestByKind.deploy_template_archive,
+  deploy_template_manifest_sha256: deployTemplatePackage.manifest_sha256,
+  image_map_sha256: componentDigestByKind.image_map
+};
+if (componentDigestByKind.substrate_pack_manifest) {
+  manifest.bindings.substrate_pack_manifest_sha256 =
+    componentDigestByKind.substrate_pack_manifest;
+}
+manifest.image_artifact_declarations = manifest.image_artifact_declarations ?? [];
+manifest.payload_artifacts = manifest.payload_artifacts ?? [];
+manifest.operator_prerequisites = manifest.operator_prerequisites ?? {};
+
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }

@@ -1274,6 +1274,19 @@ function validateAirgapBundleManifestTarget({ bundleManifest, expectedTargetProf
     AIRGAP_BUNDLE_MANIFEST_SCHEMA,
     'airgap_bundle_manifest.schema_version'
   );
+  assertString(bundleManifest.release_id, 'airgap_bundle_manifest.release_id');
+  assertString(bundleManifest.git_sha, 'airgap_bundle_manifest.git_sha');
+  requirePlainObject(bundleManifest.bindings, 'airgap_bundle_manifest.bindings');
+  if (!Array.isArray(bundleManifest.image_artifact_declarations)) {
+    fail('airgap_bundle_manifest.image_artifact_declarations must be an array');
+  }
+  if (!Array.isArray(bundleManifest.payload_artifacts)) {
+    fail('airgap_bundle_manifest.payload_artifacts must be an array');
+  }
+  requirePlainObject(
+    bundleManifest.operator_prerequisites,
+    'airgap_bundle_manifest.operator_prerequisites'
+  );
 
   if (Object.hasOwn(bundleManifest, 'target_profile')) {
     const profile = requirePlainObject(

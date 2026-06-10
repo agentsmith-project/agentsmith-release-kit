@@ -222,10 +222,28 @@ function bundleComponent(kind, bundleRelativePath) {
 
 function writeAirgapBundleManifest(profileValue, components) {
   const profile = targetProfileObject(profileValue);
+  const componentDigestByKind = Object.fromEntries(
+    components.map((component) => [component.kind, component.sha256])
+  );
+  const bindings = {
+    release_contract_sha256: componentDigestByKind.release_contract,
+    deploy_template_package_sha256: componentDigestByKind.deploy_template_package,
+    deploy_template_archive_sha256: componentDigestByKind.deploy_template_archive,
+    image_map_sha256: componentDigestByKind.image_map
+  };
+  if (componentDigestByKind.substrate_pack_manifest) {
+    bindings.substrate_pack_manifest_sha256 = componentDigestByKind.substrate_pack_manifest;
+  }
   const bundleManifest = {
     schema_version: 'agentsmith.airgap-bundle-manifest/v1',
+    release_id: 'operator-inputs-test',
+    git_sha: '0123456789abcdef0123456789abcdef01234567',
+    bindings,
     target_profile: profile,
     components,
+    image_artifact_declarations: [],
+    payload_artifacts: [],
+    operator_prerequisites: {},
     substrate: {
       mode: profile.substrate_source,
       bundled: profile.substrate_source === 'kit_installed'
@@ -483,16 +501,18 @@ function targetProfileObject(value) {
 
 function writeAirgapBundleManifest(profileValue) {
   const profile = targetProfileObject(profileValue);
-  const bundleManifest = {
-    schema_version: 'agentsmith.airgap-bundle-manifest/v1',
-    target_profile: profile,
-    substrate: {
-      mode: profile.substrate_source,
-      bundled: profile.substrate_source === 'kit_installed'
-    }
+  const bundleManifestPath = path.join(
+    path.dirname(manifestPath),
+    'bundle/airgap-bundle-manifest.json'
+  );
+  const bundleManifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
+  bundleManifest.target_profile = profile;
+  bundleManifest.substrate = {
+    mode: profile.substrate_source,
+    bundled: profile.substrate_source === 'kit_installed'
   };
   fs.writeFileSync(
-    path.join(path.dirname(manifestPath), 'bundle/airgap-bundle-manifest.json'),
+    bundleManifestPath,
     `${JSON.stringify(bundleManifest, null, 2)}\n`
   );
 }
@@ -708,6 +728,31 @@ switch (caseName) {
       `${JSON.stringify({ schema_version: 'fixture.airgap-bundle-manifest/v1' }, null, 2)}\n`
     );
     break;
+  case 'airgap_bundle_manifest_components_only': {
+    const bundleManifestPath = path.join(
+      path.dirname(manifestPath),
+      manifest.airgap_bundle_manifest
+    );
+    const bundleManifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
+    fs.writeFileSync(
+      bundleManifestPath,
+      `${JSON.stringify({
+        schema_version: bundleManifest.schema_version,
+        components: bundleManifest.components
+      }, null, 2)}\n`
+    );
+    break;
+  }
+  case 'airgap_bundle_manifest_missing_release_id': {
+    const bundleManifestPath = path.join(
+      path.dirname(manifestPath),
+      manifest.airgap_bundle_manifest
+    );
+    const bundleManifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
+    delete bundleManifest.release_id;
+    fs.writeFileSync(bundleManifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`);
+    break;
+  }
   case 'airgap_bundle_manifest_missing_components': {
     const bundleManifestPath = path.join(
       path.dirname(manifestPath),
@@ -2138,6 +2183,18 @@ copy_valid_package "$base_airgap" "$outside_airgap_manifest_dir"
 mutate_manifest "$outside_airgap_manifest_dir" airgap_bundle_manifest_outside_bundle
 expect_fail_matching airgap_bundle_manifest_outside_bundle 'airgap_bundle_manifest must resolve inside airgap_bundle' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$outside_airgap_manifest_dir"
+
+components_only_airgap_manifest_dir="$TMP_DIR/invalid-airgap-bundle-manifest-components-only"
+copy_valid_package "$base_airgap" "$components_only_airgap_manifest_dir"
+mutate_manifest "$components_only_airgap_manifest_dir" airgap_bundle_manifest_components_only
+expect_fail_matching airgap_bundle_manifest_components_only 'airgap_bundle_manifest.release_id must be a non-empty string' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$components_only_airgap_manifest_dir"
+
+missing_release_id_airgap_manifest_dir="$TMP_DIR/invalid-airgap-bundle-manifest-missing-release-id"
+copy_valid_package "$base_airgap" "$missing_release_id_airgap_manifest_dir"
+mutate_manifest "$missing_release_id_airgap_manifest_dir" airgap_bundle_manifest_missing_release_id
+expect_fail_matching airgap_bundle_manifest_missing_release_id 'airgap_bundle_manifest.release_id must be a non-empty string' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$missing_release_id_airgap_manifest_dir"
 
 missing_airgap_components_dir="$TMP_DIR/invalid-airgap-bundle-missing-components"
 copy_valid_package "$base_airgap" "$missing_airgap_components_dir"

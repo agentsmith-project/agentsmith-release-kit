@@ -10,10 +10,16 @@ outside the bundle.
 
 Secrets stay outside the package. Use `secretRef:` values only.
 
-The bundle manifest and bundle-local operator inputs are already bound to
-`airgap/use_existing`. Keep `deployment_path` set to `airgap/use_existing`.
-Replace bundle components, component checksums, namespace, secret refs,
-endpoint values, and package-local tools.
+This package requires an already assembled airgap bundle. The bundle manifest
+must come from the assembled airgap bundle provided by the release package, and
+must include the release identity, bindings, image archive declarations, payload
+artifacts, and operator prerequisites. Do not update only `components` and
+component sha256 values in the checked-in manifest.
+
+Keep `deployment_path` set to `airgap/use_existing`. Replace the whole
+`airgap-bundle/` directory from the assembled bundle, then provide or edit the
+bundle-local operator input files, namespace, secret refs, endpoint values, and
+package-local tools.
 The facade chooses the path from `deployment_path`; do not add extra deployment
 selection fields to the bundle-local substrate truth or target prerequisites.
 
@@ -22,18 +28,22 @@ selection fields to the bundle-local substrate truth or target prerequisites.
 ```bash
 EXAMPLE_DIR="examples/airgap-use-existing"
 PKG="out/operator-inputs/airgap-use-existing"
+BUNDLE_ROOT="<path-to-assembled-airgap-bundle>"
 
 mkdir -p "$PKG"
 cp "$EXAMPLE_DIR/operator-inputs.apply.example.json" "$PKG/operator-inputs.json"
-cp -R "$EXAMPLE_DIR/airgap-bundle" "$PKG/airgap-bundle"
+rm -rf "$PKG/airgap-bundle"
+mkdir -p "$PKG/airgap-bundle"
+cp -R "$BUNDLE_ROOT"/. "$PKG/airgap-bundle"/
+mkdir -p "$PKG/airgap-bundle/operator-inputs"
+cp "$EXAMPLE_DIR/airgap-bundle/operator-inputs/"*.example.json \
+  "$PKG/airgap-bundle/operator-inputs/"
 cp -R "$EXAMPLE_DIR/tools" "$PKG/tools"
 ```
 
-Replace the files under `"$PKG/airgap-bundle/components"` with the real
-bundle-local release contract, deploy template package, deploy template
-archive, and image map. Update `airgap-bundle/airgap-bundle-manifest.json`
-component sha256 values after replacement. Replace package-local tools before
-`--run`.
+`BUNDLE_ROOT` is the assembled bundle directory containing
+`airgap-bundle-manifest.json`. Keep that manifest from bundle assembly; it is
+not a components-only manifest. Replace package-local tools before `--run`.
 If this package started from init scaffold, replace
 `context: replace-with-kube-context` and
 `smoke_url: https://agentsmith.example.com/healthz`; doctor treats those
