@@ -57,6 +57,8 @@ jobs:
         run: bash scripts/test-registry-presence.sh
       - name: Airgap bundle create focused guard
         run: bash scripts/test-bundle-create.sh
+      - name: Airgap image archive export focused guard
+        run: bash scripts/test-airgap-image-archive-export.sh
       - name: Airgap bundle manifest/digest focused guard
         run: bash scripts/test-airgap-bundle-check.sh
       - name: Airgap image archive materiality focused guard

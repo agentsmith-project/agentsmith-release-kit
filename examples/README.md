@@ -35,6 +35,11 @@ Available examples:
 - `airgap-use-existing/`: `airgap/use_existing`
 - `airgap-install-substrates/`: `airgap/install_substrates`
 
+Airgap packages must copy the assembled `airgap-bundle/` as opaque release
+material. Do not author or patch `airgap-bundle-manifest.json`; the checked-in
+components-only manifests are invalid placeholders until replaced by the
+assembled bundle.
+
 Both online examples also include optional
 `operator-inputs.target-registry.apply.example.json` variants for package-local
 read-only registry probes. The target registry must already contain digest refs

@@ -31,6 +31,9 @@ the bundle while still being referenced by the operator package. Post-deploy
 product smoke is produced after the runtime check; it is not an operator input
 package field. You can scaffold the package first, then fill in the
 package-local refs and confirmations.
+For airgap packages, the bundle manifest must come from the assembled bundle and
+travel with its payload/prerequisite closure; operators should not edit manifest
+internals.
 
 ### 3. What do I run?
 
