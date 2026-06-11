@@ -9,6 +9,11 @@ import {
   validateSubstratePackManifest,
   validateSubstratePackManifestMateriality
 } from './lib/substrate-pack-manifest-validation.mjs';
+import {
+  expectedImageDeclarationsById,
+  expectedImageDeclarationSourceLabel,
+  substrateImageDeclarationsFromPackManifest
+} from './lib/airgap-substrate-image-declarations.mjs';
 import { CURRENT_RELEASE_KIT_VERSION } from './lib/release-kit-version-policy.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -838,6 +843,7 @@ async function normalizeSubstratePackManifest(args, targetProfile) {
     sourcePackRoot,
     bundlePath: 'components/substrate-pack-manifest.json',
     inputDigest: input.inputDigest,
+    imageDeclarations: substrateImageDeclarationsFromPackManifest(input.value, { fail }),
     materialPaths: substratePackMaterialPaths(input.value)
   };
 }
@@ -866,27 +872,46 @@ async function normalizeImageArchives(values) {
   return normalized;
 }
 
-function assertImageArchiveCoverage(imageArchives, imageMap) {
+function assertImageArchiveCoverage(imageArchives, imageMap, substratePackManifest) {
   const mappings = requireArray(imageMap.mappings, 'image_map.mappings');
-  const mappingIds = new Set();
+  const imageMapDeclarations = [];
   for (const [index, mappingValue] of mappings.entries()) {
     const mapping = requireObject(mappingValue, `image_map.mappings[${index}]`);
-    mappingIds.add(assertSafeSegment(mapping.id, `image_map.mappings[${index}].id`));
+    imageMapDeclarations.push({
+      id: assertSafeSegment(mapping.id, `image_map.mappings[${index}].id`)
+    });
   }
+  const expectedById = expectedImageDeclarationsById({
+    imageMapDeclarations,
+    substrateImageDeclarations: substratePackManifest?.imageDeclarations || [],
+    fail
+  });
+  const imageMapIds = new Set(imageMapDeclarations.map((declaration) => declaration.id));
+  const substrateIds = new Set(
+    (substratePackManifest?.imageDeclarations || []).map((declaration) => declaration.id)
+  );
+  const expectedLabel = expectedImageDeclarationSourceLabel(
+    substratePackManifest?.imageDeclarations || []
+  );
 
   const archiveIds = new Set(imageArchives.map((archive) => archive.id));
   for (const archive of imageArchives) {
-    if (!mappingIds.has(archive.id)) {
-      fail(`--image-archive id is not declared by image-map mappings: ${archive.id}`);
+    if (!expectedById.has(archive.id)) {
+      fail(`--image-archive id is not declared by ${expectedLabel}: ${archive.id}`);
     }
   }
-  for (const id of mappingIds) {
+  for (const id of imageMapIds) {
     if (!archiveIds.has(id)) {
       fail(`--image-archive is missing image-map mapping id: ${id}`);
     }
   }
-  if (archiveIds.size !== mappingIds.size) {
-    fail('--image-archive entries must match image-map mappings one-to-one');
+  for (const id of substrateIds) {
+    if (!archiveIds.has(id)) {
+      fail(`--image-archive is missing substrate image archive id: ${id}`);
+    }
+  }
+  if (archiveIds.size !== expectedById.size) {
+    fail(`--image-archive entries must match ${expectedLabel}`);
   }
 }
 
@@ -1079,6 +1104,11 @@ async function assembleBundle({
     const archive = imageArchiveById.get(mapping.id);
     const copied = await copyInputFile(archive.sourcePath, bundleRoot, archive.bundlePath);
     imageArtifactDeclarations.push(imageDeclarationFor(mapping, copied));
+  }
+  for (const declaration of substratePackManifest?.imageDeclarations || []) {
+    const archive = imageArchiveById.get(declaration.id);
+    const copied = await copyInputFile(archive.sourcePath, bundleRoot, archive.bundlePath);
+    imageArtifactDeclarations.push(imageDeclarationFor(declaration, copied));
   }
 
   const payloadArtifacts = [];
@@ -1493,7 +1523,11 @@ async function main() {
 
     const imageMapPath = path.join(imageMapDir, 'image-map.json');
     const imageMapInput = await readJson(imageMapPath, 'image map');
-    assertImageArchiveCoverage(imageArchives, requireObject(imageMapInput.value, 'image_map'));
+    assertImageArchiveCoverage(
+      imageArchives,
+      requireObject(imageMapInput.value, 'image_map'),
+      substratePackManifest
+    );
 
     const assembly = await assembleBundle({
       args,

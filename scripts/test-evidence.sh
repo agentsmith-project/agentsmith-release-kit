@@ -462,15 +462,32 @@ const componentPaths = {
 };
 const substratePackManifest = {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
-  target_profile: targetProfileObject(KIT_AIRGAP_PROFILE),
   release_kit_version: '0.1.0',
-  installation_id: 'kit-install-10001',
-  substrates: {
-    postgresql: {
-      image: `registry.example.internal/substrates/postgresql@${fixtureDigest('5')}`
-    }
+  installed_by: 'agentsmith-release-kit',
+  target_profile: targetProfileObject(KIT_AIRGAP_PROFILE),
+  images: {
+    postgresql: `registry.example.internal/substrates/postgresql@${fixtureDigest('5')}`,
+    mongodb: `registry.example.internal/substrates/mongodb@${fixtureDigest('6')}`,
+    redis: `registry.example.internal/substrates/redis@${fixtureDigest('7')}`,
+    object_storage: `registry.example.internal/substrates/object-storage@${fixtureDigest('8')}`,
+    oidc: `registry.example.internal/substrates/keycloak@${fixtureDigest('9')}`
   },
-  tools: []
+  payload: {
+    install_plan: fixtureDigest('a')
+  },
+  templates: {
+    postgresql: fixtureDigest('b'),
+    mongodb: fixtureDigest('c'),
+    redis: fixtureDigest('d'),
+    object_storage: fixtureDigest('e'),
+    oidc: fixtureDigest('f')
+  },
+  tools: {
+    routability_probe: fixtureDigest('1')
+  },
+  checksums: {
+    manifest: fixtureDigest('2')
+  }
 };
 const substratePackManifestDigest = jsonDigest(substratePackManifest);
 const imageArtifactDeclarations = airgapImageMap.mappings.map((mapping, index) => ({
@@ -483,6 +500,24 @@ const imageArtifactDeclarations = airgapImageMap.mappings.map((mapping, index) =
   path: `images/${mapping.id}.oci-layout.tar`,
   sha256: fixtureDigest(String(index + 1))
 }));
+const substrateImageArtifactDeclarations = Object.keys(substratePackManifest.images)
+  .sort()
+  .map((key, index) => {
+    const shaSeeds = ['6', '7', '8', '9', 'a'];
+    const image = substratePackManifest.images[key];
+    const digest = image.slice(image.lastIndexOf('@') + 1);
+    const id = `substrate_${key}`;
+    return {
+      id,
+      source_image: image,
+      source_digest: digest,
+      target_image: image,
+      target_digest: digest,
+      artifact_format: 'oci_layout_tar',
+      path: `images/${id}.oci-layout.tar`,
+      sha256: fixtureDigest(shaSeeds[index])
+    };
+  });
 const airgapPayloadArtifacts = [
   {
     id: 'operator_runbook',
@@ -740,10 +775,15 @@ function useAirgapBundleOutput({
     mode: substrateSource,
     bundled: substrateSource === 'kit_installed'
   };
+  airgapBundleManifest.image_artifact_declarations = [...imageArtifactDeclarations];
   airgapBundleManifest.components = airgapBundleManifest.components.filter(
     (component) => component.kind !== 'substrate_pack_manifest'
   );
   delete airgapBundleManifest.bindings.substrate_pack_manifest_sha256;
+  airgapBundleCheckReport.artifacts.image_map.image_count = imageArtifactDeclarations.length;
+  airgapBundleCheckReport.artifacts.bundle_manifest.image_artifact_declaration_count =
+    imageArtifactDeclarations.length;
+  airgapBundleCheckReport.image_artifact_declaration_count = imageArtifactDeclarations.length;
   airgapBundleCheckReport.components_count = 4;
   if (includeSubstratePack) {
     airgapBundleManifest.bindings.substrate_pack_manifest_sha256 = substratePackManifestDigest;
@@ -752,6 +792,13 @@ function useAirgapBundleOutput({
       path: componentPaths.substrate_pack_manifest,
       sha256: substratePackManifestDigest
     });
+    airgapBundleManifest.image_artifact_declarations.push(
+      ...substrateImageArtifactDeclarations
+    );
+    airgapBundleCheckReport.artifacts.bundle_manifest.image_artifact_declaration_count =
+      airgapBundleManifest.image_artifact_declarations.length;
+    airgapBundleCheckReport.image_artifact_declaration_count =
+      airgapBundleManifest.image_artifact_declarations.length;
     airgapBundleCheckReport.components_count = 5;
   }
   outputFiles = [

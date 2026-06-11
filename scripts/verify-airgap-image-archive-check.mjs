@@ -5,6 +5,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import {
+  expectedImageDeclarationsById,
+  expectedImageDeclarationSourceLabel,
+  substrateImageDeclarationsFromPackManifest
+} from './lib/airgap-substrate-image-declarations.mjs';
+
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(SCRIPT_DIR, '..');
 const REQUIRED_ARGS = [
@@ -33,6 +39,7 @@ const REPORT_SCOPE = 'airgap_image_archive_content_check_only';
 const REPORT_FILE = 'airgap-image-archive-check-report.json';
 const SELF_CHECK_DIR = 'airgap-bundle-check';
 const SELF_CHECK_REPORT_FILE = 'airgap-bundle-check-report.json';
+const SUBSTRATE_PACK_COMPONENT_KIND = 'substrate_pack_manifest';
 const PROBE_TIMEOUT_MS = 5000;
 const TAR_BLOCK_SIZE = 512;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
@@ -911,6 +918,30 @@ function assertImageMap(imageMap, targetProfile) {
   };
 }
 
+async function readSubstrateImageDeclarations({ bundleManifest, bundleRoot, targetProfile }) {
+  if (targetProfile.value !== KIT_AIRGAP_TARGET_PROFILE) {
+    return [];
+  }
+  const component = requireArray(
+    bundleManifest.components,
+    'bundle_manifest.components'
+  ).find((componentValue) => (
+    requireObject(componentValue, 'bundle_manifest.components[]').kind ===
+    SUBSTRATE_PACK_COMPONENT_KIND
+  ));
+  const substratePackComponent = requireObject(
+    component,
+    'bundle_manifest.components[substrate_pack_manifest]'
+  );
+  const substratePackPath = await resolveBundleFile(
+    bundleRoot,
+    substratePackComponent.path,
+    'bundle_manifest.components[substrate_pack_manifest].path'
+  );
+  const substratePackInput = await readJson(substratePackPath, 'substrate pack manifest');
+  return substrateImageDeclarationsFromPackManifest(substratePackInput.value, { fail });
+}
+
 function parseProbeDigestOutput(stdout, stderr, id) {
   if (stderr.trim() !== '') {
     fail(`archive probe must not write stderr for image id: ${id}`);
@@ -957,14 +988,21 @@ async function assertImageArtifactDeclarations({
   declarations,
   bundleRoot,
   imageMapSummary,
+  substrateImageDeclarations,
   archiveProbe
 }) {
   const items = requireArray(
     declarations,
     'bundle_manifest.image_artifact_declarations'
   );
-  if (items.length !== imageMapSummary.mappingsById.size) {
-    fail('bundle_manifest.image_artifact_declarations must match image_map.mappings length');
+  const expectedById = expectedImageDeclarationsById({
+    imageMapDeclarations: imageMapSummary.mappingsById.values(),
+    substrateImageDeclarations,
+    fail
+  });
+  const expectedLabel = expectedImageDeclarationSourceLabel(substrateImageDeclarations);
+  if (items.length !== expectedById.size) {
+    fail(`bundle_manifest.image_artifact_declarations must match ${expectedLabel} length`);
   }
 
   const seen = new Set();
@@ -981,19 +1019,19 @@ async function assertImageArtifactDeclarations({
     }
     seen.add(id);
 
-    const mapping = imageMapSummary.mappingsById.get(id);
-    if (!mapping) {
-      fail(`${label}.id must exist in image_map.mappings`);
+    const expected = expectedById.get(id);
+    if (!expected) {
+      fail(`${label}.id must exist in ${expectedLabel}`);
     }
-    assertStringEquals(declaration.source_image, mapping.source_image, `${label}.source_image`);
+    assertStringEquals(declaration.source_image, expected.source_image, `${label}.source_image`);
     const sourceDigest = requireDigest(declaration.source_digest, `${label}.source_digest`);
-    if (sourceDigest !== mapping.source_digest) {
-      fail(`${label}.source_digest must match image_map mapping`);
+    if (sourceDigest !== expected.source_digest) {
+      fail(`${label}.source_digest must match expected image declaration`);
     }
-    assertStringEquals(declaration.target_image, mapping.target_image, `${label}.target_image`);
+    assertStringEquals(declaration.target_image, expected.target_image, `${label}.target_image`);
     const targetDigest = requireDigest(declaration.target_digest, `${label}.target_digest`);
-    if (targetDigest !== mapping.target_digest) {
-      fail(`${label}.target_digest must match image_map mapping`);
+    if (targetDigest !== expected.target_digest) {
+      fail(`${label}.target_digest must match expected image declaration`);
     }
     assertStringEquals(declaration.artifact_format, 'oci_layout_tar', `${label}.artifact_format`);
 
@@ -1005,12 +1043,12 @@ async function assertImageArtifactDeclarations({
     }
     const { archiveManifestDigest } = await validateOciLayoutArchive({ archivePath, id });
     if (archiveManifestDigest !== targetDigest) {
-      fail(`${label} archive top-level descriptor digest must match image_map target_digest`);
+      fail(`${label} archive top-level descriptor digest must match expected target_digest`);
     }
 
     const probeDigest = runArchiveProbe({ archiveProbe, archivePath, id });
     if (probeDigest !== targetDigest) {
-      fail(`${label} archive probe digest must match image_map target_digest`);
+      fail(`${label} archive probe digest must match expected target_digest`);
     }
 
     archiveDigests.add(archiveSha256);
@@ -1026,7 +1064,7 @@ async function assertImageArtifactDeclarations({
     });
   }
 
-  for (const id of imageMapSummary.mappingsById.keys()) {
+  for (const id of expectedById.keys()) {
     if (!seen.has(id)) {
       fail(`bundle_manifest.image_artifact_declarations is missing ${id}`);
     }
@@ -1151,10 +1189,16 @@ async function main() {
       'bundle_manifest.target_profile',
       targetProfile
     );
+    const substrateImageDeclarations = await readSubstrateImageDeclarations({
+      bundleManifest,
+      bundleRoot,
+      targetProfile
+    });
     const archiveSummary = await assertImageArtifactDeclarations({
       declarations: bundleManifest.image_artifact_declarations,
       bundleRoot,
       imageMapSummary,
+      substrateImageDeclarations,
       archiveProbe
     });
 

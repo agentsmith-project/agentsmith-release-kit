@@ -937,6 +937,7 @@ function digestFile(file) {
 const componentPath = 'components/substrate-pack-manifest.json';
 const destination = path.join(bundleRoot, componentPath);
 const manifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
+const substratePack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
 
 fs.copyFileSync(substratePackManifest, destination);
 const componentSha256 = digestFile(destination);
@@ -951,6 +952,33 @@ manifest.components.push({
   path: componentPath,
   sha256: componentSha256
 });
+for (const key of Object.keys(substratePack.images).sort()) {
+  const id = `substrate_${key}`;
+  const image = substratePack.images[key];
+  const digest = image.slice(image.lastIndexOf('@') + 1);
+  const relativePath = `images/${id}.oci-layout.tar`;
+  const artifactPath = path.join(bundleRoot, relativePath);
+  fs.writeFileSync(
+    artifactPath,
+    [
+      'oci-layout-tar-placeholder',
+      `id=${id}`,
+      `source_image=${image}`,
+      `target_image=${image}`,
+      ''
+    ].join('\n')
+  );
+  manifest.image_artifact_declarations.push({
+    id,
+    source_image: image,
+    source_digest: digest,
+    target_image: image,
+    target_digest: digest,
+    artifact_format: 'oci_layout_tar',
+    path: relativePath,
+    sha256: digestFile(artifactPath)
+  });
+}
 
 switch (mutation) {
   case 'valid':
@@ -1060,8 +1088,16 @@ const imageMapCount = report.artifacts?.image_map?.image_count;
 if (imageMapCount !== expectedImageCount) {
   throw new Error(`image-map image count must match release contract inventory: ${imageMapCount}`);
 }
-if (report.image_artifact_declaration_count !== imageMapCount) {
+const expectedSubstrateImageCount = expectedProfile.includes('/kit_installed/') ? 5 : 0;
+const expectedImageArtifactCount = imageMapCount + expectedSubstrateImageCount;
+if (report.image_artifact_declaration_count !== expectedImageArtifactCount) {
   throw new Error(`unexpected image artifact count: ${report.image_artifact_declaration_count}`);
+}
+if (
+  report.artifacts?.bundle_manifest?.image_artifact_declaration_count !==
+  expectedImageArtifactCount
+) {
+  throw new Error('bundle manifest artifact summary must count release and substrate image declarations');
 }
 if (report.payload_artifact_count !== 5) {
   throw new Error(`unexpected payload artifact count: ${report.payload_artifact_count}`);

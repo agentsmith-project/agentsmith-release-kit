@@ -5,6 +5,11 @@ import path from 'node:path';
 
 import { validateSubstratePackManifest } from './lib/substrate-pack-manifest-validation.mjs';
 import {
+  expectedImageDeclarationsById,
+  expectedImageDeclarationSourceLabel,
+  substrateImageDeclarationsFromPackManifest
+} from './lib/airgap-substrate-image-declarations.mjs';
+import {
   DISTRIBUTION_VALUES,
   SUBSTRATE_SOURCE_VALUES,
   TARGET_CLUSTER_VALUES,
@@ -1003,13 +1008,24 @@ async function assertComponents({ components, bundleRoot, expected }) {
   return items.length;
 }
 
-async function assertImageArtifactDeclarations({ declarations, bundleRoot, imageMapSummary }) {
+async function assertImageArtifactDeclarations({
+  declarations,
+  bundleRoot,
+  imageMapSummary,
+  substrateImageDeclarations
+}) {
   const items = requireArray(
     declarations,
     'bundle_manifest.image_artifact_declarations'
   );
-  if (items.length !== imageMapSummary.mappingsById.size) {
-    fail('bundle_manifest.image_artifact_declarations must match image_map.mappings length');
+  const expectedById = expectedImageDeclarationsById({
+    imageMapDeclarations: imageMapSummary.mappingsById.values(),
+    substrateImageDeclarations,
+    fail
+  });
+  const expectedLabel = expectedImageDeclarationSourceLabel(substrateImageDeclarations);
+  if (items.length !== expectedById.size) {
+    fail(`bundle_manifest.image_artifact_declarations must match ${expectedLabel} length`);
   }
 
   const seen = new Set();
@@ -1023,19 +1039,19 @@ async function assertImageArtifactDeclarations({ declarations, bundleRoot, image
     }
     seen.add(id);
 
-    const mapping = imageMapSummary.mappingsById.get(id);
-    if (!mapping) {
-      fail(`${label}.id must exist in image_map.mappings`);
+    const expected = expectedById.get(id);
+    if (!expected) {
+      fail(`${label}.id must exist in ${expectedLabel}`);
     }
-    assertStringEquals(declaration.source_image, mapping.source_image, `${label}.source_image`);
+    assertStringEquals(declaration.source_image, expected.source_image, `${label}.source_image`);
     const sourceDigest = requireDigest(declaration.source_digest, `${label}.source_digest`);
-    if (sourceDigest !== mapping.source_digest) {
-      fail(`${label}.source_digest must match image_map mapping`);
+    if (sourceDigest !== expected.source_digest) {
+      fail(`${label}.source_digest must match expected image declaration`);
     }
-    assertStringEquals(declaration.target_image, mapping.target_image, `${label}.target_image`);
+    assertStringEquals(declaration.target_image, expected.target_image, `${label}.target_image`);
     const targetDigest = requireDigest(declaration.target_digest, `${label}.target_digest`);
-    if (targetDigest !== mapping.target_digest) {
-      fail(`${label}.target_digest must match image_map mapping`);
+    if (targetDigest !== expected.target_digest) {
+      fail(`${label}.target_digest must match expected image declaration`);
     }
     assertStringEquals(declaration.artifact_format, 'oci_layout_tar', `${label}.artifact_format`);
 
@@ -1047,7 +1063,7 @@ async function assertImageArtifactDeclarations({ declarations, bundleRoot, image
     }
   }
 
-  for (const id of imageMapSummary.mappingsById.keys()) {
+  for (const id of expectedById.keys()) {
     if (!seen.has(id)) {
       fail(`bundle_manifest.image_artifact_declarations is missing ${id}`);
     }
@@ -1217,6 +1233,7 @@ async function assertBundleManifest({
   expectedBindings,
   expectedComponentSha256,
   imageMapSummary,
+  substrateImageDeclarations,
   targetProfile
 }) {
   assertAllowedKeys(manifest, BUNDLE_MANIFEST_KEYS, 'bundle_manifest');
@@ -1241,7 +1258,8 @@ async function assertBundleManifest({
   const imageArtifactDeclarationCount = await assertImageArtifactDeclarations({
     declarations: manifest.image_artifact_declarations,
     bundleRoot,
-    imageMapSummary
+    imageMapSummary,
+    substrateImageDeclarations
   });
   const payloadSummary = await assertPayloadArtifacts({
     artifacts: manifest.payload_artifacts,
@@ -1391,6 +1409,7 @@ async function main() {
     deploy_template_archive: deployTemplateArchiveInputDigest,
     image_map: imageMapInput.inputDigest
   };
+  let substrateImageDeclarations = [];
   if (targetProfile.value === KIT_AIRGAP_TARGET_PROFILE) {
     const substratePackComponent = requireArray(
       bundleManifest.components,
@@ -1422,6 +1441,10 @@ async function main() {
       );
     }
     validateSubstratePackManifest(substratePackInput.value, targetProfile, { fail });
+    substrateImageDeclarations = substrateImageDeclarationsFromPackManifest(
+      substratePackInput.value,
+      { fail }
+    );
   }
   const bundleSummary = await assertBundleManifest({
     manifest: bundleManifest,
@@ -1431,6 +1454,7 @@ async function main() {
     expectedBindings,
     expectedComponentSha256,
     imageMapSummary,
+    substrateImageDeclarations,
     targetProfile
   });
 

@@ -183,6 +183,37 @@ create_image_archives() {
   done
 }
 
+kit_image_args=()
+kit_image_args_without_redis=()
+
+create_substrate_image_archives() {
+  local image_dir="$1"
+  local substrate_pack_manifest="$2"
+  local archive_args=()
+  local archive_args_without_redis=()
+
+  mkdir -p "$image_dir"
+  while IFS= read -r id; do
+    printf 'local oci layout tar placeholder for %s\n' "$id" >"$image_dir/$id.oci-layout.tar"
+    archive_args+=(--image-archive "$id=$image_dir/$id.oci-layout.tar")
+    if [[ "$id" != "substrate_redis" ]]; then
+      archive_args_without_redis+=(--image-archive "$id=$image_dir/$id.oci-layout.tar")
+    fi
+  done < <("$NODE_BIN" --input-type=module - "$substrate_pack_manifest" <<'NODE'
+import fs from 'node:fs';
+
+const [substratePackManifest] = process.argv.slice(2);
+const pack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
+for (const key of Object.keys(pack.images).sort()) {
+  console.log(`substrate_${key}`);
+}
+NODE
+)
+
+  kit_image_args=("${archive_args[@]}")
+  kit_image_args_without_redis=("${archive_args_without_redis[@]}")
+}
+
 write_operator_prerequisites() {
   local output="$1"
   local mutation="${2:-valid}"
@@ -244,16 +275,44 @@ write_kit_substrate_pack_manifest() {
   local output="$1"
   local profile="$2"
   local mutation="${3:-valid}"
+  local postgresql_digest
+  local mongodb_digest
+  local redis_digest
+  local object_storage_digest
+  local oidc_digest
 
-  "$NODE_BIN" --input-type=module - "$output" "$profile" "$mutation" <<'NODE'
+  postgresql_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_postgresql)"
+  mongodb_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_mongodb)"
+  redis_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_redis)"
+  object_storage_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_object_storage)"
+  oidc_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_oidc)"
+
+  "$NODE_BIN" --input-type=module - \
+    "$output" \
+    "$profile" \
+    "$mutation" \
+    "$postgresql_digest" \
+    "$mongodb_digest" \
+    "$redis_digest" \
+    "$object_storage_digest" \
+    "$oidc_digest" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [output, profile, mutation] = process.argv.slice(2);
+const [
+  output,
+  profile,
+  mutation,
+  postgresqlDigest,
+  mongodbDigest,
+  redisDigest,
+  objectStorageDigest,
+  oidcDigest
+] = process.argv.slice(2);
 const digest = (char) => `sha256:${char.repeat(64)}`;
-const image = (name, tag, char) =>
-  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+const digestImage = (name, tag, digestValue) =>
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digestValue}`;
 const packRoot = path.dirname(output);
 
 function digestBuffer(buffer) {
@@ -293,11 +352,11 @@ const manifest = {
   installed_by: 'agentsmith-release-kit',
   target_profile: profile,
   images: {
-    postgresql: image('postgresql', '16.3', '1'),
-    mongodb: image('mongodb', '7.0', '2'),
-    redis: image('redis', '7.2', '3'),
-    object_storage: image('object-storage', '2026.05', '4'),
-    oidc: image('keycloak', '25.0', '5')
+    postgresql: digestImage('postgresql', '16.3', postgresqlDigest),
+    mongodb: digestImage('mongodb', '7.0', mongodbDigest),
+    redis: digestImage('redis', '7.2', redisDigest),
+    object_storage: digestImage('object-storage', '2026.05', objectStorageDigest),
+    oidc: digestImage('keycloak', '25.0', oidcDigest)
   },
   payload: {
     install_plan: {
@@ -815,6 +874,18 @@ const bundledPackDigest =
 const packComponent = manifest.components.find((component) => (
   component.kind === 'substrate_pack_manifest'
 ));
+const substratePack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
+const expectedSubstrateDeclarations = Object.keys(substratePack.images)
+  .sort()
+  .map((key) => {
+    const image = substratePack.images[key];
+    const digest = image.slice(image.lastIndexOf('@') + 1);
+    return {
+      id: `substrate_${key}`,
+      image,
+      digest
+    };
+  });
 const materialPaths = [
   'payload/install-substrates.json',
   'templates/postgresql.yaml',
@@ -855,6 +926,36 @@ if (manifest.bindings?.substrate_pack_manifest_sha256 !== packDigest) {
 }
 if (report.components_count !== 5 || checkReport.components_count !== 5) {
   throw new Error('kit airgap reports must count the substrate pack component');
+}
+for (const expected of expectedSubstrateDeclarations) {
+  const declaration = manifest.image_artifact_declarations.find((item) => item.id === expected.id);
+  if (!declaration) {
+    throw new Error(`kit airgap manifest must declare substrate image: ${expected.id}`);
+  }
+  if (
+    declaration.source_image !== expected.image ||
+    declaration.target_image !== expected.image ||
+    declaration.source_digest !== expected.digest ||
+    declaration.target_digest !== expected.digest
+  ) {
+    throw new Error(`kit substrate declaration must bind pack image ref and digest: ${expected.id}`);
+  }
+  if (declaration.path !== `images/${expected.id}.oci-layout.tar`) {
+    throw new Error(`unexpected substrate archive path: ${declaration.path}`);
+  }
+  if (!fs.statSync(path.join(bundleRoot, declaration.path)).isFile()) {
+    throw new Error(`missing bundled substrate archive: ${declaration.path}`);
+  }
+}
+if (report.image_artifact_count !== manifest.image_artifact_declarations.length) {
+  throw new Error('kit create report must count release and substrate image artifacts');
+}
+if (
+  checkReport.image_artifact_declaration_count !== manifest.image_artifact_declarations.length ||
+  checkReport.artifacts?.bundle_manifest?.image_artifact_declaration_count !==
+    manifest.image_artifact_declarations.length
+) {
+  throw new Error('kit bundle check report must count release and substrate image declarations');
 }
 for (const relativePath of materialPaths) {
   const source = path.join(path.dirname(substratePackManifest), relativePath);
@@ -915,6 +1016,7 @@ create_payloads
 create_image_archives
 write_operator_prerequisites "$OPERATOR_PREREQUISITES"
 write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK" "$KIT_AIRGAP_PROFILE"
+create_substrate_image_archives "$IMAGE_DIR" "$KIT_SUBSTRATE_PACK"
 write_evidence_provenance "$VALID_PROVENANCE"
 refresh_args
 
@@ -948,6 +1050,7 @@ valid_kit_bundle_root="$TMP_DIR/bundle-valid-kit"
 valid_kit_output_dir="$TMP_DIR/out-valid-kit"
 run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$valid_kit_bundle_root" "$valid_kit_output_dir" \
   "${default_image_args[@]}" \
+  "${kit_image_args[@]}" \
   "${common_payload_args[@]}" \
   --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" >"$TMP_DIR/valid-create-kit.out"
 assert_kit_bundle_and_report "$valid_kit_bundle_root" "$valid_kit_output_dir" "$KIT_SUBSTRATE_PACK"
@@ -964,6 +1067,7 @@ kit_evidence_output_dir="$TMP_DIR/out-kit-evidence"
 kit_evidence_root="$TMP_DIR/evidence-kit"
 run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$kit_evidence_bundle_root" "$kit_evidence_output_dir" \
   "${default_image_args[@]}" \
+  "${kit_image_args[@]}" \
   "${common_payload_args[@]}" \
   --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" \
   --evidence-root "$kit_evidence_root" \
@@ -1050,6 +1154,23 @@ expect_create_fail unknown-image-id "$TMP_DIR/bundle-unknown-image" "$TMP_DIR/ou
     "${default_image_args[@]}" \
     --image-archive "unknown_component=$IMAGE_DIR/agentsmith_app.oci-layout.tar" \
     "${common_payload_args[@]}"
+
+expect_create_fail external-declared-rejects-substrate-image-archive "$TMP_DIR/bundle-external-substrate-image" "$TMP_DIR/out-external-substrate-image" \
+  run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-external-substrate-image" "$TMP_DIR/out-external-substrate-image" \
+    "${default_image_args[@]}" \
+    --image-archive "substrate_redis=$IMAGE_DIR/substrate_redis.oci-layout.tar" \
+    "${common_payload_args[@]}"
+
+expect_create_fail missing-substrate-image-archive "$TMP_DIR/bundle-missing-substrate-image" "$TMP_DIR/out-missing-substrate-image" \
+  run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-missing-substrate-image" "$TMP_DIR/out-missing-substrate-image" \
+    "${default_image_args[@]}" \
+    "${kit_image_args_without_redis[@]}" \
+    "${common_payload_args[@]}" \
+    --substrate-pack-manifest "$KIT_SUBSTRATE_PACK"
+if ! grep -Fq -- '--image-archive is missing substrate image archive id: substrate_redis' "$TMP_DIR/missing-substrate-image-archive.err"; then
+  cat "$TMP_DIR/missing-substrate-image-archive.err" >&2
+  fail "missing substrate image archive failure must name substrate_redis"
+fi
 
 for profile_case in \
   "online:$ONLINE_PROFILE" \

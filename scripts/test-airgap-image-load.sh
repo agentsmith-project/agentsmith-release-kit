@@ -261,6 +261,43 @@ create_image_archives() {
     --variant "$fixture_variant"
 }
 
+create_substrate_image_archives() {
+  local image_dir="$1"
+  local substrate_pack_manifest="$2"
+
+  mkdir -p "$image_dir"
+  "$NODE_BIN" --input-type=module - \
+    "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    "$image_dir" \
+    "$substrate_pack_manifest" <<'NODE'
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [fixtureScript, imageDir, substratePackManifest] = process.argv.slice(2);
+const pack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
+for (const key of Object.keys(pack.images).sort()) {
+  const id = `substrate_${key}`;
+  const image = pack.images[key];
+  const digest = image.slice(image.lastIndexOf('@') + 1);
+  const result = spawnSync(process.execPath, [
+    fixtureScript,
+    '--archive',
+    path.join(imageDir, `${id}.oci-layout.tar`),
+    '--image-id',
+    id,
+    '--target-digest',
+    digest
+  ], {
+    stdio: 'inherit'
+  });
+  if (result.status !== 0) {
+    process.exit(result.status || 1);
+  }
+}
+NODE
+}
+
 write_operator_prerequisites() {
   local output="$1"
   local tool_file="$TMP_DIR/kubectl-local"
@@ -296,16 +333,42 @@ NODE
 
 write_kit_substrate_pack_manifest() {
   local output="$1"
+  local postgresql_digest
+  local mongodb_digest
+  local redis_digest
+  local object_storage_digest
+  local oidc_digest
 
-  "$NODE_BIN" --input-type=module - "$output" "$KIT_AIRGAP_PROFILE" <<'NODE'
+  postgresql_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_postgresql)"
+  mongodb_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_mongodb)"
+  redis_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_redis)"
+  object_storage_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_object_storage)"
+  oidc_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_oidc)"
+
+  "$NODE_BIN" --input-type=module - \
+    "$output" \
+    "$KIT_AIRGAP_PROFILE" \
+    "$postgresql_digest" \
+    "$mongodb_digest" \
+    "$redis_digest" \
+    "$object_storage_digest" \
+    "$oidc_digest" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [output, profile] = process.argv.slice(2);
+const [
+  output,
+  profile,
+  postgresqlDigest,
+  mongodbDigest,
+  redisDigest,
+  objectStorageDigest,
+  oidcDigest
+] = process.argv.slice(2);
 const digest = (char) => `sha256:${char.repeat(64)}`;
-const image = (name, tag, char) =>
-  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+const image = (name, tag, digestValue) =>
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digestValue}`;
 const packRoot = path.dirname(output);
 
 function digestBuffer(buffer) {
@@ -344,11 +407,11 @@ const manifest = {
   installed_by: 'agentsmith-release-kit',
   target_profile: profile,
   images: {
-    postgresql: image('postgresql', '16.3', '1'),
-    mongodb: image('mongodb', '7.0', '2'),
-    redis: image('redis', '7.2', '3'),
-    object_storage: image('object-storage', '2026.05', '4'),
-    oidc: image('keycloak', '25.0', '5')
+    postgresql: image('postgresql', '16.3', postgresqlDigest),
+    mongodb: image('mongodb', '7.0', mongodbDigest),
+    redis: image('redis', '7.2', redisDigest),
+    object_storage: image('object-storage', '2026.05', objectStorageDigest),
+    oidc: image('keycloak', '25.0', oidcDigest)
   },
   payload: {
     install_plan: {
@@ -469,6 +532,18 @@ run_bundle_create() {
   done
   if [[ -n "$substrate_pack_manifest" ]]; then
     substrate_pack_args+=(--substrate-pack-manifest "$substrate_pack_manifest")
+    while IFS= read -r id; do
+      image_archive_args+=(--image-archive "$id=$image_dir/$id.oci-layout.tar")
+    done < <("$NODE_BIN" --input-type=module - "$substrate_pack_manifest" <<'NODE'
+import fs from 'node:fs';
+
+const [substratePackManifest] = process.argv.slice(2);
+const pack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
+for (const key of Object.keys(pack.images).sort()) {
+  console.log(`substrate_${key}`);
+}
+NODE
+)
   fi
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
@@ -605,9 +680,19 @@ const [reportFile, archiveCheckReportFile, validContract, loaderPath, expectedPr
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const archiveCheckReport = JSON.parse(fs.readFileSync(archiveCheckReportFile, 'utf8'));
 const serialized = JSON.stringify(report);
-const expectedImageCount = JSON.parse(
+const expectedReleaseImageCount = JSON.parse(
   fs.readFileSync(validContract, 'utf8')
 ).deploy_image_inventory.length;
+const expectedSubstrateIds = expectedProfile.includes('/kit_installed/')
+  ? [
+      'substrate_mongodb',
+      'substrate_object_storage',
+      'substrate_oidc',
+      'substrate_postgresql',
+      'substrate_redis'
+    ]
+  : [];
+const expectedImageCount = expectedReleaseImageCount + expectedSubstrateIds.length;
 const digestRe = /^sha256:[0-9a-f]{64}$/;
 
 function assertNoLeakKeys(value, path = 'report') {
@@ -666,6 +751,11 @@ if (!Array.isArray(report.image_ids) || report.image_ids.length !== expectedImag
 }
 if (new Set(report.image_ids).size !== expectedImageCount) {
   throw new Error('report image ids must be unique');
+}
+for (const id of expectedSubstrateIds) {
+  if (!report.image_ids.includes(id)) {
+    throw new Error(`report must include substrate image id: ${id}`);
+  }
 }
 if (!Array.isArray(report.images) || report.images.length !== expectedImageCount) {
   throw new Error('report must summarize each image load');
@@ -744,6 +834,7 @@ create_payloads
 create_image_archives
 write_operator_prerequisites "$OPERATOR_PREREQUISITES"
 write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK_MANIFEST"
+create_substrate_image_archives "$IMAGE_DIR" "$KIT_SUBSTRATE_PACK_MANIFEST"
 write_tools
 
 VALID_BUNDLE_ROOT="$TMP_DIR/bundle-valid"
@@ -832,7 +923,7 @@ assert_report \
   "$kit_output_dir/$ARCHIVE_CHECK_DIR/$ARCHIVE_CHECK_REPORT_FILE" \
   "$KIT_AIRGAP_PROFILE"
 kit_load_count="$(grep -c '^sha256:' "$LOAD_LOG")"
-[[ "$kit_load_count" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] || fail "kit image loader must run exactly once per image"
+[[ "$kit_load_count" -eq "$((${#RELEASE_IMAGE_IDS[@]} + 5))" ]] || fail "kit image loader must run exactly once per release and substrate image"
 pass "valid kit airgap image archives loaded through operator loader without release readiness"
 
 : >"$LOAD_LOG"

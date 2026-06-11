@@ -547,7 +547,8 @@ readiness.
 The guard requires explicit local inputs: release contract, deploy template
 package descriptor, matching `.tgz` archive, target registry, repeated
 `--image-archive <image_id=local-file>` entries matching the generated
-image-map one-to-one, runbook, script, profile-values schema, optional
+image-map ids and, for kit-installed airgap, `substrate_pack_manifest.images`
+ids named `substrate_<key>`, runbook, script, profile-values schema, optional
 profile-values example, operator prerequisites JSON, an absent-or-empty bundle
 root, and output directory. It rejects online, kind, and synonym axes. Image
 archives, payloads, and bundled tools must be local
@@ -636,10 +637,15 @@ sha256 must match the explicit input file.
 `bundle_manifest.bindings.deploy_template_archive_sha256`
 must match the supplied archive sha256. The archive sha256 must also match
 `deploy_template_package.package_sha256` and
-`deploy_template_package.artifact_provenance.artifact_sha256`. Image artifact
-declarations must match image-map mappings one-to-one by id and must use
-`artifact_format: oci_layout_tar`. Bundle paths are POSIX-style relative paths
-only; absolute paths, parent segments, empty segments, dot segments,
+`deploy_template_package.artifact_provenance.artifact_sha256`. Image-map
+mappings remain limited to release contract deploy images. Image artifact
+declarations must match image-map mappings by id and, for kit-installed
+airgap, must also include `substrate_pack_manifest.images` as
+`substrate_<key>` ids using the same digest-pinned image ref for source and
+target. External-declared airgap accepts no extra substrate image declarations.
+All declarations must use `artifact_format: oci_layout_tar`. Bundle paths are
+POSIX-style relative paths only; absolute paths, parent segments, empty
+segments, dot segments,
 backslashes, URI paths, symlinks, missing files, unexpected manifest fields,
 and sha mismatches fail fast.
 
@@ -696,8 +702,11 @@ image manifest or image index/list blobs, descriptor-addressed config/layer
 blobs under every image manifest, matching blob sha256 values, at least one
 image manifest, and at least one layer blob, so manifest-only or empty archives
 fail before the probe runs. The archive top-level descriptor digest and probe
-digest must both match the image-map `target_digest`; bundle-check has already
-aligned that digest with `release_contract.deploy_image_inventory`. The report
+digest must both match the expected `target_digest` from image-map or, for
+kit-installed airgap substrate images, `substrate_pack_manifest.images`.
+Bundle-check has already aligned release image digests with
+`release_contract.deploy_image_inventory` and substrate image digests with the
+substrate pack manifest. The report
 keeps the compatibility field name `archive_manifest_digest`, whose value is
 the archive top-level descriptor digest. This proves only local OCI archive
 structure/digest sanity plus digest materiality through the chosen probe.

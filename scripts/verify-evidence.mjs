@@ -18,6 +18,11 @@ import {
   requirePlainSemver,
   validateContractTargetProfileEntry
 } from './lib/release-kit-version-policy.mjs';
+import {
+  expectedImageDeclarationsById,
+  expectedImageDeclarationSourceLabel,
+  substrateImageDeclarationsFromPackManifest
+} from './lib/airgap-substrate-image-declarations.mjs';
 
 const REQUIRED_ARGS = [
   'releaseContract',
@@ -2015,14 +2020,21 @@ function assertAirgapComponents({ components, expected, targetProfile }) {
 function assertAirgapImageArtifactDeclarations({
   declarations,
   imageMapSummary,
+  substrateImageDeclarations,
   expectedCount
 }) {
   const items = requireArray(
     declarations,
     'airgap_bundle_manifest.image_artifact_declarations'
   );
-  if (items.length !== expectedCount || items.length !== imageMapSummary.mappingsById.size) {
-    fail('airgap_bundle_manifest.image_artifact_declarations must match image-map report count and image_map.mappings');
+  const expectedById = expectedImageDeclarationsById({
+    imageMapDeclarations: imageMapSummary.mappingsById.values(),
+    substrateImageDeclarations,
+    fail
+  });
+  const expectedLabel = expectedImageDeclarationSourceLabel(substrateImageDeclarations);
+  if (items.length !== expectedCount || items.length !== expectedById.size) {
+    fail(`airgap_bundle_manifest.image_artifact_declarations must match bundle manifest report count and ${expectedLabel}`);
   }
 
   const seen = new Set();
@@ -2036,28 +2048,31 @@ function assertAirgapImageArtifactDeclarations({
     }
     seen.add(id);
 
-    const mapping = imageMapSummary.mappingsById.get(id);
-    if (!mapping) {
-      fail(`${label}.id must exist in image_map.mappings`);
+    const expected = expectedById.get(id);
+    if (!expected) {
+      fail(`${label}.id must exist in ${expectedLabel}`);
     }
-    if (mapping.action !== 'mirror_required') {
+    if (
+      imageMapSummary.mappingsById.has(id) &&
+      imageMapSummary.mappingsById.get(id).action !== 'mirror_required'
+    ) {
       fail(`${label} image-map mapping action must be mirror_required`);
     }
 
-    assertStringEquals(declaration.source_image, mapping.source_image, `${label}.source_image`);
+    assertStringEquals(declaration.source_image, expected.source_image, `${label}.source_image`);
     const sourceDigest = requireDigest(declaration.source_digest, `${label}.source_digest`);
-    if (sourceDigest !== mapping.source_digest) {
-      fail(`${label}.source_digest must match image_map mapping`);
+    if (sourceDigest !== expected.source_digest) {
+      fail(`${label}.source_digest must match expected image declaration`);
     }
     imageDigestSuffix(declaration.source_image, `${label}.source_image`);
 
     const targetImage = requireString(declaration.target_image, `${label}.target_image`);
-    if (targetImage !== mapping.target_image) {
-      fail(`${label}.target_image must match image_map mapping`);
+    if (targetImage !== expected.target_image) {
+      fail(`${label}.target_image must match expected image declaration`);
     }
     const targetDigest = requireDigest(declaration.target_digest, `${label}.target_digest`);
-    if (targetDigest !== mapping.target_digest) {
-      fail(`${label}.target_digest must match image_map mapping`);
+    if (targetDigest !== expected.target_digest) {
+      fail(`${label}.target_digest must match expected image declaration`);
     }
     const targetImageDigest = imageDigestSuffix(targetImage, `${label}.target_image`);
     if (targetImageDigest !== targetDigest) {
@@ -2068,9 +2083,9 @@ function assertAirgapImageArtifactDeclarations({
     requireDigest(declaration.sha256, `${label}.sha256`);
   }
 
-  for (const id of imageMapSummary.mappingsById.keys()) {
+  for (const id of expectedById.keys()) {
     if (!seen.has(id)) {
-      fail(`airgap_bundle_manifest.image_artifact_declarations is missing image_map.mappings id: ${id}`);
+      fail(`airgap_bundle_manifest.image_artifact_declarations is missing expected image id: ${id}`);
     }
   }
 
@@ -2332,10 +2347,30 @@ function assertAirgapBundleOutput({
     },
     targetProfile
   });
+  let substrateImageDeclarations = [];
+  if (isKitAirgap) {
+    const substratePack = requireObject(
+      substratePackInput?.value,
+      'substrate_pack_manifest'
+    );
+    assertSchemaVersion(
+      substratePack.schema_version,
+      SUBSTRATE_PACK_MANIFEST_SCHEMA,
+      'substrate_pack_manifest.schema_version'
+    );
+    substrateImageDeclarations = substrateImageDeclarationsFromPackManifest(
+      substratePack,
+      { fail }
+    );
+  } else if (substratePackInput) {
+    fail('external-declared airgap bundle evidence must not include substrate-pack-manifest.json');
+  }
+
   const imageArtifactDeclarationCount = assertAirgapImageArtifactDeclarations({
     declarations: manifest.image_artifact_declarations,
     imageMapSummary,
-    expectedCount: reportArtifactSummary.imageMapCount
+    substrateImageDeclarations,
+    expectedCount: reportArtifactSummary.manifestImageDeclarationCount
   });
   const payloadArtifactCount = assertAirgapPayloadArtifacts({
     payloadArtifacts: manifest.payload_artifacts,
@@ -2360,20 +2395,6 @@ function assertAirgapBundleOutput({
     )
   });
   assertAirgapSubstrate(manifest.substrate, targetProfile);
-
-  if (isKitAirgap) {
-    const substratePack = requireObject(
-      substratePackInput?.value,
-      'substrate_pack_manifest'
-    );
-    assertSchemaVersion(
-      substratePack.schema_version,
-      SUBSTRATE_PACK_MANIFEST_SCHEMA,
-      'substrate_pack_manifest.schema_version'
-    );
-  } else if (substratePackInput) {
-    fail('external-declared airgap bundle evidence must not include substrate-pack-manifest.json');
-  }
 
   assertIntegerEquals(
     report.components_count,

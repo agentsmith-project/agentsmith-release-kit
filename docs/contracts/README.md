@@ -168,7 +168,8 @@ template-package, image-map, and airgap bundle-check validators, and writes a
 bundle manifest matching `agentsmith.airgap-bundle-manifest/v1`. It creates a
 fixed local structure under `components/`, `images/`, `payload/`, optional
 `tools/`, and root `airgap-bundle-manifest.json`; image archive ids must match
-the generated image-map mappings one-to-one. Kit-installed airgap requires
+the generated image-map ids and, for kit-installed airgap,
+`substrate_pack_manifest.images` ids named `substrate_<key>`. Kit-installed airgap requires
 `--substrate-pack-manifest`, copies it as
 `components/substrate-pack-manifest.json`, and binds its sha256 in the bundle
 manifest. Its
@@ -202,7 +203,10 @@ release contracts with `required: true` target profiles while keeping
 `readiness: false`. The bundle manifest accepts only the documented
 top-level, `bindings`, `components`, `image_artifact_declarations`,
 `payload_artifacts`, `operator_prerequisites`, and `substrate` fields. Image
-artifact declarations must match image-map mappings one-to-one by id. The
+artifact declarations must match image-map mappings by id and, for
+kit-installed airgap, must also include `substrate_pack_manifest.images` as
+`substrate_<key>` ids using the same digest-pinned image ref for source and
+target. External-declared airgap accepts no extra substrate image declarations. The
 image-map must be airgap, `mirror_required: true`, and every mapping must use
 `action: mirror_required`; mapping ids, source images, and source digests must
 match `release_contract.deploy_image_inventory`, target digests must equal
@@ -250,15 +254,17 @@ descriptor-addressed image manifest or image index/list blobs,
 descriptor-addressed config/layer blobs under every image manifest, matching
 blob sha256 values, at least one image manifest, and at least one layer blob
 are required. The archive top-level descriptor digest must match the
-corresponding image-map `target_digest`; the compatibility report field
+corresponding expected `target_digest` from image-map or, for kit-installed
+airgap substrate images, `substrate_pack_manifest.images`; the compatibility report field
 `archive_manifest_digest` carries that top-level descriptor digest. After that
 structure sanity check, it invokes an explicit local
 `--archive-probe <executable>` once per
 `bundle_manifest.image_artifact_declarations[]` archive path. The probe
 receives the archive path as argv and env, and stdout must contain exactly one
-`sha256:<64>` digest. That probe digest must also match the image-map
-`target_digest`; bundle-check has already bound that digest to the release
-contract inventory. `--archive-probe` is an operator-owned trusted local
+`sha256:<64>` digest. That probe digest must also match the expected
+`target_digest`; bundle-check has already bound release images to the release
+contract inventory and kit-installed substrate images to the substrate pack
+manifest. `--archive-probe` is an operator-owned trusted local
 executable; release-kit does not sandbox it or prove the probe itself
 trustworthy, and only validates stdout digest alignment with the release
 contract, image-map, and bundle manifest.
