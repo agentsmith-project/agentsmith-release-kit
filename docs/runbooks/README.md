@@ -34,6 +34,10 @@ package-local refs and confirmations.
 For airgap packages, the bundle manifest must come from the assembled bundle and
 travel with its payload/prerequisite closure; operators should not edit manifest
 internals.
+The package facade does not call `skopeo` directly. If a package-local
+`archive_probe`, `image_loader`, or `registry_probe` wrapper uses `skopeo`
+internally, the target environment must preinstall it or provide it with the
+package, and the wrapper should return a clear missing-tool error.
 
 ### 3. What do I run?
 
@@ -115,6 +119,11 @@ it to an operator package or airgap bundle. Add `--verify-source-images` when
 `skopeo` is available to check the public source refs against their declared
 digests; only packages materialized with that flag have skopeo-verified source
 refs. Otherwise install `skopeo` before doing source-ref verification.
+Online materialization requires real target namespace, installation id, and
+storage class facts. Airgap materialization also requires the target registry,
+and the materialized substrate pack plus image archives must be bound into the
+assembled bundle before bundle-create handoff. `.example.json` files and
+placeholder pack trees are not runnable readiness.
 Materialization only proves the package shape: initialization Jobs for DB
 schema/users, object-storage bucket bootstrap, and OIDC realm/client bootstrap,
 plus real target secrets, storage, registry access, rollout, and smoke checks
@@ -166,6 +175,11 @@ The archive probe executable basename must not be `docker`, `skopeo`, `oras`,
 `AGENTSMITH_TARGET_IMAGE`, and `AGENTSMITH_TARGET_DIGEST` in the environment.
 It must exit zero within 30 seconds, write no stderr, and print exactly one
 matching sha256 digest to stdout.
+
+If either wrapper shells out to `skopeo`, the target environment must include
+that binary or the package must provide it, and the wrapper should explain the
+missing dependency clearly. The wrapper executable name and stdout digest
+contract still remain the package-local contract.
 
 These tools are the operator's package-local offline boundary. The release kit
 does not download from the public internet, and an airgap package should treat

@@ -104,6 +104,11 @@ operator may set `target_registry` and provide a package-local `registry_probe`
 executable. The target registry must already contain digest refs for the
 release images; release-kit does not mirror images, push images, or perform
 registry login.
+The package-driven `--operator-inputs <dir-or-json> --run` facade does not
+directly require `skopeo`. If a package-local `archive_probe`, `image_loader`,
+or `registry_probe` wrapper uses `skopeo` internally, the target environment
+must preinstall it or provide it with the package, and the wrapper must fail
+with a clear missing-tool message.
 
 Post-deploy smoke reports are runtime evidence and are not operator-inputs.
 `site.env` is not an operator-inputs field; the AgentSmith post-deploy product
@@ -142,6 +147,10 @@ probe, and an explicit install confirmation; it must not provide package-local
 archive/image loader probes for apply, and explicit install confirmation; it
 uses the installer-generated substrate truth created during the package run
 and does not require `routability_probe` or bundle/package `substrate_truth`.
+Both install-substrates paths require a target-bound materialized first-party
+minimal substrate pack, or an equivalent pack tree, before a real package run.
+`.example.json` files and placeholder pack trees are scaffolding only and must
+not be treated as runnable readiness.
 
 After the four packages have been run, the operator-facing final step is
 `operator-release.sh --ga-report` with those four package paths plus the
@@ -205,6 +214,13 @@ by `--ga-report` in `ga-release-report.json`.
 
 Maintainer/internal producer diagnostics remain available for evidence plumbing
 and troubleshooting, but they are not the operator copy-paste path.
+
+Maintainers and DevOps operators running
+`node scripts/export-airgap-image-archives.mjs` or
+`node scripts/materialize-substrate-pack.mjs --verify-source-images` need
+`skopeo` on PATH or must pass `--skopeo <path>`. The operator package facade
+itself does not call those helper paths during
+`--operator-inputs <dir-or-json> --run`.
 
 The focused producer catalog is no longer duplicated in this root README.
 Maintainers changing release-kit internals should use

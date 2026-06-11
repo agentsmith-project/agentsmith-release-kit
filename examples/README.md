@@ -45,6 +45,15 @@ Both online examples also include optional
 read-only registry probes. The target registry must already contain digest refs
 for the release images.
 
+Install-substrate examples contain `.example.json` and placeholder materials.
+Before `--run`, replace them with a target-bound materialized first-party
+minimal substrate pack, or an equivalent pack tree. Do not treat the examples
+as runnable readiness.
+
+If package-local `archive_probe`, `image_loader`, or `registry_probe` wrappers
+use `skopeo` internally, preinstall it in the target environment or provide it
+with the package; wrapper errors should name the missing dependency clearly.
+
 After all four packages have been run with `--run` and AgentSmith
 product-side reports are available, use the final GA facade with the four
 package paths. Operators do not pass internal report files.
