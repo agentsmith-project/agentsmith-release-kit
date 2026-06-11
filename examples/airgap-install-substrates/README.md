@@ -20,8 +20,33 @@ Keep `deployment_path` set to `airgap/install_substrates`. Replace the whole
 `airgap-bundle/` directory from the assembled bundle, then provide or edit the
 bundle-local install inputs, namespace, service refs, package-local tools, and
 confirmation fields. Provide the substrate pack manifest together with its
-referenced `payload/`, `templates/`, and `tools/` material tree; paths are
-relative to the manifest's directory.
+referenced `payload/`, `templates/`, `tools/`, and `checksums/` material tree;
+paths are relative to the manifest's directory.
+To use the first-party minimal pack source for airgap, materialize it before
+bundle creation so bundle-create can require the matching `substrate_*` image
+archives:
+
+```bash
+node scripts/materialize-substrate-pack.mjs \
+  --deployment-path airgap/install_substrates \
+  --target-registry <registry-host[/namespace]> \
+  --output-dir "<bundle-root>/components/substrate-pack" \
+  --namespace agentsmith \
+  --installation-id kit-install-<id> \
+  --storage-class <storage-class>
+```
+
+Then pass
+`<bundle-root>/components/substrate-pack/substrate-pack-manifest.json` to
+bundle-create as the substrate pack manifest and keep the referenced material
+tree next to it.
+Add `--verify-source-images` to the materializer command when `skopeo` is
+available and you want to check source refs before creating the airgap bundle;
+without that flag, do not claim the source refs were verified with skopeo.
+Materialize and server-dry-run only prove the package shape. They do not prove
+runtime readiness: DB schema/user bootstrap, object-storage bucket bootstrap,
+OIDC realm/client bootstrap, real Kubernetes secrets, storage, registry
+access, image load, rollout, and smoke checks are still follow-up blockers.
 The installer chooses the path from `deployment_path`; do not add extra
 deployment selection fields to the bundle-local target prerequisites or install
 inputs.

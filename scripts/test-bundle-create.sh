@@ -886,15 +886,40 @@ const expectedSubstrateDeclarations = Object.keys(substratePack.images)
       digest
     };
   });
-const materialPaths = [
-  'payload/install-substrates.json',
-  'templates/postgresql.yaml',
-  'templates/mongodb.yaml',
-  'templates/redis.yaml',
-  'templates/object-storage.yaml',
-  'templates/oidc.yaml',
-  'tools/substrate-routability-probe.txt'
-];
+const materialPaths = new Set();
+
+function collectMaterialPaths(value) {
+  if (typeof value === 'string') {
+    if (!value.startsWith('sha256:')) {
+      materialPaths.add(value);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(collectMaterialPaths);
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  if (
+    typeof value.path === 'string' &&
+    typeof value.sha256 === 'string'
+  ) {
+    materialPaths.add(value.path);
+    for (const [key, nested] of Object.entries(value)) {
+      if (key !== 'path' && key !== 'sha256') {
+        collectMaterialPaths(nested);
+      }
+    }
+    return;
+  }
+  Object.values(value).forEach(collectMaterialPaths);
+}
+
+for (const section of ['payload', 'templates', 'tools', 'checksums']) {
+  collectMaterialPaths(substratePack[section]);
+}
 
 function fileDigest(file) {
   return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
@@ -957,7 +982,7 @@ if (
 ) {
   throw new Error('kit bundle check report must count release and substrate image declarations');
 }
-for (const relativePath of materialPaths) {
+for (const relativePath of [...materialPaths].sort()) {
   const source = path.join(path.dirname(substratePackManifest), relativePath);
   const bundled = path.join(bundleRoot, 'components', relativePath);
   if (!fs.statSync(bundled).isFile()) {
@@ -1055,6 +1080,29 @@ run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$valid_kit_bund
   --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" >"$TMP_DIR/valid-create-kit.out"
 assert_kit_bundle_and_report "$valid_kit_bundle_root" "$valid_kit_output_dir" "$KIT_SUBSTRATE_PACK"
 pass "valid kit-installed airgap bundle create binds substrate pack manifest"
+
+materialized_kit_pack_dir="$TMP_DIR/materialized-kit-airgap-substrate-pack"
+"$NODE_BIN" "$ROOT_DIR/scripts/materialize-substrate-pack.mjs" \
+  --deployment-path airgap/install_substrates \
+  --target-registry "$AIRGAP_REGISTRY" \
+  --output-dir "$materialized_kit_pack_dir" \
+  --namespace agentsmith \
+  --installation-id kit-install-minimal-airgap-1001 \
+  --storage-class gp3 \
+  --declared-at 2026-06-10T12:00:00.000Z >/dev/null
+create_substrate_image_archives "$IMAGE_DIR" "$materialized_kit_pack_dir/substrate-pack-manifest.json"
+materialized_kit_bundle_root="$TMP_DIR/bundle-materialized-kit"
+materialized_kit_output_dir="$TMP_DIR/out-materialized-kit"
+run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$materialized_kit_bundle_root" "$materialized_kit_output_dir" \
+  "${default_image_args[@]}" \
+  "${kit_image_args[@]}" \
+  "${common_payload_args[@]}" \
+  --substrate-pack-manifest "$materialized_kit_pack_dir/substrate-pack-manifest.json" >"$TMP_DIR/materialized-create-kit.out"
+assert_kit_bundle_and_report \
+  "$materialized_kit_bundle_root" \
+  "$materialized_kit_output_dir" \
+  "$materialized_kit_pack_dir/substrate-pack-manifest.json"
+pass "kit-installed airgap bundle create consumes first-party materialized substrate pack"
 
 expect_create_fail_with_evidence missing-evidence-provenance "$TMP_DIR/bundle-missing-evidence-provenance" "$TMP_DIR/out-missing-evidence-provenance" "$TMP_DIR/evidence-missing-provenance" \
   run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-missing-evidence-provenance" "$TMP_DIR/out-missing-evidence-provenance" \

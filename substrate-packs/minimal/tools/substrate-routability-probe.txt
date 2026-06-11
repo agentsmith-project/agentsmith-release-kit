@@ -1,0 +1,6 @@
+Minimal pack routability checks:
+- postgresql TLS connection and pgvector extension check
+- mongodb TLS connection check
+- redis TLS ping check
+- object storage HTTPS bucket check
+- oidc HTTPS discovery check

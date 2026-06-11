@@ -971,6 +971,130 @@ run_install() {
       "$@"
 }
 
+run_pack_check() {
+  local fixture_dir="$1"
+  local output_dir="$2"
+  local target_profile="${SUBSTRATE_INSTALL_TARGET_PROFILE:-$TARGET_PROFILE}"
+
+  bash "$ROOT_DIR/scripts/verify-release.sh" --substrate-pack-check \
+    --target-profile "$target_profile" \
+    --substrate-pack-manifest "$fixture_dir/substrate-pack-manifest.json" \
+    --substrate-truth "$fixture_dir/substrate-truth.json" \
+    --output-dir "$output_dir"
+}
+
+write_target_prerequisites_from_install_inputs() {
+  local install_inputs="$1"
+  local output="$2"
+  local target_profile="${3:-$TARGET_PROFILE}"
+  local namespace="${4:-agentsmith}"
+  local storage_class="${5:-gp3}"
+
+  "$NODE_BIN" --input-type=module - "$install_inputs" "$output" "$target_profile" "$namespace" "$storage_class" <<'NODE'
+import fs from 'node:fs';
+
+const [installInputsFile, output, targetProfile, namespace, storageClass] = process.argv.slice(2);
+const installInputs = JSON.parse(fs.readFileSync(installInputsFile, 'utf8'));
+const refs = new Set();
+
+function collect(value) {
+  if (typeof value === 'string' && value.startsWith('secretRef:')) {
+    refs.add(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(collect);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    Object.values(value).forEach(collect);
+  }
+}
+
+collect(installInputs.substrate_truth);
+
+const prerequisites = {
+  schema_version: 'agentsmith.target-prerequisites.truth/v1',
+  target_profile: targetProfile,
+  namespace,
+  rbac: {
+    policy: 'namespace_admin'
+  },
+  ingress: {
+    host: 'agentsmith.release.example.com',
+    tls_secret_ref: `secretRef:${namespace}/agentsmith-ingress-tls`
+  },
+  registry: {
+    auth: {
+      mode: 'none'
+    }
+  },
+  storage: {
+    storage_class: storageClass,
+    persistent_volume_policy: 'dynamic'
+  },
+  substrate_secret_refs: [...refs].sort()
+};
+
+fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+assert_resource_secret_refs_bound_to_target_prerequisites() {
+  local install_inputs="$1"
+  local target_prerequisites="$2"
+  local namespace="${3:-agentsmith}"
+
+  "$NODE_BIN" --input-type=module - "$install_inputs" "$target_prerequisites" "$namespace" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [installInputsFile, targetPrerequisitesFile, namespace] = process.argv.slice(2);
+const installInputs = JSON.parse(fs.readFileSync(installInputsFile, 'utf8'));
+const resourceList = JSON.parse(fs.readFileSync(
+  path.join(path.dirname(installInputsFile), installInputs.resource_list_path),
+  'utf8'
+));
+const targetPrerequisites = JSON.parse(fs.readFileSync(targetPrerequisitesFile, 'utf8'));
+const resourceSecretRefs = new Set();
+
+function collectResourceSecrets(value) {
+  if (Array.isArray(value)) {
+    value.forEach(collectResourceSecrets);
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  if (
+    value.secretKeyRef &&
+    typeof value.secretKeyRef === 'object' &&
+    typeof value.secretKeyRef.name === 'string'
+  ) {
+    resourceSecretRefs.add(`secretRef:${namespace}/${value.secretKeyRef.name}`);
+  }
+  if (
+    value.secret &&
+    typeof value.secret === 'object' &&
+    typeof value.secret.secretName === 'string'
+  ) {
+    resourceSecretRefs.add(`secretRef:${namespace}/${value.secret.secretName}`);
+  }
+  Object.values(value).forEach(collectResourceSecrets);
+}
+
+collectResourceSecrets(resourceList);
+const targetSecretRefs = new Set(targetPrerequisites.substrate_secret_refs || []);
+const missing = [...resourceSecretRefs].filter((ref) => !targetSecretRefs.has(ref));
+if (missing.length > 0) {
+  throw new Error(`resource Secret refs missing from target prerequisites: ${missing.join(', ')}`);
+}
+if (!resourceSecretRefs.has(`secretRef:${namespace}/oidc-admin`)) {
+  throw new Error('materialized resources must bind oidc-admin as an operator-provided Secret ref');
+}
+NODE
+}
+
 assert_install_rejected_before_kubectl() {
   local mutation="$1"
   local expected_message="$2"
@@ -994,12 +1118,20 @@ assert_install_report() {
   local expected_mode="$3"
   local expected_operator_run_id="${4:-}"
   local expected_target_profile="${5:-$TARGET_PROFILE}"
+  local expected_installation_id="${6:-kit-install-10001}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$truth_file" "$expected_mode" "$expected_operator_run_id" "$expected_target_profile" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$truth_file" "$expected_mode" "$expected_operator_run_id" "$expected_target_profile" "$expected_installation_id" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-const [reportFile, truthFile, expectedMode, expectedOperatorRunId, expectedTargetProfile] = process.argv.slice(2);
+const [
+  reportFile,
+  truthFile,
+  expectedMode,
+  expectedOperatorRunId,
+  expectedTargetProfile,
+  expectedInstallationId
+] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const truth = JSON.parse(fs.readFileSync(truthFile, 'utf8'));
 const truthDigest = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(truthFile)).digest('hex')}`;
@@ -1134,8 +1266,8 @@ if (`${truth.target_cluster}/${truth.substrate_source}/${truth.distribution}` !=
 if (truth.installed_by !== 'agentsmith-release-kit') {
   throw new Error('substrate truth must keep release-kit installed_by marker');
 }
-if (truth.installation_id !== 'kit-install-10001') {
-  throw new Error('substrate truth must keep fixture installation_id');
+if (truth.installation_id !== expectedInstallationId) {
+  throw new Error('substrate truth must keep expected installation_id');
 }
 if (/plain-credential|Bearer\s+|AKIA|PRIVATE KEY|kubeconfig/i.test(serialized)) {
   throw new Error('substrate install outputs leaked raw secret-looking material');
@@ -1621,6 +1753,54 @@ grep -Eq '^apply .*--dry-run=server' "$KUBECTL_LOG" || \
   fail "airgap server-dry-run substrate install did not pass --dry-run=server"
 assert_install_report "$airgap_dry_run_output/substrate-install-report.json" "$airgap_dry_run_output/substrate-truth.json" server-dry-run "" "$AIRGAP_TARGET_PROFILE"
 pass "airgap server-dry-run writes diagnostic substrate install report and truth"
+
+materialized_minimal_dir="$TMP_DIR/materialized-minimal-substrate-pack"
+"$NODE_BIN" "$ROOT_DIR/scripts/materialize-substrate-pack.mjs" \
+  --deployment-path online/install_substrates \
+  --output-dir "$materialized_minimal_dir" \
+  --namespace agentsmith \
+  --installation-id kit-install-minimal-1001 \
+  --storage-class gp3 \
+  --declared-at 2026-06-10T12:00:00.000Z >/dev/null
+write_target_prerequisites_from_install_inputs \
+  "$materialized_minimal_dir/substrate-install-inputs.json" \
+  "$materialized_minimal_dir/target-prerequisites.json"
+assert_resource_secret_refs_bound_to_target_prerequisites \
+  "$materialized_minimal_dir/substrate-install-inputs.json" \
+  "$materialized_minimal_dir/target-prerequisites.json"
+run_pack_check "$materialized_minimal_dir" "$TMP_DIR/out-materialized-minimal-pack-check" >/dev/null
+materialized_minimal_output="$TMP_DIR/out-materialized-minimal-install"
+reset_kubectl_log
+run_install "$materialized_minimal_dir" "$materialized_minimal_output" >/dev/null
+grep -q '^get statefulsets.apps ' "$KUBECTL_LOG" || fail "materialized minimal pack did not check StatefulSet collisions"
+grep -q '^get deployments.apps ' "$KUBECTL_LOG" || fail "materialized minimal pack did not check Deployment collisions"
+grep -q '^get persistentvolumeclaims ' "$KUBECTL_LOG" || fail "materialized minimal pack did not check PVC collisions"
+grep -Eq '^apply .*--dry-run=server' "$KUBECTL_LOG" || \
+  fail "materialized minimal pack server-dry-run did not pass --dry-run=server"
+assert_install_report \
+  "$materialized_minimal_output/substrate-install-report.json" \
+  "$materialized_minimal_output/substrate-truth.json" \
+  server-dry-run \
+  "" \
+  "$TARGET_PROFILE" \
+  kit-install-minimal-1001
+pass "first-party minimal substrate pack materializes, pack-checks, and server-dry-runs"
+
+if command -v skopeo >/dev/null 2>&1; then
+  materialized_source_verified_dir="$TMP_DIR/materialized-minimal-source-verified"
+  "$NODE_BIN" "$ROOT_DIR/scripts/materialize-substrate-pack.mjs" \
+    --deployment-path online/install_substrates \
+    --output-dir "$materialized_source_verified_dir" \
+    --namespace agentsmith \
+    --installation-id kit-install-minimal-source-verified-1001 \
+    --storage-class gp3 \
+    --declared-at 2026-06-10T12:00:00.000Z \
+    --verify-source-images \
+    --skopeo "$(command -v skopeo)" >/dev/null
+  pass "first-party minimal substrate pack source image digests verified with skopeo"
+else
+  pass "skopeo unavailable; install skopeo to enable minimal substrate pack source image digest verification"
+fi
 
 apply_output="$TMP_DIR/out-apply"
 install_digest="$(install_parameters_digest "$valid_dir/substrate-install-inputs.json")"

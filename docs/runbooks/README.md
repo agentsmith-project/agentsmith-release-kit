@@ -114,8 +114,18 @@ deployment gate and does not require `routability_probe` or bundle/package
 `substrate_truth`. `installed_by` stays a provenance marker, not installer
 proof.
 For install paths, the substrate pack is the manifest plus its referenced
-`payload/`, `templates/`, and `tools/` material tree; those paths are relative
-to the manifest's directory.
+`payload/`, `templates/`, `tools/`, and `checksums/` material tree; those
+paths are relative to the manifest's directory. The first-party source lives
+under `substrate-packs/minimal/`; materialize it with
+`scripts/materialize-substrate-pack.mjs` for one deployment path before adding
+it to an operator package or airgap bundle. Add `--verify-source-images` when
+`skopeo` is available to check the public source refs against their declared
+digests; only packages materialized with that flag have skopeo-verified source
+refs. Otherwise install `skopeo` before doing source-ref verification.
+Materialization and substrate-install server-dry-run are not runtime-ready
+evidence: initialization Jobs for DB schema/users, object-storage bucket
+bootstrap, and OIDC realm/client bootstrap, plus real target secrets, storage,
+registry access, rollout, and smoke checks remain downstream blockers.
 For both online paths, an apply package may also set `target_registry` and
 provide a package-local `registry_probe`; the registry must already contain
 digest refs for the release images.

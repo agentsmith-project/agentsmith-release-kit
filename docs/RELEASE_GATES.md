@@ -1416,13 +1416,15 @@ namespace through
 `install_parameters_sha256` under `inputs.substrate_install_inputs`.
 
 The Kubernetes resource guard is apiVersion-aware. It accepts only the narrow
-namespace-scoped allowlist used by the installer: core `v1` ConfigMap,
-`networking.k8s.io/v1` NetworkPolicy, and core `v1` Service only when
-`spec.type` is omitted or `ClusterIP`. This producer does not run workloads or
-create Pods, PVCs, Secrets, or RBAC resources. Secret material stays in secret
-refs only, unknown apiVersions are rejected even when the kind name is
-familiar, and storage remains target prerequisites proof rather than something
-installed by this producer.
+namespace-scoped allowlist used by the installer: core `v1` Service,
+ConfigMap, and PersistentVolumeClaim; `networking.k8s.io/v1` NetworkPolicy;
+`apps/v1` StatefulSet and Deployment; and `batch/v1` Job. Services must omit
+`spec.type` or use `ClusterIP`. Workload images must match digest-pinned refs
+declared in `substrate_pack_manifest.images`, and PVC `storageClassName`
+must match target prerequisites when present. Secret material stays in secret
+refs only. The installer does not create Secret, RBAC, IngressClass,
+StorageClass, PersistentVolume, or other cluster-scoped resources; unknown
+apiVersions are rejected even when the kind name is familiar.
 
 ## Substrate Routability Focused Diagnostic
 
@@ -1511,8 +1513,10 @@ declarations, `extensions.pgvector.status: installed`, and reachability status
 must include target profile, namespace, RBAC policy or proof, ingress host plus
 TLS secret ref, registry auth mode (`pull_secret_ref` required only for
 `secret` mode), storage class plus PV policy proof, and the substrate secret
-refs declared in substrate truth. The substrate installer does not create PVCs;
-storage readiness is proven through target prerequisites. The prerequisites
+refs declared in substrate truth. The substrate installer may create
+namespace-scoped PVCs from a pack resource list, but it does not create
+StorageClass or PV resources; storage readiness is proven through target
+prerequisites. The prerequisites
 `registry` object accepts only `auth.mode` and conditional `pull_secret_ref`;
 pseudo-evidence or secret payload fields such as `preloaded`, `mirror_done`,
 `verdict`, or `token` are rejected. Plaintext credentials,

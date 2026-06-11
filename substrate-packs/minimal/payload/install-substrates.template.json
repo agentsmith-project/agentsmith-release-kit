@@ -1,0 +1,19 @@
+{
+  "schema_version": "agentsmith.substrate-install-plan/minimal/v1",
+  "deployment_path": "{{DEPLOYMENT_PATH}}",
+  "target_profile": "{{TARGET_PROFILE}}",
+  "installation_id": "{{INSTALLATION_ID}}",
+  "namespace": "{{NAMESPACE}}",
+  "resource_list_path": "templates/substrate-resources.json",
+  "services": [
+    "postgresql",
+    "mongodb",
+    "redis",
+    "object_storage",
+    "oidc"
+  ],
+  "operator_boundaries": [
+    "operator provides referenced Kubernetes secrets before apply",
+    "operator verifies TLS, storage, registry, and service readiness after apply"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": "agentsmith.substrate-pack-source/minimal/v1",
+  "release_kit_version": "0.1.0",
+  "name": "minimal",
+  "images": {
+    "postgresql": {
+      "source_ref": "docker.io/pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc",
+      "target_repository": "substrates/postgresql"
+    },
+    "mongodb": {
+      "source_ref": "docker.io/library/mongo:7.0@sha256:948b635bc126d62274eebb650dd2e2e66c9abc3bb0a336eb2279a5d8489417f5",
+      "target_repository": "substrates/mongodb"
+    },
+    "redis": {
+      "source_ref": "docker.io/library/redis:7.2@sha256:73d3498d8e395b685cf9263877c445fe9bf2bb436db33d545780ae398f97a23d",
+      "target_repository": "substrates/redis"
+    },
+    "object_storage": {
+      "source_ref": "quay.io/minio/minio:RELEASE.2024-05-10T01-41-38Z@sha256:420663b8685c5396f06405ad516d611db4465939a141cc7d40266342d0f2632d",
+      "target_repository": "substrates/object-storage"
+    },
+    "oidc": {
+      "source_ref": "quay.io/keycloak/keycloak:25.0.6@sha256:82c5b7a110456dbd42b86ea572e728878549954cc8bd03cd65410d75328095d2",
+      "target_repository": "substrates/keycloak"
+    }
+  },
+  "install_plan_template": "payload/install-substrates.template.json",
+  "resource_list_template": "templates/substrate-resources.template.json",
+  "routability_probe": "tools/substrate-routability-probe.txt"
+}

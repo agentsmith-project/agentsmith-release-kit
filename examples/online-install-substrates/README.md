@@ -11,8 +11,29 @@ The example pack, prerequisites, and install-input files are already bound to
 `online/install_substrates`. Replace namespace, storage values, service refs,
 package-local tools, and confirmation fields.
 Provide the substrate pack manifest together with its referenced `payload/`,
-`templates/`, and `tools/` material tree; paths are relative to the manifest's
-directory.
+`templates/`, `tools/`, and `checksums/` material tree; paths are relative to
+the manifest's directory.
+To use the first-party minimal pack source, materialize it first:
+
+```bash
+node scripts/materialize-substrate-pack.mjs \
+  --deployment-path online/install_substrates \
+  --output-dir "<package-dir>/substrate-pack" \
+  --namespace agentsmith \
+  --installation-id kit-install-<id> \
+  --storage-class <storage-class>
+```
+
+Then point package refs at
+`<package-dir>/substrate-pack/substrate-pack-manifest.json` and
+`<package-dir>/substrate-pack/substrate-install-inputs.json`.
+Add `--verify-source-images` to the materializer command when `skopeo` is
+available and you want to check source refs before packaging; without that
+flag, do not claim the source refs were verified with skopeo.
+Materialize and server-dry-run only prove the package shape. They do not prove
+runtime readiness: DB schema/user bootstrap, object-storage bucket bootstrap,
+OIDC realm/client bootstrap, real Kubernetes secrets, storage, registry
+access, rollout, and smoke checks are still follow-up blockers.
 The installer chooses the path from `deployment_path`; do not add extra
 deployment selection fields to `target-prerequisites.example.json` or
 `substrate-install-inputs.example.json`.
