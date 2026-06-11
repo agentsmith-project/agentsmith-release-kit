@@ -55,6 +55,22 @@ const EXAMPLE_PLACEHOLDER_EXECUTABLE_RE = [
   /\breplace\s+tools\/(?:kubectl|registry-probe|routability-probe|archive-probe|image-loader)\s+with\s+(?:the\s+|an\s+)?operator-approved\b/i,
   /\boperator-reviewed local script placeholder\b/i
 ];
+const RELEASE_MATERIAL_FIELDS = [
+  'release_contract',
+  'deploy_template_package',
+  'deploy_template_archive'
+];
+const RELEASE_MATERIAL_LABELS = new Map([
+  ['release_contract', 'release contract'],
+  ['deploy_template_package', 'deploy template package'],
+  ['deploy_template_archive', 'deploy template package archive']
+]);
+const EXAMPLE_PLACEHOLDER_RELEASE_MATERIAL_SCHEMA = new Map([
+  ['release_contract', /^example[.]placeholder[.]release-contract\/v[0-9]+$/],
+  ['deploy_template_package', /^example[.]placeholder[.]deploy-template-package\/v[0-9]+$/]
+]);
+const EXAMPLE_PLACEHOLDER_DEPLOY_TEMPLATE_ARCHIVE_TEXT =
+  'placeholder deploy template archive; replace before run';
 
 const TOP_LEVEL_FIELDS = new Set([
   'schema_version',
@@ -548,6 +564,68 @@ async function detectExamplePlaceholderExecutable(file, label) {
   return EXAMPLE_PLACEHOLDER_EXECUTABLE_RE.some((pattern) => pattern.test(text))
     ? EXAMPLE_PLACEHOLDER_EXECUTABLE_REASON
     : null;
+}
+
+function examplePlaceholderReleaseMaterialReason(field, ref) {
+  return `${ref.path} is an example placeholder release material; replace with real ${RELEASE_MATERIAL_LABELS.get(field)}`;
+}
+
+async function readJsonObjectForPlaceholderInspection(file, label) {
+  const { buffer } = await readFileDigest(file, label);
+  try {
+    const value = JSON.parse(buffer.toString('utf8'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function detectExamplePlaceholderReleaseMaterial(field, ref) {
+  if (!ref?.absolute_path) {
+    return null;
+  }
+
+  const schemaPattern = EXAMPLE_PLACEHOLDER_RELEASE_MATERIAL_SCHEMA.get(field);
+  if (schemaPattern) {
+    const value = await readJsonObjectForPlaceholderInspection(ref.absolute_path, field);
+    const schemaLikeValues = [
+      value?.schema_version,
+      value?.schema,
+      value?.version
+    ];
+    return schemaLikeValues.some((item) => (
+      typeof item === 'string' && schemaPattern.test(item.trim())
+    ))
+      ? examplePlaceholderReleaseMaterialReason(field, ref)
+      : null;
+  }
+
+  if (field === 'deploy_template_archive') {
+    const { buffer } = await readFileDigest(ref.absolute_path, field);
+    return buffer.toString('utf8').trim() === EXAMPLE_PLACEHOLDER_DEPLOY_TEMPLATE_ARCHIVE_TEXT
+      ? examplePlaceholderReleaseMaterialReason(field, ref)
+      : null;
+  }
+
+  return null;
+}
+
+async function collectReleaseMaterialIssues(refs) {
+  const issues = [];
+  for (const field of RELEASE_MATERIAL_FIELDS) {
+    const reason = await detectExamplePlaceholderReleaseMaterial(field, refs[field]);
+    if (reason) {
+      issues.push({ field, reason });
+    }
+  }
+  return issues;
+}
+
+async function assertNoExamplePlaceholderReleaseMaterials(refs) {
+  const [issue] = await collectReleaseMaterialIssues(refs);
+  if (issue) {
+    fail(`${issue.field}: ${issue.reason}`);
+  }
 }
 
 function scanManifestForForbiddenContent(value, label, pathParts = []) {
@@ -2452,6 +2530,7 @@ export async function resolveOperatorInputs({ inputPath, outputDir } = {}) {
   if (missingRequiredRef) {
     fail(`missing resolved input ref: ${missingRequiredRef}`);
   }
+  await assertNoExamplePlaceholderReleaseMaterials(refs);
 
   const runtimeOutputRoot = await ensureInternalRuntimeRoot(packageRoot);
   const planOutputDir = outputDir
@@ -2551,6 +2630,7 @@ export async function diagnoseOperatorInputs({ inputPath } = {}) {
     } catch (error) {
       staticIssues.push(staticIssue('airgap_bundle_manifest', error));
     }
+    staticIssues.push(...await collectReleaseMaterialIssues(refs));
     staticIssues.push(...await collectStaticDoctorIssues({ manifest, refs, config }));
   }
   const passed =

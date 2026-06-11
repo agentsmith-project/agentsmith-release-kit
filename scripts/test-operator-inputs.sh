@@ -1954,6 +1954,80 @@ fi
   fail "operator-inputs doctor category output must not write an intake plan"
 pass "operator-inputs doctor groups missing inputs by category without a verdict"
 
+example_release_materials_dir="$TMP_DIR/invalid-example-release-materials"
+mkdir -p "$example_release_materials_dir"
+write_package_files "$example_release_materials_dir"
+write_manifest "$example_release_materials_dir" online/install_substrates apply
+cp "$EXAMPLE_ONLINE_INSTALL_DIR/release-contract.json" \
+  "$example_release_materials_dir/release-contract.json"
+cp "$EXAMPLE_ONLINE_INSTALL_DIR/deploy-template-package.json" \
+  "$example_release_materials_dir/deploy-template-package.json"
+cp "$EXAMPLE_ONLINE_INSTALL_DIR/deploy-template-package.tgz" \
+  "$example_release_materials_dir/deploy-template-package.tgz"
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$example_release_materials_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-example-release-materials.json"; then
+  fail "operator-inputs doctor should fail for copied example placeholder release materials"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-example-release-materials.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.status !== 'fail' || report.readiness !== false || report.formal_verdict !== 'not_issued') {
+  throw new Error('doctor placeholder release materials fixture must fail without readiness or formal verdict');
+}
+if (report.missing.length !== 0 || report.missing_refs.length !== 0) {
+  throw new Error('doctor placeholder release materials fixture should have no missing inputs or refs');
+}
+const issues = new Map((report.static_issues || []).map((entry) => [entry.field, entry]));
+for (const [field, expectedPath, expectedMaterial] of [
+  ['release_contract', 'release-contract.json', 'release contract'],
+  ['deploy_template_package', 'deploy-template-package.json', 'deploy template package'],
+  ['deploy_template_archive', 'deploy-template-package.tgz', 'deploy template package archive']
+]) {
+  const issue = issues.get(field);
+  if (!issue) {
+    throw new Error(`doctor placeholder release materials fixture missing static issue for ${field}`);
+  }
+  if (
+    !issue.reason.includes(`${expectedPath} is an example placeholder release material`) ||
+    !issue.reason.includes(`replace with real ${expectedMaterial}`)
+  ) {
+    throw new Error(`doctor placeholder release materials fixture reason mismatch for ${field}`);
+  }
+}
+NODE
+if bash "$ROOT_DIR/scripts/operator-release.sh" \
+  --operator-inputs "$example_release_materials_dir" \
+  --doctor >"$TMP_DIR/doctor-example-release-materials-facade.out" \
+  2>"$TMP_DIR/doctor-example-release-materials-facade.err"; then
+  fail "operator facade doctor should fail for copied example placeholder release materials"
+fi
+grep -Fq -- '- release materials: release_contract, deploy_template_package, deploy_template_archive' \
+  "$TMP_DIR/doctor-example-release-materials-facade.out" ||
+  fail "operator facade doctor did not group placeholder release materials under release materials"
+grep -Fq -- '- release_contract: release-contract.json is an example placeholder release material; replace with real release contract' \
+  "$TMP_DIR/doctor-example-release-materials-facade.out" ||
+  fail "operator facade doctor did not explain copied release-contract example placeholder"
+[[ ! -e "$example_release_materials_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
+  fail "operator-inputs doctor placeholder release materials must not write an intake plan"
+expect_fail_matching example_release_materials_resolve \
+  'release_contract: release-contract.json is an example placeholder release material; replace with real release contract' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+    --operator-inputs "$example_release_materials_dir"
+[[ ! -e "$example_release_materials_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
+  fail "operator-inputs resolve placeholder release materials must fail before writing an intake plan"
+expect_fail_matching example_release_materials_run \
+  'release_contract: release-contract.json is an example placeholder release material; replace with real release contract' \
+  bash "$ROOT_DIR/scripts/operator-release.sh" \
+    --operator-inputs "$example_release_materials_dir" \
+    --run
+[[ ! -e "$example_release_materials_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
+  fail "operator-inputs run placeholder release materials must fail before writing an intake plan"
+assert_no_path_evidence "$example_release_materials_dir" online-install-substrates
+pass "operator-inputs rejects copied example placeholder release materials before plan or run"
+
 example_stub_tools_dir="$TMP_DIR/invalid-example-stub-tools"
 mkdir -p "$example_stub_tools_dir"
 write_package_files "$example_stub_tools_dir"
