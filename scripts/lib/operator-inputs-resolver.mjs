@@ -48,6 +48,13 @@ const SAFE_TIMEOUT_RE = /^(?:0|[1-9][0-9]*(?:ms|s|m|h))$/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:[\\/]/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const MAX_SMOKE_TIMEOUT_MS = 300000;
+const EXAMPLE_PLACEHOLDER_EXECUTABLE_HEAD_BYTES = 4096;
+const EXAMPLE_PLACEHOLDER_EXECUTABLE_REASON =
+  'example placeholder executable; replace with operator-approved package-local executable';
+const EXAMPLE_PLACEHOLDER_EXECUTABLE_RE = [
+  /\breplace\s+tools\/(?:kubectl|registry-probe|routability-probe|archive-probe|image-loader)\s+with\s+(?:the\s+|an\s+)?operator-approved\b/i,
+  /\boperator-reviewed local script placeholder\b/i
+];
 
 const TOP_LEVEL_FIELDS = new Set([
   'schema_version',
@@ -504,6 +511,13 @@ async function resolveCommand({ baseDir, value, label }) {
   } catch {
     fail(`${label} must be executable`);
   }
+  const placeholderReason = await detectExamplePlaceholderExecutable(
+    resolved.absolutePath,
+    label
+  );
+  if (placeholderReason) {
+    fail(`${label}: ${resolved.path} (${placeholderReason})`);
+  }
   const { sha256 } = await readFileDigest(resolved.absolutePath, label);
   return {
     kind: 'file',
@@ -511,6 +525,29 @@ async function resolveCommand({ baseDir, value, label }) {
     absolute_path: resolved.absolutePath,
     sha256
   };
+}
+
+async function readFileHeadText(file, label) {
+  let handle;
+  try {
+    handle = await fs.open(file, 'r');
+    const buffer = Buffer.alloc(EXAMPLE_PLACEHOLDER_EXECUTABLE_HEAD_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } catch (error) {
+    fail(`cannot inspect ${label}: ${error.message}`);
+  } finally {
+    if (handle) {
+      await handle.close();
+    }
+  }
+}
+
+async function detectExamplePlaceholderExecutable(file, label) {
+  const text = await readFileHeadText(file, label);
+  return EXAMPLE_PLACEHOLDER_EXECUTABLE_RE.some((pattern) => pattern.test(text))
+    ? EXAMPLE_PLACEHOLDER_EXECUTABLE_REASON
+    : null;
 }
 
 function scanManifestForForbiddenContent(value, label, pathParts = []) {
@@ -1100,6 +1137,15 @@ async function collectMissingRequiredRefs({ manifest, baseDir, requiredInputs })
         await fs.access(requested, fsConstants.X_OK);
       } catch {
         missingRefs.push({ field, kind, path: relativePath, reason: 'ref must be executable' });
+        return;
+      }
+      try {
+        const placeholderReason = await detectExamplePlaceholderExecutable(requested, field);
+        if (placeholderReason) {
+          missingRefs.push({ field, kind, path: relativePath, reason: placeholderReason });
+        }
+      } catch (error) {
+        missingRefs.push({ field, kind, path: relativePath, reason: error.message });
       }
     }
   }

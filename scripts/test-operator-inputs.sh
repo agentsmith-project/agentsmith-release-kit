@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 EXAMPLE_ONLINE_DIR="$ROOT_DIR/examples/online-use-existing"
+EXAMPLE_ONLINE_INSTALL_DIR="$ROOT_DIR/examples/online-install-substrates"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -1952,6 +1953,118 @@ fi
 [[ ! -e "$doctor_category_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
   fail "operator-inputs doctor category output must not write an intake plan"
 pass "operator-inputs doctor groups missing inputs by category without a verdict"
+
+example_stub_tools_dir="$TMP_DIR/invalid-example-stub-tools"
+mkdir -p "$example_stub_tools_dir"
+write_package_files "$example_stub_tools_dir"
+write_manifest "$example_stub_tools_dir" online/install_substrates apply
+cp "$EXAMPLE_ONLINE_INSTALL_DIR/tools/kubectl" "$example_stub_tools_dir/tools/kubectl"
+cp "$EXAMPLE_ONLINE_INSTALL_DIR/tools/routability-probe" \
+  "$example_stub_tools_dir/tools/routability-probe"
+chmod +x "$example_stub_tools_dir/tools/kubectl" \
+  "$example_stub_tools_dir/tools/routability-probe"
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$example_stub_tools_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-example-stub-tools.json"; then
+  fail "operator-inputs doctor should fail for copied example placeholder tools"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-example-stub-tools.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.status !== 'fail' || report.readiness !== false || report.formal_verdict !== 'not_issued') {
+  throw new Error('doctor placeholder tool fixture must fail without readiness or formal verdict');
+}
+if (report.missing.length !== 0) {
+  throw new Error('doctor placeholder tool fixture should have no missing scalar/top-level fields');
+}
+const expectedReason = 'example placeholder executable; replace with operator-approved package-local executable';
+const missingRefs = new Map(report.missing_refs.map((entry) => [entry.field, entry]));
+for (const [field, expectedPath] of [
+  ['kubectl', 'tools/kubectl'],
+  ['routability_probe', 'tools/routability-probe']
+]) {
+  const entry = missingRefs.get(field);
+  if (!entry || entry.kind !== 'executable' || entry.path !== expectedPath) {
+    throw new Error(`doctor placeholder tool fixture missing executable ref for ${field}`);
+  }
+  if (entry.reason !== expectedReason) {
+    throw new Error(`doctor placeholder tool fixture reason mismatch for ${field}`);
+  }
+}
+if ((report.static_issues || []).length !== 0) {
+  throw new Error('doctor placeholder tool fixture should classify blockers as executable refs');
+}
+NODE
+if bash "$ROOT_DIR/scripts/operator-release.sh" \
+  --operator-inputs "$example_stub_tools_dir" \
+  --doctor >"$TMP_DIR/doctor-example-stub-tools-facade.out" \
+  2>"$TMP_DIR/doctor-example-stub-tools-facade.err"; then
+  fail "operator facade doctor should fail for copied example placeholder tools"
+fi
+grep -Fq -- '- operator tools: kubectl, routability_probe' \
+  "$TMP_DIR/doctor-example-stub-tools-facade.out" ||
+  fail "operator facade doctor did not group placeholder tools under operator tools"
+grep -Fq -- '- kubectl: tools/kubectl (example placeholder executable; replace with operator-approved package-local executable)' \
+  "$TMP_DIR/doctor-example-stub-tools-facade.out" ||
+  fail "operator facade doctor did not explain copied kubectl example placeholder"
+[[ ! -e "$example_stub_tools_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
+  fail "operator-inputs doctor placeholder tools must not write an intake plan"
+expect_fail_matching example_stub_tools_resolve \
+  'kubectl: tools/kubectl \(example placeholder executable; replace with operator-approved package-local executable\)' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+    --operator-inputs "$example_stub_tools_dir"
+[[ ! -e "$example_stub_tools_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
+  fail "operator-inputs resolve placeholder tools must fail before writing an intake plan"
+expect_fail_matching example_stub_tools_run \
+  'kubectl: tools/kubectl \(example placeholder executable; replace with operator-approved package-local executable\)' \
+  bash "$ROOT_DIR/scripts/operator-release.sh" \
+    --operator-inputs "$example_stub_tools_dir" \
+    --run
+[[ ! -e "$example_stub_tools_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
+  fail "operator-inputs run placeholder tools must fail before writing an intake plan"
+assert_no_path_evidence "$example_stub_tools_dir" online-install-substrates
+pass "operator-inputs rejects copied example placeholder tools before plan or run"
+
+ordinary_placeholder_tools_dir="$TMP_DIR/valid-ordinary-placeholder-tools"
+copy_valid_package "$example_online_package" "$ordinary_placeholder_tools_dir"
+cat >"$ordinary_placeholder_tools_dir/tools/kubectl" <<'SH'
+#!/usr/bin/env sh
+# ordinary placeholder note for operator wrapper docs; not an example marker
+exit 0
+SH
+chmod +x "$ordinary_placeholder_tools_dir/tools/kubectl"
+if ! "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$ordinary_placeholder_tools_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-ordinary-placeholder-tools.json"; then
+  cat "$TMP_DIR/doctor-ordinary-placeholder-tools.json" >&2
+  fail "operator-inputs doctor should accept ordinary placeholder comments in real tools"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-ordinary-placeholder-tools.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.status !== 'pass') {
+  throw new Error('doctor ordinary placeholder tool fixture must pass');
+}
+const blockedToolFields = new Set(
+  [
+    ...report.missing_refs.map((entry) => entry.field),
+    ...(report.static_issues || []).map((entry) => entry.field)
+  ].filter((field) => ['kubectl', 'routability_probe'].includes(field))
+);
+if (blockedToolFields.size > 0) {
+  throw new Error(`ordinary placeholder comments must not block tools: ${[...blockedToolFields].join(', ')}`);
+}
+NODE
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$ordinary_placeholder_tools_dir" >/dev/null
+assert_plan \
+  "$ordinary_placeholder_tools_dir/.release-kit-internal/operator-inputs-plan.json" \
+  online/use_existing
+pass "operator-inputs accepts ordinary placeholder comments in package-local tools"
 
 missing_release_contract_run_dir="$TMP_DIR/run-missing-release-contract"
 copy_valid_package "$base_online" "$missing_release_contract_run_dir"
