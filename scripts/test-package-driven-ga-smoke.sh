@@ -104,10 +104,9 @@ prepare_package_airgap_install_substrates() {
     "$package_dir/bundle" \
     "$package_dir/bundle-create-output" \
     "$KIT_AIRGAP_PROFILE" \
-    "$package_dir/substrate-pack-manifest.json" >"$package_dir/bundle-create.out"
+    "$package_dir/substrate-pack-manifest.json" \
+    "$package_dir/substrate-install-inputs.json" >"$package_dir/bundle-create.out"
   write_bundle_operator_inputs "$package_dir/bundle" "$KIT_AIRGAP_PROFILE"
-  cp "$package_dir/substrate-install-inputs.json" \
-    "$package_dir/bundle/operator-inputs/substrate-install-inputs.json"
   write_fake_airgap_kubectl "$package_dir/tools/kubectl"
   write_fake_airgap_archive_probe "$package_dir/tools/archive-probe"
   write_fake_airgap_image_loader "$package_dir/tools/image-loader"

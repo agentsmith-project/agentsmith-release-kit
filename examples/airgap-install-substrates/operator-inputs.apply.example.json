@@ -8,7 +8,7 @@
   "render_values": "airgap-bundle/operator-inputs/render-values.example.json",
   "target_prerequisites": "airgap-bundle/operator-inputs/target-prerequisites.example.json",
   "substrate_pack_manifest": "airgap-bundle/components/substrate-pack-manifest.example.json",
-  "substrate_install_inputs": "airgap-bundle/operator-inputs/substrate-install-inputs.example.json",
+  "substrate_install_inputs": "airgap-bundle/components/substrate-install-inputs.example.json",
   "airgap_bundle": "airgap-bundle",
   "airgap_bundle_manifest": "airgap-bundle/airgap-bundle-manifest.json",
   "namespace": "agentsmith",

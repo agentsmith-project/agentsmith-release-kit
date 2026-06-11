@@ -312,7 +312,8 @@ const AIRGAP_BUNDLE_BASE_COMPONENT_KINDS = new Set([
 ]);
 const AIRGAP_BUNDLE_KIT_COMPONENT_KINDS = new Set([
   ...AIRGAP_BUNDLE_BASE_COMPONENT_KINDS,
-  'substrate_pack_manifest'
+  'substrate_pack_manifest',
+  'substrate_install_inputs'
 ]);
 const AIRGAP_BUNDLE_BASE_BINDING_KEYS = new Set([
   'release_contract_sha256',
@@ -323,7 +324,8 @@ const AIRGAP_BUNDLE_BASE_BINDING_KEYS = new Set([
 ]);
 const AIRGAP_BUNDLE_KIT_BINDING_KEYS = new Set([
   ...AIRGAP_BUNDLE_BASE_BINDING_KEYS,
-  'substrate_pack_manifest_sha256'
+  'substrate_pack_manifest_sha256',
+  'substrate_install_inputs_sha256'
 ]);
 const AIRGAP_BUNDLE_COMPONENT_KEYS = new Set(['kind', 'path', 'sha256']);
 const AIRGAP_IMAGE_ARTIFACT_DECLARATION_KEYS = new Set([
@@ -2315,6 +2317,12 @@ function assertAirgapBundleOutput({
     'airgap_bundle_manifest.target_profile'
   );
   const bindings = requireObject(manifest.bindings, 'airgap_bundle_manifest.bindings');
+  const substrateInstallInputsDigest = isKitAirgap
+    ? requireDigest(
+        bindings.substrate_install_inputs_sha256,
+        'airgap_bundle_manifest.bindings.substrate_install_inputs_sha256'
+      )
+    : undefined;
   assertAirgapBindings({
     bindings,
     expected: {
@@ -2325,7 +2333,8 @@ function assertAirgapBundleOutput({
       image_map_sha256: reportArtifactSummary.imageMapInputSha,
       ...(isKitAirgap
         ? {
-            substrate_pack_manifest_sha256: substratePackInput?.inputDigest
+            substrate_pack_manifest_sha256: substratePackInput?.inputDigest,
+            substrate_install_inputs_sha256: substrateInstallInputsDigest
           }
         : {})
     },
@@ -2341,7 +2350,8 @@ function assertAirgapBundleOutput({
       image_map: reportArtifactSummary.imageMapInputSha,
       ...(isKitAirgap
         ? {
-            substrate_pack_manifest: substratePackInput?.inputDigest
+            substrate_pack_manifest: substratePackInput?.inputDigest,
+            substrate_install_inputs: substrateInstallInputsDigest
           }
         : {})
     },

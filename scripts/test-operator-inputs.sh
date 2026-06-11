@@ -234,6 +234,9 @@ function writeAirgapBundleManifest(profileValue, components) {
   if (componentDigestByKind.substrate_pack_manifest) {
     bindings.substrate_pack_manifest_sha256 = componentDigestByKind.substrate_pack_manifest;
   }
+  if (componentDigestByKind.substrate_install_inputs) {
+    bindings.substrate_install_inputs_sha256 = componentDigestByKind.substrate_install_inputs;
+  }
   const bundleManifest = {
     schema_version: 'agentsmith.airgap-bundle-manifest/v1',
     release_id: 'operator-inputs-test',
@@ -434,10 +437,11 @@ if (deploymentPath.startsWith('airgap/')) {
     copySubstratePackMaterialsIntoBundle();
     manifest.substrate_install_inputs = copyPackageFileIntoBundle(
       'substrate-install-inputs.json',
-      'operator-inputs/substrate-install-inputs.json'
+      'components/substrate-install-inputs.json'
     );
     components.push(
-      bundleComponent('substrate_pack_manifest', 'components/substrate-pack-manifest.json')
+      bundleComponent('substrate_pack_manifest', 'components/substrate-pack-manifest.json'),
+      bundleComponent('substrate_install_inputs', 'components/substrate-install-inputs.json')
     );
   }
   writeAirgapBundleManifest(
@@ -483,6 +487,7 @@ mutate_manifest() {
   local case_name="$2"
 
 "$NODE_BIN" --input-type=module - "$package_dir/operator-inputs.json" "$case_name" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -497,6 +502,10 @@ function targetProfileObject(value) {
     substrate_source: substrateSource,
     distribution
   };
+}
+
+function digestFile(file) {
+  return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
 }
 
 function writeAirgapBundleManifest(profileValue) {
@@ -808,6 +817,22 @@ switch (caseName) {
     manifest.deploy_template_package = 'deploy-template-package-copy.json';
     break;
   }
+  case 'airgap_install_substrate_install_inputs_component_path_mismatch': {
+    const packageRoot = path.dirname(manifestPath);
+    const bundleManifestPath = path.join(packageRoot, manifest.airgap_bundle_manifest);
+    const bundleManifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
+    const component = bundleManifest.components.find((item) => (
+      item.kind === 'substrate_install_inputs'
+    ));
+    const copyPath = 'components/substrate-install-inputs-copy.json';
+    fs.copyFileSync(
+      path.join(packageRoot, 'bundle/components/substrate-install-inputs.json'),
+      path.join(packageRoot, 'bundle', copyPath)
+    );
+    component.path = copyPath;
+    fs.writeFileSync(bundleManifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`);
+    break;
+  }
   case 'airgap_render_values_outside_bundle':
     manifest.render_values = 'render-values.json';
     break;
@@ -829,6 +854,20 @@ switch (caseName) {
     delete installInputs.substrate_truth.substrate_source;
     delete installInputs.substrate_truth.distribution;
     fs.writeFileSync(installInputsPath, `${JSON.stringify(installInputs, null, 2)}\n`);
+    if (manifest.airgap_bundle_manifest) {
+      const bundleManifestPath = path.join(packageRoot, manifest.airgap_bundle_manifest);
+      const bundleManifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
+      const component = bundleManifest.components?.find((item) => (
+        item.kind === 'substrate_install_inputs'
+      ));
+      if (component) {
+        component.sha256 = digestFile(installInputsPath);
+        if (bundleManifest.bindings) {
+          bundleManifest.bindings.substrate_install_inputs_sha256 = component.sha256;
+        }
+        fs.writeFileSync(bundleManifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`);
+      }
+    }
     break;
   }
   case 'substrate_pack_missing_material': {
@@ -1135,6 +1174,7 @@ if (deploymentPath.startsWith('airgap/')) {
   const componentBoundKeys = ['release_contract', 'deploy_template_package', 'deploy_template_archive'];
   if (installsSubstrates) {
     componentBoundKeys.push('substrate_pack_manifest');
+    componentBoundKeys.push('substrate_install_inputs');
   }
   for (const key of componentBoundKeys) {
     const ref = plan.input_refs?.[key];
@@ -2283,6 +2323,12 @@ copy_valid_package "$base_airgap_install" "$airgap_install_mismatch_dir"
 mutate_manifest "$airgap_install_mismatch_dir" airgap_bundle_manifest_install_mismatch
 expect_fail_matching airgap_bundle_manifest_install_mismatch 'airgap_bundle_manifest.target_profile.value must match deployment_path target_profile' \
   "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$airgap_install_mismatch_dir"
+
+airgap_install_inputs_component_path_mismatch_dir="$TMP_DIR/invalid-airgap-install-inputs-component-path-mismatch"
+copy_valid_package "$base_airgap_install" "$airgap_install_inputs_component_path_mismatch_dir"
+mutate_manifest "$airgap_install_inputs_component_path_mismatch_dir" airgap_install_substrate_install_inputs_component_path_mismatch
+expect_fail_matching airgap_install_substrate_install_inputs_component_path_mismatch 'substrate_install_inputs must match airgap_bundle_manifest.components.substrate_install_inputs.path' \
+  "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" --operator-inputs "$airgap_install_inputs_component_path_mismatch_dir"
 
 outside_airgap_install_inputs_dir="$TMP_DIR/invalid-airgap-install-inputs-outside-bundle"
 copy_valid_package "$base_airgap_install" "$outside_airgap_install_inputs_dir"

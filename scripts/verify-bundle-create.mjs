@@ -14,6 +14,10 @@ import {
   expectedImageDeclarationSourceLabel,
   substrateImageDeclarationsFromPackManifest
 } from './lib/airgap-substrate-image-declarations.mjs';
+import {
+  validateSubstrateInstallInputs,
+  validateSubstrateResourceList
+} from './lib/substrate-install-input-validation.mjs';
 import { CURRENT_RELEASE_KIT_VERSION } from './lib/release-kit-version-policy.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -140,6 +144,7 @@ function usage() {
     --profile-values-schema <file> \\
     [--profile-values-example <file>] \\
     [--substrate-pack-manifest <json> for existing_kubernetes/kit_installed/airgap] \\
+    [--substrate-install-inputs <json> for existing_kubernetes/kit_installed/airgap] \\
     --operator-prerequisites <json> \\
     --bundle-root <dir> \\
     --output-dir <dir> \\
@@ -212,6 +217,9 @@ function parseArgs(argv) {
         break;
       case '--substrate-pack-manifest':
         parsed.substratePackManifest = nextValue();
+        break;
+      case '--substrate-install-inputs':
+        parsed.substrateInstallInputs = nextValue();
         break;
       case '--operator-prerequisites':
         parsed.operatorPrerequisites = nextValue();
@@ -314,6 +322,7 @@ async function readJson(file, label) {
 
   try {
     return {
+      file,
       value: JSON.parse(raw),
       raw,
       inputDigest: digestBuffer(Buffer.from(raw))
@@ -848,6 +857,65 @@ async function normalizeSubstratePackManifest(args, targetProfile) {
   };
 }
 
+async function normalizeSubstrateInstallInputs(args, targetProfile, substratePackManifest) {
+  const requiresSubstrateInstallInputs = targetProfile.value === KIT_AIRGAP_TARGET_PROFILE;
+  if (!requiresSubstrateInstallInputs) {
+    if (args.substrateInstallInputs) {
+      fail(`--substrate-install-inputs is only accepted for ${KIT_AIRGAP_TARGET_PROFILE}`);
+    }
+    return undefined;
+  }
+  if (!args.substrateInstallInputs) {
+    cliFail('missing required argument: --substrate-install-inputs');
+  }
+
+  const sourcePath = await canonicalLocalFile(
+    args.substrateInstallInputs,
+    'substrate install inputs'
+  );
+  const input = await readJson(sourcePath, 'substrate install inputs');
+  const installSummary = validateSubstrateInstallInputs(
+    input.value,
+    targetProfile,
+    {
+      fail,
+      raw: input.raw
+    }
+  );
+
+  if (installSummary.resourceListPath) {
+    if (!substratePackManifest?.materialPaths?.includes(installSummary.resourceListPath)) {
+      fail('substrate_install_inputs.resource_list_path must be bound by substrate_pack_manifest material paths');
+    }
+    const sourceResourceListPath = path.resolve(
+      substratePackManifest.sourcePackRoot,
+      installSummary.resourceListPath
+    );
+    const canonicalResourceListPath = await canonicalLocalFile(
+      sourceResourceListPath,
+      'substrate install resource list'
+    );
+    if (!isInsideDirectory(substratePackManifest.sourcePackRoot, canonicalResourceListPath)) {
+      fail('substrate install resource list must resolve inside substrate pack root');
+    }
+    const resourceListInput = await readJson(
+      canonicalResourceListPath,
+      'substrate install resource list'
+    );
+    validateSubstrateResourceList(resourceListInput.value, {
+      fail,
+      label: 'substrate_resource_list',
+      raw: resourceListInput.raw
+    });
+  }
+
+  return {
+    sourcePath,
+    bundlePath: 'components/substrate-install-inputs.json',
+    inputDigest: input.inputDigest
+  };
+}
+
 async function normalizeImageArchives(values) {
   const seen = new Set();
   const normalized = [];
@@ -1035,7 +1103,8 @@ async function assembleBundle({
   imageArchives,
   payloadInputs,
   operatorPrerequisites,
-  substratePackManifest
+  substratePackManifest,
+  substrateInstallInputs
 }) {
   await fs.mkdir(bundleRoot, { recursive: true });
 
@@ -1095,6 +1164,16 @@ async function assembleBundle({
       ))
     });
     await copySubstratePackMaterialFiles(substratePackManifest, bundleRoot);
+  }
+  if (substrateInstallInputs) {
+    components.push({
+      kind: 'substrate_install_inputs',
+      ...(await copyInputFile(
+        substrateInstallInputs.sourcePath,
+        bundleRoot,
+        substrateInstallInputs.bundlePath
+      ))
+    });
   }
 
   const imageArchiveById = new Map(imageArchives.map((archive) => [archive.id, archive]));
@@ -1176,6 +1255,8 @@ async function assembleBundle({
   if (substratePackManifest) {
     bindings.substrate_pack_manifest_sha256 =
       componentDigestByKind.substrate_pack_manifest;
+    bindings.substrate_install_inputs_sha256 =
+      componentDigestByKind.substrate_install_inputs;
   }
   const manifest = {
     schema_version: 'agentsmith.airgap-bundle-manifest/v1',
@@ -1470,6 +1551,11 @@ async function main() {
     const payloadInputs = await normalizePayloadInputs(args);
     const operatorPrerequisites = await normalizeOperatorPrerequisites(args.operatorPrerequisites);
     const substratePackManifest = await normalizeSubstratePackManifest(args, targetProfile);
+    const substrateInstallInputs = await normalizeSubstrateInstallInputs(
+      args,
+      targetProfile,
+      substratePackManifest
+    );
 
     await fs.mkdir(args.outputDir, { recursive: true });
     workDir = await fs.mkdtemp(path.join(path.resolve(args.outputDir), '.bundle-create-work-'));
@@ -1537,7 +1623,8 @@ async function main() {
       imageArchives,
       payloadInputs,
       operatorPrerequisites,
-      substratePackManifest
+      substratePackManifest,
+      substrateInstallInputs
     });
 
     runNodeScript(

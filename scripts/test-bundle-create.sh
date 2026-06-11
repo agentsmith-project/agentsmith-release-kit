@@ -35,6 +35,7 @@ PAYLOAD_DIR="$TMP_DIR/payload"
 IMAGE_DIR="$TMP_DIR/image-archives"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
 KIT_SUBSTRATE_PACK="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
+KIT_SUBSTRATE_INSTALL_INPUTS="$TMP_DIR/substrate-install-inputs.kit-airgap.json"
 VALID_PROVENANCE="$TMP_DIR/evidence-provenance.valid.json"
 
 fail() {
@@ -341,6 +342,26 @@ writePackText('templates/mongodb.yaml', 'kind: StatefulSet\nmetadata:\n  name: m
 writePackText('templates/redis.yaml', 'kind: Deployment\nmetadata:\n  name: redis\n');
 writePackText('templates/object-storage.yaml', 'kind: Deployment\nmetadata:\n  name: object-storage\n');
 writePackText('templates/oidc.yaml', 'kind: Deployment\nmetadata:\n  name: oidc\n');
+const resourceListDigest = writePackJson('templates/substrate-resources.json', [
+  {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'agentsmith-substrate-install-fixture',
+      namespace: 'agentsmith',
+      labels: {
+        'app.kubernetes.io/managed-by': 'agentsmith-release-kit'
+      },
+      annotations: {
+        'agentsmith.io/managed-by': 'agentsmith-release-kit',
+        'agentsmith.io/installation-id': 'kit-install-10001'
+      }
+    },
+    data: {
+      target_profile: profile
+    }
+  }
+]);
 const probeDigest = writePackText(
   'tools/substrate-routability-probe.txt',
   'postgresql tls\nmongodb tls\nredis ping\nobject-storage head-bucket\noidc discovery\n'
@@ -369,7 +390,11 @@ const manifest = {
     mongodb: 'templates/mongodb.yaml',
     redis: 'templates/redis.yaml',
     object_storage: 'templates/object-storage.yaml',
-    oidc: 'templates/oidc.yaml'
+    oidc: 'templates/oidc.yaml',
+    resource_list: {
+      path: 'templates/substrate-resources.json',
+      sha256: resourceListDigest
+    }
   },
   tools: {
     routability_probe: {
@@ -408,6 +433,103 @@ switch (mutation) {
 }
 
 fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+write_kit_substrate_install_inputs() {
+  local output="$1"
+  local profile="$2"
+  local mutation="${3:-valid}"
+
+  "$NODE_BIN" --input-type=module - "$output" "$profile" "$mutation" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [output, profileValue, mutation] = process.argv.slice(2);
+const [targetCluster, substrateSource, distribution] = profileValue.split('/');
+const resourceListPath = mutation === 'missing_resource_list'
+  ? 'templates/missing-substrate-resources.json'
+  : 'templates/substrate-resources.json';
+const installProfileValue = mutation === 'target_profile_mismatch'
+  ? 'existing_kubernetes/kit_installed/online'
+  : profileValue;
+const [installTargetCluster, installSubstrateSource, installDistribution] =
+  installProfileValue.split('/');
+const installationId = 'kit-install-10001';
+const truthInstallationId = mutation === 'installation_id_mismatch'
+  ? 'kit-install-10002'
+  : installationId;
+const reachability = {
+  status: 'declared_reachable',
+  proof: 'operator fixture declared reachable'
+};
+const substrateTruth = {
+  schema_version: 'agentsmith.substrate-connection.truth/v1',
+  target_cluster: installTargetCluster,
+  substrate_source: installSubstrateSource,
+  distribution: installDistribution,
+  declared_at: '2026-06-10T12:00:00.000Z',
+  declared_by: 'release-operator@example.com',
+  installed_by: 'agentsmith-release-kit',
+  release_kit_version: '0.1.0',
+  installation_id: truthInstallationId,
+  services: {
+    postgresql: {
+      host: 'postgresql.agentsmith.svc',
+      port: 5432,
+      database: 'agentsmith',
+      credential_secret_ref: 'secretRef:agentsmith/postgresql-app',
+      admin_secret_ref: 'secretRef:agentsmith/postgresql-admin',
+      sslmode: 'verify-full',
+      reachability,
+      extensions: {
+        pgvector: {
+          status: 'installed',
+          version: '0.7.4'
+        }
+      }
+    },
+    mongodb: {
+      host: 'mongodb.agentsmith.svc',
+      port: 27017,
+      credential_secret_ref: 'secretRef:agentsmith/mongodb-app',
+      tls: { mode: 'verify-full' },
+      reachability
+    },
+    redis: {
+      host: 'redis.agentsmith.svc',
+      port: 6379,
+      credential_secret_ref: 'secretRef:agentsmith/redis-app',
+      tls: { mode: 'verify-full' },
+      reachability
+    },
+    object_storage: {
+      url: 'https://objects.agentsmith.example.com',
+      bucket: 'agentsmith-release-artifacts',
+      region: 'us-west-2',
+      credential_secret_ref: 'secretRef:agentsmith/object-storage-app',
+      tls: { mode: 'https' },
+      reachability
+    },
+    oidc: {
+      issuer_url: 'https://oidc.agentsmith.example.com/realms/agentsmith',
+      client_id: 'agentsmith-web',
+      client_secret_ref: 'secretRef:agentsmith/oidc-client',
+      tls: { mode: 'https' },
+      reachability
+    }
+  }
+};
+const installInputs = {
+  schema_version: 'agentsmith.substrate-install-inputs/v1',
+  target_profile: installProfileValue,
+  installation_id: installationId,
+  substrate_truth: substrateTruth,
+  resource_list_path: resourceListPath
+};
+
+fs.mkdirSync(path.dirname(output), { recursive: true });
+fs.writeFileSync(output, `${JSON.stringify(installInputs, null, 2)}\n`);
 NODE
 }
 
@@ -850,17 +972,19 @@ assert_kit_bundle_and_report() {
   local bundle_root="$1"
   local output_dir="$2"
   local substrate_pack_manifest="$3"
+  local substrate_install_inputs="$4"
 
   "$NODE_BIN" --input-type=module - \
     "$bundle_root" \
     "$output_dir/$REPORT_FILE" \
     "$output_dir/$CHECK_REPORT_FILE" \
-    "$substrate_pack_manifest" <<'NODE'
+    "$substrate_pack_manifest" \
+    "$substrate_install_inputs" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [bundleRoot, reportFile, checkReportFile, substratePackManifest] =
+const [bundleRoot, reportFile, checkReportFile, substratePackManifest, substrateInstallInputs] =
   process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const checkReport = JSON.parse(fs.readFileSync(checkReportFile, 'utf8'));
@@ -871,10 +995,22 @@ const packDigest =
   `sha256:${crypto.createHash('sha256').update(fs.readFileSync(substratePackManifest)).digest('hex')}`;
 const bundledPackDigest =
   `sha256:${crypto.createHash('sha256').update(fs.readFileSync(path.join(bundleRoot, 'components/substrate-pack-manifest.json'))).digest('hex')}`;
+const installInputsDigest =
+  `sha256:${crypto.createHash('sha256').update(fs.readFileSync(substrateInstallInputs)).digest('hex')}`;
+const bundledInstallInputsPath = path.join(
+  bundleRoot,
+  'components/substrate-install-inputs.json'
+);
+const bundledInstallInputsDigest =
+  `sha256:${crypto.createHash('sha256').update(fs.readFileSync(bundledInstallInputsPath)).digest('hex')}`;
 const packComponent = manifest.components.find((component) => (
   component.kind === 'substrate_pack_manifest'
 ));
+const installInputsComponent = manifest.components.find((component) => (
+  component.kind === 'substrate_install_inputs'
+));
 const substratePack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
+const installInputs = JSON.parse(fs.readFileSync(substrateInstallInputs, 'utf8'));
 const expectedSubstrateDeclarations = Object.keys(substratePack.images)
   .sort()
   .map((key) => {
@@ -949,8 +1085,33 @@ if (packComponent.sha256 !== packDigest || bundledPackDigest !== packDigest) {
 if (manifest.bindings?.substrate_pack_manifest_sha256 !== packDigest) {
   throw new Error('substrate pack binding digest must match input manifest digest');
 }
-if (report.components_count !== 5 || checkReport.components_count !== 5) {
-  throw new Error('kit airgap reports must count the substrate pack component');
+if (!installInputsComponent) {
+  throw new Error('kit airgap manifest must include substrate_install_inputs component');
+}
+if (installInputsComponent.path !== 'components/substrate-install-inputs.json') {
+  throw new Error(`unexpected substrate install inputs component path: ${installInputsComponent.path}`);
+}
+if (
+  installInputsComponent.sha256 !== installInputsDigest ||
+  bundledInstallInputsDigest !== installInputsDigest
+) {
+  throw new Error('substrate install inputs component sha must bind to input and bundled file');
+}
+if (manifest.bindings?.substrate_install_inputs_sha256 !== installInputsDigest) {
+  throw new Error('substrate install inputs binding digest must match input digest');
+}
+if (installInputs.resource_list_path) {
+  const sourceResourceList = path.join(path.dirname(substratePackManifest), installInputs.resource_list_path);
+  const bundledResourceList = path.join(bundleRoot, 'components', installInputs.resource_list_path);
+  if (!fs.statSync(bundledResourceList).isFile()) {
+    throw new Error(`missing bundled substrate install resource list: ${installInputs.resource_list_path}`);
+  }
+  if (fileDigest(sourceResourceList) !== fileDigest(bundledResourceList)) {
+    throw new Error(`bundled substrate install resource list digest mismatch: ${installInputs.resource_list_path}`);
+  }
+}
+if (report.components_count !== 6 || checkReport.components_count !== 6) {
+  throw new Error('kit airgap reports must count substrate pack and install inputs components');
 }
 for (const expected of expectedSubstrateDeclarations) {
   const declaration = manifest.image_artifact_declarations.find((item) => item.id === expected.id);
@@ -1041,6 +1202,7 @@ create_payloads
 create_image_archives
 write_operator_prerequisites "$OPERATOR_PREREQUISITES"
 write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK" "$KIT_AIRGAP_PROFILE"
+write_kit_substrate_install_inputs "$KIT_SUBSTRATE_INSTALL_INPUTS" "$KIT_AIRGAP_PROFILE"
 create_substrate_image_archives "$IMAGE_DIR" "$KIT_SUBSTRATE_PACK"
 write_evidence_provenance "$VALID_PROVENANCE"
 refresh_args
@@ -1077,8 +1239,13 @@ run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$valid_kit_bund
   "${default_image_args[@]}" \
   "${kit_image_args[@]}" \
   "${common_payload_args[@]}" \
-  --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" >"$TMP_DIR/valid-create-kit.out"
-assert_kit_bundle_and_report "$valid_kit_bundle_root" "$valid_kit_output_dir" "$KIT_SUBSTRATE_PACK"
+  --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" \
+  --substrate-install-inputs "$KIT_SUBSTRATE_INSTALL_INPUTS" >"$TMP_DIR/valid-create-kit.out"
+assert_kit_bundle_and_report \
+  "$valid_kit_bundle_root" \
+  "$valid_kit_output_dir" \
+  "$KIT_SUBSTRATE_PACK" \
+  "$KIT_SUBSTRATE_INSTALL_INPUTS"
 pass "valid kit-installed airgap bundle create binds substrate pack manifest"
 
 materialized_kit_pack_dir="$TMP_DIR/materialized-kit-airgap-substrate-pack"
@@ -1097,11 +1264,13 @@ run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$materialized_k
   "${default_image_args[@]}" \
   "${kit_image_args[@]}" \
   "${common_payload_args[@]}" \
-  --substrate-pack-manifest "$materialized_kit_pack_dir/substrate-pack-manifest.json" >"$TMP_DIR/materialized-create-kit.out"
+  --substrate-pack-manifest "$materialized_kit_pack_dir/substrate-pack-manifest.json" \
+  --substrate-install-inputs "$materialized_kit_pack_dir/substrate-install-inputs.json" >"$TMP_DIR/materialized-create-kit.out"
 assert_kit_bundle_and_report \
   "$materialized_kit_bundle_root" \
   "$materialized_kit_output_dir" \
-  "$materialized_kit_pack_dir/substrate-pack-manifest.json"
+  "$materialized_kit_pack_dir/substrate-pack-manifest.json" \
+  "$materialized_kit_pack_dir/substrate-install-inputs.json"
 pass "kit-installed airgap bundle create consumes first-party materialized substrate pack"
 
 expect_create_fail_with_evidence missing-evidence-provenance "$TMP_DIR/bundle-missing-evidence-provenance" "$TMP_DIR/out-missing-evidence-provenance" "$TMP_DIR/evidence-missing-provenance" \
@@ -1118,9 +1287,14 @@ run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$kit_evidence_b
   "${kit_image_args[@]}" \
   "${common_payload_args[@]}" \
   --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" \
+  --substrate-install-inputs "$KIT_SUBSTRATE_INSTALL_INPUTS" \
   --evidence-root "$kit_evidence_root" \
   --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/kit-evidence-create.out"
-assert_kit_bundle_and_report "$kit_evidence_bundle_root" "$kit_evidence_output_dir" "$KIT_SUBSTRATE_PACK"
+assert_kit_bundle_and_report \
+  "$kit_evidence_bundle_root" \
+  "$kit_evidence_output_dir" \
+  "$KIT_SUBSTRATE_PACK" \
+  "$KIT_SUBSTRATE_INSTALL_INPUTS"
 assert_airgap_bundle_evidence "$kit_evidence_root" "$KIT_AIRGAP_PROFILE" "$KIT_SUBSTRATE_PACK"
 if ! grep -q 'PASS: release-kit evidence accepted' "$TMP_DIR/kit-evidence-create.out"; then
   cat "$TMP_DIR/kit-evidence-create.out" >&2
@@ -1214,7 +1388,8 @@ expect_create_fail missing-substrate-image-archive "$TMP_DIR/bundle-missing-subs
     "${default_image_args[@]}" \
     "${kit_image_args_without_redis[@]}" \
     "${common_payload_args[@]}" \
-    --substrate-pack-manifest "$KIT_SUBSTRATE_PACK"
+    --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" \
+    --substrate-install-inputs "$KIT_SUBSTRATE_INSTALL_INPUTS"
 if ! grep -Fq -- '--image-archive is missing substrate image archive id: substrate_redis' "$TMP_DIR/missing-substrate-image-archive.err"; then
   cat "$TMP_DIR/missing-substrate-image-archive.err" >&2
   fail "missing substrate image archive failure must name substrate_redis"
@@ -1235,7 +1410,16 @@ done
 expect_create_fail missing-substrate-pack-manifest "$TMP_DIR/bundle-missing-substrate-pack" "$TMP_DIR/out-missing-substrate-pack" \
   run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-missing-substrate-pack" "$TMP_DIR/out-missing-substrate-pack" \
     "${default_image_args[@]}" \
-    "${common_payload_args[@]}"
+    "${kit_image_args[@]}" \
+    "${common_payload_args[@]}" \
+    --substrate-install-inputs "$KIT_SUBSTRATE_INSTALL_INPUTS"
+
+expect_create_fail missing-substrate-install-inputs "$TMP_DIR/bundle-missing-substrate-install-inputs" "$TMP_DIR/out-missing-substrate-install-inputs" \
+  run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-missing-substrate-install-inputs" "$TMP_DIR/out-missing-substrate-install-inputs" \
+    "${default_image_args[@]}" \
+    "${kit_image_args[@]}" \
+    "${common_payload_args[@]}" \
+    --substrate-pack-manifest "$KIT_SUBSTRATE_PACK"
 
 expect_create_fail external-declared-rejects-substrate-pack-manifest "$TMP_DIR/bundle-external-substrate-pack" "$TMP_DIR/out-external-substrate-pack" \
   run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-external-substrate-pack" "$TMP_DIR/out-external-substrate-pack" \
@@ -1243,14 +1427,34 @@ expect_create_fail external-declared-rejects-substrate-pack-manifest "$TMP_DIR/b
     "${common_payload_args[@]}" \
     --substrate-pack-manifest "$KIT_SUBSTRATE_PACK"
 
+expect_create_fail external-declared-rejects-substrate-install-inputs "$TMP_DIR/bundle-external-substrate-install-inputs" "$TMP_DIR/out-external-substrate-install-inputs" \
+  run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-external-substrate-install-inputs" "$TMP_DIR/out-external-substrate-install-inputs" \
+    "${default_image_args[@]}" \
+    "${common_payload_args[@]}" \
+    --substrate-install-inputs "$KIT_SUBSTRATE_INSTALL_INPUTS"
+
 for substrate_pack_case in secret_payload non_digest_image localhost_image missing_required_section missing_material_file material_sha_mismatch; do
   bad_substrate_pack="$TMP_DIR/substrate-pack-$substrate_pack_case.json"
   write_kit_substrate_pack_manifest "$bad_substrate_pack" "$KIT_AIRGAP_PROFILE" "$substrate_pack_case"
   expect_create_fail "kit-substrate-pack-$substrate_pack_case" "$TMP_DIR/bundle-kit-substrate-pack-$substrate_pack_case" "$TMP_DIR/out-kit-substrate-pack-$substrate_pack_case" \
     run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-kit-substrate-pack-$substrate_pack_case" "$TMP_DIR/out-kit-substrate-pack-$substrate_pack_case" \
       "${default_image_args[@]}" \
+      "${kit_image_args[@]}" \
       "${common_payload_args[@]}" \
-      --substrate-pack-manifest "$bad_substrate_pack"
+      --substrate-pack-manifest "$bad_substrate_pack" \
+      --substrate-install-inputs "$KIT_SUBSTRATE_INSTALL_INPUTS"
+done
+
+for substrate_install_inputs_case in target_profile_mismatch installation_id_mismatch missing_resource_list; do
+  bad_substrate_install_inputs="$TMP_DIR/substrate-install-inputs-$substrate_install_inputs_case.json"
+  write_kit_substrate_install_inputs "$bad_substrate_install_inputs" "$KIT_AIRGAP_PROFILE" "$substrate_install_inputs_case"
+  expect_create_fail "kit-substrate-install-inputs-$substrate_install_inputs_case" "$TMP_DIR/bundle-kit-substrate-install-inputs-$substrate_install_inputs_case" "$TMP_DIR/out-kit-substrate-install-inputs-$substrate_install_inputs_case" \
+    run_bundle_create_full "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$TMP_DIR/bundle-kit-substrate-install-inputs-$substrate_install_inputs_case" "$TMP_DIR/out-kit-substrate-install-inputs-$substrate_install_inputs_case" \
+      "${default_image_args[@]}" \
+      "${kit_image_args[@]}" \
+      "${common_payload_args[@]}" \
+      --substrate-pack-manifest "$KIT_SUBSTRATE_PACK" \
+      --substrate-install-inputs "$bad_substrate_install_inputs"
 done
 
 expect_create_fail invalid-target-registry "$TMP_DIR/bundle-bad-registry" "$TMP_DIR/out-bad-registry" \

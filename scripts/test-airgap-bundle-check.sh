@@ -842,12 +842,66 @@ write_kit_substrate_pack_manifest() {
   local mutation="${3:-valid}"
 
   "$NODE_BIN" --input-type=module - "$output" "$profile" "$mutation" <<'NODE'
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const [output, profile, mutation] = process.argv.slice(2);
 const digest = (char) => `sha256:${char.repeat(64)}`;
 const image = (name, tag, char) =>
   `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+const packRoot = path.dirname(output);
+
+function digestBuffer(buffer) {
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+function writePackText(relativePath, content) {
+  const file = path.join(packRoot, relativePath);
+  const bytes = Buffer.from(content);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, bytes);
+  return digestBuffer(bytes);
+}
+
+function writePackJson(relativePath, value) {
+  return writePackText(relativePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+const installPlanDigest = writePackJson('payload/install-substrates.json', {
+  schema_version: 'agentsmith.substrate-install-plan.fixture/v1',
+  installation_id: 'kit-install-10001',
+  resources: ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc']
+});
+writePackText('templates/postgresql.yaml', 'kind: StatefulSet\nmetadata:\n  name: postgresql\n');
+writePackText('templates/mongodb.yaml', 'kind: StatefulSet\nmetadata:\n  name: mongodb\n');
+writePackText('templates/redis.yaml', 'kind: Deployment\nmetadata:\n  name: redis\n');
+writePackText('templates/object-storage.yaml', 'kind: Deployment\nmetadata:\n  name: object-storage\n');
+writePackText('templates/oidc.yaml', 'kind: Deployment\nmetadata:\n  name: oidc\n');
+const resourceListDigest = writePackJson('templates/substrate-resources.json', [
+  {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'agentsmith-substrate-install-fixture',
+      namespace: 'agentsmith',
+      labels: {
+        'app.kubernetes.io/managed-by': 'agentsmith-release-kit'
+      },
+      annotations: {
+        'agentsmith.io/managed-by': 'agentsmith-release-kit',
+        'agentsmith.io/installation-id': 'kit-install-10001'
+      }
+    },
+    data: {
+      target_profile: profile
+    }
+  }
+]);
+const probeDigest = writePackText(
+  'tools/substrate-routability-probe.txt',
+  'postgresql tls\nmongodb tls\nredis ping\nobject-storage head-bucket\noidc discovery\n'
+);
 
 const manifest = {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
@@ -864,7 +918,7 @@ const manifest = {
   payload: {
     install_plan: {
       path: 'payload/install-substrates.json',
-      sha256: digest('6')
+      sha256: installPlanDigest
     }
   },
   templates: {
@@ -872,12 +926,16 @@ const manifest = {
     mongodb: 'templates/mongodb.yaml',
     redis: 'templates/redis.yaml',
     object_storage: 'templates/object-storage.yaml',
-    oidc: 'templates/oidc.yaml'
+    oidc: 'templates/oidc.yaml',
+    resource_list: {
+      path: 'templates/substrate-resources.json',
+      sha256: resourceListDigest
+    }
   },
   tools: {
     routability_probe: {
       path: 'tools/substrate-routability-probe.txt',
-      sha256: digest('7')
+      sha256: probeDigest
     }
   },
   checksums: {
@@ -938,19 +996,143 @@ const componentPath = 'components/substrate-pack-manifest.json';
 const destination = path.join(bundleRoot, componentPath);
 const manifest = JSON.parse(fs.readFileSync(bundleManifestPath, 'utf8'));
 const substratePack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
+const installInputsComponentPath = 'components/substrate-install-inputs.json';
+const installResourceListPath = 'templates/substrate-resources.json';
+const installInputsDestination = path.join(bundleRoot, installInputsComponentPath);
+const installResourceListDestination = path.join(
+  bundleRoot,
+  'components',
+  installResourceListPath
+);
 
 fs.copyFileSync(substratePackManifest, destination);
 const componentSha256 = digestFile(destination);
+fs.mkdirSync(path.dirname(installInputsDestination), { recursive: true });
+for (const relativePath of [
+  'payload/install-substrates.json',
+  'templates/postgresql.yaml',
+  'templates/mongodb.yaml',
+  'templates/redis.yaml',
+  'templates/object-storage.yaml',
+  'templates/oidc.yaml',
+  'templates/substrate-resources.json',
+  'tools/substrate-routability-probe.txt'
+]) {
+  const source = path.join(path.dirname(substratePackManifest), relativePath);
+  const materialDestination = path.join(bundleRoot, 'components', relativePath);
+  fs.mkdirSync(path.dirname(materialDestination), { recursive: true });
+  fs.copyFileSync(source, materialDestination);
+}
+const installProfileValue = mutation === 'substrate_install_inputs_mismatch'
+  ? 'existing_kubernetes/kit_installed/online'
+  : 'existing_kubernetes/kit_installed/airgap';
+const [targetCluster, substrateSource, distribution] = installProfileValue.split('/');
+const installationId = 'kit-install-10001';
+const reachability = {
+  status: 'declared_reachable',
+  proof: 'operator fixture declared reachable'
+};
+const resourceList = [
+  {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'agentsmith-substrate-install-fixture',
+      namespace: 'agentsmith',
+      labels: {
+        'app.kubernetes.io/managed-by': 'agentsmith-release-kit'
+      },
+      annotations: {
+        'agentsmith.io/managed-by': 'agentsmith-release-kit',
+        'agentsmith.io/installation-id': installationId
+      }
+    },
+    data: {
+      target_profile: installProfileValue
+    }
+  }
+];
+const installInputs = {
+  schema_version: 'agentsmith.substrate-install-inputs/v1',
+  target_profile: installProfileValue,
+  installation_id: installationId,
+  substrate_truth: {
+    schema_version: 'agentsmith.substrate-connection.truth/v1',
+    target_cluster: targetCluster,
+    substrate_source: substrateSource,
+    distribution,
+    declared_at: '2026-06-10T12:00:00.000Z',
+    declared_by: 'release-operator@example.com',
+    installed_by: 'agentsmith-release-kit',
+    release_kit_version: '0.1.0',
+    installation_id: installationId,
+    services: {
+      postgresql: {
+        host: 'postgresql.agentsmith.svc',
+        port: 5432,
+        database: 'agentsmith',
+        credential_secret_ref: 'secretRef:agentsmith/postgresql-app',
+        admin_secret_ref: 'secretRef:agentsmith/postgresql-admin',
+        sslmode: 'verify-full',
+        reachability,
+        extensions: {
+          pgvector: {
+            status: 'installed',
+            version: '0.7.4'
+          }
+        }
+      },
+      mongodb: {
+        host: 'mongodb.agentsmith.svc',
+        port: 27017,
+        credential_secret_ref: 'secretRef:agentsmith/mongodb-app',
+        tls: { mode: 'verify-full' },
+        reachability
+      },
+      redis: {
+        host: 'redis.agentsmith.svc',
+        port: 6379,
+        credential_secret_ref: 'secretRef:agentsmith/redis-app',
+        tls: { mode: 'verify-full' },
+        reachability
+      },
+      object_storage: {
+        url: 'https://objects.agentsmith.example.com',
+        bucket: 'agentsmith-release-artifacts',
+        region: 'us-west-2',
+        credential_secret_ref: 'secretRef:agentsmith/object-storage-app',
+        tls: { mode: 'https' },
+        reachability
+      },
+      oidc: {
+        issuer_url: 'https://oidc.agentsmith.example.com/realms/agentsmith',
+        client_id: 'agentsmith-web',
+        client_secret_ref: 'secretRef:agentsmith/oidc-client',
+        tls: { mode: 'https' },
+        reachability
+      }
+    }
+  },
+  resource_list_path: installResourceListPath
+};
+fs.writeFileSync(installInputsDestination, `${JSON.stringify(installInputs, null, 2)}\n`);
+const installInputsSha256 = digestFile(installInputsDestination);
 
 manifest.substrate = {
   mode: 'kit_installed',
   bundled: true
 };
 manifest.bindings.substrate_pack_manifest_sha256 = componentSha256;
+manifest.bindings.substrate_install_inputs_sha256 = installInputsSha256;
 manifest.components.push({
   kind: 'substrate_pack_manifest',
   path: componentPath,
   sha256: componentSha256
+});
+manifest.components.push({
+  kind: 'substrate_install_inputs',
+  path: installInputsComponentPath,
+  sha256: installInputsSha256
 });
 for (const key of Object.keys(substratePack.images).sort()) {
   const id = `substrate_${key}`;
@@ -999,6 +1181,24 @@ switch (mutation) {
     manifest.components = manifest.components.filter((component) => (
       component.kind !== 'substrate_pack_manifest'
     ));
+    break;
+  case 'substrate_install_inputs_binding_sha_mismatch':
+    manifest.bindings.substrate_install_inputs_sha256 = `sha256:${'3'.repeat(64)}`;
+    break;
+  case 'substrate_install_inputs_component_sha_mismatch':
+    manifest.components.find((component) => (
+      component.kind === 'substrate_install_inputs'
+    )).sha256 = `sha256:${'4'.repeat(64)}`;
+    break;
+  case 'substrate_install_inputs_mismatch':
+    break;
+  case 'missing_substrate_install_inputs_component':
+    manifest.components = manifest.components.filter((component) => (
+      component.kind !== 'substrate_install_inputs'
+    ));
+    break;
+  case 'substrate_install_resource_list_missing':
+    fs.rmSync(installResourceListDestination);
     break;
   default:
     throw new Error(`unknown kit substrate mutation: ${mutation}`);
@@ -1422,8 +1622,8 @@ run_image_map "$valid_kit_image_map_dir" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE"
 create_bundle "$valid_kit_image_map_dir/image-map.json" "$valid_kit_bundle_root" "$valid_kit_bundle_manifest"
 add_kit_substrate_pack_to_bundle "$valid_kit_bundle_root" "$valid_kit_bundle_manifest" "$valid_kit_substrate_pack"
 run_airgap_bundle_check "$valid_kit_image_map_dir/image-map.json" "$KIT_AIRGAP_PROFILE" "$valid_kit_bundle_root" "$valid_kit_bundle_manifest" "$valid_kit_output_dir" >"$TMP_DIR/valid-kit-airgap.out"
-assert_report "$valid_kit_output_dir/$REPORT_FILE" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE" 5 kit_installed true
-pass "valid kit-installed airgap bundle manifest binds substrate pack component digest"
+assert_report "$valid_kit_output_dir/$REPORT_FILE" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE" 6 kit_installed true
+pass "valid kit-installed airgap bundle manifest binds substrate pack and install inputs components"
 
 required_contract="$TMP_DIR/required-target-profile.release-contract.json"
 required_deploy_template_package="$TMP_DIR/required-target-profile.deploy-template-package.json"
@@ -1460,7 +1660,7 @@ run_airgap_bundle_check \
   "$derived_kit_bundle_root" \
   "$derived_kit_bundle_manifest" \
   "$derived_kit_output_dir" >"$TMP_DIR/derived-kit-airgap.out"
-assert_report "$derived_kit_output_dir/$REPORT_FILE" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE" 5 kit_installed true
+assert_report "$derived_kit_output_dir/$REPORT_FILE" "$VALID_CONTRACT" "$KIT_AIRGAP_PROFILE" 6 kit_installed true
 pass "kit airgap bundle manifest may omit target/substrate identity and derive from CLI"
 
 expect_outside_bundle_manifest_fail
@@ -1469,6 +1669,11 @@ expect_bundle_root_symlink_fail
 expect_kit_bundle_fail substrate-pack-binding-sha-mismatch substrate_pack_binding_sha_mismatch
 expect_kit_bundle_fail substrate-pack-component-sha-mismatch substrate_pack_component_sha_mismatch
 expect_kit_bundle_fail missing-substrate-pack-component missing_substrate_pack_component
+expect_kit_bundle_fail substrate-install-inputs-binding-sha-mismatch substrate_install_inputs_binding_sha_mismatch
+expect_kit_bundle_fail substrate-install-inputs-component-sha-mismatch substrate_install_inputs_component_sha_mismatch
+expect_kit_bundle_fail missing-substrate-install-inputs-component missing_substrate_install_inputs_component
+expect_kit_bundle_fail substrate-install-inputs-mismatch substrate_install_inputs_mismatch
+expect_kit_bundle_fail substrate-install-resource-list-missing substrate_install_resource_list_missing
 expect_kit_bundle_fail substrate-pack-secret-payload valid secret_payload
 expect_kit_bundle_fail substrate-pack-source-path valid source_path
 expect_kit_bundle_fail substrate-pack-non-digest-image valid non_digest_image

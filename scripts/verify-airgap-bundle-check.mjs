@@ -3,7 +3,14 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { validateSubstratePackManifest } from './lib/substrate-pack-manifest-validation.mjs';
+import {
+  validateSubstratePackManifest,
+  validateSubstratePackManifestMateriality
+} from './lib/substrate-pack-manifest-validation.mjs';
+import {
+  validateSubstrateInstallInputs,
+  validateSubstrateResourceList
+} from './lib/substrate-install-input-validation.mjs';
 import {
   expectedImageDeclarationsById,
   expectedImageDeclarationSourceLabel,
@@ -53,6 +60,7 @@ const REPORT_FILE = 'airgap-bundle-check-report.json';
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 const SUBSTRATE_PACK_COMPONENT_KIND = 'substrate_pack_manifest';
+const SUBSTRATE_INSTALL_INPUTS_COMPONENT_KIND = 'substrate_install_inputs';
 const BUNDLE_MANIFEST_KEYS = new Set([
   'schema_version',
   'release_id',
@@ -1120,6 +1128,50 @@ async function assertPayloadArtifacts({ artifacts, bundleRoot }) {
   };
 }
 
+async function assertSubstrateInstallInputs({ bundleRoot, component, targetProfile }) {
+  const componentValue = requireObject(
+    component,
+    'bundle_manifest.components[substrate_install_inputs]'
+  );
+  const inputPath = await resolveBundleFile(
+    bundleRoot,
+    componentValue.path,
+    'bundle_manifest.components[substrate_install_inputs].path'
+  );
+  const input = await readJson(inputPath, 'substrate install inputs');
+  const installSummary = validateSubstrateInstallInputs(
+    input.value,
+    targetProfile,
+    {
+      fail,
+      raw: input.raw
+    }
+  );
+
+  if (!installSummary.resourceListPath) {
+    return;
+  }
+
+  const resourceListBundlePath = path.posix.join(
+    path.posix.dirname(componentValue.path),
+    installSummary.resourceListPath
+  );
+  const resourceListPath = await resolveBundleFile(
+    bundleRoot,
+    resourceListBundlePath,
+    'substrate_install_inputs.resource_list_path'
+  );
+  const resourceListInput = await readJson(
+    resourceListPath,
+    'substrate install resource list'
+  );
+  validateSubstrateResourceList(resourceListInput.value, {
+    fail,
+    label: 'substrate_resource_list',
+    raw: resourceListInput.raw
+  });
+}
+
 function assertOperatorRef(value, label) {
   const ref = requireString(value, label);
   if (ref.trim() !== ref) {
@@ -1411,23 +1463,38 @@ async function main() {
   };
   let substrateImageDeclarations = [];
   if (targetProfile.value === KIT_AIRGAP_TARGET_PROFILE) {
-    const substratePackComponent = requireArray(
+    const bundleComponents = requireArray(
       bundleManifest.components,
       'bundle_manifest.components'
-    ).find((componentValue) => (
+    );
+    const substratePackComponent = bundleComponents.find((componentValue) => (
       requireObject(componentValue, 'bundle_manifest.components[]').kind ===
       SUBSTRATE_PACK_COMPONENT_KIND
+    ));
+    const substrateInstallInputsComponent = bundleComponents.find((componentValue) => (
+      requireObject(componentValue, 'bundle_manifest.components[]').kind ===
+      SUBSTRATE_INSTALL_INPUTS_COMPONENT_KIND
     ));
     const component = requireObject(
       substratePackComponent,
       'bundle_manifest.components[substrate_pack_manifest]'
     );
+    const installInputsComponent = requireObject(
+      substrateInstallInputsComponent,
+      'bundle_manifest.components[substrate_install_inputs]'
+    );
     expectedBindings.substrate_pack_manifest_sha256 = requireDigest(
       component.sha256,
       'bundle_manifest.components[substrate_pack_manifest].sha256'
     );
+    expectedBindings.substrate_install_inputs_sha256 = requireDigest(
+      installInputsComponent.sha256,
+      'bundle_manifest.components[substrate_install_inputs].sha256'
+    );
     expectedComponentSha256.substrate_pack_manifest =
       expectedBindings.substrate_pack_manifest_sha256;
+    expectedComponentSha256.substrate_install_inputs =
+      expectedBindings.substrate_install_inputs_sha256;
 
     const substratePackPath = await resolveBundleFile(
       bundleRoot,
@@ -1441,10 +1508,19 @@ async function main() {
       );
     }
     validateSubstratePackManifest(substratePackInput.value, targetProfile, { fail });
+    await validateSubstratePackManifestMateriality(substratePackInput.value, {
+      fail,
+      packRoot: path.dirname(substratePackPath)
+    });
     substrateImageDeclarations = substrateImageDeclarationsFromPackManifest(
       substratePackInput.value,
       { fail }
     );
+    await assertSubstrateInstallInputs({
+      bundleRoot,
+      component: installInputsComponent,
+      targetProfile
+    });
   }
   const bundleSummary = await assertBundleManifest({
     manifest: bundleManifest,

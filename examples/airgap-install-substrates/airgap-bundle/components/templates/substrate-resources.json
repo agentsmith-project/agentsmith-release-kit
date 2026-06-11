@@ -1,0 +1,838 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+      "name": "agentsmith-substrate-config",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "data": {
+      "profile": "existing_kubernetes/kit_installed/airgap",
+      "installation_id": "kit-install-airgap-20260523-001"
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "agentsmith-substrates-same-namespace",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/part-of": "agentsmith-substrate"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ],
+      "ingress": [
+        {
+          "from": [
+            {
+              "podSelector": {}
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "postgresql",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "postgresql"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "type": "ClusterIP",
+      "selector": {
+        "app.kubernetes.io/name": "postgresql"
+      },
+      "ports": [
+        {
+          "name": "postgresql",
+          "port": 5432,
+          "targetPort": 5432
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {
+      "name": "postgresql-data",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "postgresql"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "storageClassName": "standard",
+      "resources": {
+        "requests": {
+          "storage": "20Gi"
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "StatefulSet",
+    "metadata": {
+      "name": "postgresql",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "postgresql"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "serviceName": "postgresql",
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/name": "postgresql"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/part-of": "agentsmith-substrate",
+            "app.kubernetes.io/name": "postgresql"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "postgresql",
+              "image": "registry.airgap.example/agentsmith/substrates/postgresql:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc",
+              "ports": [
+                {
+                  "name": "postgresql",
+                  "containerPort": 5432
+                }
+              ],
+              "env": [
+                {
+                  "name": "POSTGRES_DB",
+                  "value": "agentsmith"
+                },
+                {
+                  "name": "POSTGRES_USER",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "postgresql-app",
+                      "key": "username"
+                    }
+                  }
+                },
+                {
+                  "name": "POSTGRES_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "postgresql-app",
+                      "key": "password"
+                    }
+                  }
+                },
+                {
+                  "name": "PGDATA",
+                  "value": "/pgdata"
+                }
+              ],
+              "args": [
+                "postgres",
+                "-c",
+                "ssl=on",
+                "-c",
+                "ssl_cert_file=/tls/tls.crt",
+                "-c",
+                "ssl_key_file=/tls/tls.key",
+                "-c",
+                "ssl_ca_file=/tls/ca.crt"
+              ],
+              "volumeMounts": [
+                {
+                  "name": "postgresql-data",
+                  "mountPath": "/pgdata"
+                },
+                {
+                  "name": "postgresql-tls",
+                  "mountPath": "/tls",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "volumes": [
+            {
+              "name": "postgresql-data",
+              "persistentVolumeClaim": {
+                "claimName": "postgresql-data"
+              }
+            },
+            {
+              "name": "postgresql-tls",
+              "secret": {
+                "secretName": "postgresql-server-tls"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "mongodb",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "mongodb"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "type": "ClusterIP",
+      "selector": {
+        "app.kubernetes.io/name": "mongodb"
+      },
+      "ports": [
+        {
+          "name": "mongodb",
+          "port": 27017,
+          "targetPort": 27017
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {
+      "name": "mongodb-data",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "mongodb"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "storageClassName": "standard",
+      "resources": {
+        "requests": {
+          "storage": "20Gi"
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "StatefulSet",
+    "metadata": {
+      "name": "mongodb",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "mongodb"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "serviceName": "mongodb",
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/name": "mongodb"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/part-of": "agentsmith-substrate",
+            "app.kubernetes.io/name": "mongodb"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "mongodb",
+              "image": "registry.airgap.example/agentsmith/substrates/mongodb:7.0@sha256:948b635bc126d62274eebb650dd2e2e66c9abc3bb0a336eb2279a5d8489417f5",
+              "ports": [
+                {
+                  "name": "mongodb",
+                  "containerPort": 27017
+                }
+              ],
+              "env": [
+                {
+                  "name": "MONGO_INITDB_ROOT_USERNAME",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "mongodb-app",
+                      "key": "username"
+                    }
+                  }
+                },
+                {
+                  "name": "MONGO_INITDB_ROOT_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "mongodb-app",
+                      "key": "password"
+                    }
+                  }
+                }
+              ],
+              "args": [
+                "mongod",
+                "--bind_ip_all",
+                "--tlsMode",
+                "requireTLS",
+                "--tlsCertificateKeyFile",
+                "/tls/tls.pem",
+                "--tlsCAFile",
+                "/tls/ca.crt"
+              ],
+              "volumeMounts": [
+                {
+                  "name": "mongodb-data",
+                  "mountPath": "/data/db"
+                },
+                {
+                  "name": "mongodb-tls",
+                  "mountPath": "/tls",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "volumes": [
+            {
+              "name": "mongodb-data",
+              "persistentVolumeClaim": {
+                "claimName": "mongodb-data"
+              }
+            },
+            {
+              "name": "mongodb-tls",
+              "secret": {
+                "secretName": "mongodb-server-tls"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "redis",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "redis"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "type": "ClusterIP",
+      "selector": {
+        "app.kubernetes.io/name": "redis"
+      },
+      "ports": [
+        {
+          "name": "redis",
+          "port": 6379,
+          "targetPort": 6379
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {
+      "name": "redis-data",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "redis"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "storageClassName": "standard",
+      "resources": {
+        "requests": {
+          "storage": "5Gi"
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "name": "redis",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "redis"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/name": "redis"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/part-of": "agentsmith-substrate",
+            "app.kubernetes.io/name": "redis"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "redis",
+              "image": "registry.airgap.example/agentsmith/substrates/redis:7.2@sha256:73d3498d8e395b685cf9263877c445fe9bf2bb436db33d545780ae398f97a23d",
+              "ports": [
+                {
+                  "name": "redis",
+                  "containerPort": 6379
+                }
+              ],
+              "env": [
+                {
+                  "name": "REDIS_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "redis-app",
+                      "key": "password"
+                    }
+                  }
+                }
+              ],
+              "args": [
+                "redis-server",
+                "--appendonly",
+                "yes",
+                "--tls-port",
+                "6379",
+                "--port",
+                "0",
+                "--tls-cert-file",
+                "/tls/tls.crt",
+                "--tls-key-file",
+                "/tls/tls.key",
+                "--tls-ca-cert-file",
+                "/tls/ca.crt",
+                "--requirepass",
+                "$(REDIS_PASSWORD)"
+              ],
+              "volumeMounts": [
+                {
+                  "name": "redis-data",
+                  "mountPath": "/data"
+                },
+                {
+                  "name": "redis-tls",
+                  "mountPath": "/tls",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "volumes": [
+            {
+              "name": "redis-data",
+              "persistentVolumeClaim": {
+                "claimName": "redis-data"
+              }
+            },
+            {
+              "name": "redis-tls",
+              "secret": {
+                "secretName": "redis-server-tls"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "object-storage",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "object-storage"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "type": "ClusterIP",
+      "selector": {
+        "app.kubernetes.io/name": "object-storage"
+      },
+      "ports": [
+        {
+          "name": "api",
+          "port": 9000,
+          "targetPort": 9000
+        },
+        {
+          "name": "console",
+          "port": 9001,
+          "targetPort": 9001
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {
+      "name": "object-storage-data",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "object-storage"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "storageClassName": "standard",
+      "resources": {
+        "requests": {
+          "storage": "20Gi"
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "name": "object-storage",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "object-storage"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/name": "object-storage"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/part-of": "agentsmith-substrate",
+            "app.kubernetes.io/name": "object-storage"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "object-storage",
+              "image": "registry.airgap.example/agentsmith/substrates/object-storage:RELEASE.2024-05-10T01-41-38Z@sha256:420663b8685c5396f06405ad516d611db4465939a141cc7d40266342d0f2632d",
+              "ports": [
+                {
+                  "name": "api",
+                  "containerPort": 9000
+                },
+                {
+                  "name": "console",
+                  "containerPort": 9001
+                }
+              ],
+              "env": [
+                {
+                  "name": "MINIO_ROOT_USER",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "object-storage-app",
+                      "key": "access_key"
+                    }
+                  }
+                },
+                {
+                  "name": "MINIO_ROOT_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "object-storage-app",
+                      "key": "secret_key"
+                    }
+                  }
+                }
+              ],
+              "args": [
+                "server",
+                "/data",
+                "--address",
+                ":9000",
+                "--console-address",
+                ":9001",
+                "--certs-dir",
+                "/certs"
+              ],
+              "volumeMounts": [
+                {
+                  "name": "object-storage-data",
+                  "mountPath": "/data"
+                },
+                {
+                  "name": "object-storage-tls",
+                  "mountPath": "/certs",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "volumes": [
+            {
+              "name": "object-storage-data",
+              "persistentVolumeClaim": {
+                "claimName": "object-storage-data"
+              }
+            },
+            {
+              "name": "object-storage-tls",
+              "secret": {
+                "secretName": "object-storage-server-tls"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "name": "oidc",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "oidc"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "type": "ClusterIP",
+      "selector": {
+        "app.kubernetes.io/name": "oidc"
+      },
+      "ports": [
+        {
+          "name": "https",
+          "port": 8443,
+          "targetPort": 8443
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "name": "oidc",
+      "namespace": "agentsmith",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate",
+        "app.kubernetes.io/name": "oidc"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
+      }
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/name": "oidc"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/part-of": "agentsmith-substrate",
+            "app.kubernetes.io/name": "oidc"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "oidc",
+              "image": "registry.airgap.example/agentsmith/substrates/keycloak:25.0.6@sha256:82c5b7a110456dbd42b86ea572e728878549954cc8bd03cd65410d75328095d2",
+              "ports": [
+                {
+                  "name": "https",
+                  "containerPort": 8443
+                }
+              ],
+              "env": [
+                {
+                  "name": "KEYCLOAK_ADMIN",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "oidc-admin",
+                      "key": "username"
+                    }
+                  }
+                },
+                {
+                  "name": "KEYCLOAK_ADMIN_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "name": "oidc-admin",
+                      "key": "password"
+                    }
+                  }
+                },
+                {
+                  "name": "KC_HEALTH_ENABLED",
+                  "value": "true"
+                }
+              ],
+              "args": [
+                "start-dev",
+                "--https-port=8443",
+                "--https-certificate-file=/tls/tls.crt",
+                "--https-certificate-key-file=/tls/tls.key",
+                "--hostname-strict=false"
+              ],
+              "volumeMounts": [
+                {
+                  "name": "oidc-tls",
+                  "mountPath": "/tls",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "volumes": [
+            {
+              "name": "oidc-tls",
+              "secret": {
+                "secretName": "oidc-server-tls"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+]

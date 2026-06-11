@@ -24,7 +24,12 @@
     {
       "kind": "substrate_pack_manifest",
       "path": "components/substrate-pack-manifest.example.json",
-      "sha256": "sha256:3d678fa0dbbe135f2eaba04fd3728dc4a6a77410b244c8f8b40a38f9470f28a0"
+      "sha256": "sha256:7778b829eb7e5f95a6fd5ffb7c9bb67cfb0dc8f7315e8549b7751bdc29b6c9cc"
+    },
+    {
+      "kind": "substrate_install_inputs",
+      "path": "components/substrate-install-inputs.example.json",
+      "sha256": "sha256:8e2730bed0bdb53933d30ad5bbdc1072014b55e8c6a938f44adc23ffa65a6d18"
     }
   ]
 }

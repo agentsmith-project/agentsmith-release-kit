@@ -18,17 +18,18 @@
         "sslmode": "verify-full",
         "tls": {
           "mode": "verify-full",
-          "ca_secret_ref": "secretRef:agentsmith/postgresql-ca"
-        },
-        "reachability": {
-          "status": "declared_reachable",
-          "proof": "operator connectivity check 2026-05-23T12:00:00Z"
+          "ca_secret_ref": "secretRef:agentsmith/postgresql-ca",
+          "server_secret_ref": "secretRef:agentsmith/postgresql-server-tls"
         },
         "extensions": {
           "pgvector": {
             "status": "installed",
             "version": "0.7.4"
           }
+        },
+        "reachability": {
+          "status": "declared_reachable",
+          "proof": "kit materialized postgresql cluster Service; operator readiness verification required after apply"
         }
       },
       "mongodb": {
@@ -37,11 +38,12 @@
         "credential_secret_ref": "secretRef:agentsmith/mongodb-app",
         "tls": {
           "mode": "verify-full",
-          "ca_secret_ref": "secretRef:agentsmith/mongodb-ca"
+          "ca_secret_ref": "secretRef:agentsmith/mongodb-ca",
+          "server_secret_ref": "secretRef:agentsmith/mongodb-server-tls"
         },
         "reachability": {
           "status": "declared_reachable",
-          "proof": "operator connectivity check 2026-05-23T12:00:00Z"
+          "proof": "kit materialized mongodb cluster Service; operator readiness verification required after apply"
         }
       },
       "redis": {
@@ -50,62 +52,45 @@
         "credential_secret_ref": "secretRef:agentsmith/redis-app",
         "tls": {
           "mode": "verify-full",
-          "ca_secret_ref": "secretRef:agentsmith/redis-ca"
+          "ca_secret_ref": "secretRef:agentsmith/redis-ca",
+          "server_secret_ref": "secretRef:agentsmith/redis-server-tls"
         },
         "reachability": {
           "status": "declared_reachable",
-          "proof": "operator connectivity check 2026-05-23T12:00:00Z"
+          "proof": "kit materialized redis cluster Service; operator readiness verification required after apply"
         }
       },
       "object_storage": {
-        "url": "https://objects.agentsmith.svc",
-        "bucket": "agentsmith-release-artifacts",
-        "region": "us-west-2",
+        "url": "https://object-storage.agentsmith.svc:9000",
+        "bucket": "agentsmith",
+        "region": "local",
         "credential_secret_ref": "secretRef:agentsmith/object-storage-app",
         "tls": {
           "mode": "https",
-          "ca_secret_ref": "secretRef:agentsmith/object-storage-ca"
+          "ca_secret_ref": "secretRef:agentsmith/object-storage-ca",
+          "server_secret_ref": "secretRef:agentsmith/object-storage-server-tls"
         },
         "reachability": {
           "status": "declared_reachable",
-          "proof": "operator bucket check 2026-05-23T12:00:00Z"
+          "proof": "kit materialized object-storage cluster Service; operator readiness verification required after apply"
         }
       },
       "oidc": {
-        "issuer_url": "https://oidc.airgap.example.internal/realms/agentsmith",
-        "client_id": "agentsmith-web",
+        "issuer_url": "https://oidc.agentsmith.svc:8443/realms/agentsmith",
+        "client_id": "agentsmith",
+        "admin_secret_ref": "secretRef:agentsmith/oidc-admin",
         "client_secret_ref": "secretRef:agentsmith/oidc-client",
         "tls": {
           "mode": "https",
-          "ca_secret_ref": "secretRef:agentsmith/oidc-ca"
+          "ca_secret_ref": "secretRef:agentsmith/oidc-ca",
+          "server_secret_ref": "secretRef:agentsmith/oidc-server-tls"
         },
         "reachability": {
           "status": "declared_reachable",
-          "proof": "operator oidc check 2026-05-23T12:00:00Z"
+          "proof": "kit materialized oidc cluster Service; operator readiness verification required after apply"
         }
       }
     }
   },
-  "resources": [
-    {
-      "apiVersion": "v1",
-      "kind": "ConfigMap",
-      "metadata": {
-        "name": "agentsmith-airgap-substrate-endpoints",
-        "namespace": "agentsmith",
-        "labels": {
-          "app.kubernetes.io/managed-by": "agentsmith-release-kit"
-        },
-        "annotations": {
-          "agentsmith.io/managed-by": "agentsmith-release-kit",
-          "agentsmith.io/installation-id": "kit-install-airgap-20260523-001"
-        }
-      },
-      "data": {
-        "postgresql_host": "postgresql.agentsmith.svc",
-        "mongodb_host": "mongodb.agentsmith.svc",
-        "redis_host": "redis.agentsmith.svc"
-      }
-    }
-  ]
+  "resource_list_path": "templates/substrate-resources.json"
 }

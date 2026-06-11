@@ -1031,6 +1031,7 @@ async function validateAirgapBundleComponentBindings({ refs, deploymentPath }) {
   const requiredComponentRefKeys = [...AIRGAP_BUNDLE_COMPONENT_REF_KEYS];
   if (isAirgapInstallSubstratesPath(deploymentPath)) {
     requiredComponentRefKeys.push('substrate_pack_manifest');
+    requiredComponentRefKeys.push('substrate_install_inputs');
   }
 
   for (const key of requiredComponentRefKeys) {

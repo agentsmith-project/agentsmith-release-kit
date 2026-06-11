@@ -458,7 +458,8 @@ const componentPaths = {
   deploy_template_package: 'components/deploy-template-package.json',
   deploy_template_archive: 'components/agentsmith-deploy-template-package.tgz',
   image_map: 'components/image-map.json',
-  substrate_pack_manifest: 'components/substrate-pack-manifest.json'
+  substrate_pack_manifest: 'components/substrate-pack-manifest.json',
+  substrate_install_inputs: 'components/substrate-install-inputs.json'
 };
 const substratePackManifest = {
   schema_version: 'agentsmith.substrate-pack-manifest/v1',
@@ -490,6 +491,7 @@ const substratePackManifest = {
   }
 };
 const substratePackManifestDigest = jsonDigest(substratePackManifest);
+const substrateInstallInputsDigest = fixtureDigest('4');
 const imageArtifactDeclarations = airgapImageMap.mappings.map((mapping, index) => ({
   id: mapping.id,
   source_image: mapping.source_image,
@@ -759,7 +761,9 @@ function useImageMapOutput() {
 function useAirgapBundleOutput({
   includeSubstrateTruth = false,
   profile = AIRGAP_PROFILE,
-  includeSubstratePack = profile === KIT_AIRGAP_PROFILE
+  includeSubstratePack = profile === KIT_AIRGAP_PROFILE,
+  includeSubstratePackOutput = profile === KIT_AIRGAP_PROFILE,
+  includeSubstrateInstallInputs = profile === KIT_AIRGAP_PROFILE
 } = {}) {
   const [, substrateSource] = profile.split('/');
   useTargetProfile(profile);
@@ -777,14 +781,25 @@ function useAirgapBundleOutput({
   };
   airgapBundleManifest.image_artifact_declarations = [...imageArtifactDeclarations];
   airgapBundleManifest.components = airgapBundleManifest.components.filter(
-    (component) => component.kind !== 'substrate_pack_manifest'
+    (component) =>
+      !['substrate_pack_manifest', 'substrate_install_inputs'].includes(component.kind)
   );
   delete airgapBundleManifest.bindings.substrate_pack_manifest_sha256;
+  delete airgapBundleManifest.bindings.substrate_install_inputs_sha256;
   airgapBundleCheckReport.artifacts.image_map.image_count = imageArtifactDeclarations.length;
   airgapBundleCheckReport.artifacts.bundle_manifest.image_artifact_declaration_count =
     imageArtifactDeclarations.length;
   airgapBundleCheckReport.image_artifact_declaration_count = imageArtifactDeclarations.length;
   airgapBundleCheckReport.components_count = 4;
+  if (includeSubstrateInstallInputs) {
+    airgapBundleManifest.bindings.substrate_install_inputs_sha256 =
+      substrateInstallInputsDigest;
+    airgapBundleManifest.components.push({
+      kind: 'substrate_install_inputs',
+      path: componentPaths.substrate_install_inputs,
+      sha256: substrateInstallInputsDigest
+    });
+  }
   if (includeSubstratePack) {
     airgapBundleManifest.bindings.substrate_pack_manifest_sha256 = substratePackManifestDigest;
     airgapBundleManifest.components.push({
@@ -799,8 +814,8 @@ function useAirgapBundleOutput({
       airgapBundleManifest.image_artifact_declarations.length;
     airgapBundleCheckReport.image_artifact_declaration_count =
       airgapBundleManifest.image_artifact_declarations.length;
-    airgapBundleCheckReport.components_count = 5;
   }
+  airgapBundleCheckReport.components_count = airgapBundleManifest.components.length;
   outputFiles = [
     {
       path: 'airgap-bundle-check-report.json',
@@ -815,7 +830,7 @@ function useAirgapBundleOutput({
       value: airgapImageMap
     }
   ];
-  if (includeSubstratePack) {
+  if (includeSubstratePackOutput) {
     outputFiles.push({
       path: 'substrate-pack-manifest.json',
       value: substratePackManifest

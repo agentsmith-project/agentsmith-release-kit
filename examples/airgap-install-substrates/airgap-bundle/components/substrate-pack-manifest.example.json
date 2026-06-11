@@ -4,27 +4,25 @@
   "installed_by": "agentsmith-release-kit",
   "deployment_path": "airgap/install_substrates",
   "images": {
-    "postgresql": "registry.airgap.example/agentsmith/substrates/postgresql:16.3@sha256:1111111111111111111111111111111111111111111111111111111111111111",
-    "mongodb": "registry.airgap.example/agentsmith/substrates/mongodb:7.0@sha256:2222222222222222222222222222222222222222222222222222222222222222",
-    "redis": "registry.airgap.example/agentsmith/substrates/redis:7.2@sha256:3333333333333333333333333333333333333333333333333333333333333333",
-    "object_storage": "registry.airgap.example/agentsmith/substrates/object-storage:2026.05@sha256:4444444444444444444444444444444444444444444444444444444444444444",
-    "oidc": "registry.airgap.example/agentsmith/substrates/keycloak:25.0@sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    "postgresql": "registry.airgap.example/agentsmith/substrates/postgresql:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc",
+    "mongodb": "registry.airgap.example/agentsmith/substrates/mongodb:7.0@sha256:948b635bc126d62274eebb650dd2e2e66c9abc3bb0a336eb2279a5d8489417f5",
+    "redis": "registry.airgap.example/agentsmith/substrates/redis:7.2@sha256:73d3498d8e395b685cf9263877c445fe9bf2bb436db33d545780ae398f97a23d",
+    "object_storage": "registry.airgap.example/agentsmith/substrates/object-storage:RELEASE.2024-05-10T01-41-38Z@sha256:420663b8685c5396f06405ad516d611db4465939a141cc7d40266342d0f2632d",
+    "oidc": "registry.airgap.example/agentsmith/substrates/keycloak:25.0.6@sha256:82c5b7a110456dbd42b86ea572e728878549954cc8bd03cd65410d75328095d2"
   },
   "payload": {
-    "install_plan": "payload/install-substrates.json"
+    "install_plan": "sha256:e0e5b84436675eb5094b1f18ed9d69fb77c1c4b33073fe3887ecb155b0a97315"
   },
   "templates": {
-    "postgresql": "templates/postgresql.yaml",
-    "mongodb": "templates/mongodb.yaml",
-    "redis": "templates/redis.yaml",
-    "object_storage": "templates/object-storage.yaml",
-    "oidc": "templates/oidc.yaml"
+    "resource_list": {
+      "path": "templates/substrate-resources.json",
+      "sha256": "sha256:afd49433b6a68e0d739020f8a3f5c91b743b7710c9aa92df9bd341b5f4178d2d"
+    }
   },
   "tools": {
-    "archive_probe": "tools/archive-probe",
-    "image_loader": "tools/image-loader"
+    "routability_probe": "sha256:01b59c1b2aaea06ffeb3f654cd52cf7c61d25b7b0ac04159dfe3df47b27e93ec"
   },
   "checksums": {
-    "manifest": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+    "materials": "sha256:155d5fd4bf5f266255ae67b36bae2f9d0f66d0cd5e2fcbc852bb706d7d4278f6"
   }
 }

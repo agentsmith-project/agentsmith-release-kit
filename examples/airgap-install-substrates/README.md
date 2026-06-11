@@ -18,8 +18,8 @@ component sha256 values in the checked-in manifest.
 
 Keep `deployment_path` set to `airgap/install_substrates`. Replace the whole
 `airgap-bundle/` directory from the assembled bundle, then provide or edit the
-bundle-local install inputs, namespace, service refs, package-local tools, and
-confirmation fields. Provide the substrate pack manifest together with its
+bundle-local component install inputs, namespace, service refs, package-local
+tools, and confirmation fields. Provide the substrate pack manifest together with its
 referenced `payload/`, `templates/`, `tools/`, and `checksums/` material tree;
 paths are relative to the manifest's directory.
 To use the first-party minimal pack source for airgap, materialize it before
@@ -71,7 +71,9 @@ cp -R "$EXAMPLE_DIR/tools" "$PKG/tools"
 
 `BUNDLE_ROOT` is the assembled bundle directory containing
 `airgap-bundle-manifest.json`. Keep that manifest from bundle assembly; it is
-not a components-only manifest. Replace package-local tools before `--run`.
+not a components-only manifest. Do not overwrite
+`components/substrate-install-inputs.json`; bundle-create binds it as a
+component. Replace package-local tools before `--run`.
 Because the airgap substrate pack manifest is under
 `airgap-bundle/components/`, put its referenced material tree under that same
 directory, or update the manifest paths to match.

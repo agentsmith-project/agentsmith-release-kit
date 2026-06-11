@@ -155,7 +155,8 @@ const AIRGAP_BASE_COMPONENT_KINDS = [
 ];
 const AIRGAP_KIT_COMPONENT_KINDS = [
   ...AIRGAP_BASE_COMPONENT_KINDS,
-  'substrate_pack_manifest'
+  'substrate_pack_manifest',
+  'substrate_install_inputs'
 ];
 const AIRGAP_COMPONENT_KEYS = new Set(['kind', 'path', 'sha256']);
 
@@ -2581,7 +2582,7 @@ function skeletonManifestForDeploymentPath(deploymentPath) {
       ? 'airgap-bundle/components/substrate-pack-manifest.json'
       : 'substrate-pack-manifest.json';
     manifest.substrate_install_inputs = isAirgap
-      ? 'airgap-bundle/operator-inputs/substrate-install-inputs.json'
+      ? 'airgap-bundle/components/substrate-install-inputs.json'
       : 'substrate-install-inputs.json';
   }
 
