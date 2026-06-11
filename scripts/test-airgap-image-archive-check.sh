@@ -23,6 +23,7 @@ PAYLOAD_DIR="$TMP_DIR/payload"
 IMAGE_DIR="$TMP_DIR/image-archives"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
 KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
+KIT_SUBSTRATE_INSTALL_INPUTS="$TMP_DIR/substrate-install-inputs.kit-airgap.json"
 GOOD_PROBE="$TMP_DIR/probes/archive-digest-probe"
 TARGET_ANNOTATION_PROBE="$TMP_DIR/probes/target-annotation-probe"
 DOUBLE_OUTPUT_PROBE="$TMP_DIR/probes/double-output-probe"
@@ -424,6 +425,109 @@ fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
+write_kit_substrate_install_inputs() {
+  local output="$1"
+  local profile="$2"
+
+  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
+import fs from 'node:fs';
+
+const [output, profileValue] = process.argv.slice(2);
+const [targetCluster, substrateSource, distribution] = profileValue.split('/');
+const installationId = 'kit-install-10001';
+const reachability = {
+  status: 'declared_reachable',
+  proof: 'operator fixture declared reachable'
+};
+const substrateTruth = {
+  schema_version: 'agentsmith.substrate-connection.truth/v1',
+  target_cluster: targetCluster,
+  substrate_source: substrateSource,
+  distribution,
+  declared_at: '2026-06-10T12:00:00.000Z',
+  declared_by: 'release-operator@example.com',
+  installed_by: 'agentsmith-release-kit',
+  release_kit_version: '0.1.0',
+  installation_id: installationId,
+  services: {
+    postgresql: {
+      host: 'postgresql.agentsmith.svc',
+      port: 5432,
+      database: 'agentsmith',
+      credential_secret_ref: 'secretRef:agentsmith/postgresql-app',
+      admin_secret_ref: 'secretRef:agentsmith/postgresql-admin',
+      sslmode: 'verify-full',
+      reachability,
+      extensions: {
+        pgvector: {
+          status: 'installed',
+          version: '0.7.4'
+        }
+      }
+    },
+    mongodb: {
+      host: 'mongodb.agentsmith.svc',
+      port: 27017,
+      credential_secret_ref: 'secretRef:agentsmith/mongodb-app',
+      tls: { mode: 'verify-full' },
+      reachability
+    },
+    redis: {
+      host: 'redis.agentsmith.svc',
+      port: 6379,
+      credential_secret_ref: 'secretRef:agentsmith/redis-app',
+      tls: { mode: 'verify-full' },
+      reachability
+    },
+    object_storage: {
+      url: 'https://objects.agentsmith.example.com',
+      bucket: 'agentsmith-release-artifacts',
+      region: 'us-west-2',
+      credential_secret_ref: 'secretRef:agentsmith/object-storage-app',
+      tls: { mode: 'https' },
+      reachability
+    },
+    oidc: {
+      issuer_url: 'https://oidc.agentsmith.example.com/realms/agentsmith',
+      client_id: 'agentsmith-web',
+      client_secret_ref: 'secretRef:agentsmith/oidc-client',
+      tls: { mode: 'https' },
+      reachability
+    }
+  }
+};
+const resources = [
+  {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'agentsmith-substrate-config',
+      namespace: 'agentsmith',
+      labels: {
+        'app.kubernetes.io/managed-by': 'agentsmith-release-kit'
+      },
+      annotations: {
+        'agentsmith.io/managed-by': 'agentsmith-release-kit',
+        'agentsmith.io/installation-id': installationId
+      }
+    },
+    data: {
+      profile: profileValue
+    }
+  }
+];
+const installInputs = {
+  schema_version: 'agentsmith.substrate-install-inputs/v1',
+  target_profile: profileValue,
+  installation_id: installationId,
+  substrate_truth: substrateTruth,
+  resources
+};
+
+fs.writeFileSync(output, `${JSON.stringify(installInputs, null, 2)}\n`);
+NODE
+}
+
 write_probes() {
   mkdir -p "$(dirname "$GOOD_PROBE")"
   cat >"$GOOD_PROBE" <<'NODE'
@@ -522,9 +626,10 @@ run_bundle_create() {
   local output_dir="$2"
   local target_profile="${3:-$AIRGAP_PROFILE}"
   local substrate_pack_manifest="${4:-}"
-  local release_contract="${5:-$VALID_CONTRACT}"
-  local deploy_template_package="${6:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
-  local image_dir="${7:-$IMAGE_DIR}"
+  local substrate_install_inputs="${5:-}"
+  local release_contract="${6:-$VALID_CONTRACT}"
+  local deploy_template_package="${7:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
+  local image_dir="${8:-$IMAGE_DIR}"
   local image_archive_args=()
   local substrate_pack_args=()
 
@@ -554,6 +659,9 @@ for (const key of Object.keys(pack.images).sort()) {
 }
 NODE
 )
+  fi
+  if [[ -n "$substrate_install_inputs" ]]; then
+    substrate_pack_args+=(--substrate-install-inputs "$substrate_install_inputs")
   fi
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
@@ -941,6 +1049,7 @@ create_payloads
 create_image_archives
 write_operator_prerequisites "$OPERATOR_PREREQUISITES"
 write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK_MANIFEST"
+write_kit_substrate_install_inputs "$KIT_SUBSTRATE_INSTALL_INPUTS" "$KIT_AIRGAP_PROFILE"
 create_substrate_image_archives "$IMAGE_DIR" "$KIT_SUBSTRATE_PACK_MANIFEST"
 write_probes
 
@@ -954,7 +1063,8 @@ run_bundle_create \
   "$KIT_BUNDLE_ROOT" \
   "$KIT_CREATE_OUTPUT" \
   "$KIT_AIRGAP_PROFILE" \
-  "$KIT_SUBSTRATE_PACK_MANIFEST" >"$TMP_DIR/create-kit-valid.out"
+  "$KIT_SUBSTRATE_PACK_MANIFEST" \
+  "$KIT_SUBSTRATE_INSTALL_INPUTS" >"$TMP_DIR/create-kit-valid.out"
 
 TOP_INDEX_CONTRACT="$TMP_DIR/release-contract.top-index.json"
 TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE="$TMP_DIR/deploy-template-package.top-index.json"
@@ -971,6 +1081,7 @@ run_bundle_create \
   "$TOP_INDEX_BUNDLE_ROOT" \
   "$TMP_DIR/out-create-top-index-valid" \
   "$AIRGAP_PROFILE" \
+  "" \
   "" \
   "$TOP_INDEX_CONTRACT" \
   "$TOP_INDEX_DEPLOY_TEMPLATE_PACKAGE" \
@@ -991,6 +1102,7 @@ run_bundle_create \
   "$NESTED_INDEX_BUNDLE_ROOT" \
   "$TMP_DIR/out-create-nested-index-valid" \
   "$AIRGAP_PROFILE" \
+  "" \
   "" \
   "$NESTED_INDEX_CONTRACT" \
   "$NESTED_INDEX_DEPLOY_TEMPLATE_PACKAGE" \

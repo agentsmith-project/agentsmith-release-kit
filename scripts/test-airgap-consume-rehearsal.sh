@@ -28,6 +28,7 @@ PAYLOAD_DIR="$TMP_DIR/payload"
 IMAGE_DIR="$TMP_DIR/image-archives"
 OPERATOR_PREREQUISITES="$TMP_DIR/operator-prerequisites.json"
 KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
+KIT_SUBSTRATE_INSTALL_INPUTS_DIR="$TMP_DIR/substrate-install-inputs.kit-airgap"
 GOOD_PROBE="$TMP_DIR/tools/archive-digest-probe"
 GOOD_LOADER="$TMP_DIR/tools/image-loader"
 LOAD_LOG="$TMP_DIR/image-load.log"
@@ -197,18 +198,90 @@ fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
 NODE
 }
 
+write_substrate_install_inputs() {
+  local dir="$1"
+  local profile="${2:-$KIT_AIRGAP_PROFILE}"
+
+  mkdir -p "$dir"
+  write_truth "$dir/substrate-truth-input.json" "$profile"
+  write_prerequisites "$dir/target-prerequisites.json" "$profile"
+  "$NODE_BIN" --input-type=module - "$dir" "$profile" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [dir, profile] = process.argv.slice(2);
+const substrateTruth = JSON.parse(fs.readFileSync(path.join(dir, 'substrate-truth-input.json'), 'utf8'));
+const ownerLabels = {
+  'app.kubernetes.io/managed-by': 'agentsmith-release-kit'
+};
+const ownerAnnotations = {
+  'agentsmith.io/managed-by': 'agentsmith-release-kit',
+  'agentsmith.io/installation-id': 'kit-install-10001'
+};
+const resources = [
+  {
+    apiVersion: 'v1',
+    kind: 'ConfigMap',
+    metadata: {
+      name: 'agentsmith-substrate-config',
+      namespace: 'agentsmith',
+      labels: ownerLabels,
+      annotations: ownerAnnotations
+    },
+    data: {
+      profile
+    }
+  }
+];
+const inputs = {
+  schema_version: 'agentsmith.substrate-install-inputs/v1',
+  target_profile: profile,
+  installation_id: 'kit-install-10001',
+  substrate_truth: substrateTruth,
+  resources
+};
+fs.writeFileSync(path.join(dir, 'substrate-install-inputs.json'), `${JSON.stringify(inputs, null, 2)}\n`);
+NODE
+}
+
 write_kit_substrate_pack_manifest() {
   local output="$1"
+  local postgresql_digest
+  local mongodb_digest
+  local redis_digest
+  local object_storage_digest
+  local oidc_digest
 
-  "$NODE_BIN" --input-type=module - "$output" "$KIT_AIRGAP_PROFILE" <<'NODE'
+  postgresql_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_postgresql)"
+  mongodb_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_mongodb)"
+  redis_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_redis)"
+  object_storage_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_object_storage)"
+  oidc_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_oidc)"
+
+  "$NODE_BIN" --input-type=module - \
+    "$output" \
+    "$KIT_AIRGAP_PROFILE" \
+    "$postgresql_digest" \
+    "$mongodb_digest" \
+    "$redis_digest" \
+    "$object_storage_digest" \
+    "$oidc_digest" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [output, profile] = process.argv.slice(2);
+const [
+  output,
+  profile,
+  postgresqlDigest,
+  mongodbDigest,
+  redisDigest,
+  objectStorageDigest,
+  oidcDigest
+] = process.argv.slice(2);
 const digest = (char) => `sha256:${char.repeat(64)}`;
-const image = (name, tag, char) =>
-  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+const image = (name, tag, digestValue) =>
+  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digestValue}`;
 const packRoot = path.dirname(output);
 
 function digestBuffer(buffer) {
@@ -248,11 +321,11 @@ const manifest = {
   installed_by: 'agentsmith-release-kit',
   target_profile: profile,
   images: {
-    postgresql: image('postgresql', '16.3', '1'),
-    mongodb: image('mongodb', '7.0', '2'),
-    redis: image('redis', '7.2', '3'),
-    object_storage: image('object-storage', '2026.05', '4'),
-    oidc: image('keycloak', '25.0', '5')
+    postgresql: image('postgresql', '16.3', postgresqlDigest),
+    mongodb: image('mongodb', '7.0', mongodbDigest),
+    redis: image('redis', '7.2', redisDigest),
+    object_storage: image('object-storage', '2026.05', objectStorageDigest),
+    oidc: image('keycloak', '25.0', oidcDigest)
   },
   payload: {
     install_plan: {
@@ -352,9 +425,11 @@ write_materials() {
     "$manifest_sha" \
     "$archive_sha" \
     "$contract_output" \
-    "$deploy_template_package_output" <<'NODE'
+    "$deploy_template_package_output" \
+    "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 const [
   contractInput,
@@ -362,7 +437,8 @@ const [
   manifestSha,
   archiveSha,
   contractOutput,
-  packageOutput
+  packageOutput,
+  fixtureHelper
 ] = process.argv.slice(2);
 
 const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
@@ -386,6 +462,40 @@ function digest(value) {
   return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
 }
 
+function fixtureTargetDigest(imageId) {
+  const result = spawnSync(
+    process.execPath,
+    [fixtureHelper, '--print-target-digest', '--image-id', imageId],
+    { encoding: 'utf8' }
+  );
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(result.stderr || `fixture digest failed for ${imageId}`);
+  }
+  const value = result.stdout.trim();
+  if (!/^sha256:[0-9a-f]{64}$/.test(value)) {
+    throw new Error(`fixture digest returned invalid digest for ${imageId}: ${value}`);
+  }
+  return value;
+}
+
+function replaceImageDigest(image, nextDigest) {
+  if (!/@sha256:[0-9a-f]{64}$/.test(image)) {
+    throw new Error(`image must be digest-pinned: ${image}`);
+  }
+  return image.replace(/@sha256:[0-9a-f]{64}$/, `@${nextDigest}`);
+}
+
+function retargetImageItem(item, nextDigest) {
+  item.digest = nextDigest;
+  item.image = replaceImageDigest(item.image, nextDigest);
+  if (item.source_provenance?.artifact_sha256) {
+    item.source_provenance.artifact_sha256 = nextDigest;
+  }
+}
+
 function subjectDigest(value) {
   const { artifact_provenance: _artifactProvenance, ...subject } = value;
   return digest(JSON.stringify(stableJson(subject)));
@@ -401,6 +511,36 @@ deployTemplatePackage.package_sha256 = archiveSha;
 deployTemplatePackage.manifest_sha256 = manifestSha;
 deployTemplatePackage.artifact_provenance.artifact_sha256 = archiveSha;
 deployTemplatePackage.artifact_provenance.subject_sha256 = subjectDigest(deployTemplatePackage);
+
+const digestByInventoryId = new Map();
+for (const item of contract.deploy_image_inventory || []) {
+  const nextDigest = fixtureTargetDigest(item.id);
+  digestByInventoryId.set(item.id, nextDigest);
+  retargetImageItem(item, nextDigest);
+}
+for (const sourceName of [
+  'product_images',
+  'adopted_provider_images',
+  'release_kit_prerequisite_images'
+]) {
+  for (const item of contract[sourceName] || []) {
+    const inventoryItem = (contract.deploy_image_inventory || []).find(
+      (candidate) => candidate.source === sourceName && candidate.id === item.id
+    );
+    const nextDigest = digestByInventoryId.get(inventoryItem?.id || item.id);
+    if (!nextDigest) {
+      throw new Error(`missing fixture digest for ${sourceName}.${item.id}`);
+    }
+    retargetImageItem(item, nextDigest);
+  }
+}
+if (contract.managed_runner_image) {
+  const nextDigest = digestByInventoryId.get('managed_runner');
+  if (!nextDigest) {
+    throw new Error('missing fixture digest for managed_runner');
+  }
+  retargetImageItem(contract.managed_runner_image, nextDigest);
+}
 
 contract.deploy_template_digest = manifestSha;
 contract.deploy_template_package = deployTemplatePackage;
@@ -441,6 +581,43 @@ create_image_archives() {
   "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
     --from-contract "$contract" \
     --output-dir "$IMAGE_DIR"
+}
+
+create_substrate_image_archives() {
+  local image_dir="$1"
+  local substrate_pack_manifest="$2"
+
+  mkdir -p "$image_dir"
+  "$NODE_BIN" --input-type=module - \
+    "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+    "$image_dir" \
+    "$substrate_pack_manifest" <<'NODE'
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [fixtureScript, imageDir, substratePackManifest] = process.argv.slice(2);
+const pack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
+for (const key of Object.keys(pack.images).sort()) {
+  const id = `substrate_${key}`;
+  const image = pack.images[key];
+  const digest = image.slice(image.lastIndexOf('@') + 1);
+  const result = spawnSync(process.execPath, [
+    fixtureScript,
+    '--archive',
+    path.join(imageDir, `${id}.oci-layout.tar`),
+    '--image-id',
+    id,
+    '--target-digest',
+    digest
+  ], {
+    stdio: 'inherit'
+  });
+  if (result.status !== 0) {
+    process.exit(result.status || 1);
+  }
+}
+NODE
 }
 
 write_operator_prerequisites() {
@@ -591,6 +768,7 @@ run_bundle_create() {
   local output_dir="$5"
   local target_profile="${6:-$AIRGAP_PROFILE}"
   local substrate_pack_manifest="${7:-}"
+  local substrate_install_inputs="${8:-}"
   local image_archive_args=()
   local substrate_pack_args=()
 
@@ -599,6 +777,21 @@ run_bundle_create() {
   done
   if [[ -n "$substrate_pack_manifest" ]]; then
     substrate_pack_args+=(--substrate-pack-manifest "$substrate_pack_manifest")
+    while IFS= read -r id; do
+      image_archive_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
+    done < <("$NODE_BIN" --input-type=module - "$substrate_pack_manifest" <<'NODE'
+import fs from 'node:fs';
+
+const [substratePackManifest] = process.argv.slice(2);
+const pack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
+for (const key of Object.keys(pack.images).sort()) {
+  console.log(`substrate_${key}`);
+}
+NODE
+)
+  fi
+  if [[ -n "$substrate_install_inputs" ]]; then
+    substrate_pack_args+=(--substrate-install-inputs "$substrate_install_inputs")
   fi
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --bundle-create \
@@ -836,6 +1029,8 @@ create_payloads
 create_image_archives "$VALID_CONTRACT"
 write_operator_prerequisites "$OPERATOR_PREREQUISITES"
 write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK_MANIFEST"
+write_substrate_install_inputs "$KIT_SUBSTRATE_INSTALL_INPUTS_DIR" "$KIT_AIRGAP_PROFILE"
+create_substrate_image_archives "$IMAGE_DIR" "$KIT_SUBSTRATE_PACK_MANIFEST"
 write_tools
 
 VALID_BUNDLE_ROOT="$TMP_DIR/bundle-valid"
@@ -857,7 +1052,8 @@ run_bundle_create \
   "$KIT_BUNDLE_ROOT" \
   "$KIT_CREATE_OUTPUT" \
   "$KIT_AIRGAP_PROFILE" \
-  "$KIT_SUBSTRATE_PACK_MANIFEST" >"$TMP_DIR/create-kit-valid.out"
+  "$KIT_SUBSTRATE_PACK_MANIFEST" \
+  "$KIT_SUBSTRATE_INSTALL_INPUTS_DIR/substrate-install-inputs.json" >"$TMP_DIR/create-kit-valid.out"
 write_bundle_operator_inputs "$KIT_BUNDLE_ROOT" "$KIT_AIRGAP_PROFILE"
 
 TARGET_APP_IMAGE="$(target_image_for_id "$VALID_BUNDLE_ROOT/components/image-map.json" agentsmith_app)"
