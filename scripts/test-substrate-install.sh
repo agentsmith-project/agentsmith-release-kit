@@ -21,6 +21,78 @@ pass() {
   echo "PASS: $*"
 }
 
+write_fake_source_skopeo() {
+  local fake_skopeo="$1"
+
+  cat >"$fake_skopeo" <<'BASH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$#" -ne 3 || "$1" != "inspect" || "$2" != "--raw" || "$3" != docker://*@sha256:* ]]; then
+  echo "fake skopeo expected: inspect --raw docker://<repo>@sha256:<digest>" >&2
+  exit 19
+fi
+
+ref="${3#docker://}"
+repository="${ref%@sha256:*}"
+digest="${ref##*@sha256:}"
+repository_tail="${repository##*/}"
+
+if [[ "$repository_tail" == *:* ]]; then
+  echo "fake skopeo rejected tag-bearing source ref" >&2
+  exit 20
+fi
+if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "fake skopeo expected lowercase sha256 digest" >&2
+  exit 21
+fi
+if [[ -z "${FAKE_SKOPEO_RAW_DIR:-}" ]]; then
+  echo "fake skopeo missing FAKE_SKOPEO_RAW_DIR" >&2
+  exit 22
+fi
+
+raw_file="$FAKE_SKOPEO_RAW_DIR/$digest"
+if [[ ! -f "$raw_file" ]]; then
+  echo "fake skopeo missing raw bytes for digest $digest" >&2
+  exit 23
+fi
+
+cat "$raw_file"
+BASH
+  chmod +x "$fake_skopeo"
+}
+
+write_source_verify_fixture() {
+  local source_dir="$1"
+  local raw_dir="$2"
+
+  mkdir -p "$source_dir" "$raw_dir"
+  cp -R "$ROOT_DIR/substrate-packs/minimal/." "$source_dir/"
+  "$NODE_BIN" --input-type=module - "$source_dir/pack-source.json" "$raw_dir" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [packSourcePath, rawDir] = process.argv.slice(2);
+const packSource = JSON.parse(fs.readFileSync(packSourcePath, 'utf8'));
+
+for (const [key, image] of Object.entries(packSource.images)) {
+  const [withoutDigest] = image.source_ref.split('@sha256:');
+  const rawBytes = Buffer.from(`${JSON.stringify({
+    schemaVersion: 2,
+    mediaType: 'application/vnd.oci.image.index.v1+json',
+    fixture_key: key,
+    source_ref_without_digest: withoutDigest
+  })}\n`);
+  const digest = crypto.createHash('sha256').update(rawBytes).digest('hex');
+  fs.writeFileSync(path.join(rawDir, digest), rawBytes);
+  image.source_ref = `${withoutDigest}@sha256:${digest}`;
+}
+
+fs.writeFileSync(packSourcePath, `${JSON.stringify(packSource, null, 2)}\n`);
+NODE
+}
+
 install_parameters_digest() {
   local namespace="${2:-agentsmith}"
   "$NODE_BIN" --input-type=module - "$1" "$namespace" <<'NODE'
@@ -1785,6 +1857,24 @@ assert_install_report \
   "$TARGET_PROFILE" \
   kit-install-minimal-1001
 pass "first-party minimal substrate pack materializes, pack-checks, and server-dry-runs"
+
+fake_source_skopeo="$TMP_DIR/fake-source-skopeo"
+fake_source_raw_dir="$TMP_DIR/fake-source-raw"
+fake_source_dir="$TMP_DIR/source-verify-pack"
+fake_source_verified_dir="$TMP_DIR/materialized-fake-source-verified"
+write_fake_source_skopeo "$fake_source_skopeo"
+write_source_verify_fixture "$fake_source_dir" "$fake_source_raw_dir"
+FAKE_SKOPEO_RAW_DIR="$fake_source_raw_dir" "$NODE_BIN" "$ROOT_DIR/scripts/materialize-substrate-pack.mjs" \
+  --deployment-path online/install_substrates \
+  --source-dir "$fake_source_dir" \
+  --output-dir "$fake_source_verified_dir" \
+  --namespace agentsmith \
+  --installation-id kit-install-fake-source-verified-1001 \
+  --storage-class gp3 \
+  --declared-at 2026-06-10T12:00:00.000Z \
+  --verify-source-images \
+  --skopeo "$fake_source_skopeo" >/dev/null
+pass "source image verification uses immutable digest refs instead of mutable tags"
 
 if command -v skopeo >/dev/null 2>&1; then
   materialized_source_verified_dir="$TMP_DIR/materialized-minimal-source-verified"

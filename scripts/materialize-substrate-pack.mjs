@@ -357,7 +357,7 @@ function readTagAndDigest(imageRef, label) {
     fail(`${label} must not use latest`);
   }
   return {
-    imageWithoutDigest: withoutDigest,
+    repository: withoutDigest.slice(0, lastColon),
     tag,
     digest: `sha256:${digestHex}`
   };
@@ -375,21 +375,17 @@ function targetImageRef(sourceImage, targetRegistry, targetRepository, label) {
 }
 
 function verifySourceImageDigest(imageRef, label, skopeo) {
-  const { imageWithoutDigest, digest } = readTagAndDigest(imageRef, label);
+  const { repository, digest } = readTagAndDigest(imageRef, label);
+  const digestOnlyRef = `${repository}@${digest}`;
   const result = spawnSync(
     skopeo,
     [
       'inspect',
-      '--override-os',
-      'linux',
-      '--override-arch',
-      'amd64',
-      '--format',
-      '{{.Digest}}',
-      `docker://${imageWithoutDigest}`
+      '--raw',
+      `docker://${digestOnlyRef}`
     ],
     {
-      encoding: 'utf8'
+      maxBuffer: 16 * 1024 * 1024
     }
   );
 
@@ -400,13 +396,13 @@ function verifySourceImageDigest(imageRef, label, skopeo) {
     fail(`skopeo source image check failed for ${label}: ${result.error.message}`);
   }
   if (result.status !== 0) {
-    const detail = (result.stderr || result.stdout || `exit ${result.status}`).trim();
+    const detail = (result.stderr?.toString('utf8') || result.stdout?.toString('utf8') || `exit ${result.status}`).trim();
     fail(`skopeo source image check failed for ${label}: ${detail}`);
   }
 
-  const actualDigest = result.stdout.trim();
+  const actualDigest = digestBuffer(result.stdout);
   if (actualDigest !== digest) {
-    fail(`${label} digest mismatch: skopeo inspect returned ${actualDigest}, source ref declares ${digest}`);
+    fail(`${label} digest mismatch: skopeo inspect --raw returned ${actualDigest}, source ref declares ${digest}`);
   }
 }
 
