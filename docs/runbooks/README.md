@@ -58,12 +58,11 @@ The init command writes a package skeleton for one deployment path and refuses
 to overwrite an existing `operator-inputs.json`. The doctor command lists
 missing package refs/fields plus static package blockers without executing the
 selected path. A passing doctor only means package static intake is clean; it
-is not runnable readiness or a GA verdict. Add `--run` only when the package is
-ready to execute the selected apply path. A passing `--run` produces
-path-level evidence for the final GA report; do not treat intermediate files
-as the formal release verdict. After all four package runs and product-side
-reports are available, use `--ga-report` to write the final
-`ga-release-report.json`.
+is not runnable readiness or the final GA result. Add `--run` only when the
+package is ready to execute the selected path. A passing `--run` produces
+package output for the final GA report; do not treat intermediate files as the
+final release result. After all four package runs and product-side reports are
+available, use `--ga-report` to write the final `ga-release-report.json`.
 Replace scaffold scalar placeholders such as
 `context: replace-with-kube-context` and
 `smoke_url: https://agentsmith.example.com/healthz`; doctor reports them as
@@ -75,31 +74,25 @@ The repository's manual `ga-release-aggregate` GitHub workflow can also
 download already-produced artifacts and run this same final aggregate. That
 workflow is aggregate-only; it does
 not rerun package, product, deployment, or airgap producers. Use
-`ga-release-report.json` for the formal pass/fail result.
+`ga-release-report.json` for the final pass/fail result.
 
 ### 4. What is the final report?
 
-Formal release success or failure is represented only by the final
-`ga-release-report.json` issued by `operator-release.sh --ga-report`. The
-facade takes four package paths plus AgentSmith product-side reports and
-locates internal path evidence itself. Pass
-post-deploy product smoke reports for at least one online target and one airgap
-target; the final report records that coverage under
-`post_deploy_product_smoke_coverage`, including the GA acceptance coverage
-groups and the `audit_usage_readback` binding to the canonical `audit` and
-`usage` smoke ids.
+Final release pass/fail is represented only by `ga-release-report.json`, which
+`operator-release.sh --ga-report` writes from four package paths plus
+AgentSmith product-side reports. The facade locates package output itself.
+Pass post-deploy product smoke reports for at least one online target and one
+airgap target; the final report records pass/fail and blockers.
 The final report also verifies that each smoke report's substrate truth digest
 matches the finalized deployment truth for the package it is bound to; smoke
 evidence from a different deployed substrate is a blocker.
 `site.env` is not an operator-inputs field; AgentSmith's post-deploy product
 smoke report binds the deployed site facts for this final verifier.
-On pass the report has `formal_verdict=issued`; when blocked it replaces stale
-pass outputs with `status=fail`, `formal_verdict=not_issued`, and blockers.
 
 ## Operator Package Matrix
 
 This table explains package contents for the four operator paths. It is not a
-formal release verdict, package readiness, operator readiness, or GA signoff.
+release result, package readiness, operator readiness, or GA signoff.
 
 `online/install_substrates` needs namespace-scoped installer evidence,
 required `kubectl` and `context` inputs, a package-local `routability_probe`,
@@ -122,20 +115,20 @@ it to an operator package or airgap bundle. Add `--verify-source-images` when
 `skopeo` is available to check the public source refs against their declared
 digests; only packages materialized with that flag have skopeo-verified source
 refs. Otherwise install `skopeo` before doing source-ref verification.
-Materialization and substrate-install server-dry-run are not runtime-ready
-evidence: initialization Jobs for DB schema/users, object-storage bucket
-bootstrap, and OIDC realm/client bootstrap, plus real target secrets, storage,
-registry access, rollout, and smoke checks remain downstream blockers.
+Materialization only proves the package shape: initialization Jobs for DB
+schema/users, object-storage bucket bootstrap, and OIDC realm/client bootstrap,
+plus real target secrets, storage, registry access, rollout, and smoke checks
+remain downstream blockers.
 For both online paths, an apply package may also set `target_registry` and
 provide a package-local `registry_probe`; the registry must already contain
 digest refs for the release images.
 
 | `deployment_path` | Package must include | Current run result |
 | --- | --- | --- |
-| `online/use_existing` | Release contract, deploy template package and archive, render values, target substrate truth, target prerequisites, namespace, required package-local `kubectl` and explicit `context` for apply, optional target registry plus package-local `registry_probe`. | Validates the package. With `--run` and `mode: apply`, executes the online path and writes path-level evidence for finalization. |
-| `online/install_substrates` | Release contract, deploy template package and archive, render values, target prerequisites, substrate pack manifest, substrate install inputs, required `kubectl` and `context`, package-local `routability_probe`, optional target registry plus package-local `registry_probe`, and explicit install confirmation. No package-local `substrate_truth`. | Validates installer inputs. With `--run` and `mode: apply`, runs substrate-install first, uses the installer output truth for the online gate, and writes path-level evidence for finalization. |
-| `airgap/use_existing` | Bundle-local release contract, deploy template package and archive, render values, substrate truth, and target prerequisites; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL for runtime route-smoke evidence. | Validates the bundle reference. With `--run` and `mode: apply`, runs airgap consume/deployment checks and writes path-level evidence for finalization. |
-| `airgap/install_substrates` | Bundle-local release contract, deploy template package and archive, render values, and target prerequisites; substrate pack manifest; substrate install inputs; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader` for apply; smoke URL; explicit install confirmation. No bundle/package `substrate_truth`. | Validates installer and bundle references. With `--run` and `mode: apply`, runs substrate-install first, uses the installer output truth for airgap deployment, and writes path-level evidence for finalization. |
+| `online/use_existing` | Release contract, deploy template package and archive, render values, target substrate truth, target prerequisites, namespace, required package-local `kubectl` and explicit `context`, optional target registry plus package-local `registry_probe`. | Validates the package. With `--run`, executes the online path and records output for `--ga-report`. |
+| `online/install_substrates` | Release contract, deploy template package and archive, render values, target prerequisites, substrate pack manifest, substrate install inputs, required `kubectl` and `context`, package-local `routability_probe`, optional target registry plus package-local `registry_probe`, and explicit install confirmation. No package-local `substrate_truth`. | Validates installer inputs. With `--run`, runs substrate-install first, uses the installer output truth, and records output for `--ga-report`. |
+| `airgap/use_existing` | Bundle-local release contract, deploy template package and archive, render values, substrate truth, and target prerequisites; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader`; smoke URL for runtime route-smoke evidence. | Validates the bundle reference. With `--run`, runs the airgap path and records output for `--ga-report`. |
+| `airgap/install_substrates` | Bundle-local release contract, deploy template package and archive, render values, and target prerequisites; substrate pack manifest; substrate install inputs; `airgap_bundle`; explicit bundle-local `airgap_bundle_manifest`; required package-local `kubectl`; explicit `context`; package-local `archive_probe` and `image_loader`; smoke URL; explicit install confirmation. No bundle/package `substrate_truth`. | Validates installer and bundle references. With `--run`, runs substrate-install first, uses the installer output truth, and records output for `--ga-report`. |
 
 ## Operator Examples
 
@@ -189,9 +182,5 @@ contract. This page intentionally keeps the operator path limited to
 `ga-release-report.json`.
 
 Archive attachments written next to the final report are maintainer/reference
-artifacts. `ga-evidence-index.json` binds the source report digest to archived
-path and product evidence, including Product runtime readiness and
-post-deploy product smoke coverage lookup fields. `ga-release-summary.md`
-repeats the same final report in a human-readable form, including runtime
-readiness classification and adaptive wait intervals. Neither attachment is a
-separate release verdict.
+artifacts, not operator results. The operator-facing result remains
+`ga-release-report.json`.

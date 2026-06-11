@@ -593,6 +593,134 @@ writeJson(path.join(packageDir, 'substrate-install-inputs.json'), {
 NODE
 }
 
+write_target_prerequisites_from_install_inputs() {
+  local install_inputs="$1"
+  local output="$2"
+  local target_profile="$3"
+
+  "$NODE_BIN" --input-type=module - "$install_inputs" "$output" "$target_profile" <<'NODE'
+import fs from 'node:fs';
+
+const [installInputsFile, output, targetProfile] = process.argv.slice(2);
+const installInputs = JSON.parse(fs.readFileSync(installInputsFile, 'utf8'));
+const refs = new Set();
+
+function collectSecretRefs(value) {
+  if (typeof value === 'string' && value.startsWith('secretRef:')) {
+    refs.add(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(collectSecretRefs);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    Object.values(value).forEach(collectSecretRefs);
+  }
+}
+
+collectSecretRefs(installInputs.substrate_truth);
+
+const prerequisites = {
+  schema_version: 'agentsmith.target-prerequisites.truth/v1',
+  target_profile: targetProfile,
+  namespace: 'agentsmith',
+  rbac: {
+    policy: 'namespace_admin'
+  },
+  ingress: {
+    host: 'agentsmith.release.example.com',
+    tls_secret_ref: 'secretRef:agentsmith/agentsmith-ingress-tls'
+  },
+  registry: {
+    auth: {
+      mode: 'none'
+    }
+  },
+  storage: {
+    storage_class: 'gp3',
+    persistent_volume_policy: 'dynamic'
+  },
+  substrate_secret_refs: [...refs].sort()
+};
+
+fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+write_materialized_airgap_source_fixture() {
+  local source_dir="$1"
+  local postgresql_digest
+  local mongodb_digest
+  local redis_digest
+  local object_storage_digest
+  local oidc_digest
+
+  postgresql_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_postgresql)"
+  mongodb_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_mongodb)"
+  redis_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_redis)"
+  object_storage_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_object_storage)"
+  oidc_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_oidc)"
+
+  mkdir -p "$source_dir"
+  cp -R "$ROOT_DIR/substrate-packs/minimal/payload" "$source_dir/payload"
+  cp -R "$ROOT_DIR/substrate-packs/minimal/templates" "$source_dir/templates"
+  cp -R "$ROOT_DIR/substrate-packs/minimal/tools" "$source_dir/tools"
+  "$NODE_BIN" --input-type=module - \
+    "$ROOT_DIR/substrate-packs/minimal/pack-source.json" \
+    "$source_dir/pack-source.json" \
+    "$postgresql_digest" \
+    "$mongodb_digest" \
+    "$redis_digest" \
+    "$object_storage_digest" \
+    "$oidc_digest" <<'NODE'
+import fs from 'node:fs';
+
+const [
+  input,
+  output,
+  postgresqlDigest,
+  mongodbDigest,
+  redisDigest,
+  objectStorageDigest,
+  oidcDigest
+] = process.argv.slice(2);
+const source = JSON.parse(fs.readFileSync(input, 'utf8'));
+const digestByImageKey = {
+  postgresql: postgresqlDigest,
+  mongodb: mongodbDigest,
+  redis: redisDigest,
+  object_storage: objectStorageDigest,
+  oidc: oidcDigest
+};
+
+for (const [key, digest] of Object.entries(digestByImageKey)) {
+  source.images[key].source_ref = source.images[key].source_ref.replace(
+    /@sha256:[0-9a-f]{64}$/,
+    `@${digest}`
+  );
+}
+
+fs.writeFileSync(output, `${JSON.stringify(source, null, 2)}\n`);
+NODE
+}
+
+materialize_airgap_substrate_install_materials() {
+  local output_dir="$1"
+  local source_dir="$2"
+
+  write_materialized_airgap_source_fixture "$source_dir"
+  "$NODE_BIN" "$ROOT_DIR/scripts/materialize-substrate-pack.mjs" \
+    --deployment-path airgap/install_substrates \
+    --source-dir "$source_dir" \
+    --target-registry "$AIRGAP_REGISTRY" \
+    --output-dir "$output_dir" \
+    --namespace agentsmith \
+    --installation-id kit-install-minimal-airgap-1001 \
+    --storage-class gp3 \
+    --declared-at 2026-06-10T12:00:00.000Z >/dev/null
+}
+
 write_fake_kubectl() {
   local fake_kubectl="$1"
 
@@ -1197,17 +1325,47 @@ NODE
 assert_bundled_substrate_pack_materials() {
   local bundle_root="$1"
 
-  for material in \
-    payload/install-substrates.json \
-    templates/postgresql.yaml \
-    templates/mongodb.yaml \
-    templates/redis.yaml \
-    templates/object-storage.yaml \
-    templates/oidc.yaml \
-    tools/substrate-checks.txt; do
-    [[ -f "$bundle_root/components/$material" ]] ||
-      fail "bundle-create did not copy substrate pack material: $material"
-  done
+  "$NODE_BIN" --input-type=module - "$bundle_root" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [bundleRoot] = process.argv.slice(2);
+const componentsRoot = path.join(bundleRoot, 'components');
+const manifestPath = path.join(componentsRoot, 'substrate-pack-manifest.json');
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const materialPaths = new Set();
+
+function collectMaterialPaths(value, key = '') {
+  if (typeof value === 'string') {
+    if (key !== 'sha256' && !value.startsWith('sha256:')) {
+      materialPaths.add(value);
+    }
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  if (typeof value.path === 'string') {
+    materialPaths.add(value.path);
+  }
+  for (const [nestedKey, nested] of Object.entries(value)) {
+    if (nestedKey !== 'path' && nestedKey !== 'sha256') {
+      collectMaterialPaths(nested, nestedKey);
+    }
+  }
+}
+
+collectMaterialPaths(manifest.payload);
+collectMaterialPaths(manifest.templates);
+collectMaterialPaths(manifest.tools);
+collectMaterialPaths(manifest.checksums);
+
+for (const material of [...materialPaths].sort()) {
+  if (!fs.existsSync(path.join(componentsRoot, material))) {
+    throw new Error(`bundle-create did not copy substrate pack material: ${material}`);
+  }
+}
+NODE
   [[ ! -e "$bundle_root/components/tools/kubectl" ]] ||
     fail "bundle-create must not copy operator tools as substrate pack material"
 }
@@ -1357,7 +1515,36 @@ case "$command_name" in
     ;;
   apply)
     if [[ "$*" == *".substrate-install-resources."* ]]; then
-      printf '%s\n' "configmap/agentsmith-substrate-config"
+      resource_file=""
+      previous=""
+      for arg in "$@"; do
+        if [[ "$previous" == "-f" ]]; then
+          resource_file="$arg"
+        fi
+        previous="$arg"
+      done
+      node --input-type=module - "$resource_file" <<'APPLY_NODE'
+import fs from 'node:fs';
+
+const [resourceFile] = process.argv.slice(2);
+const resourceNames = new Map([
+  ['v1|ConfigMap', 'configmap'],
+  ['v1|Service', 'service'],
+  ['v1|PersistentVolumeClaim', 'persistentvolumeclaim'],
+  ['networking.k8s.io/v1|NetworkPolicy', 'networkpolicy.networking.k8s.io'],
+  ['apps/v1|Deployment', 'deployment.apps'],
+  ['apps/v1|StatefulSet', 'statefulset.apps']
+]);
+const list = JSON.parse(fs.readFileSync(resourceFile, 'utf8'));
+const refs = list.items.map((item) => {
+  const resource = resourceNames.get(`${item.apiVersion}|${item.kind}`);
+  if (!resource) {
+    throw new Error(`unexpected substrate install resource ${item.apiVersion}/${item.kind}`);
+  }
+  return `${resource}/${item.metadata.name}`;
+});
+process.stdout.write(`${refs.join('\n')}\n`);
+APPLY_NODE
       exit 0
     fi
     printf '%s\n' "deployment.apps/agentsmith-web"
@@ -1386,6 +1573,13 @@ JSON
       echo "Error from server (NotFound): resource not found" >&2
       exit 1
     fi
+
+    case "$get_target" in
+      configmaps/*|configmap/*|services|services/*|service|service/*|persistentvolumeclaims|persistentvolumeclaims/*|persistentvolumeclaim|persistentvolumeclaim/*|statefulsets.apps|statefulsets.apps/*|statefulset.apps|statefulset.apps/*|deployments.apps|deployments.apps/*|deployment.apps|deployment.apps/*|networkpolicies.networking.k8s.io|networkpolicies.networking.k8s.io/*|networkpolicy.networking.k8s.io|networkpolicy.networking.k8s.io/*)
+        echo "Error from server (NotFound): resource not found" >&2
+        exit 1
+        ;;
+    esac
 
     if [[ "$get_target" == "pods" ]]; then
       : "${FAKE_KUBECTL_TARGET_IMAGE:?}"
@@ -1569,7 +1763,9 @@ prepare_airgap_install_package() {
   create_airgap_payloads "$package_dir"
   create_airgap_image_archives "$package_dir" "$package_dir/release-contract.json"
   write_airgap_operator_prerequisites "$package_dir" "$package_dir/operator-prerequisites.json"
-  write_substrate_install_materials "$package_dir" "$KIT_AIRGAP_PROFILE"
+  local substrate_pack_dir="$package_dir/materialized-substrate-pack"
+  local substrate_pack_source_dir="$package_dir/materialized-substrate-pack-source"
+  materialize_airgap_substrate_install_materials "$substrate_pack_dir" "$substrate_pack_source_dir"
   run_airgap_bundle_create \
     "$package_dir" \
     "$package_dir/release-contract.json" \
@@ -1578,9 +1774,13 @@ prepare_airgap_install_package() {
     "$package_dir/bundle" \
     "$package_dir/bundle-create-output" \
     "$KIT_AIRGAP_PROFILE" \
-    "$package_dir/substrate-pack-manifest.json" \
-    "$package_dir/substrate-install-inputs.json" >"$package_dir/bundle-create.out"
+    "$substrate_pack_dir/substrate-pack-manifest.json" \
+    "$substrate_pack_dir/substrate-install-inputs.json" >"$package_dir/bundle-create.out"
   write_bundle_operator_inputs "$package_dir/bundle" "$KIT_AIRGAP_PROFILE"
+  write_target_prerequisites_from_install_inputs \
+    "$package_dir/bundle/components/substrate-install-inputs.json" \
+    "$package_dir/bundle/operator-inputs/target-prerequisites.json" \
+    "$KIT_AIRGAP_PROFILE"
   write_fake_airgap_kubectl "$package_dir/tools/kubectl"
   write_fake_airgap_archive_probe "$package_dir/tools/archive-probe"
   write_fake_airgap_image_loader "$package_dir/tools/image-loader"
@@ -2009,6 +2209,7 @@ NODE
 
 assert_airgap_install_path_evidence() {
   local package_dir="$1"
+  local pack_source="${2:-fixture}"
   local output_base="$package_dir/.release-kit-internal/airgap-install-substrates"
   local install_dir="$output_base/substrate-install"
   local bundle_check_dir="$output_base/airgap-bundle-check"
@@ -2052,10 +2253,15 @@ assert_airgap_install_path_evidence() {
     "$gate_dir/target-preflight/target-preflight-report.json" \
     "$gate_dir/airgap-bundle-render-check/airgap-bundle-render-check-report.json" \
     "$path_dir/source-evidence/target-preflight-report.json" \
+    "$package_dir/bundle/components/substrate-pack-manifest.json" \
+    "$package_dir/bundle/components/substrate-install-inputs.json" \
+    "$path_dir/source-evidence/airgap-bundle-manifest.json" \
     "$path_dir/deployment-path-report.json" \
-    "$path_dir/deployment-path-finalizer-manifest.json" <<'NODE'
+    "$path_dir/deployment-path-finalizer-manifest.json" \
+    "$pack_source" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const [
   bundleTruthFile,
@@ -2064,8 +2270,12 @@ const [
   gateTargetPreflightFile,
   offlineRenderCheckFile,
   finalizedTargetPreflightFile,
+  packManifestFile,
+  substrateInstallInputsFile,
+  finalizedBundleManifestFile,
   pathReportFile,
-  finalizerManifestFile
+  finalizerManifestFile,
+  packSource
 ] = process.argv.slice(2);
 
 const digestFile = (file) =>
@@ -2076,6 +2286,8 @@ const installReport = JSON.parse(fs.readFileSync(installReportFile, 'utf8'));
 const gateTargetPreflight = JSON.parse(fs.readFileSync(gateTargetPreflightFile, 'utf8'));
 const offlineRenderCheck = JSON.parse(fs.readFileSync(offlineRenderCheckFile, 'utf8'));
 const finalizedTargetPreflight = JSON.parse(fs.readFileSync(finalizedTargetPreflightFile, 'utf8'));
+const packManifest = JSON.parse(fs.readFileSync(packManifestFile, 'utf8'));
+const finalizedBundleManifest = JSON.parse(fs.readFileSync(finalizedBundleManifestFile, 'utf8'));
 const pathReport = JSON.parse(fs.readFileSync(pathReportFile, 'utf8'));
 const finalizerManifest = JSON.parse(fs.readFileSync(finalizerManifestFile, 'utf8'));
 const stepNames = (pathReport.steps || []).map((step) => step.name).join(',');
@@ -2100,6 +2312,49 @@ if (gateTargetPreflight.substrate_truth.input_sha256 === bundleTruthDigest) {
 }
 if (pathReport.operator_path !== 'airgap/install_substrates') {
   throw new Error(`unexpected operator_path: ${pathReport.operator_path}`);
+}
+if (packSource === 'materialized') {
+  if (packManifest.deployment_path !== 'airgap/install_substrates') {
+    throw new Error('airgap install positive path must use materialized install_substrates substrate pack');
+  }
+  const materializedPaths = [
+    packManifest.payload?.install_plan?.path,
+    packManifest.templates?.resource_list?.path,
+    packManifest.tools?.routability_probe?.path,
+    packManifest.checksums?.materials?.path
+  ];
+  for (const materialPath of materializedPaths) {
+    if (typeof materialPath !== 'string') {
+      throw new Error('materialized substrate pack manifest must declare minimal material paths');
+    }
+    if (!fs.existsSync(path.join(path.dirname(packManifestFile), materialPath))) {
+      throw new Error(`materialized substrate pack material missing from bundle: ${materialPath}`);
+    }
+  }
+}
+const bundleComponentByKind = new Map(
+  (finalizedBundleManifest.components || []).map((component) => [component.kind, component])
+);
+if (
+  bundleComponentByKind.get('substrate_pack_manifest')?.sha256 !==
+  digestFile(packManifestFile)
+) {
+  throw new Error('finalized airgap bundle manifest must bind materialized substrate pack manifest digest');
+}
+if (
+  bundleComponentByKind.get('substrate_install_inputs')?.sha256 !==
+  digestFile(substrateInstallInputsFile)
+) {
+  throw new Error('finalized airgap bundle manifest must bind materialized substrate install inputs digest');
+}
+if (
+  finalizedBundleManifest.bindings?.substrate_install_inputs_sha256 !==
+  digestFile(substrateInstallInputsFile)
+) {
+  throw new Error('finalized airgap bundle manifest must bind substrate install inputs sha in bindings');
+}
+if (packSource !== 'fixture' && packSource !== 'materialized') {
+  throw new Error(`unexpected airgap install pack assertion mode: ${packSource}`);
 }
 if (stepNames !== 'target-preflight,bundle-check,image-load,substrate-install,offline-render-check,apply,rollout,route-smoke') {
   throw new Error(`unexpected airgap install finalized steps: ${stepNames}`);
@@ -3076,7 +3331,7 @@ if ! run_airgap_operator_inputs "$positive_airgap_install_package" positive-airg
   cat "$TMP_DIR/positive-airgap-install.err" >&2
   fail "airgap/install_substrates positive run failed"
 fi
-assert_airgap_install_path_evidence "$positive_airgap_install_package"
+assert_airgap_install_path_evidence "$positive_airgap_install_package" materialized
 pass "operator-inputs --run executes airgap/install_substrates apply with operator-facing prerequisites and install inputs"
 
 missing_smoke_airgap_package="$TMP_DIR/missing-smoke-airgap"

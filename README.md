@@ -82,8 +82,8 @@ Run `--init-operator-inputs` when you want a scaffolded input package for one
 deployment path. Run `--doctor` when you want missing package refs/fields plus
 static package blockers checked without executing the selected path. A passing
 doctor only means package static intake is clean; it is not runnable readiness
-or a GA verdict. Add `--run` when the package is ready to execute the selected
-path.
+or the final GA result. Add `--run` when the package is ready to execute the
+selected path.
 When doctor fails, the human output groups blockers as release materials,
 operator target facts, operator tools, and operator confirmations before the
 raw field list.
@@ -111,7 +111,7 @@ smoke report binds the deployed site facts for the final GA verifier.
 
 With `--doctor`, the facade reports missing package refs/fields plus static
 package blockers for the selected deployment path and exits without executing
-producers or issuing a verdict.
+the selected path.
 
 With `--init-operator-inputs <deployment_path> --output-dir <dir>`, the facade
 creates a skeleton package for one of the four GA deployment paths and refuses
@@ -123,19 +123,15 @@ treats them as blockers.
 
 With `--run`, the current orchestration slice supports `online/use_existing`,
 `online/install_substrates`, `airgap/use_existing`, and
-`airgap/install_substrates` with `mode: apply`.
+`airgap/install_substrates`.
 `online/use_existing` executes the selected online path.
-`online/install_substrates` first runs substrate-install, then runs the online
-gate bound to the installer output substrate truth. `airgap/use_existing` runs
-the existing airgap consume rehearsal, extracts only its nested bundle-check
-and airgap deployment-gate reports, then writes the finalized package evidence
-with bundle-local release contract/deploy package components. It requires
-package-local `kubectl`, explicit `context`, package-local archive/image load
-tools, and apply smoke inputs. The airgap install path runs substrate-install,
-then runs bundle-check plus airgap deployment-gate using bundle-local release
-materials and the installer output substrate truth. These paths record
-path-level evidence for the final GA report. Server-dry-run modes also fail
-fast. Formal release success or failure is represented only by the final `ga-release-report.json` issued by `--ga-report` after required path evidence and AgentSmith product-side reports are available.
+`online/install_substrates` first runs substrate-install, then deploys with the
+installer output substrate truth. Airgap paths use bundle-local release
+materials plus package-local `kubectl`, archive/image tooling, and smoke
+inputs. Each package run records the output later consumed by `--ga-report`.
+Final release pass/fail is represented only by `ga-release-report.json`, which
+`--ga-report` writes after the required package outputs and AgentSmith
+product-side reports are available.
 
 For `online/install_substrates`, the package must provide namespace-scoped
 installer inputs, `kubectl` and `context` inputs, a package-local routability
@@ -151,14 +147,13 @@ After the four packages have been run, the operator-facing final step is
 `operator-release.sh --ga-report` with those four package paths plus the
 AgentSmith product readiness and post-deploy product smoke reports. Provide at
 least one online and one airgap post-deploy product smoke report. The facade
-locates finalized path evidence inside each package and writes the final
-`ga-release-report.json`; operators pass package paths, not internal evidence
+locates the package output itself and writes the final
+`ga-release-report.json`; operators pass package paths, not internal report
 paths.
 The final aggregate also checks that each smoke report's substrate truth
 digest matches the finalized deployment truth for the package it is bound to;
 smoke evidence from a different deployed substrate blocks GA.
-A blocked final aggregate overwrites stale pass outputs with `status=fail`,
-`formal_verdict=not_issued`, and blockers in that same report.
+When blocked, the final report records the failed result and blockers.
 The repository also provides a manual `ga-release-aggregate` GitHub workflow
 for final aggregation. It is `workflow_dispatch` only, downloads the seven
 already-produced operator/product artifact groups by repository, artifact
@@ -202,10 +197,9 @@ bash scripts/operator-release.sh --ga-report \
 Use `--init-operator-inputs` for a scaffolded package, use `--doctor` for
 missing package refs/fields plus static package blockers, and add `--run` when
 the package is ready to execute.
-The package-driven `--run` path writes finalized deployment-path handoff
-evidence for the final GA report when it executes an apply manifest.
-It does not issue a formal GA verdict. Formal release success or failure is
-issued only by `--ga-report`, which writes the final `ga-release-report.json`.
+The package-driven `--run` path records package output for the final GA report.
+It does not write the final GA result. Final release pass/fail is written only
+by `--ga-report` in `ga-release-report.json`.
 
 ### Maintainer/Internal Diagnostics
 
@@ -221,12 +215,8 @@ not operator readiness, and not a separate GA signoff surface.
 Legacy compatibility aliases are maintainer/internal only; removal target: release-kit v1.0.0 GA cut.
 
 Archive attachments written next to the final report are maintainer/reference
-artifacts, not operator verdicts. `ga-evidence-index.json` is a derived archive
-index that binds the final report digest to path evidence, Product Readiness,
-post-deploy smoke, blockers, Product runtime readiness, and adaptive wait
-intervals without issuing another verdict. `ga-release-summary.md` is a
-human-readable archive view of the same final report, also not a third
-verdict.
+artifacts, not operator results. The operator-facing result remains
+`ga-release-report.json`.
 
 The root README intentionally keeps the default path to `operator-inputs`,
 `scripts/operator-release.sh`, `ga-release-report.json`, and the concise

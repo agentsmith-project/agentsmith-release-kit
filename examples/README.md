@@ -19,8 +19,8 @@ bash scripts/operator-release.sh --operator-inputs <staged-example-package> --ru
 Run `--init-operator-inputs` to create a fresh package skeleton, then copy or
 replace the example materials. Run `--doctor` to list missing package
 refs/fields plus static package blockers before execution. A passing doctor
-only means package static intake is clean; it is not runnable readiness or a GA
-verdict. When doctor fails, the human output groups blockers as release
+only means package static intake is clean; it is not runnable readiness or the
+final GA result. When doctor fails, the human output groups blockers as release
 materials, operator target facts, operator tools, and operator confirmations.
 Run `--run` only when the package is ready to execute.
 Replace scaffold scalar placeholders such as
@@ -47,7 +47,7 @@ for the release images.
 
 After all four packages have been run with `--run` and AgentSmith
 product-side reports are available, use the final GA facade with the four
-package paths. Operators do not pass internal deployment path report files.
+package paths. Operators do not pass internal report files.
 
 ```bash
 bash scripts/operator-release.sh --ga-report \

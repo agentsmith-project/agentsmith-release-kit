@@ -43,10 +43,10 @@ tree next to it.
 Add `--verify-source-images` to the materializer command when `skopeo` is
 available and you want to check source refs before creating the airgap bundle;
 without that flag, do not claim the source refs were verified with skopeo.
-Materialize and server-dry-run only prove the package shape. They do not prove
-runtime readiness: DB schema/user bootstrap, object-storage bucket bootstrap,
-OIDC realm/client bootstrap, real Kubernetes secrets, storage, registry
-access, image load, rollout, and smoke checks are still follow-up blockers.
+Materialization only proves the package shape. It does not prove runtime
+readiness: DB schema/user bootstrap, object-storage bucket bootstrap, OIDC
+realm/client bootstrap, real Kubernetes secrets, storage, registry access,
+image load, rollout, and smoke checks are still follow-up blockers.
 The installer chooses the path from `deployment_path`; do not add extra
 deployment selection fields to the bundle-local target prerequisites or install
 inputs.
@@ -96,8 +96,8 @@ bash scripts/operator-release.sh --operator-inputs "$PKG" --doctor
 bash scripts/operator-release.sh --operator-inputs "$PKG" --run
 ```
 
-The package run writes path-level evidence for the final GA facade. It does
-not issue `ga-release-report.json`.
+The package run records output for the final GA facade. It does not issue
+`ga-release-report.json`.
 
 ## Final GA Report
 
@@ -116,6 +116,6 @@ bash scripts/operator-release.sh --ga-report \
   --output-dir <dir>
 ```
 
-The formal result is `ga-release-report.json`.
+The final result is `ga-release-report.json`.
 `site.env` is supplied by the AgentSmith post-deploy product smoke report, not
 by operator-inputs.

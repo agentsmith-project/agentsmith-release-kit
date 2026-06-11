@@ -98,9 +98,9 @@ bash scripts/operator-release.sh --operator-inputs "$PKG" --doctor
 
 This lists missing package refs/fields plus static package blockers without
 executing the selected path. A passing doctor only means package static intake
-is clean; it is not runnable readiness or a GA verdict. When doctor fails, the
-human output groups blockers as release materials, operator target facts,
-operator tools, and operator confirmations.
+is clean; it is not runnable readiness or the final GA result. When doctor
+fails, the human output groups blockers as release materials, operator target
+facts, operator tools, and operator confirmations.
 
 ## Apply
 
@@ -108,10 +108,9 @@ operator tools, and operator confirmations.
 bash scripts/operator-release.sh --operator-inputs "$PKG" --run
 ```
 
-For an apply manifest, a successful package run writes path-level evidence to
-the package internal output for the later GA aggregate. A package run does not
-write `ga-release-report.json`, does not issue `formal_verdict`, and does not
-replace AgentSmith product readiness or post-deploy product smoke evidence.
+A successful package run records package output for the later `--ga-report`.
+It does not write `ga-release-report.json` and does not replace AgentSmith
+product readiness or post-deploy product smoke reports.
 
 ## Final GA Report
 

@@ -56,8 +56,8 @@ bash scripts/operator-release.sh --operator-inputs "$PKG" --doctor
 bash scripts/operator-release.sh --operator-inputs "$PKG" --run
 ```
 
-The package run writes path-level evidence for the final GA facade. It does
-not issue `ga-release-report.json`.
+The package run records output for the final GA facade. It does not issue
+`ga-release-report.json`.
 
 ## Final GA Report
 
@@ -76,6 +76,6 @@ bash scripts/operator-release.sh --ga-report \
   --output-dir <dir>
 ```
 
-The formal result is `ga-release-report.json`.
+The final result is `ga-release-report.json`.
 `site.env` is supplied by the AgentSmith post-deploy product smoke report, not
 by operator-inputs.

@@ -29,30 +29,30 @@ Operator-inputs intake:
   --init-operator-inputs creates a package skeleton for one deployment_path.
   Add --doctor to list missing package refs/fields plus static package blockers
   without executing the path. A passing doctor only means static package intake
-  is clean; it is not runnable readiness or a GA verdict.
+  is clean; it is not runnable readiness or the final GA result.
   Add --run when the package is ready to execute the selected path.
 
 Operator-inputs run:
   The current minimal orchestration slice supports online/use_existing,
   online/install_substrates, airgap/use_existing, and
-  airgap/install_substrates with mode apply.
+  airgap/install_substrates.
   install_substrates runs the namespace-scoped installer first and deploys with
   the installer output substrate truth. Airgap paths use bundle-local release
-  materials and package-local tools. Server-dry-run modes fail fast.
+  materials and package-local tools.
 
 Success boundary:
-  --run produces path-level evidence for the final GA report.
-  Formal release success or failure is represented only by the final ga-release-report.json written by --ga-report.
-  Required path evidence and AgentSmith product-side reports must already be available.
+  --run records package output consumed by --ga-report.
+  Final release pass/fail is represented only by ga-release-report.json
+  written by --ga-report.
+  Required package outputs and AgentSmith product-side reports must already be
+  available.
 
 Final GA report:
   --ga-report consumes four operator-inputs packages that have already been
-  run with --operator-inputs <package> --run, locates the finalized path
-  evidence from those packages, requires online and airgap post-deploy product
-  smoke reports, and writes the final ga-release-report.json.
-  A passing aggregate writes formal_verdict=issued; a blocked aggregate writes
-  status=fail, formal_verdict=not_issued, and blockers in that same report.
-  Operators do not pass internal deployment path report paths.
+  run with --operator-inputs <package> --run, requires online and airgap
+  post-deploy product smoke reports, and writes the final
+  ga-release-report.json with pass/fail and blockers.
+  Operators do not pass internal report paths.
 USAGE
 }
 
