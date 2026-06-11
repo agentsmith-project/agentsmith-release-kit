@@ -57,7 +57,7 @@ bash scripts/operator-release.sh --ga-report \
 The init command writes a package skeleton for one deployment path and refuses
 to overwrite an existing `operator-inputs.json`. The doctor command lists
 missing package refs/fields plus static package blockers without executing the
-selected path. A passing doctor only means package static intake is clean; it
+selected path. A passing doctor only means static package checks passed; it
 is not runnable readiness or the final GA result. Add `--run` only when the
 package is ready to execute the selected path. A passing `--run` produces
 package output for the final GA report; do not treat intermediate files as the
@@ -142,9 +142,9 @@ Copy/pasteable package skeletons are available under `examples/`:
 Each example stages one package for `bash scripts/operator-release.sh
 --operator-inputs <pkg>`. Run `--doctor` on the staged package to list missing
 refs before validation/execution. Install-substrate examples use
-`confirm_current_install_parameters: true`; intake computes and prints
-`install_parameters_sha256` for audit, then `--run` passes it internally to
-`verify-substrate-install`.
+`confirm_current_install_parameters: true`; the package check computes and
+prints `install_parameters_sha256` for audit, and `--run` uses it for
+installer confirmation.
 
 ### Airgap Tool Contract
 

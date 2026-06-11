@@ -25,11 +25,11 @@ Operator facade:
   Use this facade for the GA operator path: prepare operator-inputs, run the
   selected package, and finish with --ga-report.
 
-Operator-inputs intake:
+Operator package checks:
   --init-operator-inputs creates a package skeleton for one deployment_path.
   Add --doctor to list missing package refs/fields plus static package blockers
-  without executing the path. A passing doctor only means static package intake
-  is clean; it is not runnable readiness or the final GA result.
+  without executing the path. A passing doctor only means static package checks
+  passed; it is not runnable readiness or the final GA result.
   Add --run when the package is ready to execute the selected path.
 
 Operator-inputs run:

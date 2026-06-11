@@ -35,7 +35,7 @@ AgentSmith Release Kit owns:
 
 - Online deploy execution.
 - Airgap package verification and deployment flow.
-- Image bundle, mirror map, and digest adoption checks.
+- Image bundle, mirror map, and digest binding checks.
 - Kubernetes render, apply, rollout, and smoke evidence.
 - Operator runbooks for deployment, package handling, troubleshooting, and
   evidence collection.
@@ -81,7 +81,7 @@ bash scripts/operator-release.sh --ga-report \
 Run `--init-operator-inputs` when you want a scaffolded input package for one
 deployment path. Run `--doctor` when you want missing package refs/fields plus
 static package blockers checked without executing the selected path. A passing
-doctor only means package static intake is clean; it is not runnable readiness
+doctor only means static package checks passed; it is not runnable readiness
 or the final GA result. Add `--run` when the package is ready to execute the
 selected path.
 When doctor fails, the human output groups blockers as release materials,

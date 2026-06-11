@@ -19,7 +19,7 @@ bash scripts/operator-release.sh --operator-inputs <staged-example-package> --ru
 Run `--init-operator-inputs` to create a fresh package skeleton, then copy or
 replace the example materials. Run `--doctor` to list missing package
 refs/fields plus static package blockers before execution. A passing doctor
-only means package static intake is clean; it is not runnable readiness or the
+only means static package checks passed; it is not runnable readiness or the
 final GA result. When doctor fails, the human output groups blockers as release
 materials, operator target facts, operator tools, and operator confirmations.
 Run `--run` only when the package is ready to execute.

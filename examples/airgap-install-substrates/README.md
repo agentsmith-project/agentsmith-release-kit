@@ -85,9 +85,9 @@ placeholder values as blockers.
 ## Confirm Install Parameters
 
 Keep `install_confirmation.confirm_current_install_parameters: true` after
-editing the bundle-local install inputs and `namespace`. The operator-inputs
-intake computes `install_parameters_sha256`, prints it for audit, and passes
-it internally to the installer during `--run`.
+editing the bundle-local install inputs and `namespace`. The package check
+computes `install_parameters_sha256`, prints it for audit, and `--run` uses it
+for installer confirmation.
 
 ## Doctor And Run
 

@@ -97,8 +97,8 @@ bash scripts/operator-release.sh --operator-inputs "$PKG" --doctor
 ```
 
 This lists missing package refs/fields plus static package blockers without
-executing the selected path. A passing doctor only means package static intake
-is clean; it is not runnable readiness or the final GA result. When doctor
+executing the selected path. A passing doctor only means static package checks
+passed; it is not runnable readiness or the final GA result. When doctor
 fails, the human output groups blockers as release materials, operator target
 facts, operator tools, and operator confirmations.
 
