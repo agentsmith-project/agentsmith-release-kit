@@ -632,12 +632,27 @@ for (const expected of expectedPaths) {
 if (packageDirs.length !== expectedPaths.size) {
   throw new Error('package-driven GA assertion requires four operator-inputs package dirs');
 }
-const plansByPath = new Map(packageDirs.map((packageDir) => {
+const packageRecordsByPath = new Map(packageDirs.map((packageDir) => {
   const plan = JSON.parse(fs.readFileSync(path.join(packageDir, '.release-kit-internal/operator-inputs-plan.json'), 'utf8'));
-  return [plan.deployment_path, plan];
+  return [plan.deployment_path, { packageDir, plan }];
 }));
-const firstPlan = plansByPath.values().next().value;
-const contract = JSON.parse(fs.readFileSync(firstPlan.input_refs.release_contract.absolute_path, 'utf8'));
+function packagePath(record, relativePath) {
+  const raw = String(relativePath || '').replace(/\\/g, '/');
+  const normalized = path.posix.normalize(raw);
+  if (
+    raw === '' ||
+    path.posix.isAbsolute(raw) ||
+    normalized !== raw ||
+    normalized === '.' ||
+    normalized === '..' ||
+    normalized.startsWith('../')
+  ) {
+    throw new Error(`unsafe package-relative test path: ${relativePath}`);
+  }
+  return path.join(record.packageDir, normalized);
+}
+const firstRecord = packageRecordsByPath.values().next().value;
+const contract = JSON.parse(fs.readFileSync(packagePath(firstRecord, firstRecord.plan.input_refs.release_contract.path), 'utf8'));
 if (!contract.target_profiles.every((profile) => profile.required === true)) {
   throw new Error('package-driven GA smoke must use a final GA release contract with required target profiles');
 }
@@ -662,10 +677,11 @@ if (serializedEvidenceIndex.includes('.release-kit-internal')) {
   throw new Error('GA evidence index must not expose internal output paths');
 }
 for (const entry of packageIndex) {
-  const plan = plansByPath.get(entry.operator_path);
-  if (!plan) {
+  const record = packageRecordsByPath.get(entry.operator_path);
+  if (!record) {
     throw new Error(`GA report operator-inputs package index has unexpected path: ${entry.operator_path}`);
   }
+  const { plan } = record;
   if (entry.package_manifest?.path !== plan.package?.manifest_relative_path) {
     throw new Error(`GA report operator-inputs manifest path mismatch: ${entry.operator_path}`);
   }
@@ -687,26 +703,26 @@ for (const entry of packageIndex) {
   if (entry.release_materials?.release_contract?.path !== plan.input_refs?.release_contract?.path) {
     throw new Error(`GA report operator-inputs release contract path mismatch: ${entry.operator_path}`);
   }
-  if (entry.release_materials?.release_contract?.digest !== fileDigest(plan.input_refs.release_contract.absolute_path)) {
+  if (entry.release_materials?.release_contract?.digest !== fileDigest(packagePath(record, plan.input_refs.release_contract.path))) {
     throw new Error(`GA report operator-inputs release contract digest mismatch: ${entry.operator_path}`);
   }
   if (entry.release_materials?.deploy_template_package?.path !== plan.input_refs?.deploy_template_package?.path) {
     throw new Error(`GA report operator-inputs deploy template package path mismatch: ${entry.operator_path}`);
   }
-  if (entry.release_materials?.deploy_template_package?.digest !== fileDigest(plan.input_refs.deploy_template_package.absolute_path)) {
+  if (entry.release_materials?.deploy_template_package?.digest !== fileDigest(packagePath(record, plan.input_refs.deploy_template_package.path))) {
     throw new Error(`GA report operator-inputs deploy template package digest mismatch: ${entry.operator_path}`);
   }
   if (entry.operator_path.startsWith('airgap/')) {
     if (entry.airgap_runtime_tools?.archive_probe?.path !== plan.input_refs?.archive_probe?.path) {
       throw new Error(`GA report operator-inputs archive_probe path mismatch: ${entry.operator_path}`);
     }
-    if (entry.airgap_runtime_tools?.archive_probe?.digest !== fileDigest(plan.input_refs.archive_probe.absolute_path)) {
+    if (entry.airgap_runtime_tools?.archive_probe?.digest !== fileDigest(packagePath(record, plan.input_refs.archive_probe.path))) {
       throw new Error(`GA report operator-inputs archive_probe digest mismatch: ${entry.operator_path}`);
     }
     if (entry.airgap_runtime_tools?.image_loader?.path !== plan.input_refs?.image_loader?.path) {
       throw new Error(`GA report operator-inputs image_loader path mismatch: ${entry.operator_path}`);
     }
-    if (entry.airgap_runtime_tools?.image_loader?.digest !== fileDigest(plan.input_refs.image_loader.absolute_path)) {
+    if (entry.airgap_runtime_tools?.image_loader?.digest !== fileDigest(packagePath(record, plan.input_refs.image_loader.path))) {
       throw new Error(`GA report operator-inputs image_loader digest mismatch: ${entry.operator_path}`);
     }
   } else if (entry.airgap_runtime_tools !== undefined) {
@@ -976,6 +992,90 @@ seed_stale_ga_outputs() {
   cp "$ga_output_dir/ga-release-summary.md" "$output_dir/ga-release-summary.md"
   cp "$ga_output_dir/ga-evidence-index.json" "$output_dir/ga-evidence-index.json"
 }
+
+relocated_root="$TMP_DIR/ga-release-inputs"
+relocated_online_package="$relocated_root/online-use-existing"
+relocated_online_install_package="$relocated_root/online-install-substrates"
+relocated_airgap_package="$relocated_root/airgap-use-existing"
+relocated_airgap_install_package="$relocated_root/airgap-install-substrates"
+relocated_ga_output_dir="$TMP_DIR/ga-output-relocated"
+
+mkdir -p "$relocated_root"
+cp -a "$online_package" "$relocated_online_package"
+cp -a "$online_install_package" "$relocated_online_install_package"
+cp -a "$airgap_package" "$relocated_airgap_package"
+cp -a "$airgap_install_package" "$relocated_airgap_install_package"
+
+if ! bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
+  --operator-inputs "$relocated_online_package" \
+  --operator-inputs "$relocated_online_install_package" \
+  --operator-inputs "$relocated_airgap_package" \
+  --operator-inputs "$relocated_airgap_install_package" \
+  --product-readiness-report "$product_dir/product-readiness-report.json" \
+  --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
+  --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-airgap-report.json" \
+  --output-dir "$relocated_ga_output_dir" >"$TMP_DIR/ga-release-relocated.out" 2>"$TMP_DIR/ga-release-relocated.err"; then
+  cat "$TMP_DIR/ga-release-relocated.out" >&2
+  cat "$TMP_DIR/ga-release-relocated.err" >&2
+  fail "package-driven operator GA facade failed after artifact relocation"
+fi
+assert_ga_report \
+  "$relocated_ga_output_dir/ga-release-report.json" \
+  "$relocated_online_package" \
+  "$relocated_online_install_package" \
+  "$relocated_airgap_package" \
+  "$relocated_airgap_install_package"
+
+relocated_tampered_manifest_output="$TMP_DIR/ga-output-relocated-tampered-manifest"
+relocated_tampered_manifest_backup="$TMP_DIR/relocated-operator-inputs-online-use-existing.backup.json"
+seed_stale_ga_outputs "$relocated_tampered_manifest_output"
+cp "$relocated_online_package/operator-inputs.json" "$relocated_tampered_manifest_backup"
+"$NODE_BIN" --input-type=module - "$relocated_online_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestFile] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+manifest.timeout_ms = Number(manifest.timeout_ms || 60000) + 1;
+fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
+  --operator-inputs "$relocated_online_package" \
+  --operator-inputs "$relocated_online_install_package" \
+  --operator-inputs "$relocated_airgap_package" \
+  --operator-inputs "$relocated_airgap_install_package" \
+  --product-readiness-report "$product_dir/product-readiness-report.json" \
+  --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
+  --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-airgap-report.json" \
+  --output-dir "$relocated_tampered_manifest_output" >"$TMP_DIR/ga-relocated-tampered-manifest.out" 2>&1; then
+  cp "$relocated_tampered_manifest_backup" "$relocated_online_package/operator-inputs.json"
+  fail "relocated operator GA facade should fail when a moved package manifest changed after --run"
+fi
+cp "$relocated_tampered_manifest_backup" "$relocated_online_package/operator-inputs.json"
+grep -Fq 'operator-inputs manifest changed after package run for online/use_existing' "$TMP_DIR/ga-relocated-tampered-manifest.out" ||
+  fail "relocated tampered manifest failure did not explain the package run-plan drift"
+assert_ga_failure_report "$relocated_tampered_manifest_output" 'operator-inputs manifest changed after package run for online/use_existing'
+
+relocated_tampered_ref_output="$TMP_DIR/ga-output-relocated-tampered-ref"
+relocated_tampered_ref_backup="$TMP_DIR/relocated-release-contract-online-use-existing.backup.json"
+seed_stale_ga_outputs "$relocated_tampered_ref_output"
+cp "$relocated_online_package/release-contract.json" "$relocated_tampered_ref_backup"
+printf '\n' >>"$relocated_online_package/release-contract.json"
+if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
+  --operator-inputs "$relocated_online_package" \
+  --operator-inputs "$relocated_online_install_package" \
+  --operator-inputs "$relocated_airgap_package" \
+  --operator-inputs "$relocated_airgap_install_package" \
+  --product-readiness-report "$product_dir/product-readiness-report.json" \
+  --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
+  --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-airgap-report.json" \
+  --output-dir "$relocated_tampered_ref_output" >"$TMP_DIR/ga-relocated-tampered-ref.out" 2>&1; then
+  cp "$relocated_tampered_ref_backup" "$relocated_online_package/release-contract.json"
+  fail "relocated operator GA facade should fail when a moved package ref changed after --run"
+fi
+cp "$relocated_tampered_ref_backup" "$relocated_online_package/release-contract.json"
+grep -Fq 'operator-inputs release_contract ref changed after package run for online/use_existing' "$TMP_DIR/ga-relocated-tampered-ref.out" ||
+  fail "relocated tampered ref failure did not explain the package ref drift"
+assert_ga_failure_report "$relocated_tampered_ref_output" 'operator-inputs release_contract ref changed after package run for online/use_existing'
 
 tampered_manifest_output="$TMP_DIR/ga-output-tampered-manifest"
 tampered_manifest_backup="$TMP_DIR/operator-inputs-online-use-existing.backup.json"

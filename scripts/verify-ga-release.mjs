@@ -77,6 +77,8 @@ const OPERATOR_INPUTS_MANIFEST_VERSION = 1;
 const OPERATOR_INPUTS_PLAN_SCHEMA = 'agentsmith.operator-inputs-plan/v1';
 const OPERATOR_INPUTS_PLAN_SCOPE = 'operator_inputs_intake_only';
 const OPERATOR_INPUTS_PLAN_INTERNAL_SCHEMA = 'agentsmith.operator-inputs-plan-internal/v1';
+const OPERATOR_INPUTS_INTERNAL_DIR = '.release-kit-internal';
+const OPERATOR_INPUTS_PLAN_FILE = 'operator-inputs-plan.json';
 const PRODUCT_FLOWS_AGGREGATE_SCHEMA = 'agentsmith.unified-deploy.product-flows.aggregate/v1';
 const PRODUCT_FLOWS_AGGREGATE_PRODUCER = 'unified-deploy-product-flows';
 const PRODUCT_FLOWS_AGGREGATE_COMMAND = 'npm run lane:unified-deploy:product-flows';
@@ -614,6 +616,79 @@ function requireSafePackageRelativePath(value, label) {
     fail(`${label} must be a safe package-relative path`);
   }
   return normalized;
+}
+
+function requireSafePackageInternalRelativePath(value, label) {
+  const relative = requireString(value, label).replace(/\\/g, '/');
+  if (
+    path.posix.isAbsolute(relative) ||
+    WINDOWS_DRIVE_RE.test(relative) ||
+    URI_SCHEME_RE.test(relative)
+  ) {
+    fail(`${label} must be a package-relative path`);
+  }
+  const normalized = path.posix.normalize(relative);
+  if (
+    normalized !== relative ||
+    normalized === '.' ||
+    normalized === '..' ||
+    normalized.startsWith('../')
+  ) {
+    fail(`${label} must be a safe package-relative path`);
+  }
+  return normalized;
+}
+
+function packageRootFromOperatorInputsPlan(planInput, operatorPath) {
+  const planFile = path.resolve(planInput.file);
+  if (
+    path.basename(planFile) !== OPERATOR_INPUTS_PLAN_FILE ||
+    path.basename(path.dirname(planFile)) !== OPERATOR_INPUTS_INTERNAL_DIR
+  ) {
+    fail(`operator_inputs_plan file must be package-local .release-kit-internal/operator-inputs-plan.json for ${operatorPath}`);
+  }
+  return path.dirname(path.dirname(planFile));
+}
+
+function packageRelativePathFromLegacyAbsolute({
+  legacyRoot,
+  absolutePath,
+  label,
+  allowInternal = false
+}) {
+  const root = path.resolve(requireString(legacyRoot, `${label} package root`));
+  const target = path.resolve(requireString(absolutePath, label));
+  const relative = path.relative(root, target).split(path.sep).join('/');
+  if (
+    relative === '' ||
+    relative === '..' ||
+    relative.startsWith('../') ||
+    path.posix.isAbsolute(relative)
+  ) {
+    fail(`${label} must resolve inside the operator-inputs package`);
+  }
+  return allowInternal
+    ? requireSafePackageInternalRelativePath(relative, `${label} package-relative path`)
+    : requireSafePackageRelativePath(relative, `${label} package-relative path`);
+}
+
+function resolveDeploymentPathOutputDirFromPlan({
+  packageRoot,
+  legacyRoot,
+  plannedPath,
+  label
+}) {
+  const value = requireString(plannedPath, label);
+  if (!path.isAbsolute(value)) {
+    return path.join(packageRoot, requireSafePackageInternalRelativePath(value, label));
+  }
+  const relative = packageRelativePathFromLegacyAbsolute({
+    legacyRoot,
+    absolutePath: value,
+    label,
+    allowInternal: true
+  });
+  return path.join(packageRoot, relative);
 }
 
 function sameSet(left, right) {
@@ -2856,28 +2931,22 @@ async function validateOperatorInputsFileRef({
     ref.path,
     `operator_inputs_plan.input_refs.${key}.path`
   );
-  const absolutePath = requireString(
-    ref.absolute_path,
-    `operator_inputs_plan.input_refs.${key}.absolute_path`
-  );
-  if (path.resolve(packageRoot, relativePath) !== path.resolve(absolutePath)) {
-    fail(`operator_inputs_plan.input_refs.${key}.path must bind absolute_path for ${operatorPath}`);
-  }
+  const currentPath = path.join(packageRoot, relativePath);
 
   let stat;
   try {
-    stat = await fs.lstat(absolutePath);
+    stat = await fs.lstat(currentPath);
   } catch (error) {
     fail(`cannot read operator-inputs ${key} for ${operatorPath}: ${error.message}`);
   }
   if (stat.isSymbolicLink()) {
-    fail(`operator_inputs_plan.input_refs.${key}.absolute_path must not be a symlink for ${operatorPath}`);
+    fail(`operator_inputs_plan.input_refs.${key}.path must not resolve to a symlink for ${operatorPath}`);
   }
   if (!stat.isFile()) {
-    fail(`operator_inputs_plan.input_refs.${key}.absolute_path must point to a file for ${operatorPath}`);
+    fail(`operator_inputs_plan.input_refs.${key}.path must point to a file for ${operatorPath}`);
   }
   if (executable && (stat.mode & 0o111) === 0) {
-    fail(`operator_inputs_plan.input_refs.${key}.absolute_path must be executable for ${operatorPath}`);
+    fail(`operator_inputs_plan.input_refs.${key}.path must be executable for ${operatorPath}`);
   }
 
   const declaredDigest = requireDigest(
@@ -2885,7 +2954,7 @@ async function validateOperatorInputsFileRef({
     `operator_inputs_plan.input_refs.${key}.sha256`
   );
   const material = await readBuffer(
-    absolutePath,
+    currentPath,
     `operator-inputs ${key} for ${operatorPath}`
   );
   const actualDigest = digestBuffer(material);
@@ -2929,6 +2998,8 @@ async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPat
   if (!deploymentPath) {
     fail(`operator-inputs plan has no matching deployment path report: ${operatorPath}`);
   }
+  const packageRoot = packageRootFromOperatorInputsPlan(planInput, operatorPath);
+  const legacyRoot = requireString(plan.operator_inputs_root, 'operator_inputs_plan.operator_inputs_root');
 
   const internal = requireObject(plan._internal, 'operator_inputs_plan._internal');
   const expected = requireObject(
@@ -2956,23 +3027,44 @@ async function validateOperatorInputsPlan(planInput, deploymentPathByOperatorPat
     expectedOutputDirs.deployment_path,
     'operator_inputs_plan._internal.expected.output_dirs.deployment_path'
   );
+  const currentExpectedDeploymentPathOutputDir = resolveDeploymentPathOutputDirFromPlan({
+    packageRoot,
+    legacyRoot,
+    plannedPath: expectedDeploymentPathOutputDir,
+    label: 'operator_inputs_plan._internal.expected.output_dirs.deployment_path'
+  });
   if (
-    path.resolve(expectedDeploymentPathOutputDir) !==
+    path.resolve(currentExpectedDeploymentPathOutputDir) !==
     path.dirname(path.resolve(deploymentPath.report_file))
   ) {
     fail(`operator_inputs_plan._internal.expected.output_dirs.deployment_path must match deployment path report directory for ${operatorPath}`);
   }
 
   const packageInfo = requireObject(plan.package, 'operator_inputs_plan.package');
-  const packageRoot = requireString(plan.operator_inputs_root, 'operator_inputs_plan.operator_inputs_root');
-  const manifestPath = requireString(packageInfo.manifest_path, 'operator_inputs_plan.package.manifest_path');
   const manifestRelativePath = requireSafePackageRelativePath(
     packageInfo.manifest_relative_path,
     'operator_inputs_plan.package.manifest_relative_path'
   );
-  if (path.resolve(packageRoot, manifestRelativePath) !== path.resolve(manifestPath)) {
-    fail(`operator_inputs_plan.package.manifest_relative_path must bind manifest_path for ${operatorPath}`);
+  if (packageInfo.manifest_path !== undefined) {
+    const plannedManifestPath = requireString(
+      packageInfo.manifest_path,
+      'operator_inputs_plan.package.manifest_path'
+    );
+    const plannedManifestRelativePath = path.isAbsolute(plannedManifestPath)
+      ? packageRelativePathFromLegacyAbsolute({
+          legacyRoot,
+          absolutePath: plannedManifestPath,
+          label: 'operator_inputs_plan.package.manifest_path'
+        })
+      : requireSafePackageRelativePath(
+          plannedManifestPath,
+          'operator_inputs_plan.package.manifest_path'
+        );
+    if (plannedManifestRelativePath !== manifestRelativePath) {
+      fail(`operator_inputs_plan.package.manifest_relative_path must bind manifest_path for ${operatorPath}`);
+    }
   }
+  const manifestPath = path.join(packageRoot, manifestRelativePath);
   const manifestDigest = requireDigest(
     packageInfo.manifest_sha256,
     'operator_inputs_plan.package.manifest_sha256'

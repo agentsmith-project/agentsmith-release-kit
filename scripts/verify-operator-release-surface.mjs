@@ -21,6 +21,7 @@ const AIRGAP_BUNDLE_CHECK_REPORT_FILE = 'airgap-bundle-check-report.json';
 const AIRGAP_BUNDLE_MANIFEST_FILE = 'airgap-bundle-manifest.json';
 const SUBSTRATE_PACK_MANIFEST_FILE = 'substrate-pack-manifest.json';
 const SUBSTRATE_PACK_COMPONENT_PATH = 'components/substrate-pack-manifest.json';
+const SUBSTRATE_INSTALL_INPUTS_COMPONENT_PATH = 'components/substrate-install-inputs.json';
 const AIRGAP_CONSUME_REPORT_FILE = 'airgap-consume-rehearsal-report.json';
 const AIRGAP_DEPLOYMENT_GATE_REPORT_FILE = 'airgap-deployment-gate-report.json';
 const ONLINE_PRODUCER_SCHEMA = 'agentsmith.online-deployment-gate/v1';
@@ -677,6 +678,62 @@ function assertSubstratePackManifestBinding(
   }
 }
 
+function substrateInstallInputsDigestFromBinding(manifest, label) {
+  const bindings = requireObject(manifest.bindings, `${label}.bindings`);
+  const bindingDigest = requireDigest(
+    bindings.substrate_install_inputs_sha256,
+    `${label}.bindings.substrate_install_inputs_sha256`
+  );
+
+  const components = requireArray(manifest.components, `${label}.components`);
+  let matchedComponent;
+  for (const [index, componentValue] of components.entries()) {
+    const component = requireObject(componentValue, `${label}.components[${index}]`);
+    const kind = requireString(component.kind, `${label}.components[${index}].kind`);
+    if (kind !== 'substrate_install_inputs') {
+      continue;
+    }
+    if (matchedComponent) {
+      fail(`${label}.components contains duplicate substrate_install_inputs`);
+    }
+    matchedComponent = {
+      value: component,
+      label: `${label}.components[${index}]`
+    };
+  }
+
+  if (!matchedComponent) {
+    fail(`${label}.components must include substrate_install_inputs`);
+  }
+
+  assertStringEquals(
+    matchedComponent.value.path,
+    SUBSTRATE_INSTALL_INPUTS_COMPONENT_PATH,
+    `${matchedComponent.label}.path`
+  );
+  const componentDigest = requireDigest(
+    matchedComponent.value.sha256,
+    `${matchedComponent.label}.sha256`
+  );
+  if (componentDigest !== bindingDigest) {
+    fail(`${matchedComponent.label}.sha256 must match substrate install inputs binding`);
+  }
+
+  return bindingDigest;
+}
+
+function assertSubstrateInstallInputsBinding(
+  manifest,
+  expectedDigest,
+  label,
+  expectedLabel = 'evidence root'
+) {
+  const bindingDigest = substrateInstallInputsDigestFromBinding(manifest, label);
+  if (bindingDigest !== expectedDigest) {
+    fail(`${label}.bindings.substrate_install_inputs_sha256 must match ${expectedLabel}`);
+  }
+}
+
 async function buildOnlineHandoff(args, releaseIdentity) {
   if (!args.evidenceRoot) {
     return undefined;
@@ -1116,6 +1173,12 @@ async function buildAirgapSummary(args, releaseIdentity) {
         'airgap bundle substrate pack manifest'
       )
     : undefined;
+  const substrateInstallInputsInput = isKitAirgapProfile(args.machineProfile)
+    ? await readJson(
+        path.join(bundleRoot, SUBSTRATE_INSTALL_INPUTS_COMPONENT_PATH),
+        'airgap bundle substrate install inputs'
+      )
+    : undefined;
 
   assertProducerBase({
     report: bundleCreateReport,
@@ -1160,6 +1223,12 @@ async function buildAirgapSummary(args, releaseIdentity) {
       'airgap_bundle_manifest',
       'current bundle file'
     );
+    assertSubstrateInstallInputsBinding(
+      manifest,
+      substrateInstallInputsInput.digest,
+      'airgap_bundle_manifest',
+      'current bundle file'
+    );
   }
   const airgapEvidenceHandoff = await buildAirgapEvidenceHandoff(args, releaseIdentity, {
     airgapBundleCheckReportDigest: checkReportInput.digest,
@@ -1193,7 +1262,13 @@ async function buildAirgapSummary(args, releaseIdentity) {
         checkReport.tool_count,
         'airgap_bundle_check_report.tool_count'
       ),
-      target_registry_summary: parseTargetRegistry(args.targetRegistry)
+      target_registry_summary: parseTargetRegistry(args.targetRegistry),
+      ...(substratePackInput
+        ? {
+            substrate_pack_manifest_digest: substratePackInput.digest,
+            substrate_install_inputs_digest: substrateInstallInputsInput.digest
+          }
+        : {})
     },
     ...(airgapEvidenceHandoff
       ? {

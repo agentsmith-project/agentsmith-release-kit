@@ -590,16 +590,45 @@ NODE
 write_kit_substrate_pack_manifest() {
   local output="$1"
   local profile="$2"
+  local target_registry="${3:-ghcr.io/agentsmith-project}"
+  local postgresql_digest
+  local mongodb_digest
+  local redis_digest
+  local object_storage_digest
+  local oidc_digest
 
-  "$NODE_BIN" --input-type=module - "$output" "$profile" <<'NODE'
+  postgresql_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_postgresql)"
+  mongodb_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_mongodb)"
+  redis_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_redis)"
+  object_storage_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_object_storage)"
+  oidc_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_oidc)"
+
+  "$NODE_BIN" --input-type=module - \
+    "$output" \
+    "$profile" \
+    "$target_registry" \
+    "$postgresql_digest" \
+    "$mongodb_digest" \
+    "$redis_digest" \
+    "$object_storage_digest" \
+    "$oidc_digest" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [output, profile] = process.argv.slice(2);
+const [
+  output,
+  profile,
+  targetRegistry,
+  postgresqlDigest,
+  mongodbDigest,
+  redisDigest,
+  objectStorageDigest,
+  oidcDigest
+] = process.argv.slice(2);
 const digest = (char) => `sha256:${char.repeat(64)}`;
 const image = (name, tag, char) =>
-  `ghcr.io/agentsmith-project/substrates/${name}:${tag}@${digest(char)}`;
+  `${targetRegistry}/substrates/${name}:${tag}@${char}`;
 const packRoot = path.dirname(output);
 
 function digestBuffer(buffer) {
@@ -639,11 +668,11 @@ const manifest = {
   installed_by: 'agentsmith-release-kit',
   target_profile: profile,
   images: {
-    postgresql: image('postgresql', '16.3', '1'),
-    mongodb: image('mongodb', '7.0', '2'),
-    redis: image('redis', '7.2', '3'),
-    object_storage: image('object-storage', '2026.05', '4'),
-    oidc: image('keycloak', '25.0', '5')
+    postgresql: image('postgresql', '16.3', postgresqlDigest),
+    mongodb: image('mongodb', '7.0', mongodbDigest),
+    redis: image('redis', '7.2', redisDigest),
+    object_storage: image('object-storage', '2026.05', objectStorageDigest),
+    oidc: image('keycloak', '25.0', oidcDigest)
   },
   payload: {
     install_plan: {
@@ -670,6 +699,53 @@ const manifest = {
 };
 
 fs.writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+write_kit_substrate_install_inputs() {
+  local output="$1"
+  local profile="$2"
+  local substrate_truth="$3"
+
+  "$NODE_BIN" --input-type=module - "$output" "$profile" "$substrate_truth" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [output, profile, substrateTruthPath] = process.argv.slice(2);
+const installationId = 'kit-install-10001';
+const substrateTruth = JSON.parse(fs.readFileSync(substrateTruthPath, 'utf8'));
+
+const inputs = {
+  schema_version: 'agentsmith.substrate-install-inputs/v1',
+  target_profile: profile,
+  installation_id: installationId,
+  substrate_truth: substrateTruth,
+  resources: [
+    {
+      apiVersion: 'v1',
+      kind: 'ConfigMap',
+      metadata: {
+        name: 'agentsmith-substrate-config',
+        namespace: 'agentsmith',
+        labels: {
+          'app.kubernetes.io/managed-by': 'agentsmith-release-kit',
+          'app.kubernetes.io/part-of': 'agentsmith-substrate'
+        },
+        annotations: {
+          'agentsmith.io/managed-by': 'agentsmith-release-kit',
+          'agentsmith.io/installation-id': installationId
+        }
+      },
+      data: {
+        installation_id: installationId,
+        profile
+      }
+    }
+  ]
+};
+
+fs.mkdirSync(path.dirname(output), { recursive: true });
+fs.writeFileSync(output, `${JSON.stringify(inputs, null, 2)}\n`);
 NODE
 }
 
@@ -818,6 +894,33 @@ create_image_archives() {
   "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
     --from-contract "$contract" \
     --output-dir "$image_dir"
+}
+
+create_substrate_image_archive_args() {
+  local image_dir="$1"
+  local substrate_pack_manifest="$2"
+  local -n output_args_ref="$3"
+
+  output_args_ref=()
+  mkdir -p "$image_dir"
+  while IFS=' ' read -r id digest; do
+    "$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" \
+      --archive "$image_dir/$id.oci-layout.tar" \
+      --image-id "$id" \
+      --target-digest "$digest"
+    output_args_ref+=(--image-archive "$id=$image_dir/$id.oci-layout.tar")
+  done < <("$NODE_BIN" --input-type=module - "$substrate_pack_manifest" <<'NODE'
+import fs from 'node:fs';
+
+const [substratePackManifest] = process.argv.slice(2);
+const pack = JSON.parse(fs.readFileSync(substratePackManifest, 'utf8'));
+for (const key of Object.keys(pack.images).sort()) {
+  const image = pack.images[key];
+  const digest = image.slice(image.lastIndexOf('@') + 1);
+  console.log(`substrate_${key} ${digest}`);
+}
+NODE
+)
 }
 
 write_operator_prerequisites() {
@@ -1406,6 +1509,8 @@ EXTERNAL_PREREQUISITES="$TMP_DIR/target-prerequisites.external-online.json"
 KIT_PREREQUISITES="$TMP_DIR/target-prerequisites.kit-online.json"
 KIT_SUBSTRATE_PACK="$TMP_DIR/substrate-pack-manifest.kit-online.json"
 KIT_AIRGAP_SUBSTRATE_PACK="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
+KIT_AIRGAP_TRUTH="$TMP_DIR/substrate-truth.kit-airgap.json"
+KIT_AIRGAP_SUBSTRATE_INSTALL_INPUTS="$TMP_DIR/substrate-install-inputs.kit-airgap.json"
 FAKE_KUBECTL="$TMP_DIR/kubectl"
 KUBECTL_LOG="$TMP_DIR/kubectl.log"
 ROUTABILITY_PROBE="$TMP_DIR/routability-probe.sh"
@@ -1426,10 +1531,15 @@ retarget_release_contract_to_oci_fixture_digests "$VALID_AIRGAP_CONTRACT"
 write_render_values "$VALID_VALUES"
 write_truth "$EXTERNAL_TRUTH" "$EXTERNAL_ONLINE_PROFILE"
 write_truth "$KIT_TRUTH" "$KIT_ONLINE_PROFILE"
+write_truth "$KIT_AIRGAP_TRUTH" "$KIT_AIRGAP_PROFILE"
 write_prerequisites "$EXTERNAL_PREREQUISITES" "$EXTERNAL_ONLINE_PROFILE"
 write_prerequisites "$KIT_PREREQUISITES" "$KIT_ONLINE_PROFILE"
 write_kit_substrate_pack_manifest "$KIT_SUBSTRATE_PACK" "$KIT_ONLINE_PROFILE"
-write_kit_substrate_pack_manifest "$KIT_AIRGAP_SUBSTRATE_PACK" "$KIT_AIRGAP_PROFILE"
+write_kit_substrate_pack_manifest "$KIT_AIRGAP_SUBSTRATE_PACK" "$KIT_AIRGAP_PROFILE" "$AIRGAP_REGISTRY"
+write_kit_substrate_install_inputs \
+  "$KIT_AIRGAP_SUBSTRATE_INSTALL_INPUTS" \
+  "$KIT_AIRGAP_PROFILE" \
+  "$KIT_AIRGAP_TRUTH"
 write_fake_kubectl "$FAKE_KUBECTL"
 write_routability_probe "$ROUTABILITY_PROBE"
 create_payloads "$PAYLOAD_DIR" "$BUNDLED_TOOL"
@@ -1487,6 +1597,9 @@ image_args=()
 for id in "${RELEASE_IMAGE_IDS[@]}"; do
   image_args+=(--image-archive "$id=$IMAGE_DIR/$id.oci-layout.tar")
 done
+kit_airgap_image_args=()
+create_substrate_image_archive_args "$IMAGE_DIR" "$KIT_AIRGAP_SUBSTRATE_PACK" kit_airgap_image_args
+kit_airgap_expected_image_loads=$(( ${#RELEASE_IMAGE_IDS[@]} + ${#kit_airgap_image_args[@]} / 2 ))
 
 external_online_output="$TMP_DIR/out-online-use-existing"
 FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
@@ -1679,12 +1792,14 @@ bash "$ROOT_DIR/scripts/operator-release.sh" airgap-bundle kit_provided \
   --archive "$VALID_ARCHIVE" \
   --target-registry "$AIRGAP_REGISTRY" \
   "${image_args[@]}" \
+  "${kit_airgap_image_args[@]}" \
   --runbook "$PAYLOAD_DIR/runbook.md" \
   --script "$PAYLOAD_DIR/install.sh" \
   --profile-values-schema "$PAYLOAD_DIR/profile-values.schema.json" \
   --profile-values-example "$PAYLOAD_DIR/profile-values.example.yaml" \
   --operator-prerequisites "$OPERATOR_PREREQUISITES" \
   --substrate-pack-manifest "$KIT_AIRGAP_SUBSTRATE_PACK" \
+  --substrate-install-inputs "$KIT_AIRGAP_SUBSTRATE_INSTALL_INPUTS" \
   --bundle-root "$kit_airgap_bundle_root" \
   --output-dir "$kit_airgap_output" \
   --evidence-root "$kit_airgap_evidence_root" \
@@ -1715,16 +1830,32 @@ assert_operator_report \
   true
 "$NODE_BIN" --input-type=module - \
   "$kit_airgap_bundle_root/airgap-bundle-manifest.json" \
-  "$KIT_AIRGAP_SUBSTRATE_PACK" <<'NODE'
+  "$KIT_AIRGAP_SUBSTRATE_PACK" \
+  "$KIT_AIRGAP_SUBSTRATE_INSTALL_INPUTS" \
+  "$kit_airgap_output/$REPORT_FILE" \
+  "$kit_airgap_output/bundle-create-report.json" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 
-const [manifestPath, substratePackManifestPath] = process.argv.slice(2);
+const [
+  manifestPath,
+  substratePackManifestPath,
+  substrateInstallInputsPath,
+  operatorReportPath,
+  bundleCreateReportPath
+] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const operatorReport = JSON.parse(fs.readFileSync(operatorReportPath, 'utf8'));
+const bundleCreateReport = JSON.parse(fs.readFileSync(bundleCreateReportPath, 'utf8'));
 const packDigest =
   `sha256:${crypto.createHash('sha256').update(fs.readFileSync(substratePackManifestPath)).digest('hex')}`;
+const installInputsDigest =
+  `sha256:${crypto.createHash('sha256').update(fs.readFileSync(substrateInstallInputsPath)).digest('hex')}`;
 const packComponent = manifest.components.find((component) => (
   component.kind === 'substrate_pack_manifest'
+));
+const installInputsComponent = manifest.components.find((component) => (
+  component.kind === 'substrate_install_inputs'
 ));
 
 if (
@@ -1738,6 +1869,24 @@ if (!packComponent || packComponent.sha256 !== packDigest) {
 }
 if (manifest.bindings?.substrate_pack_manifest_sha256 !== packDigest) {
   throw new Error('operator kit airgap bundle missing substrate pack binding digest');
+}
+if (!installInputsComponent || installInputsComponent.path !== 'components/substrate-install-inputs.json') {
+  throw new Error('operator kit airgap bundle missing bound substrate install inputs component');
+}
+if (installInputsComponent.sha256 !== installInputsDigest) {
+  throw new Error('operator kit airgap bundle install inputs component digest drifted');
+}
+if (manifest.bindings?.substrate_install_inputs_sha256 !== installInputsDigest) {
+  throw new Error('operator kit airgap bundle missing substrate install inputs binding digest');
+}
+if (bundleCreateReport.artifacts?.substrate_install_inputs?.input_sha256 !== installInputsDigest) {
+  throw new Error('operator kit airgap bundle-create summary missing substrate install inputs digest');
+}
+if (operatorReport.airgap_handoff?.substrate_install_inputs_digest !== installInputsDigest) {
+  throw new Error('operator kit airgap handoff missing substrate install inputs digest');
+}
+if (operatorReport.airgap_handoff?.substrate_pack_manifest_digest !== packDigest) {
+  throw new Error('operator kit airgap handoff missing substrate pack digest');
 }
 NODE
 pass "operator airgap-bundle/kit_provided maps to kit-installed bundle-create"
@@ -2049,7 +2198,7 @@ fi
 grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" ||
   fail "operator kit airgap apply did not call rollout"
 grep -q 'get pods' "$KUBECTL_LOG" || fail "operator kit airgap apply did not check live pods"
-[[ "$(grep -c '^sha256:' "$LOAD_LOG" 2>/dev/null || true)" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] ||
+[[ "$(grep -c '^sha256:' "$LOAD_LOG" 2>/dev/null || true)" -eq "$kit_airgap_expected_image_loads" ]] ||
   fail "operator kit airgap apply must load every image exactly once"
 [[ -f "$kit_airgap_consume_output/$REPORT_FILE" ]] ||
   fail "operator airgap/kit_provided summary missing"

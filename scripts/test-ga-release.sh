@@ -1139,13 +1139,23 @@ for (const operatorPath of deploymentPaths) {
   const isAirgap = operatorPath.startsWith('airgap/');
   const archiveProbePath = path.join(packageRoot, 'tools/archive-probe');
   const imageLoaderPath = path.join(packageRoot, 'tools/image-loader');
+  const actualDeploymentPathOutputDir = path.join(
+    packageRoot,
+    '.release-kit-internal',
+    slug(operatorPath),
+    'deployment-path'
+  );
   const deploymentPathOutputDir =
     mutation === 'path-output-dir-drift' && operatorPath === 'online/use_existing'
-      ? path.resolve(planDir, 'wrong-output', slug(operatorPath))
-      : path.resolve(pathDir, slug(operatorPath));
+      ? path.join(packageRoot, '.release-kit-internal', 'wrong-output', slug(operatorPath))
+      : actualDeploymentPathOutputDir;
 
   copyMaterial(path.join(fixtureDir, 'release-contract.json'), releaseContractPath);
   copyMaterial(path.join(fixtureDir, 'deploy-template-package.json'), deployTemplatePackagePath);
+  fs.mkdirSync(path.dirname(actualDeploymentPathOutputDir), { recursive: true });
+  fs.cpSync(path.resolve(pathDir, slug(operatorPath)), actualDeploymentPathOutputDir, {
+    recursive: true
+  });
 
   const manifest = {
     schema_version: 'agentsmith.operator-inputs/v1',
@@ -1237,10 +1247,10 @@ run_ga_release_with_operator_plans() {
   bash "$ROOT_DIR/scripts/verify-release.sh" --ga-release \
     --release-contract "$fixture_dir/release-contract.json" \
     --deploy-template-package "$fixture_dir/deploy-template-package.json" \
-    --deployment-path-report "$path_dir/online-use-existing/deployment-path-report.json" \
-    --deployment-path-report "$path_dir/online-install-substrates/deployment-path-report.json" \
-    --deployment-path-report "$path_dir/airgap-use-existing/deployment-path-report.json" \
-    --deployment-path-report "$path_dir/airgap-install-substrates/deployment-path-report.json" \
+    --deployment-path-report "$plan_dir/online-use-existing/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json" \
+    --deployment-path-report "$plan_dir/online-install-substrates/.release-kit-internal/online-install-substrates/deployment-path/deployment-path-report.json" \
+    --deployment-path-report "$plan_dir/airgap-use-existing/.release-kit-internal/airgap-use-existing/deployment-path/deployment-path-report.json" \
+    --deployment-path-report "$plan_dir/airgap-install-substrates/.release-kit-internal/airgap-install-substrates/deployment-path/deployment-path-report.json" \
     --operator-inputs-plan "$plan_dir/online-use-existing/.release-kit-internal/operator-inputs-plan.json" \
     --operator-inputs-plan "$plan_dir/online-install-substrates/.release-kit-internal/operator-inputs-plan.json" \
     --operator-inputs-plan "$plan_dir/airgap-use-existing/.release-kit-internal/operator-inputs-plan.json" \

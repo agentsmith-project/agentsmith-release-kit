@@ -118,6 +118,7 @@ OPERATOR_SINGLETON_FLAGS=(
   --evidence-root
   --evidence-provenance
   --substrate-pack-manifest
+  --substrate-install-inputs
   --routability-probe
   --runbook
   --script
@@ -214,6 +215,9 @@ reject_raw_internal_flags() {
 
   for arg in "$@"; do
     for flag in "${OPERATOR_RAW_INTERNAL_FLAGS[@]}"; do
+      if [[ "$surface/$substrate_strategy" == "airgap-bundle/kit_provided" && "$flag" == "--substrate-install-inputs" ]]; then
+        continue
+      fi
       case "$arg" in
         "$flag"|"$flag"=*)
           fail "operator facade does not accept internal installer/finalizer argument: $flag"
@@ -868,17 +872,11 @@ async function validatePlanRef({ key, ref, packageRoot, packageInput, deployment
     refObject.path,
     `operator-inputs plan input_refs.${key}.path`
   );
-  const absolutePath = requireString(
-    refObject.absolute_path,
-    `operator-inputs plan input_refs.${key}.absolute_path`
-  );
-  if (path.resolve(packageRoot, relativePath) !== path.resolve(absolutePath)) {
-    fail(`operator-inputs ${key} ref no longer binds this package for ${deploymentPath}; ${rerunMessage(packageInput)}`);
-  }
+  const currentPath = path.join(packageRoot, relativePath);
 
   let stat;
   try {
-    stat = await fs.lstat(absolutePath);
+    stat = await fs.lstat(currentPath);
   } catch (error) {
     fail(`operator-inputs ${key} ref is missing for ${deploymentPath}; ${rerunMessage(packageInput)}: ${error.message}`);
   }
@@ -893,11 +891,16 @@ async function validatePlanRef({ key, ref, packageRoot, packageInput, deployment
       refObject.sha256,
       `operator-inputs plan input_refs.${key}.sha256`
     );
-    const actualDigest = await readFileDigest(absolutePath, `operator-inputs ${key} ref`);
+    const actualDigest = await readFileDigest(currentPath, `operator-inputs ${key} ref`);
     if (actualDigest !== expectedDigest) {
       fail(`operator-inputs ${key} ref changed after package run for ${deploymentPath}; ${rerunMessage(packageInput)}`);
     }
-    return;
+    return {
+      kind,
+      path: currentPath,
+      relativePath,
+      sha256: expectedDigest
+    };
   }
   if (kind === 'directory') {
     if (!stat.isDirectory()) {
@@ -907,13 +910,41 @@ async function validatePlanRef({ key, ref, packageRoot, packageInput, deployment
       refObject.tree_sha256,
       `operator-inputs plan input_refs.${key}.tree_sha256`
     );
-    const actualTree = await digestDirectory(absolutePath);
+    const actualTree = await digestDirectory(currentPath);
     if (actualTree.tree_sha256 !== expectedTreeDigest) {
       fail(`operator-inputs ${key} ref changed after package run for ${deploymentPath}; ${rerunMessage(packageInput)}`);
     }
-    return;
+    return {
+      kind,
+      path: currentPath,
+      relativePath,
+      tree_sha256: expectedTreeDigest
+    };
   }
   fail(`operator-inputs ${key} ref kind is unsupported for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+}
+
+function legacyPackageRelativePath({ legacyRoot, absolutePath, label }) {
+  const root = path.resolve(requireString(legacyRoot, `${label} package root`));
+  const target = path.resolve(requireString(absolutePath, label));
+  const relative = path.relative(root, target).split(path.sep).join('/');
+  if (
+    relative === '' ||
+    relative.startsWith('../') ||
+    relative === '..' ||
+    path.posix.isAbsolute(relative)
+  ) {
+    fail(`${label} must resolve inside the operator-inputs package`);
+  }
+  return safePackageRelativePath(relative, `${label} package-relative path`);
+}
+
+function resolveCurrentPackagePathFromPlan({ packageRoot, legacyRoot, plannedPath, label }) {
+  const value = requireString(plannedPath, label);
+  const relative = path.isAbsolute(value)
+    ? legacyPackageRelativePath({ legacyRoot, absolutePath: value, label })
+    : safePackageRelativePath(value, label);
+  return path.join(packageRoot, relative);
 }
 
 async function readBoundPackagePlan(packageInput) {
@@ -932,23 +963,31 @@ async function readBoundPackagePlan(packageInput) {
   }
 
   const deploymentPath = requireString(plan.deployment_path, 'operator-inputs deployment_path');
-  if (path.resolve(requireString(plan.operator_inputs_root, 'operator-inputs plan operator_inputs_root')) !== packageRoot) {
-    fail(`operator-inputs package moved after its run plan was written for ${deploymentPath}; ${rerunMessage(packageInput)}`);
-  }
+  const legacyRoot = requireString(plan.operator_inputs_root, 'operator-inputs plan operator_inputs_root');
 
   const packageInfo = requireObject(plan.package, 'operator-inputs plan package');
   const manifestRelativePath = safePackageRelativePath(
     packageInfo.manifest_relative_path,
     'operator-inputs plan package.manifest_relative_path'
   );
-  const plannedManifestPath = requireString(
-    packageInfo.manifest_path,
-    'operator-inputs plan package.manifest_path'
-  );
-  if (
-    path.resolve(packageRoot, manifestRelativePath) !== path.resolve(plannedManifestPath) ||
-    path.resolve(manifestPath) !== path.resolve(plannedManifestPath)
-  ) {
+  if (packageInfo.manifest_path !== undefined) {
+    const plannedManifestPath = requireString(
+      packageInfo.manifest_path,
+      'operator-inputs plan package.manifest_path'
+    );
+    const plannedManifestRelativePath = path.isAbsolute(plannedManifestPath)
+      ? legacyPackageRelativePath({
+          legacyRoot,
+          absolutePath: plannedManifestPath,
+          label: 'operator-inputs plan package.manifest_path'
+        })
+      : safePackageRelativePath(plannedManifestPath, 'operator-inputs plan package.manifest_path');
+    if (plannedManifestRelativePath !== manifestRelativePath) {
+      fail(`operator-inputs manifest path changed after package run for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+    }
+  }
+  const currentManifestPath = path.join(packageRoot, manifestRelativePath);
+  if (path.resolve(manifestPath) !== path.resolve(currentManifestPath)) {
     fail(`operator-inputs manifest path changed after package run for ${deploymentPath}; ${rerunMessage(packageInput)}`);
   }
   const manifestInput = await readJson(manifestPath, 'operator-inputs manifest');
@@ -960,13 +999,17 @@ async function readBoundPackagePlan(packageInput) {
   }
 
   const inputRefs = requireObject(plan.input_refs, 'operator-inputs plan input_refs');
+  const boundInputRefs = {};
   for (const [key, ref] of Object.entries(inputRefs)) {
-    await validatePlanRef({ key, ref, packageRoot, packageInput, deploymentPath });
+    boundInputRefs[key] = await validatePlanRef({ key, ref, packageRoot, packageInput, deploymentPath });
   }
 
   return {
     plan,
-    planPath
+    planPath,
+    packageRoot,
+    legacyRoot,
+    boundInputRefs
   };
 }
 
@@ -1106,10 +1149,12 @@ async function resolvePackage({ packageInput }) {
   if (!REQUIRED_DEPLOYMENT_PATHS.includes(deploymentPath)) {
     fail(`unsupported operator-inputs deployment_path for --ga-report: ${deploymentPath}`);
   }
-  const pathOutputDir = requireString(
-    plan._internal?.expected?.output_dirs?.deployment_path,
-    `deployment-path output dir for ${deploymentPath}`
-  );
+  const pathOutputDir = resolveCurrentPackagePathFromPlan({
+    packageRoot: resolved.packageRoot,
+    legacyRoot: resolved.legacyRoot,
+    plannedPath: plan._internal?.expected?.output_dirs?.deployment_path,
+    label: `deployment-path output dir for ${deploymentPath}`
+  });
   const pathReport = path.join(pathOutputDir, PATH_REPORT_FILE);
   await requirePathEvidenceEntry(pathReport, 'file', { deploymentPath, packageInput });
   await requirePathEvidenceEntry(
@@ -1128,8 +1173,8 @@ async function resolvePackage({ packageInput }) {
     pathReport,
     planPath: resolved.planPath,
     packageInput,
-    releaseContract: plan.input_refs?.release_contract,
-    deployTemplatePackage: plan.input_refs?.deploy_template_package
+    releaseContract: resolved.boundInputRefs.release_contract,
+    deployTemplatePackage: resolved.boundInputRefs.deploy_template_package
   };
 }
 
@@ -1138,7 +1183,7 @@ function requireFileRef(ref, key, deploymentPath) {
     fail(`${key} ref is missing from operator-inputs package for ${deploymentPath}`);
   }
   return {
-    path: requireString(ref.absolute_path, `${key} path for ${deploymentPath}`),
+    path: requireString(ref.path, `${key} path for ${deploymentPath}`),
     sha256: requireDigest(ref.sha256, `${key} digest for ${deploymentPath}`)
   };
 }
@@ -1426,6 +1471,7 @@ fi
 
 if [[ "$surface/$substrate_strategy" == "airgap-bundle/kit_provided" ]]; then
   require_arg_value --substrate-pack-manifest "$@" >/dev/null
+  require_arg_value --substrate-install-inputs "$@" >/dev/null
 fi
 
 if [[ "$producer_name" == "bundle-create" ]]; then

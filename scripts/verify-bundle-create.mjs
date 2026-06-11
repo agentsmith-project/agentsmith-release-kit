@@ -1283,6 +1283,7 @@ async function assembleBundle({
     imageMapImageCount: mappings.length,
     bundleChecksumsInputDigest: checksumsSha256,
     substratePackManifestInputDigest: substratePackManifest?.inputDigest,
+    substrateInstallInputsInputDigest: substrateInstallInputs?.inputDigest,
     manifestPath
   };
 }
@@ -1332,6 +1333,9 @@ function buildReport({
         ? {
             substrate_pack_manifest: {
               input_sha256: assembly.substratePackManifestInputDigest
+            },
+            substrate_install_inputs: {
+              input_sha256: assembly.substrateInstallInputsInputDigest
             }
           }
         : {})
