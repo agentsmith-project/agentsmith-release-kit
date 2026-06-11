@@ -756,6 +756,9 @@ const prerequisites = {
     tls_secret_ref: 'secretRef:release/agentsmith-ingress-tls'
   },
   registry: {
+    auth: {
+      mode: 'secret'
+    },
     pull_secret_ref: 'secretRef:release/registry-pull'
   },
   storage: {
@@ -777,8 +780,18 @@ const prerequisites = {
   ]
 };
 
+if (mutation === 'missing_registry_auth_mode') {
+  delete prerequisites.registry.auth.mode;
+}
 if (mutation === 'missing_registry_proof') {
   delete prerequisites.registry.pull_secret_ref;
+}
+if (mutation === 'no_auth_registry') {
+  prerequisites.registry.auth.mode = 'none';
+  delete prerequisites.registry.pull_secret_ref;
+}
+if (mutation === 'no_auth_registry_with_pull_secret_ref') {
+  prerequisites.registry.auth.mode = 'none';
 }
 if (mutation === 'missing_storage_proof') {
   delete prerequisites.storage.storage_class;
@@ -1553,6 +1566,22 @@ grep -Fq "target_prerequisites.registry.pull_secret_ref is required" "$TMP_DIR/m
   fail "missing registry proof failure message did not explain blocker"
 assert_kubectl_not_called
 pass "missing registry prerequisite proof rejected before kubectl"
+
+assert_install_rejected_before_kubectl \
+  missing_registry_auth_mode \
+  "target_prerequisites.registry.auth.mode is required" \
+  "missing registry auth mode"
+
+no_auth_registry_dir="$TMP_DIR/no-auth-registry"
+write_fixture_set "$no_auth_registry_dir" no_auth_registry
+reset_kubectl_log
+run_install "$no_auth_registry_dir" "$TMP_DIR/out-no-auth-registry" >/dev/null
+pass "target prerequisites accept explicit no-auth registry"
+
+assert_install_rejected_before_kubectl \
+  no_auth_registry_with_pull_secret_ref \
+  "target_prerequisites.registry.pull_secret_ref must be omitted when target_prerequisites.registry.auth.mode is none" \
+  "no-auth registry with pull secret"
 
 missing_storage_dir="$TMP_DIR/missing-storage"
 write_fixture_set "$missing_storage_dir" missing_storage_proof

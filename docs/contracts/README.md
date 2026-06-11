@@ -461,9 +461,10 @@ PostgreSQL/MongoDB/Redis, `url` or `endpoint` plus `region` and `bucket` for
 object storage, and `issuer_url` for OIDC), secret refs or redacted
 fingerprints, TLS or sslmode, `extensions.pgvector.status: installed`,
 reachability status `declared_reachable` or `verified_by_operator`, and target
-prerequisites for namespace, RBAC policy/proof, ingress TLS, registry pull
-secret, storage, and substrate secret refs. It does not connect to Kubernetes,
-render, apply, smoke, package, deploy, or claim release readiness.
+prerequisites for namespace, RBAC policy/proof, ingress TLS, registry auth mode
+(`pull_secret_ref` required only for `secret` mode), storage, and substrate
+secret refs. It does not connect to Kubernetes, render, apply, smoke, package,
+deploy, or claim release readiness.
 
 Future contracts should cover:
 

@@ -235,6 +235,9 @@ const prerequisites = {
     tls_secret_ref: 'secretRef:release/agentsmith-ingress-tls'
   },
   registry: {
+    auth: {
+      mode: 'secret'
+    },
     pull_secret_ref: 'secretRef:release/registry-pull'
   },
   storage: {

@@ -213,6 +213,9 @@ const prerequisites = {
     tls_secret_ref: 'secretRef:release/agentsmith-ingress-tls'
   },
   registry: {
+    auth: {
+      mode: 'secret'
+    },
     pull_secret_ref: 'secretRef:release/registry-pull'
   },
   storage: {
@@ -565,6 +568,121 @@ contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract
 
 fs.writeFileSync(packageOutput, `${JSON.stringify(deployTemplatePackage, null, 2)}\n`);
 fs.writeFileSync(contractOutput, `${JSON.stringify(contract, null, 2)}\n`);
+NODE
+}
+
+retarget_release_contract_to_oci_fixture_digests() {
+  local contract="$1"
+
+  "$NODE_BIN" --input-type=module - \
+    "$contract" \
+    "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
+
+const [contractPath, fixtureHelper] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+
+function stableJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(stableJson);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableJson(value[key])])
+    );
+  }
+  return value;
+}
+
+function digest(value) {
+  return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
+}
+
+function fixtureTargetDigest(imageId) {
+  const result = spawnSync(
+    process.execPath,
+    [fixtureHelper, '--print-target-digest', '--image-id', imageId],
+    { encoding: 'utf8' }
+  );
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(result.stderr || `fixture digest failed for ${imageId}`);
+  }
+  const value = result.stdout.trim();
+  if (!/^sha256:[0-9a-f]{64}$/.test(value)) {
+    throw new Error(`fixture digest returned invalid digest for ${imageId}: ${value}`);
+  }
+  return value;
+}
+
+function replaceImageDigest(image, nextDigest) {
+  if (!/@sha256:[0-9a-f]{64}$/.test(image)) {
+    throw new Error(`image must be digest-pinned: ${image}`);
+  }
+  return image.replace(/@sha256:[0-9a-f]{64}$/, `@${nextDigest}`);
+}
+
+function retargetImageItem(item, nextDigest) {
+  item.digest = nextDigest;
+  item.image = replaceImageDigest(item.image, nextDigest);
+  if (item.source_provenance?.artifact_sha256) {
+    item.source_provenance.artifact_sha256 = nextDigest;
+  }
+}
+
+function subjectDigest(value) {
+  const { artifact_provenance: _artifactProvenance, ...subject } = value;
+  return digest(JSON.stringify(stableJson(subject)));
+}
+
+function artifactProjectionDigest(value) {
+  const { artifact_sha256: _artifactSha256, ...artifactProvenance } = value.artifact_provenance;
+  const projection = { ...value, artifact_provenance: artifactProvenance };
+  return digest(JSON.stringify(stableJson(projection)));
+}
+
+const digestByInventoryId = new Map();
+for (const item of contract.deploy_image_inventory || []) {
+  const nextDigest = fixtureTargetDigest(item.id);
+  digestByInventoryId.set(item.id, nextDigest);
+  retargetImageItem(item, nextDigest);
+}
+
+for (const sourceName of [
+  'product_images',
+  'adopted_provider_images',
+  'release_kit_prerequisite_images'
+]) {
+  for (const item of contract[sourceName] || []) {
+    const inventoryItem = (contract.deploy_image_inventory || []).find(
+      (candidate) => candidate.source === sourceName && candidate.id === item.id
+    );
+    const nextDigest = digestByInventoryId.get(inventoryItem?.id || item.id);
+    if (!nextDigest) {
+      throw new Error(`missing fixture digest for ${sourceName}.${item.id}`);
+    }
+    retargetImageItem(item, nextDigest);
+  }
+}
+
+if (contract.managed_runner_image) {
+  const nextDigest = digestByInventoryId.get('managed_runner');
+  if (!nextDigest) {
+    throw new Error('missing fixture digest for managed_runner');
+  }
+  retargetImageItem(contract.managed_runner_image, nextDigest);
+}
+
+contract.artifact_provenance.subject_sha256 = subjectDigest(contract);
+contract.artifact_provenance.artifact_sha256 = artifactProjectionDigest(contract);
+
+fs.writeFileSync(contractPath, `${JSON.stringify(contract, null, 2)}\n`);
 NODE
 }
 
@@ -1048,6 +1166,7 @@ VALID_ARCHIVE_SHA="$(sha256_file "$VALID_ARCHIVE")"
 VALID_CONTRACT="$TMP_DIR/release-contract.valid.json"
 VALID_DEPLOY_TEMPLATE_PACKAGE="$TMP_DIR/deploy-template-package.valid.json"
 write_materials "$VALID_MANIFEST_SHA" "$VALID_ARCHIVE_SHA" "$VALID_CONTRACT" "$VALID_DEPLOY_TEMPLATE_PACKAGE"
+retarget_release_contract_to_oci_fixture_digests "$VALID_CONTRACT"
 
 create_payloads
 create_image_archives

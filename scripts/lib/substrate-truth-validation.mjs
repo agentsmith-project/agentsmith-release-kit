@@ -65,6 +65,7 @@ const REACHABILITY_STATUS_VALUES = new Set([
   'verified_by_operator'
 ]);
 const VECTOR_STATUS_VALUES = new Set(['installed']);
+const REGISTRY_AUTH_MODE_VALUES = new Set(['secret', 'none']);
 const ENDPOINT_FIELD_NAMES = ['endpoint', 'host', 'url', 'issuer', 'issuer_url'];
 
 class ValidationError extends Error {
@@ -529,6 +530,28 @@ function assertTargetSecretRefs(value, label, expectedRefs) {
   };
 }
 
+function assertRegistryPrerequisite(value, label) {
+  const registry = requireObject(value, label);
+  assertAllowedObjectFields(registry, label, ['auth', 'pull_secret_ref']);
+
+  const auth = requireObject(registry.auth, `${label}.auth`);
+  assertAllowedObjectFields(auth, `${label}.auth`, ['mode']);
+  const mode = requireEnumString(
+    auth.mode,
+    `${label}.auth.mode`,
+    REGISTRY_AUTH_MODE_VALUES
+  );
+
+  if (mode === 'secret') {
+    requireSecretReference(registry.pull_secret_ref, `${label}.pull_secret_ref`);
+    return;
+  }
+
+  if (Object.hasOwn(registry, 'pull_secret_ref')) {
+    fail(`${label}.pull_secret_ref must be omitted when ${label}.auth.mode is none`);
+  }
+}
+
 function assertBaseService(service, label, secretFields, endpointFields) {
   const object = requireObject(service, label);
   assertEndpoint(object, label, endpointFields);
@@ -699,12 +722,7 @@ export function validateTargetPrerequisitesTruth(
     `${label}.ingress.tls_secret_ref`
   );
 
-  const registry = requireObject(prerequisites.registry, `${label}.registry`);
-  assertAllowedObjectFields(registry, `${label}.registry`, ['pull_secret_ref']);
-  requireSecretReference(
-    registry.pull_secret_ref,
-    `${label}.registry.pull_secret_ref`
-  );
+  assertRegistryPrerequisite(prerequisites.registry, `${label}.registry`);
 
   const storage = requireObject(prerequisites.storage, `${label}.storage`);
   const storageClass = assertNonDisabledString(

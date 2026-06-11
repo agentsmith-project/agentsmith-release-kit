@@ -1500,12 +1500,13 @@ object storage, and `issuer_url` for OIDC), secret references, TLS or sslmode
 declarations, `extensions.pgvector.status: installed`, and reachability status
 `declared_reachable` or `verified_by_operator` with proof. Target prerequisites
 must include target profile, namespace, RBAC policy or proof, ingress host plus
-TLS secret ref, registry pull secret ref, storage class plus PV policy proof,
-and the substrate secret refs declared in substrate truth. The substrate
-installer does not create PVCs; storage readiness is proven through target
-prerequisites. The prerequisites `registry`
-object accepts only `pull_secret_ref`; pseudo-evidence or secret payload fields
-such as `preloaded`, `mirror_done`, `verdict`, or `token` are rejected. Plaintext credentials,
+TLS secret ref, registry auth mode (`pull_secret_ref` required only for
+`secret` mode), storage class plus PV policy proof, and the substrate secret
+refs declared in substrate truth. The substrate installer does not create PVCs;
+storage readiness is proven through target prerequisites. The prerequisites
+`registry` object accepts only `auth.mode` and conditional `pull_secret_ref`;
+pseudo-evidence or secret payload fields such as `preloaded`, `mirror_done`,
+`verdict`, or `token` are rejected. Plaintext credentials,
 connection strings, kubeconfig payloads, file or source URIs, localhost,
 `host.docker.internal`, and hosts or URLs with userinfo are rejected.
 

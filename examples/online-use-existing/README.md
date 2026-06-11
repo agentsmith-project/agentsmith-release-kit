@@ -21,8 +21,8 @@ bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir>
 - `render-values.example.json`: namespace and replica values consumed by the
   deploy template package.
 - `substrate-truth.example.json`: external substrate connection truth.
-- `target-prerequisites.example.json`: namespace, RBAC, ingress, registry pull
-  secret, storage, and matching substrate secret refs.
+- `target-prerequisites.example.json`: namespace, RBAC, ingress, registry auth
+  mode, storage, and matching substrate secret refs.
 - `tools/kubectl`: placeholder package-local kubectl wrapper/binary for apply.
 - `tools/registry-probe`: placeholder package-local read-only probe for the
   target registry variant.

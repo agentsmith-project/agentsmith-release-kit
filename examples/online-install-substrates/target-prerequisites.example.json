@@ -10,6 +10,9 @@
     "tls_secret_ref": "secretRef:agentsmith/agentsmith-ingress-tls"
   },
   "registry": {
+    "auth": {
+      "mode": "secret"
+    },
     "pull_secret_ref": "secretRef:agentsmith/registry-pull"
   },
   "storage": {

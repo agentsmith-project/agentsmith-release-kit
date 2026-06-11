@@ -645,12 +645,12 @@ target_preflight_prerequisite_only`; it does not connect to
 Kubernetes, render manifests, apply resources, smoke a cluster, package
 artifacts, or claim deploy or release readiness. The prerequisites document is
 the only place for namespace, RBAC policy/proof, ingress host and TLS secret
-ref, registry pull secret ref, storage class/PV policy proof, and substrate
-secret refs needed before a real Kubernetes or cloud target deploy. The
-substrate installer does not create PVCs; storage readiness is proven here.
-Its `registry`
-object accepts only `pull_secret_ref`; `preloaded`, `mirror_done`, `verdict`,
-`token`, and other pseudo-proof or secret payload fields fail fast.
+ref, registry auth mode (with `pull_secret_ref` required only for `secret`
+mode), storage class/PV policy proof, and substrate secret refs needed before a
+real Kubernetes or cloud target deploy. The substrate installer does not create
+PVCs; storage readiness is proven here. Its `registry` object accepts only
+`auth.mode` and conditional `pull_secret_ref`; `preloaded`, `mirror_done`,
+`verdict`, `token`, and other pseudo-proof or secret payload fields fail fast.
 
 ## Non-Goals
 
