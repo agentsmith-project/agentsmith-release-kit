@@ -483,13 +483,15 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 
 const rootDir = process.argv[2];
 const argv = process.argv.slice(3);
 const REPORT_FILE = 'ga-release-report.json';
 const SUMMARY_FILE = 'ga-release-summary.md';
 const EVIDENCE_INDEX_FILE = 'ga-evidence-index.json';
+const OPERATOR_INPUTS_MANIFEST_FILE = 'operator-inputs.json';
+const OPERATOR_INPUTS_INTERNAL_DIR = '.release-kit-internal';
+const OPERATOR_INPUTS_PLAN_FILE = 'operator-inputs-plan.json';
 const PATH_REPORT_FILE = 'deployment-path-report.json';
 const FINALIZER_MANIFEST_FILE = 'deployment-path-finalizer-manifest.json';
 const SOURCE_EVIDENCE_DIR = 'source-evidence';
@@ -709,6 +711,265 @@ function canonicalDigest(value) {
   return `sha256:${crypto.createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex')}`;
 }
 
+function safePackageRelativePath(value, label) {
+  const relativePath = requireString(value, label).replace(/\\/g, '/');
+  const normalized = path.posix.normalize(relativePath);
+  if (
+    path.posix.isAbsolute(relativePath) ||
+    normalized !== relativePath ||
+    normalized === '.' ||
+    normalized === '..' ||
+    normalized.startsWith('../') ||
+    normalized.split('/').includes('..')
+  ) {
+    fail(`${label} must be a package-relative path`);
+  }
+  return relativePath;
+}
+
+function requireObject(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail(`${label} must be an object`);
+  }
+  return value;
+}
+
+async function readJson(file, label) {
+  let buffer;
+  try {
+    buffer = await fs.readFile(file);
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+  try {
+    return {
+      value: JSON.parse(buffer.toString('utf8')),
+      digest: `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`
+    };
+  } catch (error) {
+    fail(`invalid JSON in ${label}: ${error.message}`);
+  }
+}
+
+async function readFileDigest(file, label) {
+  let buffer;
+  try {
+    buffer = await fs.readFile(file);
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
+}
+
+async function digestDirectory(root) {
+  const entries = [];
+
+  async function walk(absoluteDir, relativeDir = '') {
+    let dirents;
+    try {
+      dirents = await fs.readdir(absoluteDir, { withFileTypes: true });
+    } catch (error) {
+      fail(`cannot read operator-inputs directory ref: ${error.message}`);
+    }
+    for (const dirent of dirents.sort((left, right) => left.name.localeCompare(right.name))) {
+      const relativePath = relativeDir ? `${relativeDir}/${dirent.name}` : dirent.name;
+      const absolutePath = path.join(absoluteDir, dirent.name);
+      if (dirent.isSymbolicLink()) {
+        fail(`operator-inputs directory ref contains a symlink: ${relativePath}`);
+      }
+      if (dirent.isDirectory()) {
+        entries.push({ path: relativePath, type: 'directory' });
+        await walk(absolutePath, relativePath);
+        continue;
+      }
+      if (!dirent.isFile()) {
+        fail(`operator-inputs directory ref contains a non-file entry: ${relativePath}`);
+      }
+      entries.push({
+        path: relativePath,
+        type: 'file',
+        sha256: await readFileDigest(absolutePath, `operator-inputs directory ref ${relativePath}`)
+      });
+    }
+  }
+
+  await walk(root);
+  return {
+    entry_count: entries.length,
+    tree_sha256: canonicalDigest(entries)
+  };
+}
+
+async function requireNoSymlinkFile(file, label) {
+  let stat;
+  try {
+    stat = await fs.lstat(file);
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`${label} must not be a symlink`);
+  }
+  if (!stat.isFile()) {
+    fail(`${label} must be a regular file`);
+  }
+}
+
+async function resolveOperatorInputsPackage(inputPath) {
+  const requested = path.resolve(requireString(inputPath, '--operator-inputs'));
+  let stat;
+  try {
+    stat = await fs.lstat(requested);
+  } catch (error) {
+    fail(`cannot read operator-inputs package ${inputPath}: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`operator-inputs package must not be a symlink: ${inputPath}`);
+  }
+
+  let packageRoot;
+  let manifestPath;
+  if (stat.isDirectory()) {
+    packageRoot = await fs.realpath(requested);
+    manifestPath = path.join(packageRoot, OPERATOR_INPUTS_MANIFEST_FILE);
+    await requireNoSymlinkFile(manifestPath, 'operator-inputs manifest');
+    manifestPath = await fs.realpath(manifestPath);
+  } else if (stat.isFile()) {
+    packageRoot = await fs.realpath(path.dirname(requested));
+    manifestPath = await fs.realpath(requested);
+  } else {
+    fail(`operator-inputs package must be a directory or JSON manifest file: ${inputPath}`);
+  }
+
+  const internalDir = path.join(packageRoot, OPERATOR_INPUTS_INTERNAL_DIR);
+  let internalStat;
+  try {
+    internalStat = await fs.lstat(internalDir);
+  } catch (error) {
+    fail(`operator-inputs package has no run plan; ${rerunMessage(inputPath)}: ${error.message}`);
+  }
+  if (internalStat.isSymbolicLink() || !internalStat.isDirectory()) {
+    fail(`operator-inputs internal run output is invalid; ${rerunMessage(inputPath)}`);
+  }
+
+  const planPath = path.join(internalDir, OPERATOR_INPUTS_PLAN_FILE);
+  await requireNoSymlinkFile(planPath, 'operator-inputs run plan');
+  return {
+    packageRoot,
+    manifestPath,
+    planPath
+  };
+}
+
+async function validatePlanRef({ key, ref, packageRoot, packageInput, deploymentPath }) {
+  const refObject = requireObject(ref, `operator-inputs plan input_refs.${key}`);
+  const kind = requireString(refObject.kind, `operator-inputs plan input_refs.${key}.kind`);
+  const relativePath = safePackageRelativePath(
+    refObject.path,
+    `operator-inputs plan input_refs.${key}.path`
+  );
+  const absolutePath = requireString(
+    refObject.absolute_path,
+    `operator-inputs plan input_refs.${key}.absolute_path`
+  );
+  if (path.resolve(packageRoot, relativePath) !== path.resolve(absolutePath)) {
+    fail(`operator-inputs ${key} ref no longer binds this package for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+  }
+
+  let stat;
+  try {
+    stat = await fs.lstat(absolutePath);
+  } catch (error) {
+    fail(`operator-inputs ${key} ref is missing for ${deploymentPath}; ${rerunMessage(packageInput)}: ${error.message}`);
+  }
+  if (stat.isSymbolicLink()) {
+    fail(`operator-inputs ${key} ref must not be a symlink for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+  }
+  if (kind === 'file') {
+    if (!stat.isFile()) {
+      fail(`operator-inputs ${key} ref must be a file for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+    }
+    const expectedDigest = requireDigest(
+      refObject.sha256,
+      `operator-inputs plan input_refs.${key}.sha256`
+    );
+    const actualDigest = await readFileDigest(absolutePath, `operator-inputs ${key} ref`);
+    if (actualDigest !== expectedDigest) {
+      fail(`operator-inputs ${key} ref changed after package run for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+    }
+    return;
+  }
+  if (kind === 'directory') {
+    if (!stat.isDirectory()) {
+      fail(`operator-inputs ${key} ref must be a directory for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+    }
+    const expectedTreeDigest = requireDigest(
+      refObject.tree_sha256,
+      `operator-inputs plan input_refs.${key}.tree_sha256`
+    );
+    const actualTree = await digestDirectory(absolutePath);
+    if (actualTree.tree_sha256 !== expectedTreeDigest) {
+      fail(`operator-inputs ${key} ref changed after package run for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+    }
+    return;
+  }
+  fail(`operator-inputs ${key} ref kind is unsupported for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+}
+
+async function readBoundPackagePlan(packageInput) {
+  const { packageRoot, manifestPath, planPath } = await resolveOperatorInputsPackage(packageInput);
+  const planInput = await readJson(planPath, 'operator-inputs run plan');
+  const plan = requireObject(planInput.value, 'operator-inputs run plan');
+  if (requireString(plan.schema_version, 'operator-inputs plan schema_version') !== 'agentsmith.operator-inputs-plan/v1') {
+    fail(`operator-inputs run plan schema is unsupported; ${rerunMessage(packageInput)}`);
+  }
+  if (requireString(plan.status, 'operator-inputs plan status') !== 'pass') {
+    fail(`operator-inputs run plan did not pass; ${rerunMessage(packageInput)}`);
+  }
+  const planDigest = requireDigest(plan.plan_sha256, 'operator-inputs plan plan_sha256');
+  if (canonicalDigest({ ...plan, plan_sha256: null }) !== planDigest) {
+    fail(`operator-inputs run plan digest changed; ${rerunMessage(packageInput)}`);
+  }
+
+  const deploymentPath = requireString(plan.deployment_path, 'operator-inputs deployment_path');
+  if (path.resolve(requireString(plan.operator_inputs_root, 'operator-inputs plan operator_inputs_root')) !== packageRoot) {
+    fail(`operator-inputs package moved after its run plan was written for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+  }
+
+  const packageInfo = requireObject(plan.package, 'operator-inputs plan package');
+  const manifestRelativePath = safePackageRelativePath(
+    packageInfo.manifest_relative_path,
+    'operator-inputs plan package.manifest_relative_path'
+  );
+  const plannedManifestPath = requireString(
+    packageInfo.manifest_path,
+    'operator-inputs plan package.manifest_path'
+  );
+  if (
+    path.resolve(packageRoot, manifestRelativePath) !== path.resolve(plannedManifestPath) ||
+    path.resolve(manifestPath) !== path.resolve(plannedManifestPath)
+  ) {
+    fail(`operator-inputs manifest path changed after package run for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+  }
+  const manifestInput = await readJson(manifestPath, 'operator-inputs manifest');
+  if (
+    manifestInput.digest !==
+    requireDigest(packageInfo.manifest_sha256, 'operator-inputs plan package.manifest_sha256')
+  ) {
+    fail(`operator-inputs manifest changed after package run for ${deploymentPath}; ${rerunMessage(packageInput)}`);
+  }
+
+  const inputRefs = requireObject(plan.input_refs, 'operator-inputs plan input_refs');
+  for (const [key, ref] of Object.entries(inputRefs)) {
+    await validatePlanRef({ key, ref, packageRoot, packageInput, deploymentPath });
+  }
+
+  return {
+    plan,
+    planPath
+  };
+}
+
 function buildFailureEvidenceIndex(report) {
   return {
     schema: 'agentsmith.ga-evidence-index/v1',
@@ -838,14 +1099,8 @@ async function requirePathEvidenceEntry(file, kind, { deploymentPath, packageInp
   }
 }
 
-async function resolvePackage({ resolveOperatorInputs, packageInput }) {
-  let resolved;
-  try {
-    resolved = await resolveOperatorInputs({ inputPath: packageInput });
-  } catch (error) {
-    fail(`cannot resolve operator-inputs package ${packageInput}: ${error.message}`);
-  }
-
+async function resolvePackage({ packageInput }) {
+  const resolved = await readBoundPackagePlan(packageInput);
   const plan = resolved.plan;
   const deploymentPath = requireString(plan.deployment_path, 'operator-inputs deployment_path');
   if (!REQUIRED_DEPLOYMENT_PATHS.includes(deploymentPath)) {
@@ -922,13 +1177,10 @@ async function main() {
   await clearStaleFinalOutputs(args.outputDir);
   let verifyArgs;
   try {
-    const { resolveOperatorInputs } = await import(
-      pathToFileURL(path.join(rootDir, 'scripts/lib/operator-inputs-resolver.mjs')).href
-    );
     const resolvedPackages = [];
     const byDeploymentPath = new Map();
     for (const packageInput of args.operatorInputs) {
-      const resolved = await resolvePackage({ resolveOperatorInputs, packageInput });
+      const resolved = await resolvePackage({ packageInput });
       if (byDeploymentPath.has(resolved.deploymentPath)) {
         fail(
           `duplicate deployment_path ${resolved.deploymentPath}; provide one package for each of: ` +

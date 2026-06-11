@@ -38,10 +38,12 @@ assert_operator_success_contract_docs() {
     fail "operator-release help must foreground the operator-inputs doctor command"
   grep -q -- '--operator-inputs <package-or-json> --run' "$help_output" ||
     fail "operator-release help must foreground the operator-inputs run command"
-  grep -q -- 'Formal release success or failure' "$help_output" ||
-    fail "operator-release help must name the formal success boundary"
-  grep -q -- 'final ga-release-report.json written by --ga-report' "$help_output" ||
-    fail "operator-release help must point formal success to ga-release-report.json"
+  grep -q -- 'Final release pass/fail is represented only by ga-release-report.json' "$help_output" ||
+    fail "operator-release help must point final pass/fail to ga-release-report.json"
+  grep -q -- 'ga-release-report.json with pass/fail and blockers' "$help_output" ||
+    fail "operator-release help must describe the final report result shape"
+  grep -q -- 'Operators do not pass internal report paths' "$help_output" ||
+    fail "operator-release help must keep internal report paths out of operator input"
   grep -q -- 'static package blockers' "$help_output" ||
     fail "operator-release help must describe doctor static package blockers"
   grep -q -- 'not runnable readiness' "$help_output" ||
@@ -92,7 +94,7 @@ assert_operator_success_contract_docs() {
     '### 2. What do I prepare?' \
     '### 3. What do I run?' \
     '### 4. What is the final report?' \
-    'Formal release success or failure is represented only by the final'; do
+    'Final release pass/fail is represented only by `ga-release-report.json`'; do
     grep -q -- "$required" "$first_screen" ||
       fail "operator runbook first screen missing: $required"
   done
@@ -151,8 +153,8 @@ assert_operator_success_contract_docs() {
   if grep -Fqi -- 'operator-facing path is a single package-driven flow' "$root_readme"; then
     fail "root README must not regress to the old package-driven flow wording"
   fi
-  grep -q -- 'Formal release success' "$root_readme" ||
-    fail "root README must name the formal GA success boundary"
+  grep -q -- 'Final release pass/fail is represented only by `ga-release-report.json`' "$root_readme" ||
+    fail "root README must point final pass/fail to the GA report"
   grep -q -- 'static package blockers' "$root_readme" ||
     fail "root README must describe doctor static package blockers"
   grep -q -- 'not runnable readiness' "$root_readme" ||
@@ -161,14 +163,12 @@ assert_operator_success_contract_docs() {
     fail "operator runbook first screen must describe doctor static package blockers"
   grep -q -- 'not runnable readiness' "$first_screen" ||
     fail "operator runbook first screen must bound doctor pass semantics"
-  grep -q -- 'or failure is represented only by the' "$root_readme" ||
-    fail "root README must point formal success to the GA report"
-  grep -q -- 'final `ga-release-report.json` issued by' "$root_readme" ||
-    fail "root README must point formal success to the GA report"
-  grep -q -- 'formal_verdict=not_issued' "$root_readme" ||
-    fail "root README must describe blocked GA aggregates as not_issued"
-  grep -q -- 'formal_verdict=not_issued' "$first_screen" ||
-    fail "operator runbook first screen must describe blocked GA aggregates as not_issued"
+  grep -q -- '`--ga-report` writes' "$root_readme" ||
+    fail "root README must name --ga-report as the final report writer"
+  grep -q -- 'When blocked, the final report records the failed result and blockers' "$root_readme" ||
+    fail "root README must describe blocked GA aggregates with operator-facing wording"
+  grep -q -- 'the final report records pass/fail and blockers' "$first_screen" ||
+    fail "operator runbook first screen must describe final blockers with operator-facing wording"
   for example_readme in "$examples_readme" "$online_example_readme"; do
     grep -q -- '--post-deploy-product-smoke-report <online-json>' "$example_readme" ||
       fail "${example_readme#$ROOT_DIR/} must pass an online product smoke report to --ga-report"

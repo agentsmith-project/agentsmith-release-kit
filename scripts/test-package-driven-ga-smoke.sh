@@ -977,6 +977,37 @@ seed_stale_ga_outputs() {
   cp "$ga_output_dir/ga-evidence-index.json" "$output_dir/ga-evidence-index.json"
 }
 
+tampered_manifest_output="$TMP_DIR/ga-output-tampered-manifest"
+tampered_manifest_backup="$TMP_DIR/operator-inputs-online-use-existing.backup.json"
+seed_stale_ga_outputs "$tampered_manifest_output"
+cp "$online_package/operator-inputs.json" "$tampered_manifest_backup"
+"$NODE_BIN" --input-type=module - "$online_package/operator-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [manifestFile] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+manifest.timeout_ms = Number(manifest.timeout_ms || 60000) + 1;
+fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
+  --operator-inputs "$online_package" \
+  --operator-inputs "$online_install_package" \
+  --operator-inputs "$airgap_package" \
+  --operator-inputs "$airgap_install_package" \
+  --product-readiness-report "$product_dir/product-readiness-report.json" \
+  --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
+  --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-airgap-report.json" \
+  --output-dir "$tampered_manifest_output" >"$TMP_DIR/ga-tampered-manifest.out" 2>&1; then
+  cp "$tampered_manifest_backup" "$online_package/operator-inputs.json"
+  fail "operator GA facade should fail when a package manifest changed after --run"
+fi
+cp "$tampered_manifest_backup" "$online_package/operator-inputs.json"
+grep -Fq 'operator-inputs manifest changed after package run for online/use_existing' "$TMP_DIR/ga-tampered-manifest.out" ||
+  fail "tampered manifest failure did not explain the package run-plan drift"
+grep -Fq 'bash scripts/operator-release.sh --operator-inputs' "$TMP_DIR/ga-tampered-manifest.out" ||
+  fail "tampered manifest failure did not point operator to rerun the package"
+assert_ga_failure_report "$tampered_manifest_output" 'operator-inputs manifest changed after package run for online/use_existing'
+
 missing_package_output="$TMP_DIR/ga-output-missing-package"
 seed_stale_ga_outputs "$missing_package_output"
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
@@ -1043,13 +1074,14 @@ grep -Fq 'duplicate deployment_path online/use_existing' "$TMP_DIR/ga-duplicate-
   fail "duplicate deployment_path failure did not explain duplicate package"
 assert_ga_failure_report "$duplicate_path_output" 'duplicate deployment_path online/use_existing'
 
-missing_report_package="$TMP_DIR/pkg-online-use-existing-missing-report"
-cp -R "$online_package" "$missing_report_package"
-rm "$missing_report_package/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json"
+missing_report_path="$online_package/.release-kit-internal/online-use-existing/deployment-path/deployment-path-report.json"
+missing_report_backup="$TMP_DIR/online-use-existing-deployment-path-report.backup.json"
+cp "$missing_report_path" "$missing_report_backup"
+rm "$missing_report_path"
 missing_path_output="$TMP_DIR/ga-output-missing-path-report"
 seed_stale_ga_outputs "$missing_path_output"
 if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
-  --operator-inputs "$missing_report_package" \
+  --operator-inputs "$online_package" \
   --operator-inputs "$online_install_package" \
   --operator-inputs "$airgap_package" \
   --operator-inputs "$airgap_install_package" \
@@ -1057,8 +1089,10 @@ if bash "$ROOT_DIR/scripts/operator-release.sh" --ga-report \
   --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-report.json" \
   --post-deploy-product-smoke-report "$product_dir/post-deploy-product-smoke-airgap-report.json" \
   --output-dir "$missing_path_output" >"$TMP_DIR/ga-missing-path-report.out" 2>&1; then
+  cp "$missing_report_backup" "$missing_report_path"
   fail "operator GA facade should fail when finalized path report is missing"
 fi
+cp "$missing_report_backup" "$missing_report_path"
 grep -Fq 'finalized path evidence is missing for online/use_existing' "$TMP_DIR/ga-missing-path-report.out" ||
   fail "missing path report failure did not name the affected deployment path"
 grep -Fq 'bash scripts/operator-release.sh --operator-inputs' "$TMP_DIR/ga-missing-path-report.out" ||

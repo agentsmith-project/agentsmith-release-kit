@@ -410,14 +410,10 @@ require_text README.md "Cloud resource provisioning"
 require_text README.md "release management UI"
 require_text README.md "operator-facing path is a single package-driven facade"
 require_text README.md 'bash scripts/operator-release.sh --operator-inputs <dir-or-json>'
-require_text README.md "Formal release success"
-require_text README.md 'final `ga-release-report.json` issued by'
-require_text README.md 'issued by `--ga-report`'
-require_text README.md 'Archive attachments written next to the final report are maintainer/reference'
-require_text README.md '`ga-evidence-index.json` is a derived archive'
-require_text README.md 'without issuing another verdict'
-require_text README.md '`ga-release-summary.md` is a'
-require_text README.md 'adaptive wait'
+require_text README.md 'Final release pass/fail is represented only by `ga-release-report.json`'
+require_text README.md '`--ga-report` writes'
+require_text README.md 'operators pass package paths, not internal report'
+require_text README.md 'When blocked, the final report records the failed result and blockers'
 require_text README.md "smoke report's substrate truth"
 require_text README.md '`online/use_existing`'
 require_text README.md '`online/install_substrates`'
@@ -426,12 +422,9 @@ require_text README.md '`airgap/install_substrates`'
 require_text README.md 'The focused producer catalog is no longer duplicated'
 require_text README.md 'docs/maintainer-diagnostics.md'
 require_text docs/runbooks/README.md "Use the single operator facade"
-require_text docs/runbooks/README.md "Formal release success or failure is represented only by the final"
-require_text docs/runbooks/README.md '`ga-release-report.json` issued by `operator-release.sh --ga-report`'
-require_text docs/runbooks/README.md 'Archive attachments written next to the final report are maintainer/reference'
-require_text docs/runbooks/README.md '`ga-evidence-index.json` binds the source report digest'
-require_text docs/runbooks/README.md '`ga-release-summary.md`'
-require_text docs/runbooks/README.md 'adaptive wait intervals'
+require_text docs/runbooks/README.md 'Final release pass/fail is represented only by `ga-release-report.json`'
+require_text docs/runbooks/README.md '`operator-release.sh --ga-report` writes from four package paths'
+require_text docs/runbooks/README.md 'the final report records pass/fail and blockers'
 require_text docs/runbooks/README.md "smoke report's substrate truth digest"
 require_text docs/runbooks/README.md "## Operator Package Matrix"
 require_text docs/runbooks/README.md "provenance marker, not installer"
