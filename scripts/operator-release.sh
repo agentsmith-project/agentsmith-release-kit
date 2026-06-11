@@ -33,7 +33,7 @@ Operator package checks:
   Add --run when the package is ready to execute the selected path.
 
 Operator-inputs run:
-  The current minimal orchestration slice supports online/use_existing,
+  The supported GA package paths are online/use_existing,
   online/install_substrates, airgap/use_existing, and
   airgap/install_substrates.
   install_substrates runs the namespace-scoped installer first and deploys with

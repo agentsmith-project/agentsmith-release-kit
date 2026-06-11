@@ -48,6 +48,11 @@ assert_operator_success_contract_docs() {
     fail "operator-release help must describe doctor static package blockers"
   grep -q -- 'not runnable readiness' "$help_output" ||
     fail "operator-release help must bound doctor pass semantics"
+  grep -q -- 'supported GA package paths' "$help_output" ||
+    fail "operator-release help must describe supported GA package paths"
+  if grep -q -- 'current minimal orchestration slice' "$help_output"; then
+    fail "operator-release help must not describe GA paths as a minimal orchestration slice"
+  fi
   if grep -q -- 'verify-release.sh' "$help_output"; then
     fail "operator-release help must not expose finalizer command details"
   fi

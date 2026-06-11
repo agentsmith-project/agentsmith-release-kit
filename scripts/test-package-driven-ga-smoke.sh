@@ -544,8 +544,8 @@ if (
 ) {
   throw new Error('GA evidence index must bind the final GA report');
 }
-if (JSON.stringify(stableJson(evidenceIndex.artifact_index)) !== JSON.stringify(stableJson(report.artifact_index))) {
-  throw new Error('GA evidence index artifact_index must match the final GA report artifact_index');
+if (!evidenceIndex.artifact_index || typeof evidenceIndex.artifact_index !== 'object') {
+  throw new Error('GA evidence index must include the complete artifact index');
 }
 if (report.artifact_index?.product_readiness?.report_digest !== report.product_readiness?.report_digest) {
   throw new Error('GA report artifact index must archive product readiness report digest');
@@ -660,6 +660,10 @@ const packageIndex = report.artifact_index?.operator_inputs_packages;
 if (!Array.isArray(packageIndex) || packageIndex.length !== expectedPaths.size) {
   throw new Error('GA report artifact index must cover four operator-inputs packages');
 }
+const evidencePackageIndex = evidenceIndex.artifact_index?.operator_inputs_packages;
+if (!Array.isArray(evidencePackageIndex) || evidencePackageIndex.length !== expectedPaths.size) {
+  throw new Error('GA evidence index artifact index must retain four operator-inputs package plans');
+}
 const serializedPackageIndex = JSON.stringify(packageIndex);
 const serializedEvidenceIndex = JSON.stringify(evidenceIndex);
 for (const packageDir of packageDirs) {
@@ -681,7 +685,14 @@ for (const entry of packageIndex) {
   if (!record) {
     throw new Error(`GA report operator-inputs package index has unexpected path: ${entry.operator_path}`);
   }
+  const evidenceEntry = evidencePackageIndex.find((candidate) => candidate.operator_path === entry.operator_path);
+  if (!evidenceEntry) {
+    throw new Error(`GA evidence index operator-inputs package index missing path: ${entry.operator_path}`);
+  }
   const { plan } = record;
+  if (Object.prototype.hasOwnProperty.call(entry, 'package_plan')) {
+    throw new Error(`GA report operator-inputs package index must not expose package_plan: ${entry.operator_path}`);
+  }
   if (entry.package_manifest?.path !== plan.package?.manifest_relative_path) {
     throw new Error(`GA report operator-inputs manifest path mismatch: ${entry.operator_path}`);
   }
@@ -691,14 +702,14 @@ for (const entry of packageIndex) {
   if (entry.package_manifest?.digest !== plan.package?.manifest_sha256) {
     throw new Error(`GA report operator-inputs manifest digest mismatch: ${entry.operator_path}`);
   }
-  if (entry.package_plan?.schema !== 'agentsmith.operator-inputs-plan/v1') {
-    throw new Error(`GA report operator-inputs plan schema mismatch: ${entry.operator_path}`);
+  if (evidenceEntry.package_plan?.schema !== 'agentsmith.operator-inputs-plan/v1') {
+    throw new Error(`GA evidence index operator-inputs plan schema mismatch: ${entry.operator_path}`);
   }
-  if (entry.package_plan?.scope !== 'operator_inputs_intake_only') {
-    throw new Error(`GA report operator-inputs plan scope mismatch: ${entry.operator_path}`);
+  if (evidenceEntry.package_plan?.scope !== 'operator_inputs_intake_only') {
+    throw new Error(`GA evidence index operator-inputs plan scope mismatch: ${entry.operator_path}`);
   }
-  if (entry.package_plan?.digest !== plan.plan_sha256) {
-    throw new Error(`GA report operator-inputs plan digest mismatch: ${entry.operator_path}`);
+  if (evidenceEntry.package_plan?.digest !== plan.plan_sha256) {
+    throw new Error(`GA evidence index operator-inputs plan digest mismatch: ${entry.operator_path}`);
   }
   if (entry.release_materials?.release_contract?.path !== plan.input_refs?.release_contract?.path) {
     throw new Error(`GA report operator-inputs release contract path mismatch: ${entry.operator_path}`);

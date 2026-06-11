@@ -1563,6 +1563,11 @@ grep -q -- '--ga-report' "$help_output" ||
   fail "operator-release help must document final GA report facade"
 grep -q 'Use this facade for the GA operator path' "$help_output" ||
   fail "operator-release help must keep operator path wording"
+grep -q 'supported GA package paths' "$help_output" ||
+  fail "operator-release help must describe supported GA package paths"
+if grep -q 'current minimal orchestration slice' "$help_output"; then
+  fail "operator-release help must not describe GA paths as a minimal orchestration slice"
+fi
 if grep -Eq 'kit_provided|[.]release-kit-internal|operator-inputs-plan|docs/RELEASE_GATES[.]md|operator-release-surface-report|adoption report|candidate intake|release-engineering|operator-signoff|external_declared|kit_installed|existing_kubernetes|kind_rehearsal|operator-release[.]sh (online|airgap|airgap-bundle)' "$help_output"; then
   fail "operator-release help must not expose legacy aliases, internal paths, machine profiles, or maintainer diagnostics"
 fi

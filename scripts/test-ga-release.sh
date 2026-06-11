@@ -2271,8 +2271,8 @@ if (
 ) {
   throw new Error('GA evidence index must bind the final GA report status, verdict, schema, and digest');
 }
-if (JSON.stringify(stableJson(evidenceIndex.artifact_index)) !== JSON.stringify(stableJson(report.artifact_index))) {
-  throw new Error('GA evidence index artifact_index must match the final GA report artifact_index');
+if (!evidenceIndex.artifact_index || typeof evidenceIndex.artifact_index !== 'object') {
+  throw new Error('GA evidence index must include the complete artifact index');
 }
 if (report.artifact_index?.product_readiness?.report_digest !== report.product_readiness?.report_digest) {
   throw new Error('GA report artifact index must archive product readiness report digest');
@@ -2373,6 +2373,11 @@ if (!Array.isArray(evidenceIndex.deployment_paths) || evidenceIndex.deployment_p
 if (!Array.isArray(report.deployment_paths) || report.deployment_paths.length !== 4) {
   throw new Error('expected four deployment paths');
 }
+for (const pathEntry of report.deployment_paths) {
+  if (Object.prototype.hasOwnProperty.call(pathEntry, 'source_evidence_index')) {
+    throw new Error(`GA report deployment path must not expose source_evidence_index: ${pathEntry.operator_path}`);
+  }
+}
 if (!Array.isArray(report.artifact_index?.deployment_paths) || report.artifact_index.deployment_paths.length !== 4) {
   throw new Error('GA report artifact index must cover four deployment paths');
 }
@@ -2380,28 +2385,49 @@ for (const indexedPath of report.artifact_index.deployment_paths) {
   if (!indexedPath.operator_path || !indexedPath.digest?.startsWith('sha256:')) {
     throw new Error('GA report artifact index deployment path missing digest binding');
   }
+  if (
+    Object.prototype.hasOwnProperty.call(indexedPath, 'finalizer_manifest') ||
+    Object.prototype.hasOwnProperty.call(indexedPath, 'source_evidence_files')
+  ) {
+    throw new Error(`GA report artifact index must not expose source evidence archive details: ${indexedPath.operator_path}`);
+  }
+}
+const evidenceDeploymentPathIndex = evidenceIndex.artifact_index?.deployment_paths;
+if (!Array.isArray(evidenceDeploymentPathIndex) || evidenceDeploymentPathIndex.length !== 4) {
+  throw new Error('GA evidence index artifact index must cover four deployment paths');
+}
+if (
+  JSON.stringify(stableJson(evidenceIndex.deployment_paths)) !==
+  JSON.stringify(stableJson(evidenceDeploymentPathIndex))
+) {
+  throw new Error('GA evidence index deployment_paths must mirror complete deployment path artifact evidence');
+}
+for (const indexedPath of evidenceDeploymentPathIndex) {
+  if (!indexedPath.operator_path || !indexedPath.digest?.startsWith('sha256:')) {
+    throw new Error('GA evidence index deployment path missing digest binding');
+  }
   if (indexedPath.finalizer_manifest?.path !== 'deployment-path-finalizer-manifest.json') {
-    throw new Error(`GA report artifact index missing finalizer manifest path: ${indexedPath.operator_path}`);
+    throw new Error(`GA evidence index missing finalizer manifest path: ${indexedPath.operator_path}`);
   }
   if (!indexedPath.finalizer_manifest?.digest?.startsWith('sha256:')) {
-    throw new Error(`GA report artifact index missing finalizer manifest digest: ${indexedPath.operator_path}`);
+    throw new Error(`GA evidence index missing finalizer manifest digest: ${indexedPath.operator_path}`);
   }
   if (!Array.isArray(indexedPath.source_evidence_files) || indexedPath.source_evidence_files.length === 0) {
-    throw new Error(`GA report artifact index missing source evidence files: ${indexedPath.operator_path}`);
+    throw new Error(`GA evidence index missing source evidence files: ${indexedPath.operator_path}`);
   }
   for (const sourceFile of indexedPath.source_evidence_files) {
     if (!sourceFile.path?.startsWith('source-evidence/') || !sourceFile.sha256?.startsWith('sha256:')) {
-      throw new Error(`GA report artifact index source evidence file missing path/digest: ${indexedPath.operator_path}`);
+      throw new Error(`GA evidence index source evidence file missing path/digest: ${indexedPath.operator_path}`);
     }
     if (!sourceFile.kind || !sourceFile.schema) {
-      throw new Error(`GA report artifact index source evidence file missing kind/schema: ${indexedPath.operator_path}`);
+      throw new Error(`GA evidence index source evidence file missing kind/schema: ${indexedPath.operator_path}`);
     }
   }
   const sourceKinds = indexedPath.source_evidence_files.map((entry) => entry.kind).sort();
   if (indexedPath.operator_path.startsWith('airgap/')) {
     for (const kind of ['airgap_bundle_manifest', 'airgap_image_map']) {
       if (!sourceKinds.includes(kind)) {
-        throw new Error(`GA report artifact index airgap path missing ${kind}: ${indexedPath.operator_path}`);
+        throw new Error(`GA evidence index airgap path missing ${kind}: ${indexedPath.operator_path}`);
       }
     }
   }
@@ -2801,24 +2827,34 @@ run_ga_release_with_operator_plans "$VALID_DIR" "$PATH_DIR" "$PLAN_DIR" "$TMP_DI
 
 "$NODE_BIN" --input-type=module - \
   "$TMP_DIR/out-valid-with-operator-plans/ga-release-report.json" \
+  "$TMP_DIR/out-valid-with-operator-plans/ga-evidence-index.json" \
   "$VALID_DIR/release-contract.json" \
   "$VALID_DIR/deploy-template-package.json" \
   "$PLAN_DIR" <<'NODE'
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import path from 'node:path';
 
-const [reportFile, releaseContractFile, deployTemplatePackageFile, planDir] = process.argv.slice(2);
+const [reportFile, evidenceIndexFile, releaseContractFile, deployTemplatePackageFile, planDir] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const evidenceIndex = JSON.parse(fs.readFileSync(evidenceIndexFile, 'utf8'));
 const digest = (file) => `sha256:${crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
 const releaseContractDigest = digest(releaseContractFile);
 const deployTemplatePackageDigest = digest(deployTemplatePackageFile);
 const packageIndex = report.artifact_index?.operator_inputs_packages;
+const evidencePackageIndex = evidenceIndex.artifact_index?.operator_inputs_packages;
 
 if (!Array.isArray(packageIndex) || packageIndex.length !== 4) {
   throw new Error('GA report must index four operator-inputs packages when plans are provided');
 }
+if (!Array.isArray(evidencePackageIndex) || evidencePackageIndex.length !== 4) {
+  throw new Error('GA evidence index must retain four operator-inputs package plans when plans are provided');
+}
 if (JSON.stringify(packageIndex).includes(planDir)) {
   throw new Error('GA report operator-inputs package index must not expose local plan dir');
+}
+if (packageIndex.some((entry) => Object.prototype.hasOwnProperty.call(entry, 'package_plan'))) {
+  throw new Error('GA report operator-inputs package index must not expose package_plan');
 }
 for (const entry of packageIndex) {
   if (entry.release_materials?.release_contract?.path !== 'release-contract.json') {
@@ -2849,6 +2885,19 @@ for (const entry of packageIndex) {
     }
   } else if (entry.airgap_runtime_tools !== undefined) {
     throw new Error(`operator-inputs package index must not attach airgap tools to online path: ${entry.operator_path}`);
+  }
+}
+for (const entry of evidencePackageIndex) {
+  const planFile = path.join(planDir, entry.operator_path.replace(/[/_]+/g, '-'), '.release-kit-internal/operator-inputs-plan.json');
+  const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
+  if (entry.package_plan?.schema !== 'agentsmith.operator-inputs-plan/v1') {
+    throw new Error(`GA evidence index operator-inputs plan schema mismatch: ${entry.operator_path}`);
+  }
+  if (entry.package_plan?.scope !== 'operator_inputs_intake_only') {
+    throw new Error(`GA evidence index operator-inputs plan scope mismatch: ${entry.operator_path}`);
+  }
+  if (entry.package_plan?.digest !== plan.plan_sha256) {
+    throw new Error(`GA evidence index operator-inputs plan digest mismatch: ${entry.operator_path}`);
   }
 }
 NODE

@@ -3338,8 +3338,8 @@ async function writeFailureOutputs(outputDir, error, argsOrRawArgs) {
   console.error(`FAIL: wrote ${REPORT_FILE} (${canonicalDigest(report)}) with formal_verdict=not_issued`);
 }
 
-function buildEvidenceIndex(report) {
-  const artifactIndex = report.artifact_index ?? null;
+function buildEvidenceIndex(report, evidenceArtifactIndex = report.artifact_index ?? null) {
+  const artifactIndex = evidenceArtifactIndex;
   const canonicalRepos = Array.isArray(artifactIndex?.canonical_repos)
     ? artifactIndex.canonical_repos
     : Array.isArray(report.canonical_repos)
@@ -3412,7 +3412,7 @@ function buildEvidenceIndex(report) {
   };
 }
 
-async function writeFinalOutputs(outputDir, report) {
+async function writeFinalOutputs(outputDir, report, evidenceArtifactIndex) {
   const stamp = `${process.pid}-${Date.now()}`;
   const reportFile = path.join(outputDir, REPORT_FILE);
   const summaryFile = path.join(outputDir, SUMMARY_FILE);
@@ -3424,7 +3424,7 @@ async function writeFinalOutputs(outputDir, report) {
   try {
     await writeJson(reportTemp, report);
     await writeSummary(summaryTemp, report);
-    await writeJson(evidenceIndexTemp, buildEvidenceIndex(report));
+    await writeJson(evidenceIndexTemp, buildEvidenceIndex(report, evidenceArtifactIndex));
     await fs.rename(summaryTemp, summaryFile);
     await fs.rename(evidenceIndexTemp, evidenceIndexFile);
     await fs.rename(reportTemp, reportFile);
@@ -3508,11 +3508,75 @@ async function buildPassReport(args) {
     release,
     deployTemplateSummary
   );
-  const deploymentPathReportEntries = deploymentPaths
-    .map(({ report_file: _reportFile, ...entry }) => entry)
+  const deploymentPathEvidenceEntries = deploymentPaths
+    .map((entry) => ({
+      operator_path: entry.operator_path,
+      target_profile: entry.target_profile,
+      report_digest: entry.report_digest,
+      substrate_truth_digest: entry.substrate_truth_digest,
+      steps: entry.steps,
+      source_evidence_index: entry.source_evidence_index,
+      ...(entry.airgap_offline ? { airgap_offline: entry.airgap_offline } : {})
+    }))
     .sort((a, b) => a.operator_path.localeCompare(b.operator_path));
+  const deploymentPathReportEntries = deploymentPathEvidenceEntries.map((entry) => ({
+    operator_path: entry.operator_path,
+    target_profile: entry.target_profile,
+    report_digest: entry.report_digest,
+    substrate_truth_digest: entry.substrate_truth_digest,
+    steps: entry.steps,
+    ...(entry.airgap_offline ? { airgap_offline: entry.airgap_offline } : {})
+  }));
+  const operatorInputsPackageReportEntries = operatorInputsPackages.map((entry) => ({
+    operator_path: entry.operator_path,
+    package_manifest: entry.package_manifest,
+    release_materials: entry.release_materials,
+    ...(entry.airgap_runtime_tools ? { airgap_runtime_tools: entry.airgap_runtime_tools } : {}),
+    deployment_path_report: entry.deployment_path_report
+  }));
+  const baseArtifactIndex = {
+    release_contract: {
+      digest: release.release_contract_digest,
+      provenance: release.provenance
+    },
+    canonical_repos: canonicalRepos,
+    deploy_template_package: deployTemplateSummary,
+    product_readiness: {
+      report_digest: productReadinessSummary.report_digest,
+      provenance: productReadinessSummary.provenance
+    },
+    post_deploy_product_smoke: primaryProductSmoke.report_digest,
+    post_deploy_product_smoke_reports: productSmokeCoverage.reports.map((entry) => ({
+      report_digest: entry.report_digest,
+      source: entry.source,
+      deployment_target: entry.deployment_target,
+      deployment_path_binding: entry.deployment_path_binding
+    }))
+  };
+  const reportArtifactIndex = {
+    ...baseArtifactIndex,
+    deployment_paths: deploymentPathReportEntries.map((entry) => ({
+      operator_path: entry.operator_path,
+      digest: entry.report_digest
+    })),
+    ...(operatorInputsPackageReportEntries.length > 0 ? {
+      operator_inputs_packages: operatorInputsPackageReportEntries
+    } : {})
+  };
+  const evidenceArtifactIndex = {
+    ...baseArtifactIndex,
+    deployment_paths: deploymentPathEvidenceEntries.map((entry) => ({
+      operator_path: entry.operator_path,
+      digest: entry.report_digest,
+      finalizer_manifest: entry.source_evidence_index.finalizer_manifest,
+      source_evidence_files: entry.source_evidence_index.source_evidence_files
+    })),
+    ...(operatorInputsPackages.length > 0 ? {
+      operator_inputs_packages: operatorInputsPackages
+    } : {})
+  };
 
-  return {
+  const report = {
     schema: REPORT_SCHEMA,
     status: 'pass',
     formal_verdict: 'issued',
@@ -3550,34 +3614,7 @@ async function buildPassReport(args) {
       reports_by_distribution: productSmokeCoverage.reports_by_distribution
     },
     canonical_repos: canonicalRepos,
-    artifact_index: {
-      release_contract: {
-        digest: release.release_contract_digest,
-        provenance: release.provenance
-      },
-      canonical_repos: canonicalRepos,
-      deploy_template_package: deployTemplateSummary,
-      deployment_paths: deploymentPathReportEntries.map((entry) => ({
-        operator_path: entry.operator_path,
-        digest: entry.report_digest,
-        finalizer_manifest: entry.source_evidence_index.finalizer_manifest,
-        source_evidence_files: entry.source_evidence_index.source_evidence_files
-      })),
-      ...(operatorInputsPackages.length > 0 ? {
-        operator_inputs_packages: operatorInputsPackages
-      } : {}),
-      product_readiness: {
-        report_digest: productReadinessSummary.report_digest,
-        provenance: productReadinessSummary.provenance
-      },
-      post_deploy_product_smoke: primaryProductSmoke.report_digest,
-      post_deploy_product_smoke_reports: productSmokeCoverage.reports.map((entry) => ({
-        report_digest: entry.report_digest,
-        source: entry.source,
-        deployment_target: entry.deployment_target,
-        deployment_path_binding: entry.deployment_path_binding
-      }))
-    },
+    artifact_index: reportArtifactIndex,
     summary: {
       conclusion: 'AgentSmith GA release aggregate passed.',
       operator_paths: deploymentPathReportEntries.map((entry) => entry.operator_path).sort(),
@@ -3594,6 +3631,7 @@ async function buildPassReport(args) {
     },
     blockers: []
   };
+  return { report, evidenceArtifactIndex };
 }
 
 async function main() {
@@ -3617,16 +3655,16 @@ async function main() {
   const outputDir = path.resolve(args.outputDir);
   await clearStaleFinalOutputs(outputDir);
 
-  let report;
+  let passReport;
   try {
-    report = await buildPassReport(args);
+    passReport = await buildPassReport(args);
   } catch (error) {
     await writeFailureOutputs(outputDir, error, args);
     throw error;
   }
 
-  await writeFinalOutputs(outputDir, report);
-  console.log(`PASS: wrote ${REPORT_FILE} (${canonicalDigest(report)})`);
+  await writeFinalOutputs(outputDir, passReport.report, passReport.evidenceArtifactIndex);
+  console.log(`PASS: wrote ${REPORT_FILE} (${canonicalDigest(passReport.report)})`);
 }
 
 main().catch((error) => {
