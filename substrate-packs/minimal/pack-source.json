@@ -12,7 +12,7 @@
       "target_repository": "substrates/mongodb"
     },
     "redis": {
-      "source_ref": "docker.io/library/redis:7.2@sha256:73d3498d8e395b685cf9263877c445fe9bf2bb436db33d545780ae398f97a23d",
+      "source_ref": "docker.io/library/redis:7.2@sha256:4fcc6dc39a6e5d1904babaf7b9e4ccb9bfdcfd37fe5ccbbfdab10cb20b5c02d4",
       "target_repository": "substrates/redis"
     },
     "object_storage": {
