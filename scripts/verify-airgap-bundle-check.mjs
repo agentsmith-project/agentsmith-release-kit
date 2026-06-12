@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -946,13 +947,20 @@ async function resolveBundleFile(bundleRoot, relativePath, label) {
 }
 
 async function digestFile(file, label) {
-  let buffer;
   try {
-    buffer = await fs.readFile(file);
+    const hash = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => {
+      const stream = createReadStream(file);
+      stream.on('data', (chunk) => {
+        hash.update(chunk);
+      });
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    });
+    return `sha256:${hash.digest('hex')}`;
   } catch (error) {
     fail(`cannot read ${label}: ${error.message}`);
   }
-  return digestBuffer(buffer);
 }
 
 async function assertBundleFileSha({ bundleRoot, relativePath, declaredSha256, label }) {

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -73,6 +73,7 @@ const EXAMPLE_PLACEHOLDER_RELEASE_MATERIAL_SCHEMA = new Map([
 ]);
 const EXAMPLE_PLACEHOLDER_DEPLOY_TEMPLATE_ARCHIVE_TEXT =
   'placeholder deploy template archive; replace before run';
+const MAX_PLACEHOLDER_RELEASE_MATERIAL_BYTES = 4096;
 
 const TOP_LEVEL_FIELDS = new Set([
   'schema_version',
@@ -312,7 +313,24 @@ function digestJson(value) {
   return digestBuffer(Buffer.from(JSON.stringify(stableJson(value))));
 }
 
-async function readFileDigest(file, label) {
+async function digestFile(file, label) {
+  try {
+    const hash = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => {
+      const stream = createReadStream(file);
+      stream.on('data', (chunk) => {
+        hash.update(chunk);
+      });
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    });
+    return `sha256:${hash.digest('hex')}`;
+  } catch (error) {
+    fail(`cannot read ${label}: ${error.message}`);
+  }
+}
+
+async function readFileWithDigest(file, label) {
   let buffer;
   try {
     buffer = await fs.readFile(file);
@@ -326,7 +344,7 @@ async function readFileDigest(file, label) {
 }
 
 async function readJson(file, label) {
-  const { buffer, sha256 } = await readFileDigest(file, label);
+  const { buffer, sha256 } = await readFileWithDigest(file, label);
   try {
     return {
       file,
@@ -501,7 +519,7 @@ async function digestDirectory(rootDir) {
       if (!dirent.isFile()) {
         fail(`directory input contains a non-file entry: ${relativePath}`);
       }
-      const { sha256 } = await readFileDigest(absolutePath, relativePath);
+      const sha256 = await digestFile(absolutePath, relativePath);
       entries.push({ path: relativePath, type: 'file', sha256 });
     }
   }
@@ -536,7 +554,7 @@ async function resolveCommand({ baseDir, value, label }) {
   if (placeholderReason) {
     fail(`${label}: ${resolved.path} (${placeholderReason})`);
   }
-  const { sha256 } = await readFileDigest(resolved.absolutePath, label);
+  const sha256 = await digestFile(resolved.absolutePath, label);
   return {
     kind: 'file',
     path: resolved.path,
@@ -573,7 +591,7 @@ function examplePlaceholderReleaseMaterialReason(field, ref) {
 }
 
 async function readJsonObjectForPlaceholderInspection(file, label) {
-  const { buffer } = await readFileDigest(file, label);
+  const { buffer } = await readFileWithDigest(file, label);
   try {
     const value = JSON.parse(buffer.toString('utf8'));
     return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
@@ -603,7 +621,16 @@ async function detectExamplePlaceholderReleaseMaterial(field, ref) {
   }
 
   if (field === 'deploy_template_archive') {
-    const { buffer } = await readFileDigest(ref.absolute_path, field);
+    let stat;
+    try {
+      stat = await fs.stat(ref.absolute_path);
+    } catch (error) {
+      fail(`cannot inspect ${field}: ${error.message}`);
+    }
+    if (stat.size > MAX_PLACEHOLDER_RELEASE_MATERIAL_BYTES) {
+      return null;
+    }
+    const { buffer } = await readFileWithDigest(ref.absolute_path, field);
     return buffer.toString('utf8').trim() === EXAMPLE_PLACEHOLDER_DEPLOY_TEMPLATE_ARCHIVE_TEXT
       ? examplePlaceholderReleaseMaterialReason(field, ref)
       : null;
@@ -1325,7 +1352,7 @@ async function resolveRefs({ manifest, baseDir }) {
       key: { value: manifest[field], label: field },
       kind: 'file'
     });
-    const { sha256 } = await readFileDigest(resolved.absolutePath, field);
+    const sha256 = await digestFile(resolved.absolutePath, field);
     refs[field] = {
       kind: 'file',
       path: resolved.path,
@@ -1514,7 +1541,7 @@ async function resolveAirgapBundleComponent({ bundleRoot, component, label }) {
     fail(`${label}.path must resolve inside airgap_bundle`);
   }
 
-  const { sha256 } = await readFileDigest(realPath, `${label}.path`);
+  const sha256 = await digestFile(realPath, `${label}.path`);
   return {
     absolute_path: realPath,
     sha256

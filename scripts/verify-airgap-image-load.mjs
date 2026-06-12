@@ -41,7 +41,10 @@ const REPORT_FILE = 'airgap-image-load-report.json';
 const ARCHIVE_CHECK_DIR = 'airgap-image-archive-check';
 const ARCHIVE_CHECK_REPORT_FILE = 'airgap-image-archive-check-report.json';
 const SUBSTRATE_PACK_COMPONENT_KIND = 'substrate_pack_manifest';
-const LOADER_TIMEOUT_MS = 30000;
+const GIB = 1024 * 1024 * 1024;
+const DEFAULT_LOADER_TIMEOUT_MS = 30000;
+const LOADER_TIMEOUT_PER_GIB_MS = 30000;
+const MAX_LOADER_TIMEOUT_MS = 300000;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -78,6 +81,7 @@ function usage() {
     --bundle-manifest <json> \\
     --archive-probe <executable> \\
     --image-loader <executable> \\
+    [--loader-timeout-ms <ms>] \\
     --output-dir <dir>`;
 }
 
@@ -99,6 +103,18 @@ function readArgValue(argv, index, arg) {
     cliFail(`missing value for ${arg}`);
   }
   return value;
+}
+
+function parseLoaderTimeoutMs(value) {
+  const text = String(value || '');
+  if (!/^[0-9]+$/.test(text)) {
+    cliFail('--loader-timeout-ms must be an integer number of milliseconds');
+  }
+  const parsed = Number(text);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > MAX_LOADER_TIMEOUT_MS) {
+    cliFail(`--loader-timeout-ms must be between 1 and ${MAX_LOADER_TIMEOUT_MS}`);
+  }
+  return parsed;
 }
 
 function parseArgs(argv) {
@@ -140,6 +156,9 @@ function parseArgs(argv) {
       case '--image-loader':
         parsed.imageLoader = nextValue();
         break;
+      case '--loader-timeout-ms':
+        parsed.loaderTimeoutMs = nextValue();
+        break;
       case '--output-dir':
         parsed.outputDir = nextValue();
         break;
@@ -160,6 +179,9 @@ function parseArgs(argv) {
     if (!parsed[key]) {
       cliFail(`missing required argument: --${toKebab(key)}`);
     }
+  }
+  if (parsed.loaderTimeoutMs !== undefined) {
+    parsed.loaderTimeoutMs = parseLoaderTimeoutMs(parsed.loaderTimeoutMs);
   }
 
   return parsed;
@@ -714,9 +736,18 @@ async function readImageLoadInputs({
       fail(`${label}.sha256 must match archive check archive_sha256`);
     }
 
+    const archivePath = await resolveBundleFile(bundleRoot, declaration.path, `${label}.path`);
+    let archiveStat;
+    try {
+      archiveStat = await fs.stat(archivePath);
+    } catch (error) {
+      fail(`cannot read ${label}.path: ${error.message}`);
+    }
+
     inputsById.set(id, {
       id,
-      archivePath: await resolveBundleFile(bundleRoot, declaration.path, `${label}.path`),
+      archivePath,
+      archiveSizeBytes: archiveStat.size,
       targetImage: expected.target_image,
       targetDigest,
       archiveSha256
@@ -745,7 +776,42 @@ function parseLoaderDigestOutput(stdout, stderr, id) {
   return matches[0];
 }
 
-function runImageLoader({ imageLoader, image }) {
+function defaultLoaderTimeoutMs(archiveSizeBytes) {
+  const gibUnits = Math.max(1, Math.ceil(archiveSizeBytes / GIB));
+  const timeoutMs = DEFAULT_LOADER_TIMEOUT_MS + ((gibUnits - 1) * LOADER_TIMEOUT_PER_GIB_MS);
+  return Math.min(MAX_LOADER_TIMEOUT_MS, Math.max(DEFAULT_LOADER_TIMEOUT_MS, timeoutMs));
+}
+
+function loaderTimeoutMsForImage(image, configuredTimeoutMs) {
+  if (configuredTimeoutMs !== undefined) {
+    return configuredTimeoutMs;
+  }
+  return defaultLoaderTimeoutMs(image.archiveSizeBytes);
+}
+
+function loaderCommandEvidence(imageLoader, image) {
+  return JSON.stringify([
+    imageLoader,
+    image.archivePath,
+    image.targetImage,
+    image.targetDigest
+  ]);
+}
+
+function loaderFailureEvidence({ imageLoader, image, timeoutMs, result }) {
+  const exitStatus = result?.status ?? null;
+  const signal = result?.signal ?? null;
+  return [
+    `archive_size_bytes=${image.archiveSizeBytes}`,
+    `command=${loaderCommandEvidence(imageLoader, image)}`,
+    `timeout_ms=${timeoutMs}`,
+    `exit_status=${exitStatus}`,
+    `signal=${signal}`
+  ].join('; ');
+}
+
+function runImageLoader({ imageLoader, image, configuredTimeoutMs }) {
+  const timeoutMs = loaderTimeoutMsForImage(image, configuredTimeoutMs);
   const result = spawnSync(
     imageLoader,
     [image.archivePath, image.targetImage, image.targetDigest],
@@ -755,26 +821,34 @@ function runImageLoader({ imageLoader, image }) {
         ...process.env,
         AGENTSMITH_IMAGE_ARCHIVE_PATH: image.archivePath,
         AGENTSMITH_IMAGE_ID: image.id,
+        AGENTSMITH_IMAGE_ARCHIVE_SIZE_BYTES: String(image.archiveSizeBytes),
+        AGENTSMITH_IMAGE_LOADER_TIMEOUT_MS: String(timeoutMs),
         AGENTSMITH_TARGET_IMAGE: image.targetImage,
         AGENTSMITH_TARGET_DIGEST: image.targetDigest
       },
       encoding: 'utf8',
       maxBuffer: 1024 * 1024,
-      timeout: LOADER_TIMEOUT_MS
+      timeout: timeoutMs
     }
   );
+  const failureEvidence = () => loaderFailureEvidence({
+    imageLoader,
+    image,
+    timeoutMs,
+    result
+  });
 
   if (result.error) {
     if (result.error.code === 'ETIMEDOUT') {
-      fail(`image loader timed out for image id: ${image.id}`);
+      fail(`image loader timed out for image id: ${image.id}; ${failureEvidence()}`);
     }
-    fail(`image loader could not be executed for image id: ${image.id}`);
+    fail(`image loader could not be executed for image id: ${image.id}; ${failureEvidence()}; error=${result.error.message}`);
   }
   if (result.signal) {
-    fail(`image loader was interrupted for image id: ${image.id}`);
+    fail(`image loader was interrupted for image id: ${image.id}; ${failureEvidence()}`);
   }
   if (result.status !== 0) {
-    fail(`image loader returned non-zero status for image id: ${image.id}`);
+    fail(`image loader returned non-zero status for image id: ${image.id}; ${failureEvidence()}`);
   }
 
   const loaderDigest = parseLoaderDigestOutput(
@@ -788,12 +862,16 @@ function runImageLoader({ imageLoader, image }) {
   return loaderDigest;
 }
 
-function runImageLoads({ imageLoader, images }) {
+function runImageLoads({ imageLoader, images, configuredTimeoutMs }) {
   const loaderDigests = new Set();
   const loadedImages = [];
 
   for (const image of images) {
-    const loaderDigest = runImageLoader({ imageLoader, image });
+    const loaderDigest = runImageLoader({
+      imageLoader,
+      image,
+      configuredTimeoutMs
+    });
     loaderDigests.add(loaderDigest);
     loadedImages.push({
       id: image.id,
@@ -934,7 +1012,8 @@ async function main() {
     });
     const loadSummary = runImageLoads({
       imageLoader,
-      images: imageLoadInputs
+      images: imageLoadInputs,
+      configuredTimeoutMs: args.loaderTimeoutMs
     });
 
     await writeReport(

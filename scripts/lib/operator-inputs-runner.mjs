@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -276,13 +276,20 @@ async function readJson(file, label) {
 }
 
 async function fileDigest(file, label) {
-  let buffer;
   try {
-    buffer = await fs.readFile(file);
+    const hash = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => {
+      const stream = createReadStream(file);
+      stream.on('data', (chunk) => {
+        hash.update(chunk);
+      });
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    });
+    return `sha256:${hash.digest('hex')}`;
   } catch (error) {
     fail(`cannot read ${label}: ${error.message}`);
   }
-  return digestBuffer(buffer);
 }
 
 function requireObject(value, label) {

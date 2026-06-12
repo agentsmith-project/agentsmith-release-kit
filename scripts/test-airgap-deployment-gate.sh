@@ -35,6 +35,7 @@ KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
 KIT_SUBSTRATE_INSTALL_INPUTS_DIR="$TMP_DIR/substrate-install-inputs.kit-airgap"
 GOOD_PROBE="$TMP_DIR/tools/archive-digest-probe"
 GOOD_LOADER="$TMP_DIR/tools/image-loader"
+TIMEOUT_EXPECTING_LOADER="$TMP_DIR/tools/timeout-expecting-image-loader"
 LOAD_LOG="$TMP_DIR/image-load.log"
 KUBECTL_LOG="$TMP_DIR/kubectl.log"
 FAKE_KUBECTL="$TMP_DIR/kubectl"
@@ -270,18 +271,22 @@ NODE
 write_substrate_install_inputs() {
   local dir="$1"
   local profile="${2:-$KIT_AIRGAP_PROFILE}"
+  local postgresql_digest
+
+  postgresql_digest="$("$NODE_BIN" "$ROOT_DIR/scripts/lib/test-oci-layout-fixture.mjs" --print-target-digest --image-id substrate_postgresql)"
 
   mkdir -p "$dir"
   write_truth "$dir/substrate-truth-input.json" "$profile"
   write_prerequisites "$dir/target-prerequisites.json" "$profile"
-  "$NODE_BIN" --input-type=module - "$dir" "$profile" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$dir" "$profile" "$postgresql_digest" <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [dir, profile] = process.argv.slice(2);
+const [dir, profile, postgresqlDigest] = process.argv.slice(2);
 const substrateTruth = JSON.parse(fs.readFileSync(path.join(dir, 'substrate-truth-input.json'), 'utf8'));
 const ownerLabels = {
-  'app.kubernetes.io/managed-by': 'agentsmith-release-kit'
+  'app.kubernetes.io/managed-by': 'agentsmith-release-kit',
+  'app.kubernetes.io/name': 'postgresql'
 };
 const ownerAnnotations = {
   'agentsmith.io/managed-by': 'agentsmith-release-kit',
@@ -299,6 +304,62 @@ const resources = [
     },
     data: {
       profile
+    }
+  },
+  {
+    apiVersion: 'v1',
+    kind: 'Service',
+    metadata: {
+      name: 'postgresql',
+      namespace: 'agentsmith',
+      labels: ownerLabels,
+      annotations: ownerAnnotations
+    },
+    spec: {
+      type: 'ClusterIP',
+      selector: {
+        'app.kubernetes.io/name': 'postgresql'
+      },
+      ports: [
+        {
+          name: 'postgresql',
+          port: 5432,
+          targetPort: 5432
+        }
+      ]
+    }
+  },
+  {
+    apiVersion: 'apps/v1',
+    kind: 'StatefulSet',
+    metadata: {
+      name: 'postgresql',
+      namespace: 'agentsmith',
+      labels: ownerLabels,
+      annotations: ownerAnnotations
+    },
+    spec: {
+      selector: {
+        matchLabels: {
+          'app.kubernetes.io/name': 'postgresql'
+        }
+      },
+      serviceName: 'postgresql',
+      template: {
+        metadata: {
+          labels: {
+            'app.kubernetes.io/name': 'postgresql'
+          }
+        },
+        spec: {
+          containers: [
+            {
+              name: 'postgresql',
+              image: `ghcr.io/agentsmith-project/substrates/postgresql:16.3@${postgresqlDigest}`
+            }
+          ]
+        }
+      }
     }
   }
 ];
@@ -883,6 +944,41 @@ console.log(targetDigest);
 NODE
   chmod +x "$GOOD_LOADER"
 
+  cat >"$TIMEOUT_EXPECTING_LOADER" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const [archivePath, targetImage, targetDigest] = process.argv.slice(2);
+if (!archivePath || !targetImage || !targetDigest) {
+  process.exit(2);
+}
+const expectedTimeout = process.env.RELEASE_KIT_TEST_EXPECTED_LOADER_TIMEOUT_MS;
+if (
+  expectedTimeout &&
+  process.env.AGENTSMITH_IMAGE_LOADER_TIMEOUT_MS !== expectedTimeout
+) {
+  console.error(
+    `expected loader timeout ${expectedTimeout}, got ${process.env.AGENTSMITH_IMAGE_LOADER_TIMEOUT_MS || ''}`
+  );
+  process.exit(3);
+}
+const body = fs.readFileSync(archivePath, 'utf8');
+const matches = [
+  ...body.matchAll(/"io\.agentsmith\.fixture\.target_digest"\s*:\s*"(sha256:[0-9a-f]{64})"/g)
+];
+if (matches.length !== 1 || matches[0][1] !== targetDigest) {
+  process.exit(4);
+}
+if (!targetImage.endsWith(`@${targetDigest}`)) {
+  process.exit(5);
+}
+if (process.env.AGENTSMITH_LOAD_LOG) {
+  fs.appendFileSync(process.env.AGENTSMITH_LOAD_LOG, `${targetDigest}\n`);
+}
+console.log(targetDigest);
+NODE
+  chmod +x "$TIMEOUT_EXPECTING_LOADER"
+
   cat >"$FAKE_KUBECTL" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -891,7 +987,7 @@ printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" || "$arg" == "wait" ]]; then
     command_name="$arg"
     break
   fi
@@ -904,12 +1000,21 @@ case "$command_name" in
   apply)
     if [[ " $* " == *".substrate-install-resources."* ]]; then
       printf '%s\n' "configmap/agentsmith-substrate-config"
+      printf '%s\n' "service/postgresql"
+      printf '%s\n' "statefulset.apps/postgresql"
     else
       printf '%s\n' "deployment.apps/agentsmith-web"
     fi
     ;;
   rollout)
     printf '%s\n' "deployment rolled out token=plain-secret-value"
+    ;;
+  wait)
+    if [[ "${FAKE_KUBECTL_FAIL_SUBSTRATE_READY:-}" == "pods" && " $* " == *" --for=condition=Ready pods "* ]]; then
+      echo "postgresql selected pods not ready" >&2
+      exit 1
+    fi
+    printf '%s\n' "resource condition met token=plain-secret-value"
     ;;
   get)
     get_target=""
@@ -989,6 +1094,13 @@ JSON
       exit 0
     fi
 
+    if [[ "$get_target" == "StatefulSet/postgresql" ]]; then
+      cat <<'JSON'
+{"spec":{"selector":{"matchLabels":{"app.kubernetes.io/name":"postgresql"}}}}
+JSON
+      exit 0
+    fi
+
     if [[ "$get_target" == "pods" ]]; then
       : "${FAKE_KUBECTL_TARGET_IMAGE:?}"
       cat <<JSON
@@ -997,7 +1109,7 @@ JSON
       exit 0
     fi
 
-    if [[ "$get_target" == "configmaps" || "$get_target" == "services" || "$get_target" == "networkpolicies.networking.k8s.io" ]]; then
+    if [[ "$get_target" == "configmaps" || "$get_target" == "services" || "$get_target" == "statefulsets.apps" || "$get_target" == "networkpolicies.networking.k8s.io" ]]; then
       echo "Error from server (NotFound): resource not found" >&2
       exit 1
     fi
@@ -1241,6 +1353,18 @@ if (stepNames.join(',') !== expectedSteps.join(',')) {
 for (const step of report.steps) {
   if (step.status !== 'pass') {
     throw new Error(`unexpected step status for ${step.name}: ${step.status}`);
+  }
+  if (step.name === 'substrate-ready-wait') {
+    if (step.namespace !== 'agentsmith') {
+      throw new Error(`unexpected substrate-ready-wait namespace: ${step.namespace}`);
+    }
+    if (typeof step.timeout !== 'string' || step.timeout.trim() === '') {
+      throw new Error('substrate-ready-wait must include timeout');
+    }
+    if (!Number.isInteger(step.checked_resource_count) || step.checked_resource_count < 1) {
+      throw new Error('substrate-ready-wait must check at least one resource');
+    }
+    continue;
   }
   if (!Array.isArray(step.report_paths) || step.report_paths.length === 0) {
     throw new Error(`step missing report paths: ${step.name}`);
@@ -1571,12 +1695,41 @@ assert_report \
   airgap-run-1001
 pass "airgap deployment apply mode ran image-load, render-check, apply, rollout, and optional smoke"
 
+timeout_handoff_output="$TMP_DIR/out-apply-loader-timeout-handoff"
+reset_logs
+before_timeout_handoff_smoke="$(hit_count)"
+RELEASE_KIT_TEST_EXPECTED_LOADER_TIMEOUT_MS=123456 \
+run_airgap_gate "$VALID_BUNDLE_ROOT" "$timeout_handoff_output" "$AIRGAP_PROFILE" \
+  --mode apply \
+  --archive-probe "$GOOD_PROBE" \
+  --image-loader "$TIMEOUT_EXPECTING_LOADER" \
+  --confirm-apply "$AIRGAP_PROFILE" \
+  --operator-run-id airgap-run-loader-timeout \
+  --smoke-url "$BASE_URL/ok" \
+  --allow-http \
+  --allow-localhost \
+  --timeout-ms 123456 >"$TMP_DIR/apply-loader-timeout-handoff.out"
+[[ "$(load_count)" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] ||
+  fail "deployment gate timeout handoff must still load each image exactly once"
+after_timeout_handoff_smoke="$(hit_count)"
+[[ "$after_timeout_handoff_smoke" -eq $((before_timeout_handoff_smoke + 1)) ]] ||
+  fail "deployment gate timeout handoff must keep smoke behavior"
+assert_report \
+  "$timeout_handoff_output/$REPORT_FILE" \
+  apply \
+  target-preflight,airgap-image-load,airgap-bundle-render-check,apply,rollout,smoke \
+  airgap-run-loader-timeout
+pass "airgap deployment gate passes bounded timeout-ms to image loader step"
+
 kit_apply_output="$TMP_DIR/out-kit-apply-smoke"
 reset_logs
 before_kit_smoke="$(hit_count)"
 FAKE_KUBECTL_TARGET_IMAGE="$KIT_TARGET_APP_IMAGE" \
 run_airgap_gate "$KIT_BUNDLE_ROOT" "$kit_apply_output" "$KIT_AIRGAP_PROFILE" \
   --mode apply \
+  --substrate-truth "$proof_truth" \
+  --allow-installed-substrate-truth \
+  --substrate-install-report "$proof_report" \
   --archive-probe "$GOOD_PROBE" \
   --image-loader "$GOOD_LOADER" \
   --confirm-apply "$KIT_AIRGAP_PROFILE" \
@@ -1589,6 +1742,20 @@ if grep -q -- '--dry-run=server' "$KUBECTL_LOG"; then
   fail "confirmed kit airgap apply must not pass --dry-run=server"
 fi
 grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" || fail "kit apply mode must call rollout"
+grep -Fq 'rollout status StatefulSet/postgresql --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" ||
+  fail "kit apply mode must wait for substrate StatefulSet rollout before app apply"
+grep -Fq 'wait --for=condition=Ready pods --selector app.kubernetes.io/name=postgresql --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" ||
+  fail "kit apply mode must wait for selected substrate pods before app apply"
+substrate_ready_wait_line="$(
+  grep -nF 'wait --for=condition=Ready pods --selector app.kubernetes.io/name=postgresql --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" |
+    head -n 1 |
+    cut -d: -f1
+)"
+app_apply_line="$(grep -n '^apply ' "$KUBECTL_LOG" | head -n 1 | cut -d: -f1)"
+[[ -n "$substrate_ready_wait_line" && -n "$app_apply_line" ]] ||
+  fail "kit apply mode must log substrate ready wait and app apply"
+[[ "$substrate_ready_wait_line" -lt "$app_apply_line" ]] ||
+  fail "kit apply mode must execute substrate ready wait before app apply"
 [[ "$(load_count)" -eq "$(bundle_image_count "$KIT_BUNDLE_ROOT")" ]] ||
   fail "kit apply mode must load each bundled image exactly once"
 after_kit_smoke="$(hit_count)"
@@ -1598,10 +1765,38 @@ after_kit_smoke="$(hit_count)"
 assert_report \
   "$kit_apply_output/$REPORT_FILE" \
   apply \
-  target-preflight,substrate-pack-check,airgap-image-load,airgap-bundle-render-check,apply,rollout,smoke \
+  target-preflight,substrate-pack-check,airgap-image-load,airgap-bundle-render-check,substrate-ready-wait,apply,rollout,smoke \
   airgap-kit-run-1001 \
   "$KIT_AIRGAP_PROFILE"
-pass "kit airgap deployment apply ran substrate pack check, image-load, render-check, apply, rollout, and smoke"
+pass "kit airgap deployment apply waited for installed substrate before app apply"
+
+reset_logs
+export FAKE_KUBECTL_FAIL_SUBSTRATE_READY=pods
+FAKE_KUBECTL_TARGET_IMAGE="$KIT_TARGET_APP_IMAGE" \
+expect_gate_fail "kit-substrate-ready-wait-fail" "$TMP_DIR/out-kit-substrate-ready-wait-fail" \
+  run_airgap_gate "$KIT_BUNDLE_ROOT" "$TMP_DIR/out-kit-substrate-ready-wait-fail" "$KIT_AIRGAP_PROFILE" \
+    --mode apply \
+    --substrate-truth "$proof_truth" \
+    --allow-installed-substrate-truth \
+    --substrate-install-report "$proof_report" \
+    --archive-probe "$GOOD_PROBE" \
+    --image-loader "$GOOD_LOADER" \
+    --confirm-apply "$KIT_AIRGAP_PROFILE" \
+    --operator-run-id airgap-kit-run-ready-fail
+unset FAKE_KUBECTL_FAIL_SUBSTRATE_READY
+for token in \
+  'substrate resource not ready: StatefulSet/postgresql' \
+  'namespace=agentsmith' \
+  'timeout=120s' \
+  'command='; do
+  grep -Fq "$token" "$TMP_DIR/kit-substrate-ready-wait-fail.err" ||
+    fail "substrate ready wait failure must include evidence token: $token"
+done
+if grep -q '^apply ' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "substrate ready wait failure must stop before app apply"
+fi
+pass "kit airgap substrate ready wait failure includes resource, namespace, timeout, and command evidence"
 
 reset_logs
 expect_gate_fail "apply-bad-timeout" "$TMP_DIR/out-bad-timeout" \

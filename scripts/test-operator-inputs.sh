@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NODE_BIN="${NODE:-node}"
 EXAMPLE_ONLINE_DIR="$ROOT_DIR/examples/online-use-existing"
 EXAMPLE_ONLINE_INSTALL_DIR="$ROOT_DIR/examples/online-install-substrates"
+LARGE_FIXTURE_SIZE=$((2 * 1024 * 1024 * 1024 + 1))
+LARGE_READ_GUARD="$ROOT_DIR/scripts/lib/test-large-file-read-guard.cjs"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -15,6 +17,18 @@ fail() {
 
 pass() {
   echo "PASS: $*"
+}
+
+assert_larger_than_2g() {
+  "$NODE_BIN" --input-type=module - "$1" <<'NODE'
+import fs from 'node:fs';
+
+const [file] = process.argv.slice(2);
+const stat = fs.statSync(file);
+if (stat.size <= 2 * 1024 * 1024 * 1024) {
+  throw new Error(`expected >2GiB sparse fixture: ${file}`);
+}
+NODE
 }
 
 write_package_files() {
@@ -487,6 +501,103 @@ copy_valid_package() {
 
   cp -R "$source_dir" "$output_dir"
   rm -rf "$output_dir/.release-kit-internal"
+}
+
+add_large_bundle_image_artifact() {
+  local package_dir="$1"
+  local stream_source="$2"
+  local image_id="${3:-substrate_mongodb}"
+
+  "$NODE_BIN" --input-type=module - "$package_dir" "$stream_source" "$image_id" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [packageDir, streamSource, imageId] = process.argv.slice(2);
+const manifestPath = path.join(packageDir, 'bundle/airgap-bundle-manifest.json');
+const imagePath = path.join(packageDir, 'bundle/images', `${imageId}.oci-layout.tar`);
+const sha256 = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(streamSource)).digest('hex')}`;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+
+fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+fs.copyFileSync(streamSource, imagePath);
+manifest.image_artifact_declarations = [
+  ...(Array.isArray(manifest.image_artifact_declarations)
+    ? manifest.image_artifact_declarations.filter((item) => item.id !== imageId)
+    : []),
+  {
+    id: imageId,
+    source_image: `registry.example.invalid/${imageId}:fixture@sha256:${'1'.repeat(64)}`,
+    source_digest: `sha256:${'1'.repeat(64)}`,
+    target_image: `registry.example.invalid/${imageId}:fixture@sha256:${'1'.repeat(64)}`,
+    target_digest: `sha256:${'1'.repeat(64)}`,
+    artifact_format: 'oci_layout_tar',
+    path: `images/${imageId}.oci-layout.tar`,
+    sha256
+  }
+];
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+
+  truncate -s "$LARGE_FIXTURE_SIZE" "$package_dir/bundle/images/$image_id.oci-layout.tar"
+  assert_larger_than_2g "$package_dir/bundle/images/$image_id.oci-layout.tar"
+}
+
+write_matching_target_prerequisites() {
+  local package_dir="$1"
+
+  "$NODE_BIN" --input-type=module - "$package_dir" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [packageDir] = process.argv.slice(2);
+const installInputs = JSON.parse(
+  fs.readFileSync(path.join(packageDir, 'substrate-install-inputs.json'), 'utf8')
+);
+const refs = new Set();
+
+function collectSecretRefs(value) {
+  if (Array.isArray(value)) {
+    value.forEach(collectSecretRefs);
+    return;
+  }
+  if (value && typeof value === 'object') {
+    Object.values(value).forEach(collectSecretRefs);
+    return;
+  }
+  if (typeof value === 'string' && value.startsWith('secretRef:')) {
+    refs.add(value);
+  }
+}
+
+collectSecretRefs(installInputs.substrate_truth);
+const prerequisites = {
+  schema_version: 'agentsmith.target-prerequisites.truth/v1',
+  namespace: 'agentsmith',
+  rbac: {
+    policy: 'pre_provisioned_namespace_admin',
+    proof: 'operator kubectl auth can-i apply deployments in namespace agentsmith'
+  },
+  ingress: {
+    host: 'agentsmith.airgap.example.com',
+    tls_secret_ref: 'secretRef:agentsmith/agentsmith-ingress-tls'
+  },
+  registry: {
+    auth: { mode: 'secret' },
+    pull_secret_ref: 'secretRef:agentsmith/registry-pull'
+  },
+  storage: {
+    storage_class: 'standard',
+    persistent_volume_policy: 'dynamic'
+  },
+  substrate_secret_refs: [...refs].sort()
+};
+
+fs.writeFileSync(
+  path.join(packageDir, 'bundle/operator-inputs/target-prerequisites.json'),
+  `${JSON.stringify(prerequisites, null, 2)}\n`
+);
+NODE
 }
 
 mutate_manifest() {
@@ -2621,6 +2732,37 @@ mutate_manifest "$operator_facing_airgap_install_dir" operator_facing_airgap_bun
   --operator-inputs "$operator_facing_airgap_install_dir" >/dev/null
 assert_plan "$operator_facing_airgap_install_dir/.release-kit-internal/operator-inputs-plan.json" airgap/install_substrates
 pass "resolve-operator-inputs derives airgap install bundle/substrate target axes from deployment_path"
+
+large_airgap_install_dir="$TMP_DIR/operator-facing-airgap-install-large-image"
+copy_valid_package "$base_airgap_install" "$large_airgap_install_dir"
+mutate_manifest "$large_airgap_install_dir" operator_facing_substrate_install_inputs
+mutate_manifest "$large_airgap_install_dir" operator_facing_airgap_bundle_manifest
+large_stream_source="$TMP_DIR/operator-inputs-large-image-stream-source"
+printf '%s\n' 'operator-inputs large image artifact fixture' >"$large_stream_source"
+add_large_bundle_image_artifact "$large_airgap_install_dir" "$large_stream_source"
+write_matching_target_prerequisites "$large_airgap_install_dir"
+if ! NODE_OPTIONS="--require=$LARGE_READ_GUARD ${NODE_OPTIONS:-}" \
+  RELEASE_KIT_TEST_LARGE_STREAM_SOURCE="$large_stream_source" \
+    bash "$ROOT_DIR/scripts/operator-release.sh" \
+      --operator-inputs "$large_airgap_install_dir" \
+      --doctor >"$TMP_DIR/operator-inputs-large-doctor.out" \
+      2>"$TMP_DIR/operator-inputs-large-doctor.err"; then
+  cat "$TMP_DIR/operator-inputs-large-doctor.out" >&2
+  cat "$TMP_DIR/operator-inputs-large-doctor.err" >&2
+  fail "operator-inputs doctor should stream >2GiB bundle image artifact"
+fi
+if ! NODE_OPTIONS="--require=$LARGE_READ_GUARD ${NODE_OPTIONS:-}" \
+  RELEASE_KIT_TEST_LARGE_STREAM_SOURCE="$large_stream_source" \
+    "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+      --operator-inputs "$large_airgap_install_dir" \
+      >"$TMP_DIR/operator-inputs-large-resolve.out" \
+      2>"$TMP_DIR/operator-inputs-large-resolve.err"; then
+  cat "$TMP_DIR/operator-inputs-large-resolve.out" >&2
+  cat "$TMP_DIR/operator-inputs-large-resolve.err" >&2
+  fail "operator-inputs intake should stream >2GiB bundle image artifact"
+fi
+assert_plan "$large_airgap_install_dir/.release-kit-internal/operator-inputs-plan.json" airgap/install_substrates
+pass "operator-inputs doctor and package intake stream >2GiB bundle image artifact digest"
 
 legacy_airgap_install_truth_dir="$TMP_DIR/invalid-airgap-install-substrate-truth"
 copy_valid_package "$base_airgap_install" "$legacy_airgap_install_truth_dir"

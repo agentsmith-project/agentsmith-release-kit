@@ -589,6 +589,65 @@ writeJson(path.join(packageDir, 'substrate-install-inputs.json'), {
         installation_id: 'kit-install-10001',
         profile
       }
+    },
+    {
+      apiVersion: 'v1',
+      kind: 'Service',
+      metadata: {
+        name: 'postgresql',
+        namespace: 'agentsmith',
+        labels: ownerLabels,
+        annotations: ownerAnnotations
+      },
+      spec: {
+        type: 'ClusterIP',
+        selector: {
+          'app.kubernetes.io/name': 'postgresql'
+        },
+        ports: [
+          {
+            name: 'postgresql',
+            port: 5432,
+            targetPort: 5432
+          }
+        ]
+      }
+    },
+    {
+      apiVersion: 'apps/v1',
+      kind: 'StatefulSet',
+      metadata: {
+        name: 'postgresql',
+        namespace: 'agentsmith',
+        labels: {
+          ...ownerLabels,
+          'app.kubernetes.io/name': 'postgresql'
+        },
+        annotations: ownerAnnotations
+      },
+      spec: {
+        selector: {
+          matchLabels: {
+            'app.kubernetes.io/name': 'postgresql'
+          }
+        },
+        serviceName: 'postgresql',
+        template: {
+          metadata: {
+            labels: {
+              'app.kubernetes.io/name': 'postgresql'
+            }
+          },
+          spec: {
+            containers: [
+              {
+                name: 'postgresql',
+                image: image('postgresql', '16.3', postgresqlDigest)
+              }
+            ]
+          }
+        }
+      }
     }
   ]
 });
@@ -739,7 +798,7 @@ printf '%s\\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" || "$arg" == "wait" ]]; then
     command_name="$arg"
     break
   fi
@@ -753,6 +812,8 @@ fi
 if [[ "$command_name" == "apply" ]]; then
   if [[ "$*" == *".substrate-install-resources."* ]]; then
     printf '%s\\n' "configmap/agentsmith-substrate-config"
+    printf '%s\\n' "service/postgresql"
+    printf '%s\\n' "statefulset.apps/postgresql"
     exit 0
   fi
   printf '%s\\n' "deployment.apps/agentsmith-web"
@@ -842,7 +903,7 @@ JSON
     exit 0
   fi
 
-  if [[ "$get_target" == "configmaps" || "$get_target" == "configmap" ]]; then
+  if [[ "$get_target" == "configmaps" || "$get_target" == "configmap" || "$get_target" == "services" || "$get_target" == "service" || "$get_target" == "statefulsets.apps" || "$get_target" == "statefulset.apps" ]]; then
     echo "Error from server (NotFound): resource not found" >&2
     exit 1
   fi
@@ -1566,7 +1627,7 @@ printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" || "$arg" == "wait" ]]; then
     command_name="$arg"
     break
   fi
@@ -1614,6 +1675,9 @@ APPLY_NODE
     ;;
   rollout)
     printf '%s\n' "deployment.apps/agentsmith-web rolled out"
+    ;;
+  wait)
+    printf '%s\n' "resource condition met"
     ;;
   get)
     get_target=""
@@ -1692,6 +1756,23 @@ SECRET_NODE
 JSON
       exit 0
     fi
+
+    if [[ "$get_target" == "StatefulSet/postgresql" ]]; then
+      cat <<'JSON'
+{"spec":{"selector":{"matchLabels":{"app.kubernetes.io/name":"postgresql"}}}}
+JSON
+      exit 0
+    fi
+
+    case "$get_target" in
+      StatefulSet/*|Deployment/*)
+        workload_name="${get_target#*/}"
+        cat <<JSON
+{"spec":{"selector":{"matchLabels":{"app.kubernetes.io/name":"$workload_name"}}}}
+JSON
+        exit 0
+        ;;
+    esac
 
     if [[ "$get_target" == "configmaps" || "$get_target" == "configmap" ]]; then
       echo "Error from server (NotFound): resource not found" >&2

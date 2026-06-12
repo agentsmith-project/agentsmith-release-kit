@@ -484,6 +484,7 @@ NODE
 run_ga_report_facade() {
   "$NODE_BIN" --input-type=module - "$ROOT_DIR" "$@" <<'NODE'
 import crypto from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -756,13 +757,20 @@ async function readJson(file, label) {
 }
 
 async function readFileDigest(file, label) {
-  let buffer;
   try {
-    buffer = await fs.readFile(file);
+    const hash = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => {
+      const stream = createReadStream(file);
+      stream.on('data', (chunk) => {
+        hash.update(chunk);
+      });
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    });
+    return `sha256:${hash.digest('hex')}`;
   } catch (error) {
     fail(`cannot read ${label}: ${error.message}`);
   }
-  return `sha256:${crypto.createHash('sha256').update(buffer).digest('hex')}`;
 }
 
 async function digestDirectory(root) {

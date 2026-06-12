@@ -13,6 +13,8 @@ ALIAS_OFFLINE_PROFILE="existing_kubernetes/external_declared/offline"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="bundle-create-report.json"
 CHECK_REPORT_FILE="airgap-bundle-check-report.json"
+LARGE_FIXTURE_SIZE=$((2 * 1024 * 1024 * 1024 + 1))
+LARGE_READ_GUARD="$ROOT_DIR/scripts/lib/test-large-file-read-guard.cjs"
 mapfile -t RELEASE_IMAGE_IDS < <(
   "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
 import fs from 'node:fs';
@@ -55,6 +57,18 @@ import fs from 'node:fs';
 const [file] = process.argv.slice(2);
 const body = fs.readFileSync(file);
 console.log(`sha256:${crypto.createHash('sha256').update(body).digest('hex')}`);
+NODE
+}
+
+assert_larger_than_2g() {
+  "$NODE_BIN" --input-type=module - "$1" <<'NODE'
+import fs from 'node:fs';
+
+const [file] = process.argv.slice(2);
+const stat = fs.statSync(file);
+if (stat.size <= 2 * 1024 * 1024 * 1024) {
+  throw new Error(`expected >2GiB sparse fixture: ${file}`);
+}
 NODE
 }
 
@@ -1217,6 +1231,32 @@ if ! tail -n 1 "$TMP_DIR/valid-create.out" | grep -q 'bundle create mode is not 
   fail "bundle create stdout must end with non-readiness wording"
 fi
 pass "valid bundle create assembled bundle and wrote focused non-readiness report"
+
+large_stream_source="$TMP_DIR/large-digest-stream-source"
+printf '%s\n' 'large image archive digest fixture' >"$large_stream_source"
+large_image_dir="$TMP_DIR/image-archives-large"
+mkdir -p "$large_image_dir"
+for id in "${RELEASE_IMAGE_IDS[@]}"; do
+  cp "$IMAGE_DIR/$id.oci-layout.tar" "$large_image_dir/$id.oci-layout.tar"
+done
+large_image_id="${RELEASE_IMAGE_IDS[0]}"
+cp "$large_stream_source" "$large_image_dir/$large_image_id.oci-layout.tar"
+truncate -s "$LARGE_FIXTURE_SIZE" "$large_image_dir/$large_image_id.oci-layout.tar"
+assert_larger_than_2g "$large_image_dir/$large_image_id.oci-layout.tar"
+large_image_args=()
+for id in "${RELEASE_IMAGE_IDS[@]}"; do
+  large_image_args+=(--image-archive "$id=$large_image_dir/$id.oci-layout.tar")
+done
+large_bundle_root="$TMP_DIR/bundle-large-image"
+large_output_dir="$TMP_DIR/out-large-image"
+NODE_OPTIONS="--require=$LARGE_READ_GUARD ${NODE_OPTIONS:-}" \
+RELEASE_KIT_TEST_LARGE_STREAM_SOURCE="$large_stream_source" \
+  run_bundle_create_full "$AIRGAP_PROFILE" "$AIRGAP_REGISTRY" "$large_bundle_root" "$large_output_dir" \
+    "${large_image_args[@]}" \
+    "${common_payload_args[@]}" >"$TMP_DIR/large-image-create.out"
+assert_bundle_and_report "$large_bundle_root" "$large_output_dir"
+assert_larger_than_2g "$large_bundle_root/images/$large_image_id.oci-layout.tar"
+pass "bundle create and self-check streamed >2GiB image artifact digest"
 
 evidence_bundle_root="$TMP_DIR/bundle-evidence"
 evidence_output_dir="$TMP_DIR/out-evidence"

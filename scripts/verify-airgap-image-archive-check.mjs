@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +43,7 @@ const SELF_CHECK_REPORT_FILE = 'airgap-bundle-check-report.json';
 const SUBSTRATE_PACK_COMPONENT_KIND = 'substrate_pack_manifest';
 const PROBE_TIMEOUT_MS = 5000;
 const TAR_BLOCK_SIZE = 512;
+const MAX_TAR_ENTRY_CONTENT_BYTES = 16 * 1024 * 1024;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -81,6 +83,8 @@ class ValidationError extends Error {
     this.exitCode = 1;
   }
 }
+
+class ArchiveReadError extends Error {}
 
 function usage() {
   return `Usage:
@@ -208,7 +212,11 @@ function parseTarOctal(block, start, length, label) {
   if (!/^[0-7]+$/.test(raw)) {
     fail(`${label} has invalid tar size`);
   }
-  return Number.parseInt(raw, 8);
+  const size = Number.parseInt(raw, 8);
+  if (!Number.isSafeInteger(size)) {
+    fail(`${label} has invalid tar size`);
+  }
+  return size;
 }
 
 function isZeroBlock(block) {
@@ -242,16 +250,86 @@ function normalizeArchiveEntryPath(entryPath, label) {
   return normalized;
 }
 
-function parseTarArchive(buffer, label) {
-  const files = new Map();
-  let offset = 0;
-  let zeroBlocks = 0;
+class TarStreamReader {
+  constructor(stream) {
+    this.iterator = stream[Symbol.asyncIterator]();
+    this.buffer = Buffer.alloc(0);
+    this.done = false;
+  }
 
-  while (offset + TAR_BLOCK_SIZE <= buffer.length) {
-    const block = buffer.subarray(offset, offset + TAR_BLOCK_SIZE);
+  async fill(size) {
+    while (!this.done && this.buffer.length < size) {
+      let next;
+      try {
+        next = await this.iterator.next();
+      } catch (error) {
+        throw new ArchiveReadError(error.message);
+      }
+      if (next.done) {
+        this.done = true;
+        break;
+      }
+      const chunk = Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value);
+      this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
+    }
+  }
+
+  async readBlock(label) {
+    await this.fill(TAR_BLOCK_SIZE);
+    if (this.buffer.length === 0 && this.done) {
+      return undefined;
+    }
+    if (this.buffer.length < TAR_BLOCK_SIZE) {
+      fail(`${label} entry is truncated`);
+    }
+    const block = this.buffer.subarray(0, TAR_BLOCK_SIZE);
+    this.buffer = this.buffer.subarray(TAR_BLOCK_SIZE);
+    return block;
+  }
+
+  async readContent(size, label, onChunk) {
+    let remaining = size;
+    while (remaining > 0) {
+      await this.fill(1);
+      if (this.buffer.length === 0) {
+        fail(`${label} entry is truncated`);
+      }
+      const chunkSize = Math.min(remaining, this.buffer.length);
+      const chunk = this.buffer.subarray(0, chunkSize);
+      onChunk(chunk);
+      this.buffer = this.buffer.subarray(chunkSize);
+      remaining -= chunkSize;
+    }
+  }
+
+  async skip(size, label) {
+    await this.readContent(size, label, () => {});
+  }
+}
+
+function shouldCollectTarEntryContent(entryPath, size) {
+  if (size > MAX_TAR_ENTRY_CONTENT_BYTES) {
+    return false;
+  }
+  return (
+    entryPath === 'oci-layout' ||
+    entryPath === 'index.json' ||
+    entryPath.startsWith('blobs/sha256/')
+  );
+}
+
+async function parseTarArchive(archivePath, label) {
+  const files = new Map();
+  let zeroBlocks = 0;
+  const reader = new TarStreamReader(createReadStream(archivePath));
+
+  while (true) {
+    const block = await reader.readBlock(label);
+    if (!block) {
+      break;
+    }
     if (isZeroBlock(block)) {
       zeroBlocks += 1;
-      offset += TAR_BLOCK_SIZE;
       if (zeroBlocks >= 2) {
         break;
       }
@@ -264,11 +342,6 @@ function parseTarArchive(buffer, label) {
     const entryPath = normalizeArchiveEntryPath(prefix ? `${prefix}/${name}` : name, label);
     const typeFlag = block[156] === 0 ? '0' : String.fromCharCode(block[156]);
     const size = parseTarOctal(block, 124, 12, `${label} entry ${entryPath}`);
-    const contentStart = offset + TAR_BLOCK_SIZE;
-    const contentEnd = contentStart + size;
-    if (contentEnd > buffer.length) {
-      fail(`${label} entry is truncated: ${entryPath}`);
-    }
 
     if (typeFlag === '2') {
       fail(`${label} symlink entries are not allowed: ${entryPath}`);
@@ -287,10 +360,30 @@ function parseTarArchive(buffer, label) {
       if (files.has(entryPath)) {
         fail(`${label} contains duplicate entry: ${entryPath}`);
       }
-      files.set(entryPath, buffer.subarray(contentStart, contentEnd));
     }
 
-    offset = contentStart + Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+    const hash = crypto.createHash('sha256');
+    const chunks = [];
+    const collectContent = typeFlag === '0' && shouldCollectTarEntryContent(entryPath, size);
+    await reader.readContent(size, `${label} entry ${entryPath}`, (chunk) => {
+      if (typeFlag !== '0') {
+        return;
+      }
+      hash.update(chunk);
+      if (collectContent) {
+        chunks.push(Buffer.from(chunk));
+      }
+    });
+    const padding = (TAR_BLOCK_SIZE - (size % TAR_BLOCK_SIZE)) % TAR_BLOCK_SIZE;
+    await reader.skip(padding, `${label} entry ${entryPath}`);
+
+    if (typeFlag === '0') {
+      files.set(entryPath, {
+        content: collectContent ? Buffer.concat(chunks) : undefined,
+        digest: `sha256:${hash.digest('hex')}`,
+        size
+      });
+    }
   }
 
   if (files.size === 0) {
@@ -307,6 +400,17 @@ function parseJsonBuffer(buffer, label) {
   }
 }
 
+function readTarEntryContent(files, entryPath, label) {
+  const entry = files.get(entryPath);
+  if (!entry) {
+    return undefined;
+  }
+  if (!entry.content) {
+    fail(`${label} is too large to inspect`);
+  }
+  return entry.content;
+}
+
 function requireDescriptor(value, label) {
   const descriptor = requireObject(value, label);
   const mediaType = requireString(descriptor.mediaType, `${label}.mediaType`);
@@ -318,16 +422,23 @@ function requireDescriptor(value, label) {
   };
 }
 
-function readDescriptorBlob(files, descriptor, label, role) {
-  const content = files.get(descriptor.path);
-  if (!content) {
+function assertDescriptorBlob(files, descriptor, label, role) {
+  const entry = files.get(descriptor.path);
+  if (!entry) {
     fail(`${label} missing ${role} blob: ${descriptor.path}`);
   }
-  const actualDigest = digestBuffer(content);
-  if (actualDigest !== descriptor.digest) {
+  if (entry.digest !== descriptor.digest) {
     fail(`${label} ${role} blob digest mismatch: ${descriptor.path}`);
   }
-  return content;
+  return entry;
+}
+
+function readDescriptorBlob(files, descriptor, label, role) {
+  const entry = assertDescriptorBlob(files, descriptor, label, role);
+  if (!entry.content) {
+    fail(`${label} ${role} blob is too large to inspect: ${descriptor.path}`);
+  }
+  return entry.content;
 }
 
 function validateImageManifestDescriptor({ files, descriptor, label, state }) {
@@ -342,7 +453,7 @@ function validateImageManifestDescriptor({ files, descriptor, label, state }) {
     manifest.config,
     `${label} manifest ${descriptor.digest}.config`
   );
-  readDescriptorBlob(files, configDescriptor, `${label} manifest ${descriptor.digest}`, 'config');
+  assertDescriptorBlob(files, configDescriptor, `${label} manifest ${descriptor.digest}`, 'config');
 
   const layers = requireArray(
     manifest.layers,
@@ -356,7 +467,7 @@ function validateImageManifestDescriptor({ files, descriptor, label, state }) {
       layerValue,
       `${label} manifest ${descriptor.digest}.layers[${layerIndex}]`
     );
-    readDescriptorBlob(
+    assertDescriptorBlob(
       files,
       layerDescriptor,
       `${label} manifest ${descriptor.digest}`,
@@ -413,20 +524,22 @@ function validateOciDescriptorTree({ files, descriptor, label, visited, state })
 }
 
 async function validateOciLayoutArchive({ archivePath, id }) {
-  let archiveBuffer;
+  const label = `OCI image archive ${id}`;
+  let files;
   try {
-    archiveBuffer = await fs.readFile(archivePath);
+    files = await parseTarArchive(archivePath, label);
   } catch (error) {
+    if (error instanceof ValidationError) {
+      throw error;
+    }
     fail(`cannot read image archive for image id ${id}: ${error.message}`);
   }
 
-  const label = `OCI image archive ${id}`;
-  const files = parseTarArchive(archiveBuffer, label);
-  const layoutContent = files.get('oci-layout');
+  const layoutContent = readTarEntryContent(files, 'oci-layout', `${label} oci-layout`);
   if (!layoutContent) {
     fail(`${label} is missing oci-layout`);
   }
-  const indexContent = files.get('index.json');
+  const indexContent = readTarEntryContent(files, 'index.json', `${label} index.json`);
   if (!indexContent) {
     fail(`${label} is missing index.json`);
   }
@@ -485,13 +598,20 @@ async function readJson(file, label) {
 }
 
 async function digestFile(file, label) {
-  let buffer;
   try {
-    buffer = await fs.readFile(file);
+    const hash = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => {
+      const stream = createReadStream(file);
+      stream.on('data', (chunk) => {
+        hash.update(chunk);
+      });
+      stream.on('error', reject);
+      stream.on('end', resolve);
+    });
+    return `sha256:${hash.digest('hex')}`;
   } catch (error) {
     fail(`cannot read ${label}: ${error.message}`);
   }
-  return digestBuffer(buffer);
 }
 
 async function removeManagedReports(outputDir) {

@@ -38,6 +38,7 @@ const REPORT_SCOPE = 'airgap_deployment_gate_only';
 const REPORT_FILE = 'airgap-deployment-gate-report.json';
 const OPERATOR_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const TIMEOUT_RE = /^(?:0|[1-9][0-9]*(?:ms|s|m|h))$/;
+const DEFAULT_SUBSTRATE_READINESS_TIMEOUT = '120s';
 const FORBIDDEN_ROUTE_TEXT_RE = /(?:required_product_flows|product_flows|product_flow_results|deploy_readiness|release_verdict|\bverdict\b|\bkubeconfig\b)/i;
 const SECRET_VALUE_RE = [
   /sk-[A-Za-z0-9]{12,}/,
@@ -61,6 +62,10 @@ const MANAGED_OUTPUT_ENTRIES = [
 ];
 const WINDOWS_DRIVE_RE = /^[A-Za-z]:/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+const SUBSTRATE_ROLLOUT_KINDS = new Set(['Deployment', 'StatefulSet']);
+const SUBSTRATE_WAITABLE_KINDS = new Set([...SUBSTRATE_ROLLOUT_KINDS, 'Job']);
+const LABEL_SELECTOR_KEY_RE = /^[A-Za-z0-9_.\-/]+$/;
+const LABEL_SELECTOR_VALUE_RE = /^[A-Za-z0-9_.-]+$/;
 
 class CliError extends Error {
   constructor(message) {
@@ -787,7 +792,7 @@ async function assertSubstrateTruthSource(args) {
       'deploy template package',
       bundleRoot
     );
-    await validateInstalledSubstrateTruthProof({
+    return validateInstalledSubstrateTruthProof({
       substrateTruthPath: args.substrateTruth,
       substrateInstallReportPath: args.substrateInstallReport,
       targetProfile: args.targetProfile,
@@ -796,9 +801,9 @@ async function assertSubstrateTruthSource(args) {
       consumerOutputDir: args.outputDir,
       fail
     });
-    return;
   }
   await bundleLocalFile(args.substrateTruth, 'substrate truth', bundleRoot);
+  return undefined;
 }
 
 async function assertInputPathsOutsideForbiddenRoots(args) {
@@ -888,6 +893,242 @@ function kubeArgs(args) {
   return argv;
 }
 
+function kubectlPrefixArgs(args) {
+  const prefix = [];
+  pushIfValue(prefix, '--kubeconfig', args.kubeconfig);
+  pushIfValue(prefix, '--context', args.context);
+  return prefix;
+}
+
+function summarizeOutput(output) {
+  const text = output.trim();
+  if (!text) {
+    return '';
+  }
+  return `; output=${text.split(/\r?\n/).slice(-4).join(' | ')}`;
+}
+
+function substrateReadinessTimeout(args) {
+  return args.timeout || DEFAULT_SUBSTRATE_READINESS_TIMEOUT;
+}
+
+function substrateResourceLabel(resource) {
+  return `${resource.kind}/${resource.name}`;
+}
+
+function substrateCommandEvidence(args, commandArgs) {
+  return JSON.stringify([args.kubectl, ...kubectlPrefixArgs(args), ...commandArgs]);
+}
+
+function substrateReadinessFailure({ args, resource, commandArgs, result, error }) {
+  const timeout = substrateReadinessTimeout(args);
+  const resourceLabel = substrateResourceLabel(resource);
+  const base = [
+    `substrate resource not ready: ${resourceLabel}`,
+    `namespace=${args.namespace}`,
+    `timeout=${timeout}`,
+    `command=${substrateCommandEvidence(args, commandArgs)}`
+  ];
+  if (error) {
+    base.push(`error=${error.message}`);
+  }
+  if (result) {
+    const exitStatus = result.status === null ? `signal ${result.signal}` : `exit code ${result.status}`;
+    base.push(`exit_status=${exitStatus}`);
+    base.push(summarizeOutput(`${result.stderr || ''}\n${result.stdout || ''}`).replace(/^; /, ''));
+  }
+  return base.filter((part) => part !== '').join('; ');
+}
+
+function runSubstrateKubectl(args, resource, commandArgs) {
+  const result = spawnSync(args.kubectl, [...kubectlPrefixArgs(args), ...commandArgs], {
+    encoding: 'utf8',
+    maxBuffer: 2 * 1024 * 1024
+  });
+  if (result.error) {
+    fail(substrateReadinessFailure({
+      args,
+      resource,
+      commandArgs,
+      error: result.error
+    }));
+  }
+  if (result.status !== 0) {
+    fail(substrateReadinessFailure({
+      args,
+      resource,
+      commandArgs,
+      result
+    }));
+  }
+  return result.stdout || '';
+}
+
+function parseSubstrateKubectlJson(args, resource, commandArgs, stdout) {
+  try {
+    return JSON.parse(stdout);
+  } catch (error) {
+    fail(`${substrateReadinessFailure({ args, resource, commandArgs })}; invalid_json=${error.message}`);
+  }
+}
+
+function validateSelectorPart(value, label, pattern) {
+  const text = requireString(value, label);
+  if (text !== text.trim() || !pattern.test(text)) {
+    fail(`${label} contains unsupported selector characters`);
+  }
+  return text;
+}
+
+function selectorFromSubstrateResource(resourceJson, resource) {
+  const selector = requireObject(
+    resourceJson?.spec?.selector,
+    `${substrateResourceLabel(resource)}.spec.selector`
+  );
+  if (Object.hasOwn(selector, 'matchExpressions')) {
+    fail(`${substrateResourceLabel(resource)}.spec.selector.matchExpressions is not supported`);
+  }
+  const matchLabels = requireObject(
+    selector.matchLabels,
+    `${substrateResourceLabel(resource)}.spec.selector.matchLabels`
+  );
+  const entries = Object.entries(matchLabels).sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  if (entries.length === 0) {
+    fail(`${substrateResourceLabel(resource)}.spec.selector.matchLabels must not be empty`);
+  }
+  return entries.map(([key, value]) => {
+    const safeKey = validateSelectorPart(
+      key,
+      `${substrateResourceLabel(resource)}.spec.selector.matchLabels key`,
+      LABEL_SELECTOR_KEY_RE
+    );
+    const safeValue = validateSelectorPart(
+      value,
+      `${substrateResourceLabel(resource)}.spec.selector.matchLabels.${key}`,
+      LABEL_SELECTOR_VALUE_RE
+    );
+    return `${safeKey}=${safeValue}`;
+  }).join(',');
+}
+
+function substrateInstallResourceRefs(report, args) {
+  const refs = requireArray(report.resource_refs, 'substrate_install_report.resource_refs');
+  return refs
+    .map((value, index) => {
+      const ref = requireObject(value, `substrate_install_report.resource_refs[${index}]`);
+      const kind = requireString(ref.kind, `substrate_install_report.resource_refs[${index}].kind`);
+      const name = requireString(ref.name, `substrate_install_report.resource_refs[${index}].name`);
+      const namespace = requireString(
+        ref.namespace,
+        `substrate_install_report.resource_refs[${index}].namespace`
+      );
+      if (namespace !== args.namespace) {
+        fail(`substrate_install_report.resource_refs[${index}].namespace must match --namespace`);
+      }
+      return { kind, name, namespace };
+    })
+    .filter((resource) => SUBSTRATE_WAITABLE_KINDS.has(resource.kind));
+}
+
+function runSubstrateRolloutWait(args, resource) {
+  const commandArgs = [
+    'rollout',
+    'status',
+    substrateResourceLabel(resource),
+    '--namespace',
+    args.namespace,
+    '--timeout',
+    substrateReadinessTimeout(args)
+  ];
+  runSubstrateKubectl(args, resource, commandArgs);
+}
+
+function runSubstrateJobWait(args, resource) {
+  const commandArgs = [
+    'wait',
+    '--for=condition=complete',
+    substrateResourceLabel(resource),
+    '--namespace',
+    args.namespace,
+    '--timeout',
+    substrateReadinessTimeout(args)
+  ];
+  runSubstrateKubectl(args, resource, commandArgs);
+}
+
+function runSubstratePodReadyWait(args, resource) {
+  const getArgs = [
+    'get',
+    substrateResourceLabel(resource),
+    '--namespace',
+    args.namespace,
+    '-o',
+    'json'
+  ];
+  const resourceJson = parseSubstrateKubectlJson(
+    args,
+    resource,
+    getArgs,
+    runSubstrateKubectl(args, resource, getArgs)
+  );
+  const selector = selectorFromSubstrateResource(resourceJson, resource);
+  const waitArgs = [
+    'wait',
+    '--for=condition=Ready',
+    'pods',
+    '--selector',
+    selector,
+    '--namespace',
+    args.namespace,
+    '--timeout',
+    substrateReadinessTimeout(args)
+  ];
+  runSubstrateKubectl(args, resource, waitArgs);
+}
+
+function shouldRunSubstrateReadyWait(args, substrateTruthProof) {
+  return (
+    args.mode === 'apply' &&
+    args.targetProfile.value === KIT_AIRGAP_TARGET_PROFILE &&
+    args.allowInstalledSubstrateTruth &&
+    substrateTruthProof?.substrateInstallReportPath
+  );
+}
+
+async function runSubstrateReadyWait({ args, steps, substrateTruthProof }) {
+  if (!shouldRunSubstrateReadyWait(args, substrateTruthProof)) {
+    return;
+  }
+
+  const report = (await readJsonFile(
+    substrateTruthProof.substrateInstallReportPath,
+    'substrate install report'
+  )).value;
+  const resources = substrateInstallResourceRefs(report, args);
+  if (resources.length === 0) {
+    fail('substrate install report has no waitable Deployment, StatefulSet, or Job resource_refs');
+  }
+
+  for (const resource of resources) {
+    if (SUBSTRATE_ROLLOUT_KINDS.has(resource.kind)) {
+      runSubstrateRolloutWait(args, resource);
+      runSubstratePodReadyWait(args, resource);
+      continue;
+    }
+    runSubstrateJobWait(args, resource);
+  }
+
+  steps.push({
+    name: 'substrate-ready-wait',
+    status: 'pass',
+    namespace: args.namespace,
+    timeout: substrateReadinessTimeout(args),
+    checked_resource_count: resources.length
+  });
+}
+
 function runVerify(step, mode, argv) {
   const result = spawnSync('bash', [VERIFY_RELEASE, mode, ...argv], {
     cwd: ROOT_DIR,
@@ -969,7 +1210,7 @@ async function main(argv) {
   await removeManagedOutputs(args.outputDir);
   validateArgs(args);
   await assertInputPathsOutsideForbiddenRoots(args);
-  await assertSubstrateTruthSource(args);
+  const substrateTruthProof = await assertSubstrateTruthSource(args);
 
   const steps = [];
   const targetProfile = args.targetProfile.value;
@@ -1057,6 +1298,7 @@ async function main(argv) {
         args.archiveProbe,
         '--image-loader',
         args.imageLoader,
+        ...(args.timeoutMs !== undefined ? ['--loader-timeout-ms', args.timeoutMs] : []),
         '--output-dir',
         outputSubdir(args, 'airgap-image-load')
       ],
@@ -1104,6 +1346,12 @@ async function main(argv) {
         'airgap-bundle-render-check-report.json'
       )
     ]
+  });
+
+  await runSubstrateReadyWait({
+    args,
+    steps,
+    substrateTruthProof
   });
 
   const applyArgv = [

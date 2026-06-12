@@ -15,6 +15,8 @@ AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="airgap-image-load-report.json"
 ARCHIVE_CHECK_DIR="airgap-image-archive-check"
 ARCHIVE_CHECK_REPORT_FILE="airgap-image-archive-check-report.json"
+LARGE_FIXTURE_SIZE=$((2 * 1024 * 1024 * 1024 + 1))
+LARGE_READ_GUARD="$ROOT_DIR/scripts/lib/test-large-file-read-guard.cjs"
 mapfile -t RELEASE_IMAGE_IDS < <(
   "$NODE_BIN" --input-type=module - "$FIXTURE_CONTRACT" <<'NODE'
 import fs from 'node:fs';
@@ -40,6 +42,9 @@ KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-airgap.json"
 KIT_SUBSTRATE_INSTALL_INPUTS="$TMP_DIR/substrate-install-inputs.kit-airgap.json"
 GOOD_PROBE="$TMP_DIR/tools/archive-digest-probe"
 GOOD_LOADER="$TMP_DIR/tools/image-loader"
+LARGE_TIMEOUT_PROBE="$TMP_DIR/tools/large-timeout-probe"
+LARGE_TIMEOUT_LOADER="$TMP_DIR/tools/large-timeout-image-loader"
+TIMEOUT_LOADER="$TMP_DIR/tools/timeout-image-loader"
 NONZERO_LOADER="$TMP_DIR/tools/nonzero-image-loader"
 WRONG_DIGEST_LOADER="$TMP_DIR/tools/wrong-digest-image-loader"
 EXTRA_STDOUT_LOADER="$TMP_DIR/tools/extra-stdout-image-loader"
@@ -63,6 +68,18 @@ import fs from 'node:fs';
 const [file] = process.argv.slice(2);
 const body = fs.readFileSync(file);
 console.log(`sha256:${crypto.createHash('sha256').update(body).digest('hex')}`);
+NODE
+}
+
+assert_larger_than_2g() {
+  "$NODE_BIN" --input-type=module - "$1" <<'NODE'
+import fs from 'node:fs';
+
+const [file] = process.argv.slice(2);
+const stat = fs.statSync(file);
+if (stat.size <= 2 * 1024 * 1024 * 1024) {
+  throw new Error(`expected >2GiB sparse fixture: ${file}`);
+}
 NODE
 }
 
@@ -567,6 +584,36 @@ console.log(matches[0][1]);
 NODE
   chmod +x "$GOOD_PROBE"
 
+  cat >"$LARGE_TIMEOUT_PROBE" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const archivePath = process.argv[2] || process.env.AGENTSMITH_IMAGE_ARCHIVE_PATH;
+const imageId = process.env.AGENTSMITH_IMAGE_ID || '';
+const largeImageId = process.env.RELEASE_KIT_TEST_LARGE_IMAGE_ID || '';
+const largeDigest = process.env.RELEASE_KIT_TEST_LARGE_TARGET_DIGEST || '';
+if (!archivePath) {
+  process.exit(2);
+}
+if (imageId === largeImageId) {
+  if (!/^sha256:[0-9a-f]{64}$/.test(largeDigest)) {
+    process.exit(3);
+  }
+  console.log(largeDigest);
+  process.exit(0);
+}
+
+const body = fs.readFileSync(archivePath, 'utf8');
+const matches = [
+  ...body.matchAll(/"io\.agentsmith\.fixture\.target_digest"\s*:\s*"(sha256:[0-9a-f]{64})"/g)
+];
+if (matches.length !== 1) {
+  process.exit(4);
+}
+console.log(matches[0][1]);
+NODE
+  chmod +x "$LARGE_TIMEOUT_PROBE"
+
   cat >"$GOOD_LOADER" <<'NODE'
 #!/usr/bin/env node
 import fs from 'node:fs';
@@ -592,11 +639,63 @@ console.log(targetDigest);
 NODE
   chmod +x "$GOOD_LOADER"
 
+  cat >"$LARGE_TIMEOUT_LOADER" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const [archivePath, targetImage, targetDigest] = process.argv.slice(2);
+if (!archivePath || !targetImage || !targetDigest) {
+  process.exit(2);
+}
+if (!targetImage.endsWith(`@${targetDigest}`)) {
+  process.exit(3);
+}
+
+const imageId = process.env.AGENTSMITH_IMAGE_ID || '';
+const largeImageId = process.env.RELEASE_KIT_TEST_LARGE_IMAGE_ID || '';
+if (imageId === largeImageId) {
+  const archiveSize = Number(process.env.AGENTSMITH_IMAGE_ARCHIVE_SIZE_BYTES || '0');
+  const timeoutMs = Number(process.env.AGENTSMITH_IMAGE_LOADER_TIMEOUT_MS || '0');
+  if (!(archiveSize > 2 * 1024 * 1024 * 1024)) {
+    console.error(`large loader missing >2GiB archive size: ${archiveSize}`);
+    process.exit(4);
+  }
+  if (!(timeoutMs > 30000 && timeoutMs <= 300000)) {
+    console.error(`large loader expected bounded timeout above fixed 30s: ${timeoutMs}`);
+    process.exit(5);
+  }
+  if (process.env.AGENTSMITH_LOAD_LOG) {
+    fs.appendFileSync(process.env.AGENTSMITH_LOAD_LOG, `large-timeout:${imageId}:${archiveSize}:${timeoutMs}\n`);
+  }
+  console.log(targetDigest);
+  process.exit(0);
+}
+
+const body = fs.readFileSync(archivePath, 'utf8');
+const matches = [
+  ...body.matchAll(/"io\.agentsmith\.fixture\.target_digest"\s*:\s*"(sha256:[0-9a-f]{64})"/g)
+];
+if (matches.length !== 1 || matches[0][1] !== targetDigest) {
+  process.exit(6);
+}
+if (process.env.AGENTSMITH_LOAD_LOG) {
+  fs.appendFileSync(process.env.AGENTSMITH_LOAD_LOG, `${targetDigest}\n`);
+}
+console.log(targetDigest);
+NODE
+  chmod +x "$LARGE_TIMEOUT_LOADER"
+
   cat >"$NONZERO_LOADER" <<'NODE'
 #!/usr/bin/env node
 process.exit(7);
 NODE
   chmod +x "$NONZERO_LOADER"
+
+  cat >"$TIMEOUT_LOADER" <<'NODE'
+#!/usr/bin/env node
+setTimeout(() => {}, 10000);
+NODE
+  chmod +x "$TIMEOUT_LOADER"
 
   cat >"$WRONG_DIGEST_LOADER" <<'NODE'
 #!/usr/bin/env node
@@ -702,6 +801,7 @@ run_image_load_full() {
   local output_dir="$7"
   local release_contract="${8:-$VALID_CONTRACT}"
   local deploy_template_package="${9:-$VALID_DEPLOY_TEMPLATE_PACKAGE}"
+  local extra_args=("${@:10}")
 
   bash "$ROOT_DIR/scripts/verify-release.sh" --airgap-image-load \
     --release-contract "$release_contract" \
@@ -713,7 +813,8 @@ run_image_load_full() {
     --bundle-manifest "$bundle_manifest" \
     --archive-probe "$archive_probe" \
     --image-loader "$image_loader" \
-    --output-dir "$output_dir"
+    --output-dir "$output_dir" \
+    "${extra_args[@]}"
 }
 
 run_image_load() {
@@ -775,6 +876,42 @@ fs.writeFileSync(archivePath, `placeholder archive for ${imageId}\n`);
 declaration.sha256 = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(archivePath)).digest('hex')}`;
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
+}
+
+prepare_large_image_archive() {
+  local bundle_root="$1"
+  local image_id="$2"
+  local stream_source="$3"
+  local archive_info=()
+
+  mapfile -t archive_info < <("$NODE_BIN" --input-type=module - \
+    "$bundle_root" \
+    "$image_id" \
+    "$stream_source" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [bundleRoot, imageId, streamSource] = process.argv.slice(2);
+const manifestPath = path.join(bundleRoot, 'airgap-bundle-manifest.json');
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const declaration = manifest.image_artifact_declarations.find((item) => item.id === imageId);
+if (!declaration) {
+  throw new Error(`missing image declaration: ${imageId}`);
+}
+const archivePath = path.join(bundleRoot, ...declaration.path.split('/'));
+fs.copyFileSync(archivePath, streamSource);
+const sourceBody = fs.readFileSync(streamSource);
+declaration.sha256 = `sha256:${crypto.createHash('sha256').update(sourceBody).digest('hex')}`;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+console.log(archivePath);
+console.log(declaration.target_digest);
+NODE
+  )
+  cp "$stream_source" "${archive_info[0]}"
+  truncate -s "$LARGE_FIXTURE_SIZE" "${archive_info[0]}"
+  assert_larger_than_2g "${archive_info[0]}"
+  printf '%s\n' "${archive_info[@]}"
 }
 
 assert_report() {
@@ -1077,6 +1214,41 @@ nested_index_load_count="$(grep -c '^sha256:' "$LOAD_LOG")"
 [[ "$nested_index_load_count" -eq "${#RELEASE_IMAGE_IDS[@]}" ]] || fail "nested index image loader must run exactly once per image"
 pass "nested OCI image index archives loaded through operator loader without release readiness"
 
+: >"$LOAD_LOG"
+large_bundle_root="$TMP_DIR/bundle-image-load-large"
+copy_valid_bundle "$large_bundle_root"
+large_image_id="agentsmith_app"
+large_stream_source="$TMP_DIR/large-image-load-stream-source.tar"
+large_archive_info=()
+mapfile -t large_archive_info < <(prepare_large_image_archive \
+  "$large_bundle_root" \
+  "$large_image_id" \
+  "$large_stream_source")
+large_target_digest="${large_archive_info[1]}"
+large_output_dir="$TMP_DIR/out-image-load-large"
+PATH="$shim_dir:$PATH" \
+NODE_OPTIONS="--require=$LARGE_READ_GUARD ${NODE_OPTIONS:-}" \
+RELEASE_KIT_TEST_LARGE_STREAM_SOURCE="$large_stream_source" \
+RELEASE_KIT_TEST_LARGE_IMAGE_ID="$large_image_id" \
+RELEASE_KIT_TEST_LARGE_TARGET_DIGEST="$large_target_digest" \
+AGENTSMITH_LOAD_LOG="$LOAD_LOG" \
+  run_image_load_full \
+    "$large_bundle_root/components/image-map.json" \
+    "$AIRGAP_PROFILE" \
+    "$large_bundle_root" \
+    "$large_bundle_root/airgap-bundle-manifest.json" \
+    "$LARGE_TIMEOUT_PROBE" \
+    "$LARGE_TIMEOUT_LOADER" \
+    "$large_output_dir" >"$TMP_DIR/image-load-large.out"
+assert_report \
+  "$large_output_dir/$REPORT_FILE" \
+  "$large_output_dir/$ARCHIVE_CHECK_DIR/$ARCHIVE_CHECK_REPORT_FILE"
+if ! grep -q "^large-timeout:$large_image_id:" "$LOAD_LOG"; then
+  cat "$LOAD_LOG" >&2
+  fail "large image loader must receive archive size and bounded timeout evidence"
+fi
+pass "airgap image load derives bounded timeout for >2GiB image artifact"
+
 for profile_case in \
   "online:$ONLINE_PROFILE" \
   "kind:$KIND_PROFILE" \
@@ -1096,6 +1268,36 @@ expect_load_fail "missing-archive-materiality" "$TMP_DIR/out-placeholder" \
 
 expect_load_fail "loader-nonzero" "$TMP_DIR/out-loader-nonzero" \
   run_image_load "$VALID_BUNDLE_ROOT" "$TMP_DIR/out-loader-nonzero" "$NONZERO_LOADER"
+
+timeout_evidence_output="$TMP_DIR/out-loader-timeout-evidence"
+write_stale_reports "$timeout_evidence_output"
+if run_image_load_full \
+    "$VALID_BUNDLE_ROOT/components/image-map.json" \
+    "$AIRGAP_PROFILE" \
+    "$VALID_BUNDLE_ROOT" \
+    "$VALID_BUNDLE_ROOT/airgap-bundle-manifest.json" \
+    "$GOOD_PROBE" \
+    "$TIMEOUT_LOADER" \
+    "$timeout_evidence_output" \
+    "$VALID_CONTRACT" \
+    "$VALID_DEPLOY_TEMPLATE_PACKAGE" \
+    --loader-timeout-ms 1 >"$TMP_DIR/loader-timeout-evidence.out" 2>"$TMP_DIR/loader-timeout-evidence.err"; then
+  cat "$TMP_DIR/loader-timeout-evidence.out" >&2
+  cat "$TMP_DIR/loader-timeout-evidence.err" >&2
+  fail "expected loader timeout evidence failure"
+fi
+assert_no_reports "$timeout_evidence_output"
+for token in \
+  'image loader timed out for image id:' \
+  'archive_size_bytes=' \
+  'command=' \
+  'timeout_ms=1' \
+  'exit_status=' \
+  'signal='; do
+  grep -Fq "$token" "$TMP_DIR/loader-timeout-evidence.err" ||
+    fail "loader timeout failure must include evidence token: $token"
+done
+pass "airgap image load timeout failure includes minimal loader evidence"
 
 expect_load_fail "loader-target-digest-mismatch" "$TMP_DIR/out-loader-digest-mismatch" \
   run_image_load "$VALID_BUNDLE_ROOT" "$TMP_DIR/out-loader-digest-mismatch" "$WRONG_DIGEST_LOADER"

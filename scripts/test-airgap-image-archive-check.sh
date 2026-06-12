@@ -12,6 +12,8 @@ KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 ALIAS_OFFLINE_PROFILE="existing_kubernetes/external_declared/offline"
 AIRGAP_REGISTRY="registry.example.internal/releases"
 REPORT_FILE="airgap-image-archive-check-report.json"
+LARGE_FIXTURE_SIZE=$((2 * 1024 * 1024 * 1024 + 1))
+LARGE_READ_GUARD="$ROOT_DIR/scripts/lib/test-large-file-read-guard.cjs"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -28,6 +30,7 @@ GOOD_PROBE="$TMP_DIR/probes/archive-digest-probe"
 TARGET_ANNOTATION_PROBE="$TMP_DIR/probes/target-annotation-probe"
 DOUBLE_OUTPUT_PROBE="$TMP_DIR/probes/double-output-probe"
 TIMEOUT_PROBE="$TMP_DIR/probes/timeout-probe"
+LARGE_TARGET_DIGEST_PROBE="$TMP_DIR/probes/large-target-digest-probe"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -46,6 +49,18 @@ import fs from 'node:fs';
 const [file] = process.argv.slice(2);
 const body = fs.readFileSync(file);
 console.log(`sha256:${crypto.createHash('sha256').update(body).digest('hex')}`);
+NODE
+}
+
+assert_larger_than_2g() {
+  "$NODE_BIN" --input-type=module - "$1" <<'NODE'
+import fs from 'node:fs';
+
+const [file] = process.argv.slice(2);
+const stat = fs.statSync(file);
+if (stat.size <= 2 * 1024 * 1024 * 1024) {
+  throw new Error(`expected >2GiB sparse fixture: ${file}`);
+}
 NODE
 }
 
@@ -620,6 +635,75 @@ NODE
 setTimeout(() => {}, 10000);
 NODE
   chmod +x "$TIMEOUT_PROBE"
+
+  cat >"$LARGE_TARGET_DIGEST_PROBE" <<'NODE'
+#!/usr/bin/env node
+import fs from 'node:fs';
+
+const TAR_BLOCK_SIZE = 512;
+const archivePath = process.argv[2] || process.env.AGENTSMITH_IMAGE_ARCHIVE_PATH;
+const imageId = process.env.AGENTSMITH_IMAGE_ID || '';
+const largeImageId = process.env.RELEASE_KIT_TEST_LARGE_IMAGE_ID || '';
+const largeDigest = process.env.RELEASE_KIT_TEST_LARGE_TARGET_DIGEST || '';
+if (!archivePath) {
+  process.exit(2);
+}
+
+if (imageId === largeImageId) {
+  if (!/^sha256:[0-9a-f]{64}$/.test(largeDigest)) {
+    process.exit(3);
+  }
+  console.log(largeDigest);
+  process.exit(0);
+}
+
+function readTarString(block, start, length) {
+  const slice = block.subarray(start, start + length);
+  const end = slice.indexOf(0);
+  return slice.subarray(0, end === -1 ? slice.length : end).toString('utf8').trim();
+}
+
+function parseTarOctal(block, start, length) {
+  const raw = readTarString(block, start, length).trim();
+  return raw === '' ? 0 : Number.parseInt(raw, 8);
+}
+
+function readTarFile(buffer, wantedPath) {
+  for (let offset = 0; offset + TAR_BLOCK_SIZE <= buffer.length; ) {
+    const block = buffer.subarray(offset, offset + TAR_BLOCK_SIZE);
+    if (block.every((byte) => byte === 0)) {
+      break;
+    }
+    const name = readTarString(block, 0, 100);
+    const prefix = readTarString(block, 345, 155);
+    const entryPath = prefix ? `${prefix}/${name}` : name;
+    const size = parseTarOctal(block, 124, 12);
+    const contentStart = offset + TAR_BLOCK_SIZE;
+    const contentEnd = contentStart + size;
+    if (entryPath === wantedPath) {
+      return buffer.subarray(contentStart, contentEnd);
+    }
+    offset = contentStart + Math.ceil(size / TAR_BLOCK_SIZE) * TAR_BLOCK_SIZE;
+  }
+  return undefined;
+}
+
+const body = fs.readFileSync(archivePath);
+const indexContent = readTarFile(body, 'index.json');
+if (!indexContent) {
+  process.exit(4);
+}
+const index = JSON.parse(indexContent.toString('utf8'));
+if (!Array.isArray(index.manifests) || index.manifests.length !== 1) {
+  process.exit(5);
+}
+const digest = index.manifests[0]?.digest;
+if (!/^sha256:[0-9a-f]{64}$/.test(digest)) {
+  process.exit(6);
+}
+console.log(digest);
+NODE
+  chmod +x "$LARGE_TARGET_DIGEST_PROBE"
 }
 
 run_bundle_create() {
@@ -1128,6 +1212,53 @@ if ! tail -n 1 "$TMP_DIR/image-archive-valid.out" | grep -q 'airgap image archiv
   fail "airgap image archive check stdout must end with non-readiness wording"
 fi
 pass "valid airgap image archives matched target digests without calling registry tools"
+
+large_bundle_root="$TMP_DIR/bundle-large-image-archive"
+copy_valid_bundle "$large_bundle_root"
+large_image_id="agentsmith_app"
+large_stream_source="$TMP_DIR/large-image-archive-stream-source.tar"
+large_archive_info=()
+mapfile -t large_archive_info < <("$NODE_BIN" --input-type=module - \
+  "$large_bundle_root" \
+  "$large_image_id" \
+  "$large_stream_source" <<'NODE'
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [bundleRoot, imageId, streamSource] = process.argv.slice(2);
+const manifestPath = path.join(bundleRoot, 'airgap-bundle-manifest.json');
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const declaration = manifest.image_artifact_declarations.find((item) => item.id === imageId);
+if (!declaration) {
+  throw new Error(`missing image declaration: ${imageId}`);
+}
+const archivePath = path.join(bundleRoot, ...declaration.path.split('/'));
+fs.copyFileSync(archivePath, streamSource);
+const sourceBody = fs.readFileSync(streamSource);
+declaration.sha256 = `sha256:${crypto.createHash('sha256').update(sourceBody).digest('hex')}`;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+console.log(archivePath);
+console.log(declaration.target_digest);
+NODE
+)
+large_archive_path="${large_archive_info[0]}"
+large_target_digest="${large_archive_info[1]}"
+cp "$large_stream_source" "$large_archive_path"
+truncate -s "$LARGE_FIXTURE_SIZE" "$large_archive_path"
+assert_larger_than_2g "$large_archive_path"
+large_archive_output_dir="$TMP_DIR/out-image-archive-large"
+PATH="$shim_dir:$PATH" \
+NODE_OPTIONS="--require=$LARGE_READ_GUARD ${NODE_OPTIONS:-}" \
+RELEASE_KIT_TEST_LARGE_STREAM_SOURCE="$large_stream_source" \
+RELEASE_KIT_TEST_LARGE_IMAGE_ID="$large_image_id" \
+RELEASE_KIT_TEST_LARGE_TARGET_DIGEST="$large_target_digest" \
+  run_image_archive_check \
+    "$large_bundle_root" \
+    "$large_archive_output_dir" \
+    "$LARGE_TARGET_DIGEST_PROBE" >"$TMP_DIR/image-archive-large.out"
+assert_report "$large_archive_output_dir/$REPORT_FILE"
+pass "airgap image archive check streamed >2GiB image artifact digest and OCI layout inspection"
 
 kit_output_dir="$TMP_DIR/out-image-archive-kit"
 PATH="$shim_dir:$PATH" run_image_archive_check \
