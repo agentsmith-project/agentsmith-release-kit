@@ -44,6 +44,11 @@ if (mutation === 'unknown_image') {
   appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@${unknownDigest}`;
 }
 
+if (mutation === 'target_registry_ref') {
+  const digest = appImage.slice(appImage.lastIndexOf('@') + 1);
+  appImage = `kind-registry:5000/agentsmith-project/agentsmith-app:${contract.release_id}@${digest}`;
+}
+
 fs.mkdirSync(renderedManifests, { recursive: true });
 
 if (mutation === 'job') {
@@ -210,9 +215,9 @@ JSON
       exit 0
     fi
 
-    if [[ "\${FAKE_KUBECTL_PODS_MODE:-full}" == "rewritten_ref_same_digest" ]]; then
+    if [[ "\${FAKE_KUBECTL_PODS_MODE:-full}" == "canonical_source_same_digest" ]]; then
     cat <<'JSON'
-{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"runtime.registry.example/rewritten/agentsmith-app:runtime@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://runtime.registry.example/rewritten/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}],"containerStatuses":[{"name":"web","image":"runtime.registry.example/rewritten/agentsmith-app:runtime@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":""}]}}]}
+{"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"kind-registry:5000/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}],"containerStatuses":[{"name":"web","image":"kind-registry:5000/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
 JSON
       exit 0
     fi
@@ -413,6 +418,14 @@ if (!Array.isArray(report.workload_summaries) || report.workload_summaries.lengt
 if (report.workload_summaries[0].resource_ref?.selector !== report.rollout_resource_refs[0].selector) {
   throw new Error('workload summary must keep the selector-scoped resource ref');
 }
+const refDrift = report.observed_live_image_ref_drift_summary;
+if (!refDrift || refDrift.digests_count !== 1 || !Array.isArray(refDrift.digests)) {
+  throw new Error('rollout report must include controlled live image ref drift summary');
+}
+const workloadRefDrift = report.workload_summaries[0].observed_live_image_ref_drift_summary;
+if (!workloadRefDrift || workloadRefDrift.digests_count !== 1 || !Array.isArray(workloadRefDrift.digests)) {
+  throw new Error('workload summary must include controlled live image ref drift summary');
+}
 if (report.render_check?.scope !== 'render_check_image_inventory_only' || report.render_check?.status !== 'pass') {
   throw new Error('rollout report must include render-check pass summary');
 }
@@ -427,6 +440,45 @@ if (/plain-secret-value|token=|deployment rolled out|rollout failed|job complete
 }
 if (/kubeconfig/i.test(serialized)) {
   throw new Error('rollout report must not include kubeconfig data or field names');
+}
+NODE
+}
+
+assert_ref_drift_report() {
+  local report_file="$1"
+  local expected_digest="$2"
+  local expected_rendered_ref="$3"
+  local expected_observed_ref="$4"
+  local expected_drift="$5"
+
+  "$NODE_BIN" --input-type=module - "$report_file" "$expected_digest" "$expected_rendered_ref" "$expected_observed_ref" "$expected_drift" <<'NODE'
+import fs from 'node:fs';
+
+const [
+  reportFile,
+  expectedDigest,
+  expectedRenderedRef,
+  expectedObservedRef,
+  expectedDrift
+] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const summary = report.observed_live_image_ref_drift_summary;
+const entry = summary?.digests?.find((item) => item.digest === expectedDigest);
+
+if (!entry) {
+  throw new Error(`missing drift summary for ${expectedDigest}`);
+}
+if (summary.drift !== (expectedDrift === 'true') || entry.drift !== (expectedDrift === 'true')) {
+  throw new Error(`unexpected drift state for ${expectedDigest}`);
+}
+if (!entry.rendered_image_refs.includes(expectedRenderedRef)) {
+  throw new Error(`missing rendered ref in drift summary: ${expectedRenderedRef}`);
+}
+if (!entry.observed_live_image_refs.includes(expectedObservedRef)) {
+  throw new Error(`missing observed ref in drift summary: ${expectedObservedRef}`);
+}
+if (entry.missing_rendered_ref_count < 0 || entry.unexpected_live_ref_count < 0) {
+  throw new Error('drift summary counts must be non-negative');
 }
 NODE
 }
@@ -475,12 +527,20 @@ grep -q 'rollout status Deployment/agentsmith-web --namespace agentsmith --timeo
 assert_rollout_report "$kit_airgap_output/rollout-report.json" "$KIT_AIRGAP_TARGET_PROFILE"
 pass "kit-installed airgap rollout accepted without changing Kubernetes rollout behavior"
 
-rewritten_ref_output="$TMP_DIR/out-rewritten-ref"
+canonical_source_manifests="$TMP_DIR/manifests-target-registry"
+canonical_source_output="$TMP_DIR/out-canonical-source-ref"
+write_manifests "$canonical_source_manifests" target_registry_ref
 reset_kubectl_log
-FAKE_KUBECTL_PODS_MODE=rewritten_ref_same_digest run_rollout "$valid_manifests" "$rewritten_ref_output" "$TARGET_PROFILE" >/dev/null
-grep -q 'get pods --namespace agentsmith --selector app.kubernetes.io/name=agentsmith-web,app.kubernetes.io/part=web -o json' "$KUBECTL_LOG" || fail "fake kubectl did not receive selector-scoped get pods for rewritten-ref case"
-assert_rollout_report "$rewritten_ref_output/rollout-report.json"
-pass "source-registry rollout keeps digest-only semantics for rewritten live refs"
+FAKE_KUBECTL_PODS_MODE=canonical_source_same_digest run_rollout "$canonical_source_manifests" "$canonical_source_output" "$TARGET_PROFILE" >/dev/null
+grep -q 'get pods --namespace agentsmith --selector app.kubernetes.io/name=agentsmith-web,app.kubernetes.io/part=web -o json' "$KUBECTL_LOG" || fail "fake kubectl did not receive selector-scoped get pods for canonical-source case"
+assert_rollout_report "$canonical_source_output/rollout-report.json" "$TARGET_PROFILE" "Deployment" "agentsmith-web" "app.kubernetes.io/name=agentsmith-web,app.kubernetes.io/part=web" 2 2 0
+assert_ref_drift_report \
+  "$canonical_source_output/rollout-report.json" \
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111" \
+  "kind-registry:5000/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111" \
+  "ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111" \
+  true
+pass "target-registry rollout accepts canonical source live imageID with same digest and reports drift"
 
 bad_manifests="$TMP_DIR/manifests-render-check-fail"
 bad_output="$TMP_DIR/out-render-check-fail"

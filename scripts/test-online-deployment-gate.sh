@@ -1201,6 +1201,63 @@ if (rendered.includes(appMapping.source_image)) {
 NODE
 }
 
+assert_rollout_ref_drift() {
+  local output_dir="$1"
+  local expected_digest="$2"
+  local expected_rendered_ref="$3"
+  local expected_observed_ref="$4"
+  local expected_drift="$5"
+
+  "$NODE_BIN" --input-type=module - "$output_dir/rollout/rollout-report.json" "$expected_digest" "$expected_rendered_ref" "$expected_observed_ref" "$expected_drift" <<'NODE'
+import fs from 'node:fs';
+
+const [
+  reportFile,
+  expectedDigest,
+  expectedRenderedRefInput,
+  expectedObservedRefInput,
+  expectedDrift
+] = process.argv.slice(2);
+
+function stripTag(imageWithoutDigest) {
+  const lastSlash = imageWithoutDigest.lastIndexOf('/');
+  const lastColon = imageWithoutDigest.lastIndexOf(':');
+  return lastColon > lastSlash ? imageWithoutDigest.slice(0, lastColon) : imageWithoutDigest;
+}
+
+function normalizeDigestRef(value) {
+  const withoutScheme = value.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
+  const marker = '@sha256:';
+  const lower = withoutScheme.toLowerCase();
+  const markerIndex = lower.lastIndexOf(marker);
+  if (markerIndex < 0) {
+    throw new Error(`expected digest-pinned image ref: ${value}`);
+  }
+  const digest = `sha256:${lower.slice(markerIndex + marker.length)}`;
+  return `${stripTag(withoutScheme.slice(0, markerIndex)).toLowerCase()}@${digest}`;
+}
+
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const summary = report.observed_live_image_ref_drift_summary;
+const entry = summary?.digests?.find((item) => item.digest === expectedDigest);
+const expectedRenderedRef = normalizeDigestRef(expectedRenderedRefInput);
+const expectedObservedRef = normalizeDigestRef(expectedObservedRefInput);
+
+if (!entry) {
+  throw new Error(`missing drift summary for ${expectedDigest}`);
+}
+if (summary.drift !== (expectedDrift === 'true') || entry.drift !== (expectedDrift === 'true')) {
+  throw new Error(`unexpected drift state for ${expectedDigest}`);
+}
+if (!entry.rendered_image_refs.includes(expectedRenderedRef)) {
+  throw new Error(`missing rendered ref in drift summary: ${expectedRenderedRef}`);
+}
+if (!entry.observed_live_image_refs.includes(expectedObservedRef)) {
+  throw new Error(`missing observed ref in drift summary: ${expectedObservedRef}`);
+}
+NODE
+}
+
 image_map_target_image() {
   local image_map="$1"
   local image_id="$2"
@@ -1838,17 +1895,17 @@ run_evidence "$VALID_CONTRACT_MATERIAL" "$target_registry_apply_evidence_root" "
 [[ -f "$target_registry_apply_evidence_output/evidence-validation/evidence-validation-report.json" ]] || fail "target-registry apply evidence gate did not internally validate evidence root"
 pass "target-registry confirmed apply rollout smoke can generate validator-accepted online gate evidence root"
 
-target_registry_digest_only_live_root="$TMP_DIR/evidence-target-registry-digest-only-live"
-target_registry_digest_only_live_output="$TMP_DIR/out-target-registry-digest-only-live"
+target_registry_tag_only_live_root="$TMP_DIR/evidence-target-registry-tag-only-live"
+target_registry_tag_only_live_output="$TMP_DIR/out-target-registry-tag-only-live"
 target_registry_tag_only_image="${target_registry_app_image%@sha256:*}:runtime"
-target_registry_live_digest="${target_registry_app_image##*@}"
-write_stale_evidence_files "$target_registry_digest_only_live_root"
+target_registry_tag_only_image_id="docker-pullable://$target_registry_tag_only_image"
+write_stale_evidence_files "$target_registry_tag_only_live_root"
 reset_kubectl_log
 reset_registry_probe_log
-before_target_registry_digest_only_live="$(hit_count)"
+before_target_registry_tag_only_live="$(hit_count)"
 if FAKE_KUBECTL_LIVE_IMAGE="$target_registry_tag_only_image" \
-  FAKE_KUBECTL_LIVE_IMAGE_ID="$target_registry_live_digest" \
-  run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$target_registry_digest_only_live_output" "$TARGET_PROFILE" \
+  FAKE_KUBECTL_LIVE_IMAGE_ID="$target_registry_tag_only_image_id" \
+  run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$target_registry_tag_only_live_output" "$TARGET_PROFILE" \
   --mode apply \
   --confirm-apply "$TARGET_PROFILE" \
   --operator-run-id operator-run-1014 \
@@ -1858,19 +1915,19 @@ if FAKE_KUBECTL_LIVE_IMAGE="$target_registry_tag_only_image" \
   --smoke-url "$BASE_URL/ok" \
   --allow-http \
   --allow-localhost \
-  --evidence-root "$target_registry_digest_only_live_root" \
-  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/target-registry-digest-only-live.out" 2>"$TMP_DIR/target-registry-digest-only-live.err"; then
-  fail "expected target-registry apply evidence to reject digest-only live status without target digest-pinned refs"
+  --evidence-root "$target_registry_tag_only_live_root" \
+  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/target-registry-tag-only-live.out" 2>"$TMP_DIR/target-registry-tag-only-live.err"; then
+  fail "expected target-registry apply evidence to reject tag-only live status without digest"
 fi
-after_target_registry_digest_only_live="$(hit_count)"
+after_target_registry_tag_only_live="$(hit_count)"
 assert_registry_probe_called "$RELEASE_IMAGE_COUNT"
-grep -q 'get pods' "$KUBECTL_LOG" || fail "target-registry digest-only live case did not reach live pod check"
-[[ "$before_target_registry_digest_only_live" == "$after_target_registry_digest_only_live" ]] || fail "target-registry digest-only live rejection should stop before route/network smoke"
-assert_no_gate_report "$target_registry_digest_only_live_output"
-assert_no_evidence_files "$target_registry_digest_only_live_root"
-[[ ! -e "$target_registry_digest_only_live_output/rollout/rollout-report.json" ]] || fail "target-registry digest-only live rejection must not write rollout report"
-[[ ! -e "$target_registry_digest_only_live_output/smoke/smoke-report.json" ]] || fail "target-registry digest-only live rejection must not write smoke report"
-pass "target-registry apply evidence rejects digest-only live status without target digest-pinned refs before smoke or evidence closure"
+grep -q 'get pods' "$KUBECTL_LOG" || fail "target-registry tag-only live case did not reach live pod check"
+[[ "$before_target_registry_tag_only_live" == "$after_target_registry_tag_only_live" ]] || fail "target-registry tag-only live rejection should stop before route/network smoke"
+assert_no_gate_report "$target_registry_tag_only_live_output"
+assert_no_evidence_files "$target_registry_tag_only_live_root"
+[[ ! -e "$target_registry_tag_only_live_output/rollout/rollout-report.json" ]] || fail "target-registry tag-only live rejection must not write rollout report"
+[[ ! -e "$target_registry_tag_only_live_output/smoke/smoke-report.json" ]] || fail "target-registry tag-only live rejection must not write smoke report"
+pass "target-registry apply evidence rejects tag-only live status before smoke or evidence closure"
 
 target_registry_mixed_live_root="$TMP_DIR/evidence-target-registry-mixed-live"
 target_registry_mixed_live_output="$TMP_DIR/out-target-registry-mixed-live"
@@ -1878,7 +1935,7 @@ write_stale_evidence_files "$target_registry_mixed_live_root"
 reset_kubectl_log
 reset_registry_probe_log
 before_target_registry_mixed_live="$(hit_count)"
-if FAKE_KUBECTL_LIVE_INIT_IMAGE="$target_registry_app_image" \
+FAKE_KUBECTL_LIVE_INIT_IMAGE="$target_registry_app_image" \
   FAKE_KUBECTL_LIVE_INIT_IMAGE_ID="docker-pullable://$target_registry_app_image" \
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE="ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111" \
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID="docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111" \
@@ -1893,16 +1950,21 @@ if FAKE_KUBECTL_LIVE_INIT_IMAGE="$target_registry_app_image" \
   --allow-http \
   --allow-localhost \
   --evidence-root "$target_registry_mixed_live_root" \
-  --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/target-registry-mixed-live.out" 2>"$TMP_DIR/target-registry-mixed-live.err"; then
-  fail "expected target-registry apply evidence to reject mixed source and target live image refs"
-fi
+  --evidence-provenance "$VALID_PROVENANCE" >/dev/null
 after_target_registry_mixed_live="$(hit_count)"
 assert_registry_probe_called "$RELEASE_IMAGE_COUNT"
 grep -q 'get pods' "$KUBECTL_LOG" || fail "target-registry mixed live case did not reach live pod check"
-[[ "$before_target_registry_mixed_live" == "$after_target_registry_mixed_live" ]] || fail "target-registry mixed live rejection should stop before route/network smoke"
-assert_no_gate_report "$target_registry_mixed_live_output"
-assert_no_evidence_files "$target_registry_mixed_live_root"
-pass "target-registry apply evidence rejects mixed source and target live image refs before smoke or evidence closure"
+[[ "$after_target_registry_mixed_live" -eq $((before_target_registry_mixed_live + 1)) ]] || fail "target-registry mixed live case should continue through route smoke"
+assert_gate_report "$target_registry_mixed_live_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,image-map,registry-presence,render,render-check,apply,rollout,smoke" operator-run-1015
+assert_gate_rendered_target_registry "$target_registry_mixed_live_output" "$target_registry"
+assert_rollout_ref_drift \
+  "$target_registry_mixed_live_output" \
+  "sha256:1111111111111111111111111111111111111111111111111111111111111111" \
+  "$target_registry_app_image" \
+  "docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111" \
+  true
+assert_generated_evidence "$target_registry_mixed_live_root"
+pass "target-registry apply evidence accepts same-digest canonical source live image refs and reports drift"
 
 missing_provenance_root="$TMP_DIR/evidence-missing-provenance"
 missing_provenance_output="$TMP_DIR/out-missing-provenance"

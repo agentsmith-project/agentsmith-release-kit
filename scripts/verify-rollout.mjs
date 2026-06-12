@@ -667,20 +667,17 @@ function expectedImageRefsFromImages(images, label) {
     if (!byDigest.has(normalized.digest)) {
       byDigest.set(normalized.digest, {
         digest: normalized.digest,
-        image_refs: new Set(),
-        enforce_live_ref: false
+        image_refs: new Set()
       });
     }
     const entry = byDigest.get(normalized.digest);
     entry.image_refs.add(normalized.ref);
-    entry.enforce_live_ref = entry.enforce_live_ref || image?.matched_by === 'digest';
   }
 
   return [...byDigest.values()]
     .map((entry) => ({
       digest: entry.digest,
-      image_refs: [...entry.image_refs].sort(),
-      enforce_live_ref: entry.enforce_live_ref
+      image_refs: [...entry.image_refs].sort()
     }))
     .sort((left, right) => left.digest.localeCompare(right.digest));
 }
@@ -761,38 +758,6 @@ function assertExpectedDigestsObserved(expectedDigests, liveSummary, resource) {
   }
 }
 
-function assertExpectedImageRefsObserved(expectedImageRefs, liveSummary, resource) {
-  for (const expected of expectedImageRefs) {
-    if (!expected.enforce_live_ref) {
-      continue;
-    }
-
-    const observedRefs = liveSummary.observed_image_refs_by_digest.get(expected.digest);
-    if (!observedRefs || observedRefs.size === 0) {
-      if (liveSummary.observed_digests.includes(expected.digest)) {
-        fail(`${resource.kind}/${resource.name} selected pods expose expected digest ${expected.digest} but no digest-pinned live image ref was observed`);
-      }
-      continue;
-    }
-
-    const expectedRefs = new Set(expected.image_refs);
-    const missing = expected.image_refs.filter((ref) => !observedRefs.has(ref));
-    const unexpected = [...observedRefs]
-      .filter((ref) => !expectedRefs.has(ref))
-      .sort();
-    if (missing.length > 0 || unexpected.length > 0) {
-      const details = [];
-      if (missing.length > 0) {
-        details.push(`missing rendered ref(s): ${missing.join(', ')}`);
-      }
-      if (unexpected.length > 0) {
-        details.push(`unexpected live ref(s): ${unexpected.join(', ')}`);
-      }
-      fail(`${resource.kind}/${resource.name} selected pods live image ref does not match rendered image ref for digest ${expected.digest}: ${details.join('; ')}`);
-    }
-  }
-}
-
 function liveDigestSummaryForExpected(expectedDigests, liveSummary) {
   return {
     pods_count: liveSummary.pods_count,
@@ -804,6 +769,58 @@ function liveDigestSummaryForExpected(expectedDigests, liveSummary) {
     observed_digests: liveSummary.observed_digests,
     matched_expected_digests: matchedExpectedDigests(expectedDigests, liveSummary)
   };
+}
+
+function imageRefDriftDigestSummary(digest, renderedImageRefs, observedLiveImageRefs) {
+  const renderedRefs = [...new Set(renderedImageRefs)].sort();
+  const observedRefs = [...new Set(observedLiveImageRefs)].sort();
+  const renderedSet = new Set(renderedRefs);
+  const observedSet = new Set(observedRefs);
+  const missingRenderedRefCount = renderedRefs.filter((ref) => !observedSet.has(ref)).length;
+  const unexpectedLiveRefCount = observedRefs.filter((ref) => !renderedSet.has(ref)).length;
+  const drift = missingRenderedRefCount > 0 || unexpectedLiveRefCount > 0;
+
+  return {
+    digest,
+    rendered_image_refs: renderedRefs,
+    observed_live_image_refs: observedRefs,
+    drift,
+    missing_rendered_ref_count: missingRenderedRefCount,
+    unexpected_live_ref_count: unexpectedLiveRefCount
+  };
+}
+
+function imageRefDriftSummaryFromDigests(digests) {
+  const normalizedDigests = digests.sort((left, right) => left.digest.localeCompare(right.digest));
+  const driftedDigestsCount = normalizedDigests.filter((entry) => entry.drift).length;
+
+  return {
+    drift: driftedDigestsCount > 0,
+    digests_count: normalizedDigests.length,
+    drifted_digests_count: driftedDigestsCount,
+    rendered_refs_count: normalizedDigests.reduce(
+      (count, entry) => count + entry.rendered_image_refs.length,
+      0
+    ),
+    observed_refs_count: normalizedDigests.reduce(
+      (count, entry) => count + entry.observed_live_image_refs.length,
+      0
+    ),
+    digests: normalizedDigests
+  };
+}
+
+function liveImageRefDriftSummaryForExpected(expectedImageRefs, liveSummary) {
+  const digests = expectedImageRefs.map((expected) => {
+    const observedRefs = liveSummary.observed_image_refs_by_digest.get(expected.digest);
+    return imageRefDriftDigestSummary(
+      expected.digest,
+      expected.image_refs,
+      observedRefs ? [...observedRefs] : []
+    );
+  });
+
+  return imageRefDriftSummaryFromDigests(digests);
 }
 
 function aggregateLiveDigestSummary(workloadResults, expectedDigests) {
@@ -833,6 +850,43 @@ function aggregateLiveDigestSummary(workloadResults, expectedDigests) {
   return liveDigestSummaryForExpected(expectedDigests, aggregate);
 }
 
+function aggregateLiveImageRefDriftSummary(workloadResults) {
+  const byDigest = new Map();
+
+  for (const result of workloadResults) {
+    const entries = result.observed_live_image_ref_drift_summary?.digests;
+    if (!Array.isArray(entries)) {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!byDigest.has(entry.digest)) {
+        byDigest.set(entry.digest, {
+          rendered_image_refs: new Set(),
+          observed_live_image_refs: new Set()
+        });
+      }
+      const aggregate = byDigest.get(entry.digest);
+      for (const ref of entry.rendered_image_refs || []) {
+        aggregate.rendered_image_refs.add(ref);
+      }
+      for (const ref of entry.observed_live_image_refs || []) {
+        aggregate.observed_live_image_refs.add(ref);
+      }
+    }
+  }
+
+  const digests = [...byDigest.entries()].map(([digest, entry]) => {
+    return imageRefDriftDigestSummary(
+      digest,
+      [...entry.rendered_image_refs],
+      [...entry.observed_live_image_refs]
+    );
+  });
+
+  return imageRefDriftSummaryFromDigests(digests);
+}
+
 function buildReport({ args, renderReport, workloadResults, expectedDigests }) {
   const resourceRefs = workloadResults.map((result) => result.resource_ref);
 
@@ -855,6 +909,9 @@ function buildReport({ args, renderReport, workloadResults, expectedDigests }) {
     observed_live_image_digest_summary: aggregateLiveDigestSummary(
       workloadResults,
       expectedDigests
+    ),
+    observed_live_image_ref_drift_summary: aggregateLiveImageRefDriftSummary(
+      workloadResults
     ),
     workload_summaries: workloadResults,
     render_check: {
@@ -901,12 +958,15 @@ async function main() {
     const livePodsJson = runKubectlGetPods(args, selector);
     const liveSummary = collectLiveStatusDigests(livePodsJson);
     assertExpectedDigestsObserved(workload.expected_image_digests, liveSummary, resource);
-    assertExpectedImageRefsObserved(workload.expected_image_refs, liveSummary, resource);
     workloadResults.push({
       resource_ref: resourceRefWithSelector(resource, selector),
       expected_image_digests: workload.expected_image_digests,
       observed_live_image_digest_summary: liveDigestSummaryForExpected(
         workload.expected_image_digests,
+        liveSummary
+      ),
+      observed_live_image_ref_drift_summary: liveImageRefDriftSummaryForExpected(
+        workload.expected_image_refs,
         liveSummary
       )
     });

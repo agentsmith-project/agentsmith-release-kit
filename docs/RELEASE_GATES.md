@@ -994,20 +994,19 @@ and values; `matchExpressions` are not supported. The diagnostic then reads
 `kubectl get pods --namespace <ns> --selector <selector> -o json` and verifies
 that every expected render/check image digest for that workload appears in the
 selected pods, using live `imageID` values first and `image` only as a
-fallback. For ordinary source-registry rendered refs, this digest match is the
-live image check. When render/check accepts a rendered ref through digest
-adoption, as with target-registry image-map refs, digest-pinned live refs for
-that digest must be only the rendered refs; mixed source and target refs fail.
+fallback. This digest match is the live image hard gate; when a runtime reports
+a different canonical image ref for the same digest, rollout records the ref
+drift but does not fail.
 
 The generated `rollout-report.json` must keep `schema:
 agentsmith.kubernetes-rollout-report/v1`, `scope:
 kubernetes_rollout_imageid_only`, `readiness: false`, and `status: pass`. It
 records the release contract digest, target axes, namespace, timeout, rollout
 resource refs, selectors, expected image digests, selector-scoped
-`observed_live_image_digest_summary` with source counts, and render/check
-summary. It must not contain `verdict`, `release_verdict`, deploy readiness,
-product-flow fields, kubeconfig content, raw kubectl stdout/stderr, or raw
-secret payloads.
+`observed_live_image_digest_summary` with source counts,
+`observed_live_image_ref_drift_summary`, and render/check summary. It must not
+contain `verdict`, `release_verdict`, deploy readiness, product-flow fields,
+kubeconfig content, raw kubectl stdout/stderr, or raw secret payloads.
 
 ## Route/Service Smoke Focused Diagnostic
 
@@ -1089,8 +1088,8 @@ checks, and invalid prerequisites remove stale managed reports. Default
 `--registry-probe`; server dry-run external target-registry does not require a
 probe. Apply mode requires exact `--confirm-apply <matching-target-profile>`
 and `--operator-run-id <id>` before Kubernetes calls. In confirmed apply
-rollout, strict live ref checks apply only to digest-adopted target refs;
-ordinary source-registry rollout remains digest-only. It is not mirror
+rollout, the live image hard gate remains selector-scoped digest adoption, and
+same-digest live ref drift is reported without failing. It is not mirror
 execution or registry login; registry presence and routability remain focused
 read-only probe prerequisites and are not standalone release evidence.
 
