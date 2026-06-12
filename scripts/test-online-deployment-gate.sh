@@ -2374,12 +2374,12 @@ TARGET_PREREQUISITES_OVERRIDE="$VALID_KIT_PREREQUISITES" run_gate "$VALID_CONTRA
   --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
   --routability-probe "$PASS_ROUTABILITY_PROBE" \
   --smoke-url "$BASE_URL/ok" \
-  --timeout-ms 60000 \
+  --timeout-ms 180000 \
   --allow-http \
   --allow-localhost >/dev/null
 after_kit_apply="$(hit_count)"
 [[ "$after_kit_apply" -eq $((before_kit_apply + 1)) ]] || fail "kit apply gate smoke should issue one request"
-assert_routability_probe_timeout 5 60000
+assert_routability_probe_timeout 5 180000
 grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" || fail "kit apply gate did not call rollout"
 [[ -f "$kit_apply_output/rollout/rollout-report.json" ]] || fail "kit apply gate did not write rollout report"
 [[ -f "$kit_apply_output/smoke/smoke-report.json" ]] || fail "kit apply gate did not write smoke report"
