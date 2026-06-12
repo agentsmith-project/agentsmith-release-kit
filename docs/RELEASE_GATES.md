@@ -857,7 +857,14 @@ Confirmed `--mode apply` requires `--archive-probe`, `--image-loader`,
 matching `--confirm-apply <target-profile>`, and `--operator-run-id`; it then
 runs image-load, bundle render-check, apply, rollout, and optional smoke only
 when `--smoke-url` is supplied. Kit-installed airgap adds substrate-pack-check
-to the chain.
+to the chain. Confirmed apply also fail-fast checks live required substrate
+Secret keys after target-preflight and before image-load, bundle render-check,
+apply, rollout, or smoke. It only reads existing Kubernetes Secret keys
+referenced by substrate truth credential/admin/client secretRefs
+(`credential_secret_ref`, `admin_secret_ref`, and `client_secret_ref`); each
+key must exist, be base64-decodable, and decode to length > 0. Failure output
+is limited to `ref`, `key`, and `decoded_length` and does not include Secret
+payloads or create a separate readiness, verdict, or report.
 `airgap-deployment-gate-report.json` has `schema:
 agentsmith.airgap-deployment-gate/v1`, `scope:
 airgap_deployment_gate_only`, `readiness: false`, and `status: pass`; it is
@@ -1092,6 +1099,14 @@ rollout, the live image hard gate remains selector-scoped digest adoption, and
 same-digest live ref drift is reported without failing. It is not mirror
 execution or registry login; registry presence and routability remain focused
 read-only probe prerequisites and are not standalone release evidence.
+Confirmed apply also fail-fast checks live required substrate Secret keys after
+target-preflight and before render, apply, rollout, smoke, or evidence. It
+only reads existing Kubernetes Secret keys referenced by substrate truth
+credential/admin/client secretRefs (`credential_secret_ref`,
+`admin_secret_ref`, and `client_secret_ref`); each key must exist, be
+base64-decodable, and decode to length > 0. Failure output is limited to
+`ref`, `key`, and `decoded_length` and does not include Secret payloads or
+create a separate readiness, verdict, or report.
 
 Confirmed apply mode can optionally add `--evidence-root <dir>` and
 `--evidence-provenance <json>` for external-declared online or kit-installed

@@ -15,6 +15,43 @@ export const SUBSTRATE_CONNECTION_SCHEMA = 'agentsmith.substrate-connection.trut
 export const TARGET_PREREQUISITES_SCHEMA = 'agentsmith.target-prerequisites.truth/v1';
 
 const REQUIRED_SERVICES = ['postgresql', 'mongodb', 'redis', 'object_storage', 'oidc'];
+const REQUIRED_SUBSTRATE_SECRET_KEY_FIELDS = [
+  {
+    service: 'postgresql',
+    field: 'credential_secret_ref',
+    keys: ['username', 'password']
+  },
+  {
+    service: 'postgresql',
+    field: 'admin_secret_ref',
+    keys: ['username', 'password']
+  },
+  {
+    service: 'mongodb',
+    field: 'credential_secret_ref',
+    keys: ['username', 'password']
+  },
+  {
+    service: 'redis',
+    field: 'credential_secret_ref',
+    keys: ['password']
+  },
+  {
+    service: 'object_storage',
+    field: 'credential_secret_ref',
+    keys: ['access_key', 'secret_key']
+  },
+  {
+    service: 'oidc',
+    field: 'admin_secret_ref',
+    keys: ['username', 'password']
+  },
+  {
+    service: 'oidc',
+    field: 'client_secret_ref',
+    keys: ['client_secret']
+  }
+];
 const SUBSTRATE_TRUTH_FIELDS = [
   'schema_version',
   'target_cluster',
@@ -865,6 +902,36 @@ export function validateSubstrateConnectionTruth(
     truthProfile,
     serviceSummary
   };
+}
+
+export function requiredSubstrateSecretKeyRefs(value, { label = 'substrate_truth' } = {}) {
+  const truth = requireObject(value, label);
+  const services = requireObject(truth.services, `${label}.services`);
+  const requirements = [];
+  const seen = new Set();
+
+  for (const { service, field, keys } of REQUIRED_SUBSTRATE_SECRET_KEY_FIELDS) {
+    const serviceConfig = services[service];
+    if (!serviceConfig || typeof serviceConfig !== 'object' || Array.isArray(serviceConfig)) {
+      continue;
+    }
+    const ref = serviceConfig[field];
+    if (!isSecretRefValue(ref)) {
+      continue;
+    }
+    for (const key of keys) {
+      const dedupeKey = `${ref}\0${key}`;
+      if (seen.has(dedupeKey)) {
+        continue;
+      }
+      seen.add(dedupeKey);
+      requirements.push({ ref, key });
+    }
+  }
+
+  return requirements.sort((left, right) =>
+    left.ref === right.ref ? left.key.localeCompare(right.key) : left.ref.localeCompare(right.ref)
+  );
 }
 
 export function validateTargetPrerequisitesTruth(

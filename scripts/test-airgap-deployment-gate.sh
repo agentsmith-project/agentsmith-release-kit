@@ -243,6 +243,30 @@ fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
 NODE
 }
 
+write_redis_app_inputs() {
+  local truth_output="$1"
+  local prerequisites_output="$2"
+  local profile="${3:-$AIRGAP_PROFILE}"
+
+  write_truth "$truth_output" "$profile"
+  write_prerequisites "$prerequisites_output" "$profile"
+  "$NODE_BIN" --input-type=module - "$truth_output" "$prerequisites_output" <<'NODE'
+import fs from 'node:fs';
+
+const [truthPath, prerequisitesPath] = process.argv.slice(2);
+const truth = JSON.parse(fs.readFileSync(truthPath, 'utf8'));
+const prerequisites = JSON.parse(fs.readFileSync(prerequisitesPath, 'utf8'));
+
+truth.services.redis.credential_secret_ref = 'secretRef:release/redis-app';
+prerequisites.substrate_secret_refs = prerequisites.substrate_secret_refs.map((ref) =>
+  ref === 'secretRef:release/redis-credential' ? 'secretRef:release/redis-app' : ref
+);
+
+fs.writeFileSync(truthPath, `${JSON.stringify(truth, null, 2)}\n`);
+fs.writeFileSync(prerequisitesPath, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
 write_substrate_install_inputs() {
   local dir="$1"
   local profile="${2:-$KIT_AIRGAP_PROFILE}"
@@ -889,13 +913,74 @@ case "$command_name" in
     ;;
   get)
     get_target=""
+    get_name=""
+    get_namespace=""
+    output_format=""
     previous=""
     for arg in "$@"; do
       if [[ "$previous" == "get" ]]; then
         get_target="$arg"
       fi
+      if [[ "$get_target" == "secret" && "$previous" == "secret" && -z "$get_name" ]]; then
+        get_name="$arg"
+      fi
+      if [[ "$previous" == "--namespace" ]]; then
+        get_namespace="$arg"
+      fi
+      if [[ "$previous" == "-o" || "$previous" == "--output" ]]; then
+        output_format="$arg"
+      fi
+      case "$arg" in
+        --namespace=*)
+          get_namespace="${arg#--namespace=}"
+          ;;
+        --output=*)
+          output_format="${arg#--output=}"
+          ;;
+      esac
       previous="$arg"
     done
+    if [[ "$get_target" == secret/* ]]; then
+      get_name="${get_target#secret/}"
+      get_target="secret"
+    fi
+
+    if [[ "$get_target" == "secret" ]]; then
+      if [[ -z "$get_name" || -z "$get_namespace" || "$output_format" != "json" ]]; then
+        echo "unexpected fake kubectl get secret args: $*" >&2
+        exit 2
+      fi
+      node --input-type=module - "$get_namespace" "$get_name" <<'SECRET_NODE'
+const [namespace, name] = process.argv.slice(2);
+const value = 'dg==';
+const dataByName = new Map([
+  ['postgresql-credential', { username: value, password: value }],
+  ['postgresql-app', { username: value, password: value }],
+  ['postgresql-admin', { username: value, password: value }],
+  ['mongodb-credential', { username: value, password: value }],
+  ['mongodb-app', { username: value, password: value }],
+  ['redis-credential', { password: value }],
+  ['redis-app', { password: value }],
+  ['object-storage-credential', { access_key: value, secret_key: value }],
+  ['object-storage-app', { access_key: value, secret_key: value }],
+  ['oidc-admin', { username: value, password: value }],
+  ['oidc-client', { client_secret: value }]
+]);
+const data = dataByName.get(name);
+if (!data) {
+  process.stderr.write('unexpected fake kubectl secret name: ' + name + '\n');
+  process.exit(2);
+}
+const emptyKey = process.env.FAKE_KUBECTL_EMPTY_SECRET_KEY || '';
+for (const key of Object.keys(data)) {
+  if (emptyKey === namespace + '/' + name + '/' + key || emptyKey === name + '/' + key) {
+    data[key] = '';
+  }
+}
+process.stdout.write(JSON.stringify({ data }) + '\n');
+SECRET_NODE
+      exit 0
+    fi
 
     if [[ "$get_target" == "Deployment/agentsmith-web" ]]; then
       cat <<'JSON'
@@ -1039,6 +1124,7 @@ run_airgap_gate() {
     shift 2
   fi
 
+  FAKE_KUBECTL_EMPTY_SECRET_KEY="${FAKE_KUBECTL_EMPTY_SECRET_KEY:-}" \
   bash "$ROOT_DIR/scripts/verify-release.sh" --airgap-deployment-gate \
     --release-contract "$bundle_root/components/release-contract.json" \
     --deploy-template-package "$bundle_root/components/deploy-template-package.json" \
@@ -1278,6 +1364,9 @@ run_bundle_create \
   "$VALID_BUNDLE_ROOT" \
   "$VALID_CREATE_OUTPUT" >"$TMP_DIR/create-valid.out"
 write_bundle_operator_inputs "$VALID_BUNDLE_ROOT"
+EMPTY_REDIS_TRUTH="$VALID_BUNDLE_ROOT/operator-inputs/substrate-truth.redis-app.json"
+EMPTY_REDIS_PREREQUISITES="$VALID_BUNDLE_ROOT/operator-inputs/target-prerequisites.redis-app.json"
+write_redis_app_inputs "$EMPTY_REDIS_TRUTH" "$EMPTY_REDIS_PREREQUISITES" "$AIRGAP_PROFILE"
 
 KIT_BUNDLE_ROOT="$TMP_DIR/bundle-kit-valid"
 KIT_CREATE_OUTPUT="$TMP_DIR/out-create-kit-valid"
@@ -1412,6 +1501,48 @@ expect_gate_fail "kit-external-substrate-truth-minimal-synthetic-install-report"
     --allow-installed-substrate-truth \
     --substrate-install-report "$synthetic_report"
 assert_no_apply_side_effects "kit external substrate truth with minimal synthetic install report"
+
+empty_redis_output="$TMP_DIR/out-empty-redis-secret"
+mkdir -p "$empty_redis_output/airgap-image-load" "$empty_redis_output/apply" "$empty_redis_output/smoke"
+printf '%s\n' '{"stale":true}' >"$empty_redis_output/$REPORT_FILE"
+printf '%s\n' '{"stale":true}' >"$empty_redis_output/airgap-image-load/airgap-image-load-report.json"
+printf '%s\n' '{"stale":true}' >"$empty_redis_output/apply/apply-report.json"
+printf '%s\n' '{"stale":true}' >"$empty_redis_output/smoke/smoke-report.json"
+reset_logs
+before_empty_redis="$(hit_count)"
+if FAKE_KUBECTL_EMPTY_SECRET_KEY="release/redis-app/password" \
+  run_airgap_gate "$VALID_BUNDLE_ROOT" "$empty_redis_output" "$AIRGAP_PROFILE" \
+    --mode apply \
+    --archive-probe "$GOOD_PROBE" \
+    --image-loader "$GOOD_LOADER" \
+    --confirm-apply "$AIRGAP_PROFILE" \
+    --operator-run-id airgap-run-empty-redis \
+    --smoke-url "$BASE_URL/ok" \
+    --allow-http \
+    --allow-localhost \
+    --substrate-truth "$EMPTY_REDIS_TRUTH" \
+    --target-prerequisites "$EMPTY_REDIS_PREREQUISITES" >"$TMP_DIR/empty-redis-secret.out" 2>"$TMP_DIR/empty-redis-secret.err"; then
+  fail "expected empty redis-app password to fail"
+fi
+after_empty_redis="$(hit_count)"
+grep -Fq 'required substrate Secret key empty: secretRef:release/redis-app key password decoded_length=empty' "$TMP_DIR/empty-redis-secret.err" ||
+  fail "airgap empty redis password failure must identify secretRef, key, and empty category"
+grep -q '^get secret redis-app --namespace release -o json$' "$KUBECTL_LOG" ||
+  fail "airgap empty redis password check must read redis-app before apply"
+if grep -q '^apply ' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "airgap empty redis password must fail before kubectl apply"
+fi
+[[ "$(load_count)" -eq 0 ]] || fail "airgap empty redis password must fail before image loader"
+[[ "$before_empty_redis" == "$after_empty_redis" ]] || fail "airgap empty redis password reached route/network smoke"
+assert_no_report "$empty_redis_output"
+[[ ! -e "$empty_redis_output/airgap-image-load/airgap-image-load-report.json" ]] ||
+  fail "airgap empty redis password must not leave image-load report"
+[[ ! -e "$empty_redis_output/apply/apply-report.json" ]] ||
+  fail "airgap empty redis password must not leave apply report"
+[[ ! -e "$empty_redis_output/smoke/smoke-report.json" ]] ||
+  fail "airgap empty redis password must not leave smoke report"
+pass "airgap apply rejects empty redis-app/password before apply, smoke, or evidence closure"
 
 apply_output="$TMP_DIR/out-apply-smoke"
 reset_logs

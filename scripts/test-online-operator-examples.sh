@@ -295,6 +295,28 @@ if (expectedTargetRegistry) {
 NODE
 }
 
+write_non_placeholder_tool_fixture() {
+  local tool_file="$1"
+
+  cat >"$tool_file" <<'SH'
+#!/usr/bin/env sh
+set -eu
+exit 0
+SH
+  chmod +x "$tool_file"
+}
+
+replace_example_tool_placeholders() {
+  local package_dir="$1"
+
+  [[ -d "$package_dir/tools" ]] || return 0
+  local tool_file
+  for tool_file in "$package_dir"/tools/*; do
+    [[ -f "$tool_file" ]] || continue
+    write_non_placeholder_tool_fixture "$tool_file"
+  done
+}
+
 stage_operator_example() {
   local example_dir="$1"
   local package_dir="$2"
@@ -310,15 +332,13 @@ stage_operator_example() {
       cp "$CONTRACT_MATERIAL" "$package_dir/release-contract.json"
       cp "$PACKAGE_MATERIAL" "$package_dir/deploy-template-package.json"
       cp "$ARCHIVE" "$package_dir/deploy-template-package.tgz"
-      if [[ -d "$package_dir/tools" ]]; then
-        chmod +x "$package_dir"/tools/*
-      fi
+      replace_example_tool_placeholders "$package_dir"
       ;;
     airgap/*)
       cp "$CONTRACT_MATERIAL" "$package_dir/airgap-bundle/components/release-contract.json"
       cp "$PACKAGE_MATERIAL" "$package_dir/airgap-bundle/components/deploy-template-package.json"
       cp "$ARCHIVE" "$package_dir/airgap-bundle/components/agentsmith-deploy-template-package.tgz"
-      chmod +x "$package_dir"/tools/*
+      replace_example_tool_placeholders "$package_dir"
       update_airgap_bundle_component_digests "$package_dir/airgap-bundle"
       ;;
     *)
@@ -381,13 +401,68 @@ fi
 
 if [[ "$command_name" == "get" ]]; then
   get_target=""
+  get_name=""
+  get_namespace=""
+  output_format=""
   previous=""
   for arg in "$@"; do
     if [[ "$previous" == "get" ]]; then
       get_target="$arg"
     fi
+    if [[ "$get_target" == "secret" && "$previous" == "secret" && -z "$get_name" ]]; then
+      get_name="$arg"
+    fi
+    if [[ "$previous" == "--namespace" ]]; then
+      get_namespace="$arg"
+    fi
+    if [[ "$previous" == "-o" || "$previous" == "--output" ]]; then
+      output_format="$arg"
+    fi
+    case "$arg" in
+      --namespace=*)
+        get_namespace="${arg#--namespace=}"
+        ;;
+      --output=*)
+        output_format="${arg#--output=}"
+        ;;
+    esac
     previous="$arg"
   done
+  if [[ "$get_target" == secret/* ]]; then
+    get_name="${get_target#secret/}"
+    get_target="secret"
+  fi
+
+  if [[ "$get_target" == "secret" ]]; then
+    if [[ -z "$get_name" || -z "$get_namespace" || "$output_format" != "json" ]]; then
+      echo "unexpected fake kubectl get secret args: $*" >&2
+      exit 2
+    fi
+    node --input-type=module - "$get_namespace" "$get_name" <<'SECRET_NODE'
+const [namespace, name] = process.argv.slice(2);
+const value = 'dg==';
+const dataByName = new Map([
+  ['postgresql-credential', { username: value, password: value }],
+  ['postgresql-app', { username: value, password: value }],
+  ['postgresql-admin', { username: value, password: value }],
+  ['mongodb-credential', { username: value, password: value }],
+  ['mongodb-app', { username: value, password: value }],
+  ['redis-credential', { password: value }],
+  ['redis-app', { password: value }],
+  ['object-storage-credential', { access_key: value, secret_key: value }],
+  ['object-storage-app', { access_key: value, secret_key: value }],
+  ['oidc-admin', { username: value, password: value }],
+  ['oidc-client', { client_secret: value }]
+]);
+const data = dataByName.get(name);
+if (!data) {
+  process.stderr.write('unexpected fake kubectl secret name: ' + name + '\n');
+  process.exit(2);
+}
+process.stdout.write(JSON.stringify({ data }) + '\n');
+SECRET_NODE
+    exit 0
+  fi
 
   if [[ "$get_target" == "Deployment/agentsmith-web" ]]; then
     cat <<'JSON'

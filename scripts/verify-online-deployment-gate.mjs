@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { CURRENT_RELEASE_KIT_VERSION } from './lib/release-kit-version-policy.mjs';
+import { assertLiveRequiredSubstrateSecrets } from './lib/substrate-secret-preflight.mjs';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VERIFY_RELEASE = path.join(ROOT_DIR, 'scripts', 'verify-release.sh');
@@ -1376,6 +1377,17 @@ async function main(argv) {
         ]
       });
     }
+  }
+
+  if (args.mode === 'apply') {
+    const substrateTruth = (await readJsonFile(args.substrateTruth, 'substrate truth')).value;
+    assertLiveRequiredSubstrateSecrets({
+      substrateTruth,
+      kubectl: args.kubectl,
+      kubeconfig: args.kubeconfig,
+      context: args.context,
+      fail
+    });
   }
 
   const renderArgv = [

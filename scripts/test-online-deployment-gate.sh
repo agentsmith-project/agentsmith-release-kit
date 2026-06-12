@@ -201,6 +201,30 @@ fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
 NODE
 }
 
+write_redis_app_inputs() {
+  local truth_output="$1"
+  local prerequisites_output="$2"
+  local profile="${3:-$TARGET_PROFILE}"
+
+  write_truth "$truth_output" "$profile"
+  write_prerequisites "$prerequisites_output" "$profile" valid
+  "$NODE_BIN" --input-type=module - "$truth_output" "$prerequisites_output" <<'NODE'
+import fs from 'node:fs';
+
+const [truthPath, prerequisitesPath] = process.argv.slice(2);
+const truth = JSON.parse(fs.readFileSync(truthPath, 'utf8'));
+const prerequisites = JSON.parse(fs.readFileSync(prerequisitesPath, 'utf8'));
+
+truth.services.redis.credential_secret_ref = 'secretRef:release/redis-app';
+prerequisites.substrate_secret_refs = prerequisites.substrate_secret_refs.map((ref) =>
+  ref === 'secretRef:release/redis-credential' ? 'secretRef:release/redis-app' : ref
+);
+
+fs.writeFileSync(truthPath, `${JSON.stringify(truth, null, 2)}\n`);
+fs.writeFileSync(prerequisitesPath, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
 write_render_values() {
   local output="$1"
 
@@ -581,6 +605,9 @@ if [[ "$command_name" == "get" ]]; then
     if [[ "$previous" == "get" ]]; then
       get_target="$arg"
     fi
+    if [[ "$get_target" == "secret" && "$previous" == "secret" && -z "$get_name" ]]; then
+      get_name="$arg"
+    fi
     if [[ "$get_target" == "job" && "$previous" == "job" && -z "$get_name" ]]; then
       get_name="$arg"
     fi
@@ -603,6 +630,47 @@ if [[ "$command_name" == "get" ]]; then
     fi
     previous="$arg"
   done
+  if [[ "$get_target" == secret/* ]]; then
+    get_name="\${get_target#secret/}"
+    get_target="secret"
+  fi
+
+  if [[ "$get_target" == "secret" ]]; then
+    if [[ -z "$get_name" || -z "$get_namespace" || "$output_format" != "json" ]]; then
+      echo "unexpected fake kubectl get secret args: $*" >&2
+      exit 2
+    fi
+    node --input-type=module - "$get_namespace" "$get_name" <<'SECRET_NODE'
+const [namespace, name] = process.argv.slice(2);
+const value = 'dg==';
+const dataByName = new Map([
+  ['postgresql-credential', { username: value, password: value }],
+  ['postgresql-app', { username: value, password: value }],
+  ['postgresql-admin', { username: value, password: value }],
+  ['mongodb-credential', { username: value, password: value }],
+  ['mongodb-app', { username: value, password: value }],
+  ['redis-credential', { password: value }],
+  ['redis-app', { password: value }],
+  ['object-storage-credential', { access_key: value, secret_key: value }],
+  ['object-storage-app', { access_key: value, secret_key: value }],
+  ['oidc-admin', { username: value, password: value }],
+  ['oidc-client', { client_secret: value }]
+]);
+const data = dataByName.get(name);
+if (!data) {
+  process.stderr.write('unexpected fake kubectl secret name: ' + name + '\\n');
+  process.exit(2);
+}
+const emptyKey = process.env.FAKE_KUBECTL_EMPTY_SECRET_KEY || '';
+for (const key of Object.keys(data)) {
+  if (emptyKey === namespace + '/' + name + '/' + key || emptyKey === name + '/' + key) {
+    data[key] = '';
+  }
+}
+process.stdout.write(JSON.stringify({ data }) + '\\n');
+SECRET_NODE
+    exit 0
+  fi
 
   if [[ "$get_target" == "job" ]]; then
     if [[ -z "$get_name" || "$get_namespace" != "agentsmith" || "$output_format" != "json" ]]; then
@@ -1012,6 +1080,7 @@ run_gate() {
   FAKE_KUBECTL_LIVE_INIT_IMAGE_ID="${FAKE_KUBECTL_LIVE_INIT_IMAGE_ID:-}" \
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE:-}" \
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID:-}" \
+  FAKE_KUBECTL_EMPTY_SECRET_KEY="${FAKE_KUBECTL_EMPTY_SECRET_KEY:-}" \
   REGISTRY_PROBE_LOG="$REGISTRY_PROBE_LOG" \
   ROUTABILITY_PROBE_LOG="$ROUTABILITY_PROBE_LOG" \
   bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
@@ -1447,6 +1516,8 @@ VALID_TRUTH="$TMP_DIR/substrate-truth.valid.json"
 VALID_KIT_TRUTH="$TMP_DIR/substrate-truth.kit-online.valid.json"
 VALID_PREREQUISITES="$TMP_DIR/target-prerequisites.valid.json"
 VALID_KIT_PREREQUISITES="$TMP_DIR/target-prerequisites.kit-online.valid.json"
+EMPTY_REDIS_TRUTH="$TMP_DIR/substrate-truth.redis-app.json"
+EMPTY_REDIS_PREREQUISITES="$TMP_DIR/target-prerequisites.redis-app.json"
 INVALID_PREFLIGHT_PREREQUISITES="$TMP_DIR/target-prerequisites.invalid-preflight.json"
 VALID_KIT_SUBSTRATE_PACK_MANIFEST="$TMP_DIR/substrate-pack-manifest.kit-online.valid.json"
 VALID_VALUES="$TMP_DIR/render-values.valid.json"
@@ -1473,6 +1544,7 @@ write_truth "$VALID_TRUTH"
 write_truth "$VALID_KIT_TRUTH" "$KIT_ONLINE_PROFILE"
 write_prerequisites "$VALID_PREREQUISITES" valid
 write_prerequisites "$VALID_KIT_PREREQUISITES" "$KIT_ONLINE_PROFILE" valid
+write_redis_app_inputs "$EMPTY_REDIS_TRUTH" "$EMPTY_REDIS_PREREQUISITES"
 write_prerequisites "$INVALID_PREFLIGHT_PREREQUISITES" missing_namespace
 write_kit_substrate_pack_manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" "$KIT_ONLINE_PROFILE"
 write_render_values "$VALID_VALUES"
@@ -1761,6 +1833,45 @@ assert_kubectl_not_called
 assert_no_gate_report "$signed_cli_mismatch_output"
 assert_no_evidence_files "$signed_cli_mismatch_root"
 pass "signed_operator_run provenance must bind to CLI operator run id before kubectl"
+
+empty_redis_evidence_root="$TMP_DIR/evidence-empty-redis"
+empty_redis_output="$TMP_DIR/out-empty-redis-secret"
+mkdir -p "$empty_redis_output/apply" "$empty_redis_output/smoke"
+printf '%s\n' '{"stale":true}' >"$empty_redis_output/online-deployment-gate-report.json"
+printf '%s\n' '{"stale":true}' >"$empty_redis_output/apply/apply-report.json"
+printf '%s\n' '{"stale":true}' >"$empty_redis_output/smoke/smoke-report.json"
+write_stale_evidence_files "$empty_redis_evidence_root"
+reset_kubectl_log
+before_empty_redis="$(hit_count)"
+if FAKE_KUBECTL_EMPTY_SECRET_KEY="release/redis-app/password" \
+  TARGET_PREREQUISITES_OVERRIDE="$EMPTY_REDIS_PREREQUISITES" \
+  run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$EMPTY_REDIS_TRUTH" "$empty_redis_output" "$TARGET_PROFILE" \
+    --mode apply \
+    --confirm-apply "$TARGET_PROFILE" \
+    --operator-run-id operator-run-empty-redis \
+    --timeout 120s \
+    --smoke-url "$BASE_URL/ok" \
+    --allow-http \
+    --allow-localhost \
+    --evidence-root "$empty_redis_evidence_root" \
+    --evidence-provenance "$VALID_PROVENANCE" >"$TMP_DIR/empty-redis-secret.out" 2>"$TMP_DIR/empty-redis-secret.err"; then
+  fail "expected empty redis-app password to fail"
+fi
+after_empty_redis="$(hit_count)"
+grep -Fq 'required substrate Secret key empty: secretRef:release/redis-app key password decoded_length=empty' "$TMP_DIR/empty-redis-secret.err" ||
+  fail "empty redis password failure must identify secretRef, key, and empty category"
+grep -q '^get secret redis-app --namespace release -o json$' "$KUBECTL_LOG" ||
+  fail "empty redis password check must read redis-app before apply"
+if grep -q '^apply ' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "empty redis password must fail before kubectl apply"
+fi
+[[ "$before_empty_redis" == "$after_empty_redis" ]] || fail "empty redis password reached route/network smoke"
+assert_no_gate_report "$empty_redis_output"
+assert_no_evidence_files "$empty_redis_evidence_root"
+[[ ! -e "$empty_redis_output/apply/apply-report.json" ]] || fail "empty redis password must not leave apply report"
+[[ ! -e "$empty_redis_output/smoke/smoke-report.json" ]] || fail "empty redis password must not leave smoke report"
+pass "online apply rejects empty redis-app/password before apply, smoke, or evidence"
 
 apply_output="$TMP_DIR/out-apply-smoke"
 reset_kubectl_log

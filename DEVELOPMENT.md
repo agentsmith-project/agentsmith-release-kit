@@ -371,6 +371,14 @@ loader, confirmed apply, operator run, and smoke options. Confirmed
 `--confirm-apply`, and `--operator-run-id`, then runs image-load, bundle
 render-check, apply, rollout, and optional smoke only when `--smoke-url` is
 supplied. Kit-installed airgap adds substrate-pack-check to the chain. Its
+confirmed apply path also fail-fast checks live required substrate Secret keys
+after target-preflight and before image-load, render-check, apply, rollout, or
+smoke. The check only reads existing Kubernetes Secret keys referenced by
+substrate truth credential/admin/client secretRefs
+(`credential_secret_ref`, `admin_secret_ref`, and `client_secret_ref`); each
+key must exist, be base64-decodable, and decode to length > 0. Failures report
+only `ref`, `key`, and `decoded_length`, never Secret payloads or a separate
+readiness, verdict, or report. Its
 report keeps `readiness: false`, is not
 accepted by evidence intake, and does not perform registry mirror/login,
 substrate install, operator signature/identity, product-flow, package,
@@ -518,7 +526,14 @@ apply requires exact `--confirm-apply
 <matching-target-profile>` and `--operator-run-id <id>` before Kubernetes
 calls. Confirmed apply with `--target-registry` also requires
 `--registry-probe <executable>` and runs `--registry-presence` after image-map
-and before render, apply, smoke, or evidence closure. Its
+and before render, apply, smoke, or evidence closure. Confirmed apply also
+fail-fast checks live required substrate Secret keys after target-preflight and
+before render, apply, smoke, or evidence closure. The check only reads existing
+Kubernetes Secret keys referenced by substrate truth credential/admin/client
+secretRefs (`credential_secret_ref`, `admin_secret_ref`, and
+`client_secret_ref`); each key must exist, be base64-decodable, and decode to
+length > 0. Failures report only `ref`, `key`, and `decoded_length`, never
+Secret payloads or a separate readiness, verdict, or report. Its
 `online-deployment-gate-report.json` must keep
 `readiness: false` and `scope: online_deployment_gate_only`; it records only
 release identity, target profile, mode, step names, relative report paths, and

@@ -308,6 +308,17 @@ not claim registry presence, image load/import, offline install, package,
 deploy, apply, smoke, or release readiness. It is not a release-kit evidence
 envelope output.
 
+The airgap deployment gate reuses this bundle render-check in its focused
+chain. In confirmed `--mode apply`, after target-preflight and before
+image-load, bundle render-check, apply, smoke, or evidence, it runs an inline
+live required substrate Secret key preflight against substrate truth
+credential/admin/client secretRefs (`credential_secret_ref`,
+`admin_secret_ref`, and `client_secret_ref`). Each referenced existing
+Kubernetes Secret key must exist, be base64-decodable, and decode to length
+`> 0`. Failure output is limited to `ref`, `key`, and `decoded_length`; no
+Secret payload is emitted, and no separate readiness, verdict, or report is
+created.
+
 The current `--rollout` validator is a focused Kubernetes rollout/live digest
 diagnostic only. It consumes the release contract, an already-rendered manifest
 directory, explicit target profile
@@ -352,7 +363,15 @@ validators in order, and writes `online-deployment-gate-report.json` with
 `schema: agentsmith.online-deployment-gate/v1`, `readiness: false`, and
 `scope: online_deployment_gate_only`. Default mode stops after server-side
 dry-run apply and must not write `operator_run_id`; confirmed apply runs
-rollout and optional smoke and writes top-level `operator_run_id`. When
+rollout and optional smoke and writes top-level `operator_run_id`. Confirmed
+apply also runs an inline live required substrate Secret key preflight after
+target-preflight and before render, apply, smoke, or evidence. The check only
+reads existing Kubernetes Secret keys referenced by substrate truth
+credential/admin/client secretRefs (`credential_secret_ref`,
+`admin_secret_ref`, and `client_secret_ref`); each key must exist, be
+base64-decodable, and decode to length `> 0`. Failure output is limited to
+`ref`, `key`, and `decoded_length`; no Secret payload is emitted, and no
+separate readiness, verdict, or report is created. When
 `--target-registry <registry-host[/namespace]>` is supplied, it first generates
 an image-map and passes it to render for image reference adoption only. The
 external-declared online path may optionally check target-registry presence in
