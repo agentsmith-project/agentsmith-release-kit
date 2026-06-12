@@ -64,6 +64,46 @@ spec:
 NODE
 }
 
+write_job_manifests() {
+  local rendered_manifests="$1"
+
+  "$NODE_BIN" --input-type=module - "$VALID_CONTRACT" "$rendered_manifests" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [contractInput, renderedManifests] = process.argv.slice(2);
+const contract = JSON.parse(fs.readFileSync(contractInput, 'utf8'));
+const inventory = new Map(contract.deploy_image_inventory.map((item) => [item.id, item.image]));
+const appImage = inventory.get('agentsmith_app');
+
+if (!appImage) {
+  throw new Error('missing fixture app image');
+}
+
+fs.mkdirSync(renderedManifests, { recursive: true });
+fs.writeFileSync(
+  path.join(renderedManifests, 'job.yaml'),
+  `apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agentsmith-bootstrap
+  labels:
+    app.kubernetes.io/name: agentsmith
+    app.kubernetes.io/part-of: agentsmith-deploy
+  annotations:
+    rendered-by: agentsmith-unified-deploy
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: bootstrap
+          image: ${appImage}
+`
+);
+NODE
+}
+
 write_fake_kubectl() {
   local fake_kubectl="$1"
 
@@ -79,9 +119,13 @@ set -euo pipefail
 printf '%s\\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
-for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" ]]; then
+command_index=-1
+args=("$@")
+for index in "\${!args[@]}"; do
+  arg="\${args[$index]}"
+  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "get" || "$arg" == "delete" ]]; then
     command_name="$arg"
+    command_index="$index"
     break
   fi
 done
@@ -93,6 +137,80 @@ if [[ "$command_name" == "version" ]]; then
   fi
   printf '%s\\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
   exit 0
+fi
+
+if [[ "$command_name" == "get" ]]; then
+  resource="\${args[$((command_index + 1))]:-}"
+  name="\${args[$((command_index + 2))]:-}"
+  if [[ "$resource" != "job" ]]; then
+    echo "unexpected fake kubectl get resource: $*" >&2
+    exit 2
+  fi
+
+  case "\${FAKE_KUBECTL_JOB_MODE:-not_found}" in
+    not_found)
+      printf 'Error from server (NotFound): jobs.batch "%s" not found\\n' "$name" >&2
+      exit 1
+      ;;
+    completed)
+      cat <<JSON
+{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"$name","namespace":"agentsmith","labels":{"app.kubernetes.io/name":"agentsmith","app.kubernetes.io/part-of":"agentsmith-deploy"},"annotations":{"rendered-by":"agentsmith-unified-deploy"}},"status":{"conditions":[{"type":"Complete","status":"True"}]}}
+JSON
+      exit 0
+      ;;
+    missing_ownership)
+      cat <<JSON
+{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"$name","namespace":"agentsmith","labels":{"app.kubernetes.io/name":"agentsmith"},"annotations":{}},"status":{"conditions":[{"type":"Complete","status":"True"}]}}
+JSON
+      exit 0
+      ;;
+    active)
+      cat <<JSON
+{"apiVersion":"batch/v1","kind":"Job","metadata":{"name":"$name","namespace":"agentsmith","labels":{"app.kubernetes.io/name":"agentsmith","app.kubernetes.io/part-of":"agentsmith-deploy"},"annotations":{"rendered-by":"agentsmith-unified-deploy"}},"status":{"active":1,"conditions":[{"type":"Complete","status":"False"}]}}
+JSON
+      exit 0
+      ;;
+    invalid_json)
+      printf '{not-json\\n'
+      exit 0
+      ;;
+    error)
+      echo "fake get failure" >&2
+      exit 1
+      ;;
+    *)
+      echo "unknown FAKE_KUBECTL_JOB_MODE: \${FAKE_KUBECTL_JOB_MODE}" >&2
+      exit 2
+      ;;
+  esac
+fi
+
+if [[ "$command_name" == "delete" ]]; then
+  resource="\${args[$((command_index + 1))]:-}"
+  name="\${args[$((command_index + 2))]:-}"
+  if [[ "$resource" != "job" ]]; then
+    echo "unexpected fake kubectl delete resource: $*" >&2
+    exit 2
+  fi
+
+  case "\${FAKE_KUBECTL_DELETE_MODE:-success}" in
+    success)
+      printf 'job.batch "%s" deleted\\n' "$name"
+      exit 0
+      ;;
+    not_found)
+      printf 'Error from server (NotFound): jobs.batch "%s" not found\\n' "$name" >&2
+      exit 1
+      ;;
+    error)
+      echo "fake delete failure" >&2
+      exit 1
+      ;;
+    *)
+      echo "unknown FAKE_KUBECTL_DELETE_MODE: \${FAKE_KUBECTL_DELETE_MODE}" >&2
+      exit 2
+      ;;
+  esac
 fi
 
 if [[ "$command_name" == "apply" ]]; then
@@ -132,7 +250,7 @@ if [[ "$command_name" == "apply" ]]; then
     echo "error: apply requires -f" >&2
     exit 1
   fi
-  printf '%s\\n' "deployment.apps/agentsmith-web"
+  printf '%s\\n' "\${FAKE_KUBECTL_APPLY_OUTPUT:-deployment.apps/agentsmith-web}"
   exit 0
 fi
 
@@ -190,7 +308,12 @@ run_apply_raw() {
   )
   command+=("$@")
 
-  FAKE_KUBECTL_LOG="$KUBECTL_LOG" FAKE_KUBECTL_VERSION_MODE="${FAKE_KUBECTL_VERSION_MODE:-json}" "${command[@]}"
+  FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+    FAKE_KUBECTL_VERSION_MODE="${FAKE_KUBECTL_VERSION_MODE:-json}" \
+    FAKE_KUBECTL_JOB_MODE="${FAKE_KUBECTL_JOB_MODE:-not_found}" \
+    FAKE_KUBECTL_DELETE_MODE="${FAKE_KUBECTL_DELETE_MODE:-success}" \
+    FAKE_KUBECTL_APPLY_OUTPUT="${FAKE_KUBECTL_APPLY_OUTPUT:-deployment.apps/agentsmith-web}" \
+    "${command[@]}"
 }
 
 run_apply_from_release_kit() {
@@ -212,7 +335,12 @@ run_apply_from_release_kit() {
   )
   command+=("$@")
 
-  FAKE_KUBECTL_LOG="$KUBECTL_LOG" FAKE_KUBECTL_VERSION_MODE="${FAKE_KUBECTL_VERSION_MODE:-json}" "${command[@]}"
+  FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+    FAKE_KUBECTL_VERSION_MODE="${FAKE_KUBECTL_VERSION_MODE:-json}" \
+    FAKE_KUBECTL_JOB_MODE="${FAKE_KUBECTL_JOB_MODE:-not_found}" \
+    FAKE_KUBECTL_DELETE_MODE="${FAKE_KUBECTL_DELETE_MODE:-success}" \
+    FAKE_KUBECTL_APPLY_OUTPUT="${FAKE_KUBECTL_APPLY_OUTPUT:-deployment.apps/agentsmith-web}" \
+    "${command[@]}"
 }
 
 assert_apply_report() {
@@ -257,6 +385,12 @@ if (!Array.isArray(report.resource_refs) || report.resource_refs.length !== 1) {
 }
 if (!Array.isArray(report.kubectl_resource_refs) || report.kubectl_resource_refs[0] !== 'deployment.apps/agentsmith-web') {
   throw new Error('apply report must include kubectl resource refs');
+}
+if (!Array.isArray(report.pre_apply_job_replacements)) {
+  throw new Error('apply report must include stable pre_apply_job_replacements array');
+}
+if (report.pre_apply_job_replacements.length !== 0) {
+  throw new Error('non-Job apply report must not include pre-apply Job replacements');
 }
 if (!report.kubectl_version?.client?.gitVersion || !report.kubectl_version?.server?.gitVersion) {
   throw new Error('apply report must include kubectl client and server versions');
@@ -303,6 +437,91 @@ if (/plain-secret-value|token=|kubectl client output/.test(serialized)) {
   throw new Error('apply report leaked raw kubectl version stdout');
 }
 NODE
+}
+
+assert_job_replacement_report() {
+  local report_file="$1"
+
+  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+const replacements = report.pre_apply_job_replacements;
+
+if (report.mode !== 'apply') {
+  throw new Error(`unexpected report mode: ${report.mode}`);
+}
+if (report.operator_run_id !== 'operator-run-job-1001') {
+  throw new Error(`unexpected operator_run_id: ${report.operator_run_id}`);
+}
+if (!Array.isArray(report.kubectl_resource_refs) || report.kubectl_resource_refs[0] !== 'job.batch/agentsmith-bootstrap') {
+  throw new Error('Job apply report must include kubectl Job resource ref');
+}
+if (!Array.isArray(replacements) || replacements.length !== 1) {
+  throw new Error('apply report must record exactly one pre-apply Job replacement');
+}
+
+const replacement = replacements[0];
+if (replacement.kind !== 'Job') {
+  throw new Error(`unexpected replacement kind: ${replacement.kind}`);
+}
+if (replacement.name !== 'agentsmith-bootstrap') {
+  throw new Error(`unexpected replacement name: ${replacement.name}`);
+}
+if (replacement.namespace !== 'agentsmith') {
+  throw new Error(`unexpected replacement namespace: ${replacement.namespace}`);
+}
+if (replacement.reason !== 'completed_existing_job_replaced_before_apply') {
+  throw new Error(`unexpected replacement reason: ${replacement.reason}`);
+}
+NODE
+}
+
+assert_no_pre_apply_job_replacements() {
+  local report_file="$1"
+
+  "$NODE_BIN" --input-type=module - "$report_file" <<'NODE'
+import fs from 'node:fs';
+
+const [reportFile] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+
+if (!Array.isArray(report.pre_apply_job_replacements)) {
+  throw new Error('apply report must include stable pre_apply_job_replacements array');
+}
+if (report.pre_apply_job_replacements.length !== 0) {
+  throw new Error('expected no pre-apply Job replacements');
+}
+NODE
+}
+
+assert_job_replacement_order() {
+  local get_line
+  local delete_line
+  local apply_line
+
+  get_line="$(grep -n '^get job agentsmith-bootstrap --namespace agentsmith -o json$' "$KUBECTL_LOG" | head -n 1 | cut -d: -f1 || true)"
+  delete_line="$(grep -n '^delete job agentsmith-bootstrap --namespace agentsmith --wait=true$' "$KUBECTL_LOG" | head -n 1 | cut -d: -f1 || true)"
+  apply_line="$(grep -n '^apply ' "$KUBECTL_LOG" | head -n 1 | cut -d: -f1 || true)"
+
+  if [[ -z "$get_line" || -z "$delete_line" || -z "$apply_line" ]]; then
+    cat "$KUBECTL_LOG" >&2
+    fail "expected get, delete, and apply kubectl calls for Job replacement"
+  fi
+  if ((get_line >= delete_line || delete_line >= apply_line)); then
+    cat "$KUBECTL_LOG" >&2
+    fail "expected Job get before delete before apply"
+  fi
+}
+
+assert_no_delete_or_apply_after_job_get() {
+  grep -q '^get job agentsmith-bootstrap --namespace agentsmith -o json$' "$KUBECTL_LOG" ||
+    fail "expected kubectl get job before failing"
+  if grep -Eq '^(delete job agentsmith-bootstrap|apply )' "$KUBECTL_LOG"; then
+    cat "$KUBECTL_LOG" >&2
+    fail "failed Job replacement preflight must not delete or apply"
+  fi
 }
 
 assert_boundary_failure() {
@@ -380,6 +599,65 @@ if grep -q -- '--dry-run=server' "$KUBECTL_LOG"; then
 fi
 assert_apply_report "$apply_output/apply-report.json" apply operator-run-1001
 pass "confirmed apply requires operator run id and records it"
+
+job_manifests="$TMP_DIR/manifests-job"
+write_job_manifests "$job_manifests"
+
+job_apply_output="$TMP_DIR/out-job-apply"
+reset_kubectl_log
+FAKE_KUBECTL_JOB_MODE=completed \
+FAKE_KUBECTL_APPLY_OUTPUT=job.batch/agentsmith-bootstrap \
+run_apply "$job_manifests" "$job_apply_output" "$TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$TARGET_PROFILE" \
+  --operator-run-id operator-run-job-1001 >/dev/null
+assert_job_replacement_order
+assert_job_replacement_report "$job_apply_output/apply-report.json"
+pass "apply mode replaces completed adoptable rendered Jobs before kubectl apply"
+
+job_dry_run_output="$TMP_DIR/out-job-dry-run"
+reset_kubectl_log
+FAKE_KUBECTL_JOB_MODE=completed \
+FAKE_KUBECTL_APPLY_OUTPUT=job.batch/agentsmith-bootstrap \
+run_apply "$job_manifests" "$job_dry_run_output" "$TARGET_PROFILE" >/dev/null
+if grep -Eq '^(get job agentsmith-bootstrap|delete job agentsmith-bootstrap)' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "server dry-run must not run pre-apply Job replacement"
+fi
+assert_no_pre_apply_job_replacements "$job_dry_run_output/apply-report.json"
+pass "server dry-run leaves rendered Jobs untouched"
+
+reset_kubectl_log
+if FAKE_KUBECTL_JOB_MODE=missing_ownership \
+  run_apply "$job_manifests" "$TMP_DIR/out-job-missing-ownership" "$TARGET_PROFILE" \
+    --mode apply \
+    --confirm-apply "$TARGET_PROFILE" \
+    --operator-run-id operator-run-job-1002 >"$TMP_DIR/job-missing-ownership.out" 2>"$TMP_DIR/job-missing-ownership.err"; then
+  cat "$TMP_DIR/job-missing-ownership.out" >&2
+  cat "$TMP_DIR/job-missing-ownership.err" >&2
+  fail "expected existing Job without AgentSmith ownership to fail before apply"
+fi
+assert_no_delete_or_apply_after_job_get
+if [[ -e "$TMP_DIR/out-job-missing-ownership/apply-report.json" ]]; then
+  fail "failed Job ownership preflight must not leave apply-report.json"
+fi
+pass "apply mode rejects completed Jobs outside the narrow AgentSmith ownership boundary"
+
+reset_kubectl_log
+if FAKE_KUBECTL_JOB_MODE=active \
+  run_apply "$job_manifests" "$TMP_DIR/out-job-active" "$TARGET_PROFILE" \
+    --mode apply \
+    --confirm-apply "$TARGET_PROFILE" \
+    --operator-run-id operator-run-job-1003 >"$TMP_DIR/job-active.out" 2>"$TMP_DIR/job-active.err"; then
+  cat "$TMP_DIR/job-active.out" >&2
+  cat "$TMP_DIR/job-active.err" >&2
+  fail "expected active existing Job to fail before apply"
+fi
+assert_no_delete_or_apply_after_job_get
+if [[ -e "$TMP_DIR/out-job-active/apply-report.json" ]]; then
+  fail "failed active Job preflight must not leave apply-report.json"
+fi
+pass "apply mode rejects active rendered Jobs before delete or apply"
 
 airgap_apply_output="$TMP_DIR/out-airgap-apply"
 reset_kubectl_log

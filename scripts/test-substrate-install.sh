@@ -244,6 +244,7 @@ function serviceResource(serviceType, extraSpec = {}) {
 
 const substrateTruth = {
   schema_version: 'agentsmith.substrate-connection.truth/v1',
+  redacted_fingerprint: `sha256:${'a'.repeat(64)}`,
   target_cluster: targetCluster,
   substrate_source: substrateSource,
   distribution,
@@ -1340,6 +1341,9 @@ if (truth.installed_by !== 'agentsmith-release-kit') {
 }
 if (truth.installation_id !== expectedInstallationId) {
   throw new Error('substrate truth must keep expected installation_id');
+}
+if (!/^sha256:[0-9a-f]{64}$/.test(truth.redacted_fingerprint || '')) {
+  throw new Error('substrate truth must include redacted_fingerprint');
 }
 if (/plain-credential|Bearer\s+|AKIA|PRIVATE KEY|kubeconfig/i.test(serialized)) {
   throw new Error('substrate install outputs leaked raw secret-looking material');

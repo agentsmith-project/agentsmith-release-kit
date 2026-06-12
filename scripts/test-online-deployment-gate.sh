@@ -67,6 +67,7 @@ function service(name, host) {
 
 const truth = {
   schema_version: 'agentsmith.substrate-connection.truth/v1',
+  redacted_fingerprint: `sha256:${'a'.repeat(64)}`,
   target_cluster: targetCluster,
   substrate_source: substrateSource,
   distribution,
@@ -571,17 +572,46 @@ fi
 
 if [[ "$command_name" == "get" ]]; then
   get_target=""
+  get_name=""
+  get_namespace=""
+  output_format=""
   selector=""
   previous=""
   for arg in "$@"; do
     if [[ "$previous" == "get" ]]; then
       get_target="$arg"
     fi
+    if [[ "$get_target" == "job" && "$previous" == "job" && -z "$get_name" ]]; then
+      get_name="$arg"
+    fi
+    if [[ "$previous" == "--namespace" ]]; then
+      get_namespace="$arg"
+    fi
+    if [[ "$previous" == "-o" || "$previous" == "--output" ]]; then
+      output_format="$arg"
+    fi
+    case "$arg" in
+      --namespace=*)
+        get_namespace="\${arg#--namespace=}"
+        ;;
+      --output=*)
+        output_format="\${arg#--output=}"
+        ;;
+    esac
     if [[ "$previous" == "--selector" ]]; then
       selector="$arg"
     fi
     previous="$arg"
   done
+
+  if [[ "$get_target" == "job" ]]; then
+    if [[ -z "$get_name" || "$get_namespace" != "agentsmith" || "$output_format" != "json" ]]; then
+      echo "unexpected fake kubectl get job args: $*" >&2
+      exit 2
+    fi
+    printf 'Error from server (NotFound): jobs.batch "%s" not found\\n' "$get_name" >&2
+    exit 1
+  fi
 
   if [[ "$get_target" == "Deployment/agentsmith-web" ]]; then
     cat <<'JSON'
@@ -1714,11 +1744,16 @@ run_gate "$with_job_contract" "$with_job_package" "$with_job_archive" "$VALID_VA
 after_apply_with_job="$(hit_count)"
 [[ "$before_apply_with_job" == "$after_apply_with_job" ]] || fail "apply gate without smoke URL should not issue route/network requests"
 grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" || fail "apply gate with job did not call deployment rollout"
+grep -q '^get job agentsmith-api-migration --namespace agentsmith -o json$' "$KUBECTL_LOG" || fail "apply gate with job did not preflight rendered job"
+if grep -q '^delete job agentsmith-api-migration' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "apply gate with missing prior job must not delete rendered job"
+fi
 grep -q 'wait --for=condition=complete Job/agentsmith-api-migration --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" || fail "apply gate with job did not wait for job completion"
 grep -q 'get Job/agentsmith-api-migration --namespace agentsmith -o json' "$KUBECTL_LOG" || fail "apply gate with job did not read live job selector"
 [[ -f "$apply_with_job_output/rollout/rollout-report.json" ]] || fail "apply gate with job did not write rollout report"
 assert_gate_report "$apply_with_job_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout" operator-run-with-job
-pass "apply mode accepts bootstrap Job completion inside rollout path"
+pass "apply mode accepts missing pre-apply Job and bootstrap Job completion inside rollout path"
 
 apply_evidence_output="$TMP_DIR/out-apply-evidence"
 apply_evidence_root="$TMP_DIR/evidence-apply"

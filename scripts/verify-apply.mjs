@@ -25,6 +25,13 @@ const SUPPORTED_TARGET_PROFILES = new Set([
   'existing_kubernetes/kit_installed/airgap'
 ]);
 const SUPPORTED_MODES = new Set(['server-dry-run', 'apply']);
+const AGENTSMITH_JOB_OWNERSHIP_LABELS = {
+  'app.kubernetes.io/name': 'agentsmith',
+  'app.kubernetes.io/part-of': 'agentsmith-deploy'
+};
+const AGENTSMITH_JOB_OWNERSHIP_ANNOTATIONS = {
+  'rendered-by': 'agentsmith-unified-deploy'
+};
 const NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const OPERATOR_RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 
@@ -247,7 +254,11 @@ function summarizeOutput(output) {
   return `: ${text.split(/\r?\n/).slice(-6).join(' | ')}`;
 }
 
-function runCommand(command, commandArgs, label, options = {}) {
+function commandExitStatus(result) {
+  return result.status === null ? `signal ${result.signal}` : `exit code ${result.status}`;
+}
+
+function executeCommand(command, commandArgs, label) {
   const result = spawnSync(command, commandArgs, {
     encoding: 'utf8',
     maxBuffer: 8 * 1024 * 1024
@@ -257,12 +268,22 @@ function runCommand(command, commandArgs, label, options = {}) {
     fail(`${label} failed to start: ${result.error.message}`);
   }
 
+  return {
+    status: result.status,
+    signal: result.signal,
+    stdout: result.stdout || '',
+    stderr: result.stderr || ''
+  };
+}
+
+function runCommand(command, commandArgs, label, options = {}) {
+  const result = executeCommand(command, commandArgs, label);
+
   if (result.status !== 0) {
-    const exitStatus = result.status === null ? `signal ${result.signal}` : `exit code ${result.status}`;
     const output = options.includeOutput
       ? summarizeOutput(`${result.stderr || ''}\n${result.stdout || ''}`)
       : '';
-    fail(`${label} failed with ${exitStatus}${output}`);
+    fail(`${label} failed with ${commandExitStatus(result)}${output}`);
   }
 
   return {
@@ -500,6 +521,202 @@ function runKubectlVersion(args) {
   return normalizeKubectlVersion(result.stdout);
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function kubectlFailedWithNotFound(result) {
+  if (result.status === 0) {
+    return false;
+  }
+  return /\bnotfound\b|not found/i.test(`${result.stderr || ''}\n${result.stdout || ''}`);
+}
+
+function failKubectlResult(label, result) {
+  const output = summarizeOutput(`${result.stderr || ''}\n${result.stdout || ''}`);
+  fail(`${label} failed with ${commandExitStatus(result)}${output}`);
+}
+
+function parseKubectlJson(stdout, label) {
+  let parsed;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (error) {
+    fail(`${label} returned invalid JSON: ${error.message}`);
+  }
+  if (!isPlainObject(parsed)) {
+    fail(`${label} returned non-object JSON`);
+  }
+  return parsed;
+}
+
+function renderedJobRefs(renderReport, namespace) {
+  const manifests = Array.isArray(renderReport.manifests) ? renderReport.manifests : [];
+  const refs = [];
+  const seen = new Set();
+
+  for (const manifest of manifests) {
+    if (manifest.kind !== 'Job') {
+      continue;
+    }
+    if (typeof manifest.name !== 'string' || manifest.name.trim() === '') {
+      fail('render-check Job manifest is missing metadata.name');
+    }
+
+    const name = manifest.name.trim();
+    const key = `${namespace}/${name}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    refs.push({
+      kind: 'Job',
+      name,
+      namespace
+    });
+  }
+
+  return refs;
+}
+
+function hasJobCondition(job, type, status) {
+  const conditions = job.status?.conditions;
+  if (!Array.isArray(conditions)) {
+    return false;
+  }
+  return conditions.some((condition) => {
+    return isPlainObject(condition) && condition.type === type && condition.status === status;
+  });
+}
+
+function existingJobLabel(jobRef) {
+  return `Job ${jobRef.namespace}/${jobRef.name}`;
+}
+
+function requireAdoptableCompletedJob(job, jobRef) {
+  const metadata = isPlainObject(job.metadata) ? job.metadata : {};
+  const labels = isPlainObject(metadata.labels) ? metadata.labels : {};
+  const annotations = isPlainObject(metadata.annotations) ? metadata.annotations : {};
+  const problems = [];
+
+  if (job.kind !== 'Job') {
+    problems.push('kind is not Job');
+  }
+  if (metadata.name !== jobRef.name) {
+    problems.push('metadata.name does not match rendered Job');
+  }
+
+  for (const [key, expected] of Object.entries(AGENTSMITH_JOB_OWNERSHIP_LABELS)) {
+    if (labels[key] !== expected) {
+      problems.push(`missing label ${key}=${expected}`);
+    }
+  }
+  for (const [key, expected] of Object.entries(AGENTSMITH_JOB_OWNERSHIP_ANNOTATIONS)) {
+    if (annotations[key] !== expected) {
+      problems.push(`missing annotation ${key}=${expected}`);
+    }
+  }
+
+  if (metadata.deletionTimestamp !== undefined && metadata.deletionTimestamp !== null) {
+    problems.push('has deletionTimestamp');
+  }
+  if (
+    metadata.ownerReferences !== undefined &&
+    (!Array.isArray(metadata.ownerReferences) || metadata.ownerReferences.length > 0)
+  ) {
+    problems.push('has ownerReferences');
+  }
+  if (hasJobCondition(job, 'Failed', 'True')) {
+    problems.push('has Failed=True condition');
+  }
+  if (!hasJobCondition(job, 'Complete', 'True')) {
+    problems.push('is not Complete=True');
+  }
+
+  if (problems.length > 0) {
+    fail(
+      `${existingJobLabel(jobRef)} is not eligible for pre-apply replacement: ${problems.join(
+        '; '
+      )}`
+    );
+  }
+}
+
+function getExistingJob(args, jobRef) {
+  const label = `kubectl get job ${jobRef.name}`;
+  const result = executeCommand(
+    args.kubectl,
+    [
+      ...kubectlPrefixArgs(args),
+      'get',
+      'job',
+      jobRef.name,
+      '--namespace',
+      jobRef.namespace,
+      '-o',
+      'json'
+    ],
+    label
+  );
+
+  if (result.status === 0) {
+    return parseKubectlJson(result.stdout, label);
+  }
+  if (kubectlFailedWithNotFound(result)) {
+    return undefined;
+  }
+  failKubectlResult(label, result);
+}
+
+function deleteExistingJob(args, jobRef) {
+  const label = `kubectl delete job ${jobRef.name}`;
+  const result = executeCommand(
+    args.kubectl,
+    [
+      ...kubectlPrefixArgs(args),
+      'delete',
+      'job',
+      jobRef.name,
+      '--namespace',
+      jobRef.namespace,
+      '--wait=true'
+    ],
+    label
+  );
+
+  if (result.status === 0) {
+    return true;
+  }
+  if (kubectlFailedWithNotFound(result)) {
+    return false;
+  }
+  failKubectlResult(label, result);
+}
+
+function runPreApplyJobReplacements(args, renderReport) {
+  if (args.mode !== 'apply') {
+    return [];
+  }
+
+  const replacements = [];
+  for (const jobRef of renderedJobRefs(renderReport, args.namespace)) {
+    const existingJob = getExistingJob(args, jobRef);
+    if (!existingJob) {
+      continue;
+    }
+
+    requireAdoptableCompletedJob(existingJob, jobRef);
+    if (deleteExistingJob(args, jobRef)) {
+      replacements.push({
+        ...jobRef,
+        reason: 'completed_existing_job_replaced_before_apply'
+      });
+    }
+  }
+
+  return replacements;
+}
+
 function runKubectlApply(args, manifestFiles) {
   const applyArgs = [
     ...kubectlPrefixArgs(args),
@@ -557,7 +774,13 @@ function requireRenderCheckPass(renderReport) {
   }
 }
 
-function buildReport({ args, renderReport, kubectlVersion, kubectlApplyOutput }) {
+function buildReport({
+  args,
+  renderReport,
+  kubectlVersion,
+  kubectlApplyOutput,
+  preApplyJobReplacements
+}) {
   const report = {
     schema_version: REPORT_SCHEMA,
     scope: APPLY_SCOPE,
@@ -574,6 +797,7 @@ function buildReport({ args, renderReport, kubectlVersion, kubectlApplyOutput })
     mode: args.mode,
     resource_refs: manifestResourceRefs(renderReport, args.namespace),
     kubectl_resource_refs: kubectlResourceRefs(kubectlApplyOutput.stdout),
+    pre_apply_job_replacements: preApplyJobReplacements || [],
     kubectl_version: kubectlVersion,
     render_check: {
       schema: renderReport.schema,
@@ -614,6 +838,7 @@ async function main() {
   const manifestFiles = await applyManifestFiles(args);
 
   const kubectlVersion = runKubectlVersion(args);
+  const preApplyJobReplacements = runPreApplyJobReplacements(args, renderCheckReport.value);
   const kubectlApplyOutput = runKubectlApply(args, manifestFiles);
 
   await writeReport(
@@ -622,7 +847,8 @@ async function main() {
       args,
       renderReport: renderCheckReport.value,
       kubectlVersion,
-      kubectlApplyOutput
+      kubectlApplyOutput,
+      preApplyJobReplacements
     })
   );
 

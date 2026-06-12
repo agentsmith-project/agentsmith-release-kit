@@ -458,6 +458,7 @@ const reachability = {
 };
 const substrateTruth = {
   schema_version: 'agentsmith.substrate-connection.truth/v1',
+  redacted_fingerprint: `sha256:${'a'.repeat(64)}`,
   target_cluster: targetCluster,
   substrate_source: substrateSource,
   distribution,

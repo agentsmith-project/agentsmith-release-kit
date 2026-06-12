@@ -3,6 +3,7 @@
   "installation_id": "kit-install-20260523-001",
   "substrate_truth": {
     "schema_version": "agentsmith.substrate-connection.truth/v1",
+    "redacted_fingerprint": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
     "declared_at": "2026-05-23T12:00:00.000Z",
     "declared_by": "release-operator@example.com",
     "installed_by": "agentsmith-release-kit",

@@ -309,6 +309,20 @@ function stableJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+function canonicalize(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalize(item));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalize(value[key])])
+    );
+  }
+  return value;
+}
+
 async function writeText(root, relativePath, content) {
   const file = path.join(root, relativePath);
   await fs.mkdir(path.dirname(file), { recursive: true });
@@ -499,6 +513,21 @@ function reachabilityProof(serviceName) {
   return `kit materialized ${serviceName} cluster Service; operator readiness verification required after apply`;
 }
 
+function substrateTruthFingerprint(truth) {
+  const projection = canonicalize({
+    schema_version: truth.schema_version,
+    target_cluster: truth.target_cluster,
+    substrate_source: truth.substrate_source,
+    distribution: truth.distribution,
+    declared_by: truth.declared_by,
+    installed_by: truth.installed_by,
+    release_kit_version: truth.release_kit_version,
+    installation_id: truth.installation_id,
+    services: truth.services
+  });
+  return digestBuffer(Buffer.from(JSON.stringify(projection)));
+}
+
 function buildSubstrateTruth({
   declaredAt,
   declaredBy,
@@ -508,7 +537,7 @@ function buildSubstrateTruth({
   targetProfile
 }) {
   const profile = splitTargetProfile(targetProfile);
-  return {
+  const truth = {
     schema_version: SUBSTRATE_TRUTH_SCHEMA,
     target_cluster: profile.target_cluster,
     substrate_source: profile.substrate_source,
@@ -602,6 +631,8 @@ function buildSubstrateTruth({
       }
     }
   };
+  truth.redacted_fingerprint = substrateTruthFingerprint(truth);
+  return truth;
 }
 
 function imageReplacements(images) {

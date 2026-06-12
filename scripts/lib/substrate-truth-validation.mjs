@@ -25,6 +25,7 @@ const SUBSTRATE_TRUTH_FIELDS = [
   'installed_by',
   'release_kit_version',
   'installation_id',
+  'redacted_fingerprint',
   'services'
 ];
 const TARGET_PREREQUISITES_FIELDS = [
@@ -39,6 +40,8 @@ const TARGET_PREREQUISITES_FIELDS = [
 ];
 const SECRET_REF_PREFIX = 'secretRef:';
 const FINGERPRINT_RE = /^(?:redacted|fingerprint):sha256:[0-9a-f]{64}$/;
+const SUBSTRATE_REDACTED_FINGERPRINT_RE =
+  /^(?:sha256:[0-9a-f]{64}|(?:redacted|fingerprint):sha256:[0-9a-f]{64})$/;
 const KUBERNETES_NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const URI_SCHEME_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
 const LOCAL_URI_RE = /\b(?:file|local|source|git\+file):\/\//i;
@@ -438,6 +441,14 @@ function requireSecretReference(value, label) {
   const text = requireString(value, label);
   if (!isSafeSecretReference(text)) {
     fail(`${label} must be a secretRef or redacted fingerprint`);
+  }
+  return text;
+}
+
+function requireRedactedFingerprint(value, label) {
+  const text = requireString(value, label);
+  if (!SUBSTRATE_REDACTED_FINGERPRINT_RE.test(text)) {
+    fail(`${label} must be sha256:<64 lowercase hex>, redacted:sha256:<64 lowercase hex>, or fingerprint:sha256:<64 lowercase hex>`);
   }
   return text;
 }
@@ -843,6 +854,10 @@ export function validateSubstrateConnectionTruth(
     targetProfile,
     label,
     requiredSubstrateSource
+  );
+  requireRedactedFingerprint(
+    truth.redacted_fingerprint,
+    `${label}.redacted_fingerprint`
   );
   const serviceSummary = assertServices(truth, label);
   return {

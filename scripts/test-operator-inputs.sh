@@ -273,6 +273,7 @@ function writeSubstrateInstallInputs(profileValue) {
   };
   const substrateTruth = {
     schema_version: 'agentsmith.substrate-connection.truth/v1',
+    redacted_fingerprint: `sha256:${'a'.repeat(64)}`,
     target_cluster: profile.target_cluster,
     substrate_source: profile.substrate_source,
     distribution: profile.distribution,

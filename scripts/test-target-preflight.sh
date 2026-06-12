@@ -49,6 +49,7 @@ function service(name, host) {
 
 const truth = {
   schema_version: 'agentsmith.substrate-connection.truth/v1',
+  redacted_fingerprint: `sha256:${'a'.repeat(64)}`,
   target_cluster: targetCluster,
   substrate_source: substrateSource,
   distribution,
@@ -234,6 +235,13 @@ switch (mutation) {
     break;
   case 'redacted_fingerprint':
     useRedactedFingerprints();
+    truth.redacted_fingerprint = `redacted:sha256:${'b'.repeat(64)}`;
+    break;
+  case 'missing_redacted_fingerprint':
+    delete truth.redacted_fingerprint;
+    break;
+  case 'invalid_redacted_fingerprint':
+    truth.redacted_fingerprint = `sha256:${'A'.repeat(64)}`;
     break;
   case 'raw_password':
     truth.services.postgresql['pass' + 'word'] = 'plain-' + 'cre' + 'dential-value';
@@ -707,6 +715,8 @@ fi
 pass "missing target prerequisites rejected"
 
 expect_fail wrong-schema wrong_schema
+expect_fail missing-redacted-fingerprint missing_redacted_fingerprint
+expect_fail invalid-redacted-fingerprint invalid_redacted_fingerprint
 expect_fail target-profile-mismatch target_mismatch
 expect_fail missing-endpoint missing_endpoint
 expect_fail missing-secret-ref missing_secret_ref
