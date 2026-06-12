@@ -1306,28 +1306,30 @@ async function main(argv) {
   });
 
   if (isKitOnline(args)) {
+    const substrateRoutabilityArgv = [
+      '--target-profile',
+      targetProfile,
+      '--substrate-pack-check-report',
+      substratePackCheckReportPath,
+      '--substrate-truth',
+      args.substrateTruth,
+      '--target-prerequisites',
+      args.targetPrerequisites,
+      '--namespace',
+      args.namespace,
+      ...kubeArgs(args),
+      '--routability-probe',
+      args.routabilityProbe,
+      '--output-dir',
+      outputSubdir(args, 'substrate-routability')
+    ];
+    pushIfValue(substrateRoutabilityArgv, '--timeout-ms', args.timeoutMs);
     runStep({
       args,
       steps,
       name: 'substrate-routability',
       mode: '--substrate-routability',
-      argv: [
-        '--target-profile',
-        targetProfile,
-        '--substrate-pack-check-report',
-        substratePackCheckReportPath,
-        '--substrate-truth',
-        args.substrateTruth,
-        '--target-prerequisites',
-        args.targetPrerequisites,
-        '--namespace',
-        args.namespace,
-        ...kubeArgs(args),
-        '--routability-probe',
-        args.routabilityProbe,
-        '--output-dir',
-        outputSubdir(args, 'substrate-routability')
-      ],
+      argv: substrateRoutabilityArgv,
       reportPaths: [
         path.join(outputSubdir(args, 'substrate-routability'), 'substrate-routability-report.json')
       ]
