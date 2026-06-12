@@ -144,6 +144,28 @@
           }
         },
         "spec": {
+          "initContainers": [
+            {
+              "name": "postgresql-prepare-tls",
+              "image": "{{IMAGE_POSTGRESQL}}",
+              "command": [
+                "sh",
+                "-ec",
+                "cp /tls-source/tls.crt /tls/tls.crt\ncp /tls-source/tls.key /tls/tls.key\ncp /tls-source/ca.crt /tls/ca.crt\nchown postgres:postgres /tls/tls.crt /tls/tls.key /tls/ca.crt\nchmod 0644 /tls/tls.crt /tls/ca.crt\nchmod 0600 /tls/tls.key"
+              ],
+              "volumeMounts": [
+                {
+                  "name": "postgresql-tls-workdir",
+                  "mountPath": "/tls"
+                },
+                {
+                  "name": "postgresql-tls-source",
+                  "mountPath": "/tls-source",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
           "containers": [
             {
               "name": "postgresql",
@@ -199,7 +221,7 @@
                   "mountPath": "/pgdata"
                 },
                 {
-                  "name": "postgresql-tls",
+                  "name": "postgresql-tls-workdir",
                   "mountPath": "/tls",
                   "readOnly": true
                 }
@@ -214,7 +236,11 @@
               }
             },
             {
-              "name": "postgresql-tls",
+              "name": "postgresql-tls-workdir",
+              "emptyDir": {}
+            },
+            {
+              "name": "postgresql-tls-source",
               "secret": {
                 "secretName": "postgresql-server-tls"
               }

@@ -128,6 +128,7 @@ write_render_values() {
   "namespace": "agentsmith",
   "replicas": 2,
   "release_channel": "stable",
+  "PUBLIC_BASE_URL": "https://agentsmith.release.example.com",
   "unsafe_payload": "not-real-credential-value",
   "AFSCP_DEFAULT_VOLUME_ID": "vol_agentsmith_default",
   "AFSCP_DEFAULT_VOLUME_BACKEND": "juicefs",
@@ -181,6 +182,16 @@ switch (mutation) {
       permission_model: 'payload-root-only'
     });
     break;
+  case 'profile_mismatch':
+    values.PROFILE = 'local-kind-online-install-substrates';
+    break;
+  case 'ingress_host_mismatch':
+    values.INGRESS_HOST = 'other.release.example.com';
+    break;
+  case 'afscp_default_volume_pv_name_mismatch':
+    values.namespace = 'agentsmith-install-online';
+    values.AFSCP_DEFAULT_VOLUME_PV_NAME = 'agentsmith-afscp-default-volume';
+    break;
   default:
     throw new Error(`unknown render values mutation: ${mutation}`);
 }
@@ -220,6 +231,8 @@ metadata:
     release: ${{ release.release_id }}
     channel: ${{ values.release_channel }}
     distribution: ${{ target.distribution }}
+    profile: ${{ values.PROFILE }}
+    pv-name: ${{ values.AFSCP_DEFAULT_VOLUME_PV_NAME }}
 spec:
   replicas: ${{ values.replicas }}
   template:
@@ -268,6 +281,81 @@ spec:
               image: ${{ images.llmup.image }}
             - name: managed-runner
               image: ${{ images.managed_runner.image }}
+YAML
+      ;;
+    with_ingress)
+      cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
+  namespace: ${{ values.namespace }}
+  labels:
+    distribution: ${{ target.distribution }}
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+          env:
+            - name: POSTGRES_HOST
+              value: ${{ substrate.services.postgresql.host }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentsmith
+  namespace: ${{ values.namespace }}
+spec:
+  rules:
+    - host: ${{ values.INGRESS_HOST }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentsmith-web
+                port:
+                  number: 3001
+YAML
+      ;;
+    hostless_ingress)
+      cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
+  namespace: ${{ values.namespace }}
+  labels:
+    distribution: ${{ target.distribution }}
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+          env:
+            - name: POSTGRES_HOST
+              value: ${{ substrate.services.postgresql.host }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentsmith
+  namespace: ${{ values.namespace }}
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentsmith-web
+                port:
+                  number: 3001
 YAML
       ;;
     unknown_variable)
@@ -878,6 +966,12 @@ if (!rendered.includes('namespace: agentsmith')) {
 if (!rendered.includes('distribution: online')) {
   throw new Error('rendered manifest must contain target profile values');
 }
+if (rendered.includes('channel: stable') && !rendered.includes(`profile: ${expectedProfile}`)) {
+  throw new Error('rendered manifest must bind values.PROFILE to the target profile');
+}
+if (rendered.includes('channel: stable') && !rendered.includes('pv-name: agentsmith-afscp-default-volume')) {
+  throw new Error('rendered manifest must bind AFSCP_DEFAULT_VOLUME_PV_NAME to the namespace-scoped default');
+}
 if (!rendered.includes('postgresql.release.example.internal')) {
   throw new Error('rendered manifest must contain substrate truth values');
 }
@@ -1042,6 +1136,51 @@ assert_rendered_image_adoption \
   source
 pass "valid render accepted with focused non-readiness report"
 
+INGRESS_ARCHIVE="$TMP_DIR/with-ingress.tgz"
+INGRESS_MANIFEST_SHA="$(create_render_archive with-ingress "$INGRESS_ARCHIVE" with_ingress)"
+INGRESS_ARCHIVE_SHA="$(sha256_file "$INGRESS_ARCHIVE")"
+INGRESS_CONTRACT="$TMP_DIR/release-contract.with-ingress.json"
+INGRESS_PACKAGE="$TMP_DIR/deploy-template-package.with-ingress.json"
+INGRESS_OUT="$TMP_DIR/out-with-ingress"
+write_materials \
+  "$INGRESS_MANIFEST_SHA" \
+  "$INGRESS_ARCHIVE_SHA" \
+  "$INGRESS_CONTRACT" \
+  "$INGRESS_PACKAGE"
+run_render \
+  "$INGRESS_CONTRACT" \
+  "$INGRESS_PACKAGE" \
+  "$INGRESS_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$INGRESS_OUT" >/dev/null
+assert_pass_report "$INGRESS_OUT/manifest-render-report.json" "$INGRESS_OUT/rendered-manifests"
+grep -Fq 'host: agentsmith.release.example.com' "$INGRESS_OUT/rendered-manifests/templates/workloads.yaml" ||
+  fail "rendered ingress did not derive host from PUBLIC_BASE_URL"
+pass "render derives ingress host from PUBLIC_BASE_URL"
+
+HOSTLESS_INGRESS_ARCHIVE="$TMP_DIR/hostless-ingress.tgz"
+HOSTLESS_INGRESS_MANIFEST_SHA="$(create_render_archive hostless-ingress "$HOSTLESS_INGRESS_ARCHIVE" hostless_ingress)"
+HOSTLESS_INGRESS_ARCHIVE_SHA="$(sha256_file "$HOSTLESS_INGRESS_ARCHIVE")"
+HOSTLESS_INGRESS_CONTRACT="$TMP_DIR/release-contract.hostless-ingress.json"
+HOSTLESS_INGRESS_PACKAGE="$TMP_DIR/deploy-template-package.hostless-ingress.json"
+write_materials \
+  "$HOSTLESS_INGRESS_MANIFEST_SHA" \
+  "$HOSTLESS_INGRESS_ARCHIVE_SHA" \
+  "$HOSTLESS_INGRESS_CONTRACT" \
+  "$HOSTLESS_INGRESS_PACKAGE"
+expect_fail_case \
+  hostless-ingress \
+  "$HOSTLESS_INGRESS_CONTRACT" \
+  "$HOSTLESS_INGRESS_PACKAGE" \
+  "$HOSTLESS_INGRESS_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "must declare spec.rules[].host"
+
 SINGLE_LABEL_ENDPOINTSLICE_VALUES="$TMP_DIR/render-values.single-label-endpointslice-fqdn.json"
 write_render_values "$SINGLE_LABEL_ENDPOINTSLICE_VALUES" single_label_endpointslice_fqdn
 expect_fail_case \
@@ -1139,6 +1278,48 @@ expect_fail_case \
   "" \
   "" \
   "render_values.AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON.jvs_external_control_root must be true"
+
+PROFILE_MISMATCH_VALUES="$TMP_DIR/render-values.profile-mismatch.json"
+write_render_values "$PROFILE_MISMATCH_VALUES" profile_mismatch
+expect_fail_case \
+  profile-mismatch \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$PROFILE_MISMATCH_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.PROFILE must match --target-profile"
+
+INGRESS_HOST_MISMATCH_VALUES="$TMP_DIR/render-values.ingress-host-mismatch.json"
+write_render_values "$INGRESS_HOST_MISMATCH_VALUES" ingress_host_mismatch
+expect_fail_case \
+  ingress-host-mismatch \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$INGRESS_HOST_MISMATCH_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.INGRESS_HOST must match render_values.PUBLIC_BASE_URL host"
+
+AFSCP_DEFAULT_VOLUME_PV_NAME_MISMATCH_VALUES="$TMP_DIR/render-values.afscp-default-volume-pv-name-mismatch.json"
+write_render_values "$AFSCP_DEFAULT_VOLUME_PV_NAME_MISMATCH_VALUES" afscp_default_volume_pv_name_mismatch
+expect_fail_case \
+  afscp-default-volume-pv-name-mismatch \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$AFSCP_DEFAULT_VOLUME_PV_NAME_MISMATCH_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.AFSCP_DEFAULT_VOLUME_PV_NAME must match the namespace-scoped default"
 
 STALE_REQUIRED_IDS_CONTRACT="$TMP_DIR/release-contract.stale-six-image-required-image-ids.json"
 STALE_REQUIRED_IDS_PACKAGE="$TMP_DIR/deploy-template-package.stale-six-image-required-image-ids.json"

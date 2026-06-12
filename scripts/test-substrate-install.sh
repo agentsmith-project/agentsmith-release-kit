@@ -1844,6 +1844,50 @@ write_target_prerequisites_from_install_inputs \
 assert_resource_secret_refs_bound_to_target_prerequisites \
   "$materialized_minimal_dir/substrate-install-inputs.json" \
   "$materialized_minimal_dir/target-prerequisites.json"
+"$NODE_BIN" --input-type=module - "$materialized_minimal_dir/templates/substrate-resources.json" <<'NODE'
+import fs from 'node:fs';
+
+const [resourceListPath] = process.argv.slice(2);
+const resources = JSON.parse(fs.readFileSync(resourceListPath, 'utf8'));
+const postgresql = resources.find((resource) => (
+  resource?.kind === 'StatefulSet' && resource?.metadata?.name === 'postgresql'
+));
+if (!postgresql) {
+  throw new Error('materialized minimal pack must include postgresql StatefulSet');
+}
+const podSpec = postgresql.spec?.template?.spec;
+const initContainer = podSpec?.initContainers?.find((container) => (
+  container.name === 'postgresql-prepare-tls'
+));
+if (!initContainer) {
+  throw new Error('postgresql StatefulSet must prepare TLS files in an initContainer');
+}
+const initCommand = initContainer.command?.join('\n') ?? '';
+for (const expected of [
+  'cp /tls-source/tls.key /tls/tls.key',
+  'chown postgres:postgres /tls/tls.crt /tls/tls.key /tls/ca.crt',
+  'chmod 0600 /tls/tls.key'
+]) {
+  if (!initCommand.includes(expected)) {
+    throw new Error(`postgresql TLS initContainer command missing: ${expected}`);
+  }
+}
+const volumeByName = new Map((podSpec?.volumes ?? []).map((volume) => [volume.name, volume]));
+if (!volumeByName.get('postgresql-tls-workdir')?.emptyDir) {
+  throw new Error('postgresql TLS workdir must be an emptyDir volume');
+}
+if (volumeByName.get('postgresql-tls-source')?.secret?.secretName !== 'postgresql-server-tls') {
+  throw new Error('postgresql TLS source must mount postgresql-server-tls secret');
+}
+const mainContainer = podSpec?.containers?.find((container) => container.name === 'postgresql');
+const mainTlsMount = mainContainer?.volumeMounts?.find((mount) => mount.mountPath === '/tls');
+if (mainTlsMount?.name !== 'postgresql-tls-workdir' || mainTlsMount?.readOnly !== true) {
+  throw new Error('postgresql main container must read TLS files from the prepared read-only workdir');
+}
+if ((mainContainer?.volumeMounts ?? []).some((mount) => mount.name === 'postgresql-tls-source')) {
+  throw new Error('postgresql main container must not mount the raw TLS secret directly');
+}
+NODE
 run_pack_check "$materialized_minimal_dir" "$TMP_DIR/out-materialized-minimal-pack-check" >/dev/null
 materialized_minimal_output="$TMP_DIR/out-materialized-minimal-install"
 reset_kubectl_log

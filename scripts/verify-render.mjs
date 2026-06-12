@@ -72,6 +72,7 @@ const AFSCP_WORKLOAD_MOUNT_SECRET_REFS_KEY = 'AFSCP_API_WORKLOAD_MOUNT_SECRET_RE
 const AFSCP_VOLUME_ID_RE = /^[a-z0-9](?:[a-z0-9_-]*[a-z0-9])?$/;
 const KUBERNETES_DNS_LABEL_RE = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/;
 const KUBERNETES_DNS_SUBDOMAIN_RE = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?(?:\.[a-z0-9](?:[-a-z0-9]*[a-z0-9])?)*$/;
+const AFSCP_DEFAULT_VOLUME_PV_NAME_SUFFIX = 'afscp-default-volume';
 const SECRET_REF_RESERVED_WORD_RE = /(^|[-_])(password|passwd|pwd|token|secret|client[-_]?secret|private[-_]?key|kubeconfig|access[-_]?key|api[-_]?key)([-_]|$)/i;
 const AFSCP_WORKLOAD_MOUNT_SECRET_REFS_LINE_RE = /(?:^|\n)[ \t]*AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS[ \t]*:[ \t]*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\r\n#]*))/g;
 const KUBERNETES_SECRET_KIND_RE = /^kind:[ \t]*Secret[ \t]*(?:#.*)?$/m;
@@ -1462,6 +1463,110 @@ function validateImageMap({
   return imagesById;
 }
 
+function validateRenderIngressHost(value, label) {
+  const host = requireString(value, label).toLowerCase();
+  if (
+    host.trim() !== host ||
+    URI_SCHEME_RE.test(host) ||
+    host.includes('@') ||
+    host.includes('/') ||
+    host.includes(':') ||
+    /\s/.test(host)
+  ) {
+    fail(`${label} must be a host without scheme, path, port, or userinfo`);
+  }
+  if (isLocalRegistryHost(host)) {
+    fail(`${label} must not use localhost, loopback, or host.docker.internal`);
+  }
+  if (!DNS_HOST_RE.test(host)) {
+    fail(`${label} must be a DNS host`);
+  }
+  return host;
+}
+
+function publicBaseUrlHost(renderValues) {
+  if (!Object.prototype.hasOwnProperty.call(renderValues, 'PUBLIC_BASE_URL')) {
+    return undefined;
+  }
+  const publicBaseUrl = requireString(
+    renderValues.PUBLIC_BASE_URL,
+    'render_values.PUBLIC_BASE_URL'
+  );
+  let parsed;
+  try {
+    parsed = new URL(publicBaseUrl);
+  } catch {
+    fail('render_values.PUBLIC_BASE_URL must be a valid URL');
+  }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    fail('render_values.PUBLIC_BASE_URL must use http or https');
+  }
+  if (parsed.username || parsed.password) {
+    fail('render_values.PUBLIC_BASE_URL must not include userinfo');
+  }
+  return validateRenderIngressHost(parsed.hostname, 'render_values.PUBLIC_BASE_URL host');
+}
+
+function deriveIngressHost(renderValues) {
+  const derived = publicBaseUrlHost(renderValues);
+  const explicit = Object.prototype.hasOwnProperty.call(renderValues, 'INGRESS_HOST')
+    ? validateRenderIngressHost(renderValues.INGRESS_HOST, 'render_values.INGRESS_HOST')
+    : undefined;
+  if (explicit && derived && explicit !== derived) {
+    fail('render_values.INGRESS_HOST must match render_values.PUBLIC_BASE_URL host');
+  }
+  return explicit || derived;
+}
+
+function validateRenderNamespace(value, label) {
+  const namespace = requireString(value, label);
+  if (namespace.length > 63 || !KUBERNETES_DNS_LABEL_RE.test(namespace)) {
+    fail(`${label} must be a Kubernetes namespace name`);
+  }
+  return namespace;
+}
+
+function deriveAfscpDefaultVolumePvName(renderValues) {
+  const namespace = validateRenderNamespace(renderValues.namespace, 'render_values.namespace');
+  const expected = `${namespace}-${AFSCP_DEFAULT_VOLUME_PV_NAME_SUFFIX}`;
+  if (!KUBERNETES_DNS_SUBDOMAIN_RE.test(expected) || expected.length > 253) {
+    fail('render_values.namespace produces an invalid AFSCP default volume PV name');
+  }
+  if (Object.prototype.hasOwnProperty.call(renderValues, 'AFSCP_DEFAULT_VOLUME_PV_NAME')) {
+    const actual = requireString(
+      renderValues.AFSCP_DEFAULT_VOLUME_PV_NAME,
+      'render_values.AFSCP_DEFAULT_VOLUME_PV_NAME'
+    );
+    if (!KUBERNETES_DNS_SUBDOMAIN_RE.test(actual) || actual.length > 253) {
+      fail('render_values.AFSCP_DEFAULT_VOLUME_PV_NAME must be a Kubernetes DNS subdomain name');
+    }
+    if (actual !== expected) {
+      fail('render_values.AFSCP_DEFAULT_VOLUME_PV_NAME must match the namespace-scoped default');
+    }
+  }
+  return expected;
+}
+
+function normalizeRenderValues(renderValues, targetProfile) {
+  if (Object.prototype.hasOwnProperty.call(renderValues, 'PROFILE')) {
+    const profile = requireString(renderValues.PROFILE, 'render_values.PROFILE');
+    if (profile !== targetProfile.value) {
+      fail('render_values.PROFILE must match --target-profile');
+    }
+  }
+
+  const normalized = {
+    ...renderValues,
+    PROFILE: targetProfile.value,
+    AFSCP_DEFAULT_VOLUME_PV_NAME: deriveAfscpDefaultVolumePvName(renderValues)
+  };
+  const ingressHost = deriveIngressHost(renderValues);
+  if (ingressHost) {
+    normalized.INGRESS_HOST = ingressHost;
+  }
+  return normalized;
+}
+
 function buildRenderContext({
   contract,
   inventory,
@@ -1481,7 +1586,7 @@ function buildRenderContext({
   }
 
   return {
-    values: renderValues,
+    values: normalizeRenderValues(renderValues, targetProfile),
     images,
     target: targetProfile,
     substrate: substrateTruth,
@@ -1734,6 +1839,61 @@ function parseJsonManifest(raw, relativePath) {
   return extractJsonWorkload(parsed, `manifest ${relativePath}`);
 }
 
+function jsonResources(resource) {
+  if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
+    return [];
+  }
+  if (resource.kind === 'List' && Array.isArray(resource.items)) {
+    return resource.items.flatMap((item) => jsonResources(item));
+  }
+  return [resource];
+}
+
+function assertRenderedIngressHost(host, label, expectedIngressHost) {
+  const normalized = validateRenderIngressHost(host, label);
+  if (expectedIngressHost && normalized !== expectedIngressHost) {
+    fail(`${label} must match render_values.INGRESS_HOST`);
+  }
+  return normalized;
+}
+
+function requireExpectedIngressHost(expectedIngressHost, label) {
+  if (!expectedIngressHost) {
+    fail(`${label} requires render_values.PUBLIC_BASE_URL or render_values.INGRESS_HOST`);
+  }
+}
+
+function validateJsonIngressHosts(raw, relativePath, expectedIngressHost) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+
+  for (const resource of jsonResources(parsed)) {
+    if (resource.kind !== 'Ingress') {
+      continue;
+    }
+    const name = getResourceName(resource) || '<unnamed>';
+    const label = `rendered manifest ${relativePath} Ingress ${name}`;
+    requireExpectedIngressHost(expectedIngressHost, label);
+    const rules = Array.isArray(resource.spec?.rules) ? resource.spec.rules : [];
+    if (rules.length === 0) {
+      fail(`${label} must declare spec.rules[].host`);
+    }
+    for (const [ruleIndex, rule] of rules.entries()) {
+      assertRenderedIngressHost(
+        rule?.host,
+        `${label}.spec.rules[${ruleIndex}].host`,
+        expectedIngressHost
+      );
+    }
+  }
+
+  return true;
+}
+
 function yamlDocuments(raw) {
   return raw
     .split(/^---[ \t]*(?:#.*)?$/m)
@@ -1774,6 +1934,78 @@ function yamlName(document) {
     }
   }
   return undefined;
+}
+
+function yamlIngressRuleHosts(document) {
+  const hosts = [];
+  const lines = document.split(/\r?\n/);
+  let rulesIndent;
+
+  for (const line of lines) {
+    if (line.trim() === '' || line.trim().startsWith('#')) {
+      continue;
+    }
+    const indent = line.match(/^\s*/)[0].length;
+    if (rulesIndent !== undefined && indent <= rulesIndent) {
+      rulesIndent = undefined;
+    }
+
+    const rulesMatch = line.match(/^(\s*)rules:\s*(?:#.*)?$/);
+    if (rulesMatch) {
+      rulesIndent = rulesMatch[1].length;
+      continue;
+    }
+
+    if (rulesIndent === undefined) {
+      continue;
+    }
+
+    const hostMatch = line.match(/^\s*(?:-\s*)?host:\s*(.*?)\s*$/);
+    if (hostMatch) {
+      hosts.push(stripQuotes(stripInlineComment(hostMatch[1])));
+    }
+  }
+
+  return hosts;
+}
+
+function validateYamlIngressHosts(raw, relativePath, expectedIngressHost) {
+  const documents = yamlDocuments(raw);
+  for (const [index, document] of documents.entries()) {
+    if (yamlKind(document) !== 'Ingress') {
+      continue;
+    }
+    const name = yamlName(document) || '<unnamed>';
+    const label = `rendered manifest ${relativePath}#${index + 1} Ingress ${name}`;
+    requireExpectedIngressHost(expectedIngressHost, label);
+    const hosts = yamlIngressRuleHosts(document);
+    if (hosts.length === 0) {
+      fail(`${label} must declare spec.rules[].host`);
+    }
+    hosts.forEach((host, hostIndex) => {
+      assertRenderedIngressHost(
+        host,
+        `${label}.spec.rules[${hostIndex}].host`,
+        expectedIngressHost
+      );
+    });
+  }
+}
+
+function validateRenderedIngressHosts(raw, relativePath, expectedIngressHost) {
+  if (path.extname(relativePath).toLowerCase() === '.json') {
+    validateJsonIngressHosts(raw, relativePath, expectedIngressHost);
+    return;
+  }
+
+  const trimmed = raw.trim();
+  if (
+    (trimmed.startsWith('{') || trimmed.startsWith('[')) &&
+    validateJsonIngressHosts(raw, relativePath, expectedIngressHost)
+  ) {
+    return;
+  }
+  validateYamlIngressHosts(raw, relativePath, expectedIngressHost);
 }
 
 function yamlContainerImages(document) {
@@ -1907,7 +2139,7 @@ function validateImage(imageEntry, inventory, label) {
   fail(`${label} is not listed in release_contract.deploy_image_inventory`);
 }
 
-async function validateRenderedManifests(renderedRoot, renderedFiles, inventory) {
+async function validateRenderedManifests(renderedRoot, renderedFiles, inventory, context) {
   if (renderedFiles.length === 0) {
     fail('render must produce at least one manifest');
   }
@@ -1920,6 +2152,7 @@ async function validateRenderedManifests(renderedRoot, renderedFiles, inventory)
     assertInsideRoot(renderedRoot, filePath, `rendered manifest ${file.path}`);
     const raw = await readText(filePath, `rendered manifest ${file.path}`);
     assertNoRenderedUnsafePayload(raw, `rendered manifest ${file.path}`);
+    validateRenderedIngressHosts(raw, file.path, context.values.INGRESS_HOST);
     const workloads = parseRenderedManifest(raw, file.path);
 
     for (const [workloadIndex, workload] of workloads.entries()) {
@@ -2155,7 +2388,8 @@ async function main() {
   const manifestSummary = await validateRenderedManifests(
     renderedRoot,
     renderedFiles,
-    inventory
+    inventory,
+    context
   );
 
   await writeReport(
