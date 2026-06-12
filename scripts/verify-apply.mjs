@@ -17,6 +17,7 @@ const REQUIRED_ARGS = [
 ];
 const REPORT_SCHEMA = 'agentsmith.kubernetes-apply-report/v1';
 const APPLY_SCOPE = 'kubernetes_apply_only';
+const MANIFEST_EXTENSIONS = new Set(['.json', '.yaml', '.yml']);
 const SUPPORTED_TARGET_PROFILES = new Set([
   'existing_kubernetes/external_declared/online',
   'existing_kubernetes/external_declared/airgap',
@@ -364,6 +365,87 @@ function kubectlPrefixArgs(args) {
   return prefix;
 }
 
+function assertInsideRoot(rootDir, file, label) {
+  const relative = path.relative(rootDir, file);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) {
+    fail(`${label} must stay inside rendered manifests root`);
+  }
+}
+
+function isManifestFile(file) {
+  return MANIFEST_EXTENSIONS.has(path.extname(file).toLowerCase());
+}
+
+async function renderedManifestsRoot(input) {
+  let root;
+  try {
+    root = await fs.realpath(input);
+  } catch (error) {
+    fail(`cannot read rendered manifests root: ${error.message}`);
+  }
+
+  let stat;
+  try {
+    stat = await fs.stat(root);
+  } catch (error) {
+    fail(`cannot stat rendered manifests root: ${error.message}`);
+  }
+  if (!stat.isDirectory()) {
+    fail('rendered manifests root must be a directory');
+  }
+  return root;
+}
+
+async function collectApplyManifestFiles(root, dir = root, files = []) {
+  let entries;
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch (error) {
+    fail(`cannot read rendered manifests directory: ${error.message}`);
+  }
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+
+  for (const entry of entries) {
+    const file = path.join(dir, entry.name);
+    let stat;
+    try {
+      stat = await fs.lstat(file);
+    } catch (error) {
+      fail(`cannot stat rendered manifest path: ${error.message}`);
+    }
+
+    if (stat.isSymbolicLink()) {
+      fail(`rendered manifest path must not be a symlink: ${path.relative(root, file)}`);
+    }
+
+    if (stat.isDirectory()) {
+      const realDir = await fs.realpath(file);
+      assertInsideRoot(root, realDir, `rendered manifest directory ${path.relative(root, file)}`);
+      await collectApplyManifestFiles(root, file, files);
+      continue;
+    }
+
+    if (!stat.isFile() || !isManifestFile(file)) {
+      continue;
+    }
+
+    const realFile = await fs.realpath(file);
+    assertInsideRoot(root, realFile, `rendered manifest ${path.relative(root, file)}`);
+    files.push(file);
+  }
+
+  return files;
+}
+
+async function applyManifestFiles(args) {
+  const root = await renderedManifestsRoot(args.renderedManifests);
+  const files = await collectApplyManifestFiles(root);
+  if (files.length === 0) {
+    fail('rendered manifests root must contain yaml, yml, or json manifests');
+  }
+  return files;
+}
+
 function versionFields(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
@@ -418,16 +500,18 @@ function runKubectlVersion(args) {
   return normalizeKubectlVersion(result.stdout);
 }
 
-function runKubectlApply(args) {
+function runKubectlApply(args, manifestFiles) {
   const applyArgs = [
     ...kubectlPrefixArgs(args),
     'apply',
     '--server-side',
     '--namespace',
-    args.namespace,
-    '-f',
-    args.renderedManifests
+    args.namespace
   ];
+
+  for (const manifestFile of manifestFiles) {
+    applyArgs.push('-f', manifestFile);
+  }
 
   if (args.mode === 'server-dry-run') {
     applyArgs.push('--dry-run=server');
@@ -527,9 +611,10 @@ async function main() {
 
   const renderCheckReport = await runRenderCheckGuard(args);
   requireRenderCheckPass(renderCheckReport.value);
+  const manifestFiles = await applyManifestFiles(args);
 
   const kubectlVersion = runKubectlVersion(args);
-  const kubectlApplyOutput = runKubectlApply(args);
+  const kubectlApplyOutput = runKubectlApply(args, manifestFiles);
 
   await writeReport(
     args.outputDir,

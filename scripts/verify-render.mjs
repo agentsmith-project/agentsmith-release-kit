@@ -7,6 +7,8 @@ import zlib from 'node:zlib';
 
 import {
   assertNoUnsafeSubstratePayload,
+  validateAfscpDefaultVolumeRenderValues,
+  validateEndpointSliceRenderValues,
   validateSubstrateConnectionTruth
 } from './lib/substrate-truth-validation.mjs';
 import {
@@ -2107,6 +2109,8 @@ async function main() {
     [deployTemplatePackage, 'deploy_template_package'],
     [renderValues, 'render_values']
   );
+  validateAfscpDefaultVolumeRenderValues(renderValues, { label: 'render_values' });
+  validateEndpointSliceRenderValues(renderValues, { label: 'render_values' });
   assertNoUnsafeSubstratePayload(substrateTruth, 'substrate_truth', substrateTruthInput.raw);
   validateSubstrateConnectionTruth(substrateTruth, targetProfile, { label: 'substrate_truth' });
 

@@ -962,7 +962,7 @@ bash scripts/test-rollout.sh
 ```
 
 This focused guard exercises `bash scripts/verify-release.sh --rollout`. It
-checks only rollout status and live pod image digest adoption for
+checks only rollout status or Job completion and live pod image digest adoption for
 already-rendered manifests. It does not render templates, apply resources,
 smoke routes, run product flows, provision cloud resources, build packages, or
 claim deploy or release readiness.
@@ -981,12 +981,14 @@ render/check.
 
 Before any `kubectl` call, the rollout diagnostic must pass the render/check
 image inventory guard. The rendered workload set must contain only
-Deployment, StatefulSet, and DaemonSet resources. List wrappers are flattened
+Deployment, StatefulSet, DaemonSet, and Job resources. List wrappers are flattened
 by render/check and judged by their inner workloads; other workload kinds such
-as Job, CronJob, Pod, or ReplicaSet fail fast before rollout commands. For
-each rollout-capable resource, the diagnostic runs `kubectl rollout status
-<kind>/<name> --namespace <ns> --timeout <duration>`, then reads
-`kubectl get <kind>/<name> --namespace <ns> -o json`. The workload selector
+as CronJob, Pod, or ReplicaSet fail fast before rollout commands. For
+Deployment, StatefulSet, and DaemonSet resources, the diagnostic runs
+`kubectl rollout status <kind>/<name> --namespace <ns> --timeout <duration>`.
+For Job resources, it runs `kubectl wait --for=condition=complete Job/<name>
+--namespace <ns> --timeout <duration>` and fails on wait failure or timeout.
+It then reads `kubectl get <kind>/<name> --namespace <ns> -o json`. The workload selector
 must use non-empty `spec.selector.matchLabels` with safe non-empty string keys
 and values; `matchExpressions` are not supported. The diagnostic then reads
 `kubectl get pods --namespace <ns> --selector <selector> -o json` and verifies

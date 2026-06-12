@@ -1,5 +1,9 @@
 {
   "namespace": "agentsmith",
-  "replicas": 2
+  "replicas": 2,
+  "AFSCP_DEFAULT_VOLUME_ID": "vol_agentsmith_default",
+  "AFSCP_DEFAULT_VOLUME_BACKEND": "juicefs",
+  "AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS": "shared",
+  "AFSCP_DEFAULT_VOLUME_STATUS": "active",
+  "AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON": "{\"webdav_export\":true,\"workload_mount\":true,\"jvs_external_control_root\":true,\"directory_quota\":false,\"filtered_mount\":false,\"csi_driver\":\"csi.juicefs.com\",\"storage_class\":\"static-juicefs-rwx\",\"permission_model\":\"payload-root-only\"}"
 }
-

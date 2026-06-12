@@ -44,9 +44,11 @@ if (mutation === 'unknown_image') {
   appImage = `ghcr.io/agentsmith-project/not-in-contract:${contract.release_id}@${unknownDigest}`;
 }
 
-fs.mkdirSync(renderedManifests, { recursive: true });
+const manifestDir =
+  mutation === 'nested' ? path.join(renderedManifests, 'templates', 'app') : renderedManifests;
+fs.mkdirSync(manifestDir, { recursive: true });
 fs.writeFileSync(
-  path.join(renderedManifests, 'deployment.yaml'),
+  path.join(manifestDir, 'deployment.yaml'),
   `apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -94,6 +96,42 @@ if [[ "$command_name" == "version" ]]; then
 fi
 
 if [[ "$command_name" == "apply" ]]; then
+  seen_manifest_source=0
+  previous=""
+  for arg in "$@"; do
+    if [[ "$previous" == "-f" || "$previous" == "--filename" ]]; then
+      seen_manifest_source=1
+      if [[ -d "$arg" ]]; then
+        has_manifest=0
+        for candidate in "$arg"/*.json "$arg"/*.yaml "$arg"/*.yml; do
+          if [[ -f "$candidate" ]]; then
+            has_manifest=1
+            break
+          fi
+        done
+        if [[ "$has_manifest" == "0" ]]; then
+          printf 'error: error reading [%s]: recognized file extensions are [.json .yaml .yml]\\n' "$arg" >&2
+          exit 1
+        fi
+      elif [[ -f "$arg" ]]; then
+        case "$arg" in
+          *.json|*.yaml|*.yml) ;;
+          *)
+            printf 'error: error reading [%s]: recognized file extensions are [.json .yaml .yml]\\n' "$arg" >&2
+            exit 1
+            ;;
+        esac
+      else
+        printf 'error: the path "%s" does not exist\\n' "$arg" >&2
+        exit 1
+      fi
+    fi
+    previous="$arg"
+  done
+  if [[ "$seen_manifest_source" == "0" ]]; then
+    echo "error: apply requires -f" >&2
+    exit 1
+  fi
   printf '%s\\n' "deployment.apps/agentsmith-web"
   exit 0
 fi
@@ -288,6 +326,20 @@ grep -q 'version' "$KUBECTL_LOG" || fail "fake kubectl did not receive version c
 grep -Eq 'apply .*--dry-run=server' "$KUBECTL_LOG" || fail "fake kubectl did not receive server dry-run apply call"
 assert_apply_report "$valid_output/apply-report.json" server-dry-run
 pass "server dry-run happy path calls kubectl dry-run and writes non-readiness report"
+
+nested_manifests="$TMP_DIR/manifests-nested"
+nested_output="$TMP_DIR/out-nested"
+write_manifests "$nested_manifests" nested
+reset_kubectl_log
+run_apply "$nested_manifests" "$nested_output" "$TARGET_PROFILE" >/dev/null
+nested_manifest_file="$nested_manifests/templates/app/deployment.yaml"
+grep -Fq -- "-f $nested_manifest_file" "$KUBECTL_LOG" || fail "nested rendered manifest file was not passed to kubectl apply"
+if grep -Fq -- "-f $nested_manifests " "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "nested rendered manifests must not be applied by passing the root directory"
+fi
+assert_apply_report "$nested_output/apply-report.json" server-dry-run
+pass "server dry-run applies nested rendered manifest files directly"
 
 airgap_dry_run_output="$TMP_DIR/out-airgap-dry-run"
 reset_kubectl_log

@@ -18,8 +18,8 @@ bash scripts/operator-release.sh --operator-inputs <operator-inputs-json-or-dir>
   `online/use_existing` apply.
 - `operator-inputs.target-registry.apply.example.json`: apply manifest variant
   that enables the target registry check.
-- `render-values.example.json`: namespace and replica values consumed by the
-  deploy template package.
+- `render-values.example.json`: namespace, replica, and canonical AFSCP
+  default volume values consumed by the deploy template package.
 - `substrate-truth.example.json`: external substrate connection truth.
 - `target-prerequisites.example.json`: namespace, RBAC, ingress, registry auth
   mode, storage, and matching substrate secret refs.

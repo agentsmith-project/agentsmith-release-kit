@@ -22,7 +22,8 @@ const SUPPORTED_TARGET_PROFILES = new Set([
   'existing_kubernetes/kit_installed/online',
   'existing_kubernetes/kit_installed/airgap'
 ]);
-const ROLLOUT_WORKLOAD_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet']);
+const ROLLOUT_STATUS_WORKLOAD_KINDS = new Set(['Deployment', 'StatefulSet', 'DaemonSet']);
+const ROLLOUT_WORKLOAD_KINDS = new Set([...ROLLOUT_STATUS_WORKLOAD_KINDS, 'Job']);
 const NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const TIMEOUT_RE = /^(?:0|[1-9][0-9]*(?:ms|s|m|h))$/;
 const DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
@@ -389,7 +390,7 @@ function rolloutWorkloads(renderReport, namespace) {
     const name = manifest?.name;
 
     if (!ROLLOUT_WORKLOAD_KINDS.has(kind)) {
-      fail(`rollout supports only Deployment, StatefulSet, and DaemonSet workloads; found ${kind || 'unknown'} at render-check manifest ${index + 1}`);
+      fail(`rollout supports only Deployment, StatefulSet, DaemonSet, and Job workloads; found ${kind || 'unknown'} at render-check manifest ${index + 1}`);
     }
     if (typeof name !== 'string' || name.trim() === '') {
       fail(`render-check manifest ${index + 1} must include metadata.name for rollout`);
@@ -463,6 +464,37 @@ function runRolloutStatus(args, resource) {
     ],
     `kubectl rollout status ${resource.kind}/${resource.name}`
   );
+}
+
+function runJobWaitComplete(args, resource) {
+  runCommand(
+    args.kubectl,
+    [
+      ...kubectlPrefixArgs(args),
+      'wait',
+      '--for=condition=complete',
+      `${resource.kind}/${resource.name}`,
+      '--namespace',
+      args.namespace,
+      '--timeout',
+      args.timeout
+    ],
+    `kubectl wait ${resource.kind}/${resource.name}`
+  );
+}
+
+function waitForResourceReadiness(args, resource) {
+  if (ROLLOUT_STATUS_WORKLOAD_KINDS.has(resource.kind)) {
+    runRolloutStatus(args, resource);
+    return;
+  }
+
+  if (resource.kind === 'Job') {
+    runJobWaitComplete(args, resource);
+    return;
+  }
+
+  fail(`rollout supports only Deployment, StatefulSet, DaemonSet, and Job workloads; found ${resource.kind || 'unknown'}`);
 }
 
 function parseKubectlJson(stdout, label) {
@@ -863,7 +895,7 @@ async function main() {
 
   for (const workload of workloads) {
     const resource = workload.resource_ref;
-    runRolloutStatus(args, resource);
+    waitForResourceReadiness(args, resource);
     const liveResource = runKubectlGetResource(args, resource);
     const selector = selectorFromResource(liveResource, resource);
     const livePodsJson = runKubectlGetPods(args, selector);
@@ -890,7 +922,7 @@ async function main() {
     })
   );
 
-  console.log('PASS: Kubernetes rollout status and live image digests accepted rendered manifests');
+  console.log('PASS: Kubernetes rollout status/Job completion and live image digests accepted rendered manifests');
 }
 
 main().catch((error) => {

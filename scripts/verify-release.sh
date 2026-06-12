@@ -77,7 +77,7 @@ Mode status:
   --substrate-routability checks only existing Kubernetes / kit-installed / online substrate endpoint routability through an operator pod-network probe; it is not substrate installation, deploy, package, or release readiness.
   --substrate-install installs only namespace-scoped kit substrate resources from a validated JSON resource list and writes substrate install report/truth; server-dry-run is diagnostic only and apply report/truth are producer evidence, not release readiness.
   --apply runs Kubernetes apply-only validation or confirmed apply only; it is not release readiness.
-  --rollout checks Kubernetes rollout status and live image digests only; it is not release readiness.
+  --rollout checks Kubernetes rollout status or Job completion and live image digests only; it is not release readiness.
   --smoke checks one route status after a bound rollout report only; it is not release readiness.
   --online-deployment-gate runs the online focused chain in order only for existing Kubernetes external-declared online and kit-installed online targets; kit-installed online requires --substrate-pack-manifest and --routability-probe. Optional evidence output is a validated focused envelope for external-declared online or kit-installed online, not release readiness.
   --online-deployment-gate evidence args are accepted only with --mode apply.

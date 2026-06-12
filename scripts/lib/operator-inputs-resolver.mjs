@@ -13,6 +13,8 @@ import {
 } from './substrate-pack-manifest-validation.mjs';
 import {
   assertNoUnsafeSubstratePayload,
+  validateAfscpDefaultVolumeRenderValues,
+  validateEndpointSliceRenderValues,
   validateSubstrateConnectionTruth,
   validateTargetPrerequisitesTruth
 } from './substrate-truth-validation.mjs';
@@ -2020,6 +2022,8 @@ async function validateDoctorRenderValues(refs) {
   const input = await readJson(refs.render_values.absolute_path, 'render_values');
   requirePlainObject(input.value, 'render_values');
   assertNoStaticInputForbiddenContent(input.value, 'render_values');
+  validateAfscpDefaultVolumeRenderValues(input.value, { label: 'render_values' });
+  validateEndpointSliceRenderValues(input.value, { label: 'render_values' });
 }
 
 async function validateDoctorUseExistingTruth({ refs, targetProfile }) {

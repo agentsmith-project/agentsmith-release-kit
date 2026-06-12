@@ -40,7 +40,12 @@ JSON
 JSON
   cat >"$package_dir/render-values.json" <<'JSON'
 {
-  "namespace": "agentsmith"
+  "namespace": "agentsmith",
+  "AFSCP_DEFAULT_VOLUME_ID": "vol_agentsmith_default",
+  "AFSCP_DEFAULT_VOLUME_BACKEND": "juicefs",
+  "AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS": "shared",
+  "AFSCP_DEFAULT_VOLUME_STATUS": "active",
+  "AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON": "{\"webdav_export\":true,\"workload_mount\":true,\"jvs_external_control_root\":true,\"directory_quota\":false,\"filtered_mount\":false,\"csi_driver\":\"csi.juicefs.com\",\"storage_class\":\"static-juicefs-rwx\",\"permission_model\":\"payload-root-only\"}"
 }
 JSON
   cat >"$package_dir/substrate-truth.json" <<'JSON'
@@ -1840,6 +1845,123 @@ grep -Fq -- '- render_values:' "$TMP_DIR/doctor-static-invalid-facade.out" ||
 [[ ! -e "$doctor_static_invalid_dir/.release-kit-internal/operator-inputs-plan.json" ]] ||
   fail "operator-inputs doctor static checks must not write an intake plan"
 pass "operator-inputs doctor fails existing refs with static package blockers without writing a plan"
+
+expect_doctor_endpoint_render_fail() {
+  local label="$1"
+  local address_type="$2"
+  local host="$3"
+  local expected_reason="$4"
+  local doctor_static_endpoint_dir="$TMP_DIR/doctor-static-invalid-$label-online"
+  local report_path="$TMP_DIR/doctor-static-$label.json"
+
+  copy_valid_package "$example_online_package" "$doctor_static_endpoint_dir"
+  "$NODE_BIN" --input-type=module - \
+    "$doctor_static_endpoint_dir/render-values.example.json" \
+    "$address_type" \
+    "$host" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath, addressType, host] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.SUBSTRATE_POSTGRES_ADDRESS_TYPE = addressType;
+renderValues.SUBSTRATE_POSTGRES_HOST = host;
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+  if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+    --operator-inputs "$doctor_static_endpoint_dir" \
+    --doctor \
+    --stdout >"$report_path"; then
+    fail "operator-inputs doctor should fail when render values contain invalid EndpointSlice address: $label"
+  fi
+  "$NODE_BIN" --input-type=module - "$report_path" "$expected_reason" <<'NODE'
+import fs from 'node:fs';
+
+const [reportPath, expectedReason] = process.argv.slice(2);
+const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+if (report.status !== 'fail' || report.readiness !== false || report.formal_verdict !== 'not_issued') {
+  throw new Error('doctor EndpointSlice blocker must fail without readiness or formal verdict');
+}
+const renderIssue = report.static_issues.find((issue) => issue.field === 'render_values');
+if (!renderIssue || !String(renderIssue.reason).includes(expectedReason)) {
+  throw new Error(`doctor EndpointSlice blocker must explain render_values ${expectedReason}`);
+}
+NODE
+  pass "operator-inputs doctor rejects render_values invalid EndpointSlice address: $label"
+}
+
+expect_doctor_endpoint_render_fail \
+  single-label-endpointslice-fqdn \
+  FQDN \
+  mbos-postgres \
+  'EndpointSlice FQDN'
+expect_doctor_endpoint_render_fail \
+  url-endpointslice-fqdn \
+  FQDN \
+  https://postgres.ops.example.com/path \
+  'EndpointSlice address literal'
+expect_doctor_endpoint_render_fail \
+  host-port-endpointslice-fqdn \
+  FQDN \
+  postgres.ops.example.com:5432 \
+  'EndpointSlice address literal'
+
+doctor_static_afscp_volume_dir="$TMP_DIR/doctor-static-invalid-afscp-volume-online"
+copy_valid_package "$example_online_package" "$doctor_static_afscp_volume_dir"
+"$NODE_BIN" --input-type=module - "$doctor_static_afscp_volume_dir/render-values.example.json" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.AFSCP_DEFAULT_VOLUME_ID = 'default';
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_afscp_volume_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-afscp-volume.json"; then
+  fail "operator-inputs doctor should fail when render values contain invalid AFSCP default volume id"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-afscp-volume.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.status !== 'fail' || report.readiness !== false || report.formal_verdict !== 'not_issued') {
+  throw new Error('doctor AFSCP default volume blocker must fail without readiness or formal verdict');
+}
+const renderIssue = report.static_issues.find((issue) => issue.field === 'render_values');
+if (!renderIssue || !/AFSCP_DEFAULT_VOLUME_ID/.test(renderIssue.reason) || !/vol_<suffix>/.test(renderIssue.reason)) {
+  throw new Error('doctor AFSCP default volume blocker must explain invalid render_values volume id');
+}
+NODE
+pass "operator-inputs doctor rejects invalid AFSCP default volume id"
+
+doctor_static_afscp_volume_status_dir="$TMP_DIR/doctor-static-invalid-afscp-volume-status-online"
+copy_valid_package "$example_online_package" "$doctor_static_afscp_volume_status_dir"
+"$NODE_BIN" --input-type=module - "$doctor_static_afscp_volume_status_dir/render-values.example.json" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.AFSCP_DEFAULT_VOLUME_STATUS = 'ready';
+renderValues.AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS = 'workspace';
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_afscp_volume_status_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-afscp-volume-status.json"; then
+  fail "operator-inputs doctor should fail when render values contain legacy AFSCP default volume status/isolation"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-afscp-volume-status.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const renderIssue = report.static_issues.find((issue) => issue.field === 'render_values');
+if (!renderIssue || !/AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS/.test(renderIssue.reason) || !/shared/.test(renderIssue.reason)) {
+  throw new Error('doctor AFSCP default volume blocker must explain canonical shared isolation');
+}
+NODE
+pass "operator-inputs doctor rejects legacy AFSCP default volume status/isolation"
 
 doctor_static_schema_dir="$TMP_DIR/doctor-static-invalid-target-prerequisites"
 copy_valid_package "$example_online_package" "$doctor_static_schema_dir"

@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 import {
   DISTRIBUTION_VALUES,
   SUBSTRATE_SOURCE_VALUES,
@@ -67,6 +69,43 @@ const REACHABILITY_STATUS_VALUES = new Set([
 const VECTOR_STATUS_VALUES = new Set(['installed']);
 const REGISTRY_AUTH_MODE_VALUES = new Set(['secret', 'none']);
 const ENDPOINT_FIELD_NAMES = ['endpoint', 'host', 'url', 'issuer', 'issuer_url'];
+const ENDPOINT_SLICE_ADDRESS_TYPES = new Set(['IPv4', 'IPv6', 'FQDN']);
+const ENDPOINT_SLICE_RENDER_BINDINGS = [
+  ['SUBSTRATE_POSTGRES_ADDRESS_TYPE', 'SUBSTRATE_POSTGRES_HOST'],
+  ['SUBSTRATE_MONGODB_ADDRESS_TYPE', 'SUBSTRATE_MONGODB_HOST'],
+  ['SUBSTRATE_REDIS_ADDRESS_TYPE', 'SUBSTRATE_REDIS_HOST'],
+  ['SUBSTRATE_MINIO_ADDRESS_TYPE', 'SUBSTRATE_MINIO_HOST'],
+  ['SUBSTRATE_KEYCLOAK_ADDRESS_TYPE', 'SUBSTRATE_KEYCLOAK_HOST']
+];
+const ENDPOINT_SLICE_ADDRESS_LITERAL_MESSAGE =
+  'must be an EndpointSlice address literal without scheme, path, port, or userinfo';
+const DNS_LABEL_RE = /^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/i;
+const AFSCP_DEFAULT_VOLUME_RENDER_KEYS = [
+  'AFSCP_DEFAULT_VOLUME_ID',
+  'AFSCP_DEFAULT_VOLUME_BACKEND',
+  'AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS',
+  'AFSCP_DEFAULT_VOLUME_STATUS',
+  'AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON'
+];
+const AFSCP_VOLUME_ID_RE = /^vol_[A-Za-z0-9][A-Za-z0-9_-]{1,127}$/;
+const AFSCP_DEFAULT_VOLUME_EXPECTED_VALUES = new Map([
+  ['AFSCP_DEFAULT_VOLUME_BACKEND', 'juicefs'],
+  ['AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS', 'shared'],
+  ['AFSCP_DEFAULT_VOLUME_STATUS', 'active']
+]);
+const AFSCP_DEFAULT_VOLUME_REQUIRED_CAPABILITIES = new Map([
+  ['webdav_export', true],
+  ['workload_mount', true],
+  ['jvs_external_control_root', true],
+  ['directory_quota', false],
+  ['filtered_mount', false],
+  ['csi_driver', 'csi.juicefs.com'],
+  ['storage_class', 'static-juicefs-rwx'],
+  ['permission_model', 'payload-root-only']
+]);
+const AFSCP_DEFAULT_VOLUME_CAPABILITY_FIELDS = new Set(
+  AFSCP_DEFAULT_VOLUME_REQUIRED_CAPABILITIES.keys()
+);
 
 class ValidationError extends Error {
   constructor(message) {
@@ -148,6 +187,127 @@ function endpointHostnameCandidate(text) {
   }
 
   return trimmed;
+}
+
+function endpointSliceAddressTypeForLiteral(literal, label) {
+  const ipVersion = isIP(literal);
+  if (ipVersion === 4) {
+    return 'IPv4';
+  }
+  if (ipVersion === 6) {
+    return 'IPv6';
+  }
+  if (literal.includes(':')) {
+    fail(`${label} ${ENDPOINT_SLICE_ADDRESS_LITERAL_MESSAGE}`);
+  }
+  assertEndpointSliceFqdn(literal, label);
+  return 'FQDN';
+}
+
+function assertEndpointSliceFqdn(hostname, label) {
+  const normalized = hostname.toLowerCase().replace(/\.+$/, '');
+  const labels = normalized.split('.');
+  if (
+    labels.length < 2 ||
+    labels.some((part) => !DNS_LABEL_RE.test(part))
+  ) {
+    fail(`${label} must be an IPv4/IPv6 address or an EndpointSlice FQDN with at least two DNS labels`);
+  }
+}
+
+function requireEndpointSliceAddressLiteral(value, label) {
+  const text = requireString(value, label);
+  const literal = text.trim();
+  if (
+    literal !== text ||
+    URI_SCHEME_RE.test(literal) ||
+    /[/?#@\[\]\s]/.test(literal)
+  ) {
+    fail(`${label} ${ENDPOINT_SLICE_ADDRESS_LITERAL_MESSAGE}`);
+  }
+  return literal;
+}
+
+function assertEndpointSliceAddressLiteral(value, label, expectedAddressType) {
+  const literal = requireEndpointSliceAddressLiteral(value, label);
+  const actualAddressType = endpointSliceAddressTypeForLiteral(literal, label);
+  if (expectedAddressType && actualAddressType !== expectedAddressType) {
+    fail(`${label} must match EndpointSlice addressType ${expectedAddressType}`);
+  }
+}
+
+export function validateEndpointSliceRenderValues(value, { label = 'render_values' } = {}) {
+  const renderValues = requireObject(value, label);
+  for (const [addressTypeKey, hostKey] of ENDPOINT_SLICE_RENDER_BINDINGS) {
+    const hasAddressType = Object.prototype.hasOwnProperty.call(renderValues, addressTypeKey);
+    const hasHost = Object.prototype.hasOwnProperty.call(renderValues, hostKey);
+    if (!hasAddressType && !hasHost) {
+      continue;
+    }
+    if (!hasAddressType || !hasHost) {
+      fail(`${label}.${addressTypeKey} and ${label}.${hostKey} must be provided together`);
+    }
+    const addressType = requireString(renderValues[addressTypeKey], `${label}.${addressTypeKey}`);
+    if (!ENDPOINT_SLICE_ADDRESS_TYPES.has(addressType)) {
+      fail(`${label}.${addressTypeKey} must be IPv4, IPv6, or FQDN`);
+    }
+    assertEndpointSliceAddressLiteral(renderValues[hostKey], `${label}.${hostKey}`, addressType);
+  }
+}
+
+export function validateAfscpDefaultVolumeRenderValues(value, { label = 'render_values' } = {}) {
+  const renderValues = requireObject(value, label);
+  const hasDefaultVolumeKey = AFSCP_DEFAULT_VOLUME_RENDER_KEYS.some((key) =>
+    Object.prototype.hasOwnProperty.call(renderValues, key)
+  );
+  if (!hasDefaultVolumeKey) {
+    return;
+  }
+
+  for (const key of AFSCP_DEFAULT_VOLUME_RENDER_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(renderValues, key)) {
+      fail(`${label}.${key} is required when AFSCP default volume render values are provided`);
+    }
+  }
+
+  const volumeId = requireString(
+    renderValues.AFSCP_DEFAULT_VOLUME_ID,
+    `${label}.AFSCP_DEFAULT_VOLUME_ID`
+  );
+  if (!AFSCP_VOLUME_ID_RE.test(volumeId)) {
+    fail(`${label}.AFSCP_DEFAULT_VOLUME_ID must match AFSCP volume id pattern vol_<suffix>`);
+  }
+
+  for (const [key, expected] of AFSCP_DEFAULT_VOLUME_EXPECTED_VALUES) {
+    const actual = requireString(renderValues[key], `${label}.${key}`);
+    if (actual !== expected) {
+      fail(`${label}.${key} must be ${expected}`);
+    }
+  }
+
+  const rawCapabilities = requireString(
+    renderValues.AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON,
+    `${label}.AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON`
+  );
+  let capabilities;
+  try {
+    capabilities = JSON.parse(rawCapabilities);
+  } catch {
+    fail(`${label}.AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON must be valid JSON`);
+  }
+  if (!capabilities || typeof capabilities !== 'object' || Array.isArray(capabilities)) {
+    fail(`${label}.AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON must be a JSON object`);
+  }
+  for (const key of Object.keys(capabilities)) {
+    if (!AFSCP_DEFAULT_VOLUME_CAPABILITY_FIELDS.has(key)) {
+      fail(`${label}.AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON.${key} is not allowed`);
+    }
+  }
+  for (const [key, expected] of AFSCP_DEFAULT_VOLUME_REQUIRED_CAPABILITIES) {
+    if (capabilities[key] !== expected) {
+      fail(`${label}.AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON.${key} must be ${JSON.stringify(expected)}`);
+    }
+  }
 }
 
 function isSecretRefValue(value) {
@@ -584,6 +744,7 @@ function assertServices(truth, label) {
     ['credential_secret_ref'],
     ['host']
   );
+
   assertBaseService(
     services.redis,
     `${label}.services.redis`,

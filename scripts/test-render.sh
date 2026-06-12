@@ -120,15 +120,72 @@ NODE
 
 write_render_values() {
   local output="$1"
+  local mutation="${2:-valid}"
 
   cat >"$output" <<'JSON'
 {
   "namespace": "agentsmith",
   "replicas": 2,
   "release_channel": "stable",
-  "unsafe_payload": "not-real-credential-value"
+  "unsafe_payload": "not-real-credential-value",
+  "AFSCP_DEFAULT_VOLUME_ID": "vol_agentsmith_default",
+  "AFSCP_DEFAULT_VOLUME_BACKEND": "juicefs",
+  "AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS": "shared",
+  "AFSCP_DEFAULT_VOLUME_STATUS": "active",
+  "AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON": "{\"webdav_export\":true,\"workload_mount\":true,\"jvs_external_control_root\":true,\"directory_quota\":false,\"filtered_mount\":false,\"csi_driver\":\"csi.juicefs.com\",\"storage_class\":\"static-juicefs-rwx\",\"permission_model\":\"payload-root-only\"}"
 }
 JSON
+
+  "$NODE_BIN" --input-type=module - "$output" "$mutation" <<'NODE'
+import fs from 'node:fs';
+
+const [output, mutation] = process.argv.slice(2);
+const values = JSON.parse(fs.readFileSync(output, 'utf8'));
+
+switch (mutation) {
+  case 'valid':
+    break;
+  case 'single_label_endpointslice_fqdn':
+    values.SUBSTRATE_POSTGRES_ADDRESS_TYPE = 'FQDN';
+    values.SUBSTRATE_POSTGRES_HOST = 'mbos-postgres';
+    break;
+  case 'url_endpointslice_fqdn':
+    values.SUBSTRATE_POSTGRES_ADDRESS_TYPE = 'FQDN';
+    values.SUBSTRATE_POSTGRES_HOST = 'https://postgres.ops.example.com/path';
+    break;
+  case 'host_port_endpointslice_fqdn':
+    values.SUBSTRATE_POSTGRES_ADDRESS_TYPE = 'FQDN';
+    values.SUBSTRATE_POSTGRES_HOST = 'postgres.ops.example.com:5432';
+    break;
+  case 'host_port_endpointslice_ipv4':
+    values.SUBSTRATE_POSTGRES_ADDRESS_TYPE = 'IPv4';
+    values.SUBSTRATE_POSTGRES_HOST = '192.0.2.10:5432';
+    break;
+  case 'afscp_default_volume_id_default':
+    values.AFSCP_DEFAULT_VOLUME_ID = 'default';
+    break;
+  case 'afscp_default_volume_ready_workspace':
+    values.AFSCP_DEFAULT_VOLUME_STATUS = 'ready';
+    values.AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS = 'workspace';
+    break;
+  case 'afscp_default_volume_bad_capabilities':
+    values.AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON = JSON.stringify({
+      webdav_export: true,
+      workload_mount: true,
+      jvs_external_control_root: false,
+      directory_quota: false,
+      filtered_mount: false,
+      csi_driver: 'csi.juicefs.com',
+      storage_class: 'static-juicefs-rwx',
+      permission_model: 'payload-root-only'
+    });
+    break;
+  default:
+    throw new Error(`unknown render values mutation: ${mutation}`);
+}
+
+fs.writeFileSync(output, `${JSON.stringify(values, null, 2)}\n`);
+NODE
 }
 
 create_render_archive() {
@@ -983,6 +1040,104 @@ assert_rendered_image_adoption \
   "$VALID_IMAGE_MAP" \
   source
 pass "valid render accepted with focused non-readiness report"
+
+SINGLE_LABEL_ENDPOINTSLICE_VALUES="$TMP_DIR/render-values.single-label-endpointslice-fqdn.json"
+write_render_values "$SINGLE_LABEL_ENDPOINTSLICE_VALUES" single_label_endpointslice_fqdn
+expect_fail_case \
+  single-label-endpointslice-fqdn \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$SINGLE_LABEL_ENDPOINTSLICE_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.SUBSTRATE_POSTGRES_HOST must be an IPv4/IPv6 address or an EndpointSlice FQDN with at least two DNS labels"
+
+URL_ENDPOINTSLICE_VALUES="$TMP_DIR/render-values.url-endpointslice-fqdn.json"
+write_render_values "$URL_ENDPOINTSLICE_VALUES" url_endpointslice_fqdn
+expect_fail_case \
+  url-endpointslice-fqdn \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$URL_ENDPOINTSLICE_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.SUBSTRATE_POSTGRES_HOST must be an EndpointSlice address literal without scheme, path, port, or userinfo"
+
+HOST_PORT_ENDPOINTSLICE_FQDN_VALUES="$TMP_DIR/render-values.host-port-endpointslice-fqdn.json"
+write_render_values "$HOST_PORT_ENDPOINTSLICE_FQDN_VALUES" host_port_endpointslice_fqdn
+expect_fail_case \
+  host-port-endpointslice-fqdn \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$HOST_PORT_ENDPOINTSLICE_FQDN_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.SUBSTRATE_POSTGRES_HOST must be an EndpointSlice address literal without scheme, path, port, or userinfo"
+
+HOST_PORT_ENDPOINTSLICE_IPV4_VALUES="$TMP_DIR/render-values.host-port-endpointslice-ipv4.json"
+write_render_values "$HOST_PORT_ENDPOINTSLICE_IPV4_VALUES" host_port_endpointslice_ipv4
+expect_fail_case \
+  host-port-endpointslice-ipv4 \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$HOST_PORT_ENDPOINTSLICE_IPV4_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.SUBSTRATE_POSTGRES_HOST must be an EndpointSlice address literal without scheme, path, port, or userinfo"
+
+AFSCP_DEFAULT_VOLUME_ID_DEFAULT_VALUES="$TMP_DIR/render-values.afscp-default-volume-id-default.json"
+write_render_values "$AFSCP_DEFAULT_VOLUME_ID_DEFAULT_VALUES" afscp_default_volume_id_default
+expect_fail_case \
+  afscp-default-volume-id-default \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$AFSCP_DEFAULT_VOLUME_ID_DEFAULT_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.AFSCP_DEFAULT_VOLUME_ID must match AFSCP volume id pattern vol_<suffix>"
+
+AFSCP_DEFAULT_VOLUME_READY_WORKSPACE_VALUES="$TMP_DIR/render-values.afscp-default-volume-ready-workspace.json"
+write_render_values "$AFSCP_DEFAULT_VOLUME_READY_WORKSPACE_VALUES" afscp_default_volume_ready_workspace
+expect_fail_case \
+  afscp-default-volume-ready-workspace \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$AFSCP_DEFAULT_VOLUME_READY_WORKSPACE_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS must be shared"
+
+AFSCP_DEFAULT_VOLUME_BAD_CAPABILITIES_VALUES="$TMP_DIR/render-values.afscp-default-volume-bad-capabilities.json"
+write_render_values "$AFSCP_DEFAULT_VOLUME_BAD_CAPABILITIES_VALUES" afscp_default_volume_bad_capabilities
+expect_fail_case \
+  afscp-default-volume-bad-capabilities \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$AFSCP_DEFAULT_VOLUME_BAD_CAPABILITIES_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.AFSCP_DEFAULT_VOLUME_CAPABILITIES_JSON.jvs_external_control_root must be true"
 
 STALE_REQUIRED_IDS_CONTRACT="$TMP_DIR/release-contract.stale-six-image-required-image-ids.json"
 STALE_REQUIRED_IDS_PACKAGE="$TMP_DIR/deploy-template-package.stale-six-image-required-image-ids.json"

@@ -70,6 +70,35 @@ if (mutation === 'job') {
   process.exit(0);
 }
 
+if (mutation === 'cronjob') {
+  const cronJob = {
+    apiVersion: 'batch/v1',
+    kind: 'CronJob',
+    metadata: {
+      name: 'agentsmith-api-migration-schedule'
+    },
+    spec: {
+      schedule: '0 0 * * *',
+      jobTemplate: {
+        spec: {
+          template: {
+            spec: {
+              containers: [
+                {
+                  name: 'api',
+                  image: appImage
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  };
+  fs.writeFileSync(path.join(renderedManifests, 'cronjob.json'), `${JSON.stringify(cronJob, null, 2)}\n`);
+  process.exit(0);
+}
+
 fs.writeFileSync(
   path.join(renderedManifests, 'deployment.yaml'),
   `apiVersion: apps/v1
@@ -106,7 +135,7 @@ printf '%s\\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "rollout" || "$arg" == "get" ]]; then
+  if [[ "$arg" == "rollout" || "$arg" == "wait" || "$arg" == "get" ]]; then
     command_name="$arg"
     break
   fi
@@ -118,6 +147,15 @@ if [[ "$command_name" == "rollout" ]]; then
     exit 1
   fi
   echo "deployment rolled out token=plain-secret-value"
+  exit 0
+fi
+
+if [[ "$command_name" == "wait" ]]; then
+  if [[ "\${FAKE_KUBECTL_WAIT_MODE:-pass}" == "fail" ]]; then
+    echo "job wait timed out token=plain-secret-value" >&2
+    exit 1
+  fi
+  echo "job complete token=plain-secret-value"
   exit 0
 fi
 
@@ -142,8 +180,16 @@ JSON
     exit 0
   fi
 
+  if [[ "$get_target" == "Job/agentsmith-api-migration" ]]; then
+    cat <<'JSON'
+{"spec":{"selector":{"matchLabels":{"batch.kubernetes.io/job-name":"agentsmith-api-migration","controller-uid":"job-uid-123"}}}}
+JSON
+    exit 0
+  fi
+
   if [[ "$get_target" == "pods" ]]; then
     expected_selector="app.kubernetes.io/name=agentsmith-web,app.kubernetes.io/part=web"
+    expected_job_selector="batch.kubernetes.io/job-name=agentsmith-api-migration,controller-uid=job-uid-123"
     if [[ "\${FAKE_KUBECTL_PODS_MODE:-full}" == "stale_unrelated_digest" ]]; then
       if [[ "$selector" == "$expected_selector" ]]; then
         cat <<'JSON'
@@ -167,6 +213,12 @@ JSON
     if [[ "\${FAKE_KUBECTL_PODS_MODE:-full}" == "rewritten_ref_same_digest" ]]; then
     cat <<'JSON'
 {"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"runtime.registry.example/rewritten/agentsmith-app:runtime@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://runtime.registry.example/rewritten/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}],"containerStatuses":[{"name":"web","image":"runtime.registry.example/rewritten/agentsmith-app:runtime@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":""}]}}]}
+JSON
+      exit 0
+    fi
+    if [[ "$selector" == "$expected_job_selector" ]]; then
+    cat <<'JSON'
+{"items":[{"metadata":{"name":"agentsmith-api-migration-abc"},"status":{"containerStatuses":[{"name":"api","image":"ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111","imageID":"docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111"}]}}]}
 JSON
       exit 0
     fi
@@ -240,6 +292,7 @@ run_rollout_raw() {
 
   FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
   FAKE_KUBECTL_ROLLOUT_MODE="${FAKE_KUBECTL_ROLLOUT_MODE:-pass}" \
+  FAKE_KUBECTL_WAIT_MODE="${FAKE_KUBECTL_WAIT_MODE:-pass}" \
   FAKE_KUBECTL_PODS_MODE="${FAKE_KUBECTL_PODS_MODE:-full}" \
     "${command[@]}"
 }
@@ -265,6 +318,7 @@ run_rollout_from_release_kit() {
 
   FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
   FAKE_KUBECTL_ROLLOUT_MODE="${FAKE_KUBECTL_ROLLOUT_MODE:-pass}" \
+  FAKE_KUBECTL_WAIT_MODE="${FAKE_KUBECTL_WAIT_MODE:-pass}" \
   FAKE_KUBECTL_PODS_MODE="${FAKE_KUBECTL_PODS_MODE:-full}" \
     "${command[@]}"
 }
@@ -272,11 +326,26 @@ run_rollout_from_release_kit() {
 assert_rollout_report() {
   local report_file="$1"
   local expected_profile="${2:-$TARGET_PROFILE}"
+  local expected_kind="${3:-Deployment}"
+  local expected_name="${4:-agentsmith-web}"
+  local expected_selector="${5:-app.kubernetes.io/name=agentsmith-web,app.kubernetes.io/part=web}"
+  local expected_status_entries="${6:-2}"
+  local expected_image_id_count="${7:-1}"
+  local expected_image_field_fallback_count="${8:-1}"
 
-  "$NODE_BIN" --input-type=module - "$report_file" "$expected_profile" <<'NODE'
+  "$NODE_BIN" --input-type=module - "$report_file" "$expected_profile" "$expected_kind" "$expected_name" "$expected_selector" "$expected_status_entries" "$expected_image_id_count" "$expected_image_field_fallback_count" <<'NODE'
 import fs from 'node:fs';
 
-const [reportFile, expectedProfile] = process.argv.slice(2);
+const [
+  reportFile,
+  expectedProfile,
+  expectedKind,
+  expectedName,
+  expectedSelector,
+  expectedStatusEntries,
+  expectedImageIdCount,
+  expectedImageFieldFallbackCount
+] = process.argv.slice(2);
 const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
 const serialized = JSON.stringify(report);
 
@@ -307,10 +376,10 @@ if (!report.release_contract?.input_sha256?.startsWith('sha256:')) {
 if (!Array.isArray(report.rollout_resource_refs) || report.rollout_resource_refs.length !== 1) {
   throw new Error('rollout report must include one rollout resource ref');
 }
-if (report.rollout_resource_refs[0].kind !== 'Deployment' || report.rollout_resource_refs[0].name !== 'agentsmith-web') {
-  throw new Error('rollout resource ref is not the fixture deployment');
+if (report.rollout_resource_refs[0].kind !== expectedKind || report.rollout_resource_refs[0].name !== expectedName) {
+  throw new Error('rollout resource ref is not the expected fixture resource');
 }
-if (report.rollout_resource_refs[0].selector !== 'app.kubernetes.io/name=agentsmith-web,app.kubernetes.io/part=web') {
+if (report.rollout_resource_refs[0].selector !== expectedSelector) {
   throw new Error(`unexpected rollout selector: ${report.rollout_resource_refs[0].selector}`);
 }
 if (!Array.isArray(report.expected_image_digests) || report.expected_image_digests.length !== 1) {
@@ -325,10 +394,14 @@ if ('observed_live_image_ids_summary' in report) {
   throw new Error('rollout report must use observed_live_image_digest_summary');
 }
 const observed = report.observed_live_image_digest_summary;
-if (observed?.pods_count !== 1 || observed?.status_entries_count !== 2) {
+if (observed?.pods_count !== 1 || observed?.status_entries_count !== Number(expectedStatusEntries)) {
   throw new Error('live digest summary must include pod and status-entry counts');
 }
-if (observed.image_id_count !== 1 || observed.image_field_fallback_count !== 1 || observed.missing_digest_count !== 0) {
+if (
+  observed.image_id_count !== Number(expectedImageIdCount) ||
+  observed.image_field_fallback_count !== Number(expectedImageFieldFallbackCount) ||
+  observed.missing_digest_count !== 0
+) {
   throw new Error('live digest summary must include source breakdown');
 }
 if (!Array.isArray(observed.matched_expected_digests) || observed.matched_expected_digests.length !== 1) {
@@ -349,7 +422,7 @@ if ('release_verdict' in report || 'verdict' in report || 'deploy_readiness' in 
 if (/required_product_flows|product_flows|product_flow_results/.test(serialized)) {
   throw new Error('rollout report must not include AgentSmith product flow fields');
 }
-if (/plain-secret-value|token=|deployment rolled out|rollout failed/.test(serialized)) {
+if (/plain-secret-value|token=|deployment rolled out|rollout failed|job complete|job wait timed out/.test(serialized)) {
   throw new Error('rollout report leaked raw kubectl stdout or stderr');
 }
 if (/kubeconfig/i.test(serialized)) {
@@ -477,13 +550,43 @@ job_manifests="$TMP_DIR/manifests-job"
 job_output="$TMP_DIR/out-job"
 write_manifests "$job_manifests" job
 reset_kubectl_log
-if run_rollout "$job_manifests" "$job_output" "$TARGET_PROFILE" >"$TMP_DIR/job.out" 2>"$TMP_DIR/job.err"; then
-  cat "$TMP_DIR/job.out" >&2
-  cat "$TMP_DIR/job.err" >&2
+run_rollout "$job_manifests" "$job_output" "$TARGET_PROFILE" >/dev/null
+grep -q 'wait --for=condition=complete Job/agentsmith-api-migration --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" || fail "fake kubectl did not receive job wait complete call"
+grep -q 'get Job/agentsmith-api-migration --namespace agentsmith -o json' "$KUBECTL_LOG" || fail "fake kubectl did not receive job get call"
+grep -q 'get pods --namespace agentsmith --selector batch.kubernetes.io/job-name=agentsmith-api-migration,controller-uid=job-uid-123 -o json' "$KUBECTL_LOG" || fail "fake kubectl did not receive job selector-scoped get pods call"
+assert_rollout_report \
+  "$job_output/rollout-report.json" \
+  "$TARGET_PROFILE" \
+  "Job" \
+  "agentsmith-api-migration" \
+  "batch.kubernetes.io/job-name=agentsmith-api-migration,controller-uid=job-uid-123" \
+  1 \
+  1 \
+  0
+pass "job rollout waits for completion and checks selected pod digest"
+
+job_wait_fail_output="$TMP_DIR/out-job-wait-fail"
+reset_kubectl_log
+if FAKE_KUBECTL_WAIT_MODE=fail run_rollout "$job_manifests" "$job_wait_fail_output" "$TARGET_PROFILE" >"$TMP_DIR/job-wait-fail.out" 2>"$TMP_DIR/job-wait-fail.err"; then
+  cat "$TMP_DIR/job-wait-fail.out" >&2
+  cat "$TMP_DIR/job-wait-fail.err" >&2
+  fail "expected job wait failure to fail"
+fi
+grep -q 'wait --for=condition=complete Job/agentsmith-api-migration --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" || fail "fake kubectl did not receive job wait before failure"
+assert_no_report "$job_wait_fail_output/rollout-report.json"
+pass "job wait failure leaves no pass report"
+
+unsupported_manifests="$TMP_DIR/manifests-unsupported"
+unsupported_output="$TMP_DIR/out-unsupported"
+write_manifests "$unsupported_manifests" cronjob
+reset_kubectl_log
+if run_rollout "$unsupported_manifests" "$unsupported_output" "$TARGET_PROFILE" >"$TMP_DIR/unsupported.out" 2>"$TMP_DIR/unsupported.err"; then
+  cat "$TMP_DIR/unsupported.out" >&2
+  cat "$TMP_DIR/unsupported.err" >&2
   fail "expected unsupported workload kind to fail"
 fi
 assert_kubectl_not_called
-assert_no_report "$job_output/rollout-report.json"
+assert_no_report "$unsupported_output/rollout-report.json"
 pass "unsupported workload kind rejected before kubectl rollout"
 
 default_boundary_parent="$TMP_DIR/default-boundary"

@@ -325,7 +325,7 @@ create_archive() {
 JSON
 
   case "$mutation" in
-    valid)
+    valid|with_job)
       cat >"$package_dir/templates/workloads.yaml" <<'YAML'
 apiVersion: apps/v1
 kind: Deployment
@@ -354,6 +354,23 @@ spec:
             - name: POSTGRES_HOST
               value: ${{ substrate.services.postgresql.host }}
 YAML
+      if [[ "$mutation" == "with_job" ]]; then
+        cat >>"$package_dir/templates/workloads.yaml" <<'YAML'
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agentsmith-api-migration
+  namespace: ${{ values.namespace }}
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: api
+          image: ${{ images.agentsmith_app.image }}
+YAML
+      fi
       ;;
     unknown_variable)
       cat >"$package_dir/templates/workloads.yaml" <<'YAML'
@@ -526,7 +543,7 @@ printf '%s\\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "wait" || "$arg" == "get" ]]; then
     command_name="$arg"
     break
   fi
@@ -547,12 +564,21 @@ if [[ "$command_name" == "rollout" ]]; then
   exit 0
 fi
 
+if [[ "$command_name" == "wait" ]]; then
+  printf '%s\\n' "job.batch/agentsmith-api-migration condition met"
+  exit 0
+fi
+
 if [[ "$command_name" == "get" ]]; then
   get_target=""
+  selector=""
   previous=""
   for arg in "$@"; do
     if [[ "$previous" == "get" ]]; then
       get_target="$arg"
+    fi
+    if [[ "$previous" == "--selector" ]]; then
+      selector="$arg"
     fi
     previous="$arg"
   done
@@ -564,6 +590,13 @@ JSON
     exit 0
   fi
 
+  if [[ "$get_target" == "Job/agentsmith-api-migration" ]]; then
+    cat <<'JSON'
+{"spec":{"selector":{"matchLabels":{"batch.kubernetes.io/job-name":"agentsmith-api-migration","controller-uid":"job-uid-123"}}}}
+JSON
+    exit 0
+  fi
+
   if [[ "$get_target" == "pods" ]]; then
     live_image="\${FAKE_KUBECTL_LIVE_IMAGE:-ghcr.io/agentsmith-project/agentsmith-app:2026.05.23-p0@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
     live_image_id="\${FAKE_KUBECTL_LIVE_IMAGE_ID:-docker-pullable://ghcr.io/agentsmith-project/agentsmith-app@sha256:1111111111111111111111111111111111111111111111111111111111111111}"
@@ -571,6 +604,12 @@ JSON
     live_init_image_id="\${FAKE_KUBECTL_LIVE_INIT_IMAGE_ID:-$live_image_id}"
     live_container_image="\${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE:-$live_image}"
     live_container_image_id="\${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID:-$live_image_id}"
+    if [[ "$selector" == "batch.kubernetes.io/job-name=agentsmith-api-migration,controller-uid=job-uid-123" ]]; then
+      cat <<JSON
+{"items":[{"metadata":{"name":"agentsmith-api-migration-abc"},"status":{"containerStatuses":[{"name":"api","image":"$live_container_image","imageID":"$live_container_image_id"}]}}]}
+JSON
+      exit 0
+    fi
     cat <<JSON
 {"items":[{"metadata":{"name":"agentsmith-web-abc"},"status":{"initContainerStatuses":[{"name":"schema","image":"$live_init_image","imageID":"$live_init_image_id"}],"containerStatuses":[{"name":"web","image":"$live_container_image","imageID":"$live_container_image_id"}]}}]}
 JSON
@@ -1659,6 +1698,27 @@ grep -q 'get pods' "$KUBECTL_LOG" || fail "apply gate did not check live pods"
 [[ -f "$apply_output/smoke/smoke-report.json" ]] || fail "apply gate did not write smoke report"
 assert_gate_report "$apply_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout,smoke" operator-run-1002
 pass "apply mode runs rollout and optional smoke with non-readiness aggregate"
+
+with_job_archive="$TMP_DIR/valid-with-job.tgz"
+with_job_contract="$TMP_DIR/release-contract.with-job.json"
+with_job_package="$TMP_DIR/deploy-template-package.with-job.json"
+prepare_archive_case valid-with-job with_job "$with_job_archive" "$with_job_contract" "$with_job_package"
+apply_with_job_output="$TMP_DIR/out-apply-with-job"
+reset_kubectl_log
+before_apply_with_job="$(hit_count)"
+run_gate "$with_job_contract" "$with_job_package" "$with_job_archive" "$VALID_VALUES" "$VALID_TRUTH" "$apply_with_job_output" "$TARGET_PROFILE" \
+  --mode apply \
+  --confirm-apply "$TARGET_PROFILE" \
+  --operator-run-id operator-run-with-job \
+  --timeout 120s >/dev/null
+after_apply_with_job="$(hit_count)"
+[[ "$before_apply_with_job" == "$after_apply_with_job" ]] || fail "apply gate without smoke URL should not issue route/network requests"
+grep -q 'rollout status Deployment/agentsmith-web' "$KUBECTL_LOG" || fail "apply gate with job did not call deployment rollout"
+grep -q 'wait --for=condition=complete Job/agentsmith-api-migration --namespace agentsmith --timeout 120s' "$KUBECTL_LOG" || fail "apply gate with job did not wait for job completion"
+grep -q 'get Job/agentsmith-api-migration --namespace agentsmith -o json' "$KUBECTL_LOG" || fail "apply gate with job did not read live job selector"
+[[ -f "$apply_with_job_output/rollout/rollout-report.json" ]] || fail "apply gate with job did not write rollout report"
+assert_gate_report "$apply_with_job_output/online-deployment-gate-report.json" apply "inputs,target-preflight,template-package,render,render-check,apply,rollout" operator-run-with-job
+pass "apply mode accepts bootstrap Job completion inside rollout path"
 
 apply_evidence_output="$TMP_DIR/out-apply-evidence"
 apply_evidence_root="$TMP_DIR/evidence-apply"

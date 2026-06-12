@@ -313,11 +313,13 @@ diagnostic only. It consumes the release contract, an already-rendered manifest
 directory, explicit target profile
 `existing_kubernetes/<external_declared|kit_installed>/<online|airgap>`,
 namespace, and Kubernetes client options. It first runs the render/check guard,
-then accepts only Deployment, StatefulSet, and DaemonSet workloads, runs
-`kubectl rollout status`, reads `spec.selector.matchLabels` through
-`kubectl get <kind>/<name> -o json`, and checks live pod `imageID` or `image`
-digests only from `kubectl get pods --selector <selector> -o json` for that
-workload. It writes `rollout-report.json` with `schema:
+then accepts only Deployment, StatefulSet, DaemonSet, and Job workloads. It
+runs `kubectl rollout status` for Deployment, StatefulSet, and DaemonSet
+resources, waits for Job `condition=complete`, reads
+`spec.selector.matchLabels` through `kubectl get <kind>/<name> -o json`, and
+checks live pod `imageID` or `image` digests only from `kubectl get pods
+--selector <selector> -o json` for that workload. It writes
+`rollout-report.json` with `schema:
 agentsmith.kubernetes-rollout-report/v1`, `readiness: false`, and `scope:
 kubernetes_rollout_imageid_only`. The report uses
 `observed_live_image_digest_summary` and must not include AgentSmith

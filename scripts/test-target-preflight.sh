@@ -208,6 +208,9 @@ switch (mutation) {
   case 'localhost_endpoint':
     truth.services.postgresql.host = 'localhost';
     break;
+  case 'single_label_endpoint':
+    truth.services.postgresql.host = 'mbos-postgres';
+    break;
   case 'localhost_with_port_endpoint':
     truth.services.postgresql.host = 'localhost:5432';
     break;
@@ -591,6 +594,17 @@ write_prerequisites "$EXTERNAL_PREREQUISITES" "$EXTERNAL_PROFILE" valid
 run_target_preflight "$EXTERNAL_PROFILE" "$EXTERNAL_TRUTH" "$EXTERNAL_PREREQUISITES" "$EXTERNAL_OUT" >/dev/null
 assert_pass_report "$EXTERNAL_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
 pass "valid existing_kubernetes/external_declared/online truth accepted with focused non-readiness report"
+
+SINGLE_LABEL_ENDPOINT_TRUTH="$TMP_DIR/external-single-label-endpoint-valid.json"
+SINGLE_LABEL_ENDPOINT_OUT="$TMP_DIR/out-external-single-label-endpoint"
+write_truth "$SINGLE_LABEL_ENDPOINT_TRUTH" "$EXTERNAL_PROFILE" single_label_endpoint
+run_target_preflight \
+  "$EXTERNAL_PROFILE" \
+  "$SINGLE_LABEL_ENDPOINT_TRUTH" \
+  "$EXTERNAL_PREREQUISITES" \
+  "$SINGLE_LABEL_ENDPOINT_OUT" >/dev/null
+assert_pass_report "$SINGLE_LABEL_ENDPOINT_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
+pass "neutral substrate truth accepts single-label service endpoint"
 
 OMIT_AXES_TRUTH="$TMP_DIR/external-truth-omit-axes.json"
 OMIT_AXES_OUT="$TMP_DIR/out-external-omit-axes"
