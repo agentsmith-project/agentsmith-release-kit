@@ -932,6 +932,113 @@ if [[ "$command_name" == "version" ]]; then
 fi
 
 if [[ "$command_name" == "get" ]]; then
+  get_resource=""
+  get_name=""
+  get_namespace=""
+  output_format=""
+  saw_get=false
+  previous=""
+  for arg in "$@"; do
+    if [[ "$previous" == "--namespace" ]]; then
+      get_namespace="$arg"
+    fi
+    if [[ "$previous" == "-o" || "$previous" == "--output" ]]; then
+      output_format="$arg"
+    fi
+    case "$arg" in
+      --namespace=*)
+        get_namespace="\${arg#--namespace=}"
+        ;;
+      --output=*)
+        output_format="\${arg#--output=}"
+        ;;
+    esac
+    if [[ "$saw_get" == "true" ]]; then
+      if [[ -z "$get_resource" ]]; then
+        get_resource="$arg"
+        previous="$arg"
+        continue
+      fi
+      if [[ -z "$get_name" && "$arg" != -* ]]; then
+        get_name="$arg"
+      fi
+    fi
+    if [[ "$arg" == "get" ]]; then
+      saw_get=true
+    fi
+    previous="$arg"
+  done
+
+  if [[ "$get_resource" == "namespace" || "$get_resource" == "namespaces" ]]; then
+    namespace_mode="\${FAKE_KUBECTL_NAMESPACE_MODE:-exists}"
+    if [[ "$namespace_mode" == "missing" ]]; then
+      echo "Error from server (NotFound): namespaces \\"$get_name\\" not found" >&2
+      exit 1
+    fi
+    if [[ "$namespace_mode" == "unreadable" ]]; then
+      echo "Error from server (Forbidden): namespaces \\"$get_name\\" is forbidden" >&2
+      exit 1
+    fi
+    if [[ "$namespace_mode" == "invalid-json" ]]; then
+      echo "not json"
+      exit 0
+    fi
+    printf '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"%s"}}\\n' "$get_name"
+    exit 0
+  fi
+
+  if [[ "$get_resource" == "secret" || "$get_resource" == "secrets" ]]; then
+    if [[ -z "$get_name" || -z "$get_namespace" || "$output_format" != "json" ]]; then
+      echo "unexpected fake kubectl get secret args: $*" >&2
+      exit 2
+    fi
+    missing_secret="\${FAKE_KUBECTL_MISSING_SECRET:-}"
+    if [[ "$missing_secret" == "$get_namespace/$get_name" || "$missing_secret" == "$get_name" ]]; then
+      echo "Error from server (NotFound): secrets \\"$get_name\\" not found" >&2
+      exit 1
+    fi
+    node --input-type=module - "$get_namespace" "$get_name" <<'SECRET_NODE'
+const [namespace, name] = process.argv.slice(2);
+const value = 'dg==';
+const dataByName = new Map([
+  ['postgresql-credential', { username: value, password: value }],
+  ['postgresql-app', { username: value, password: value }],
+  ['postgresql-admin', { username: value, password: value }],
+  ['postgresql-ca', { 'ca.crt': value }],
+  ['postgresql-server-tls', { 'tls.crt': value, 'tls.key': value, 'ca.crt': value }],
+  ['mongodb-credential', { username: value, password: value }],
+  ['mongodb-app', { username: value, password: value }],
+  ['mongodb-ca', { 'ca.crt': value }],
+  ['mongodb-server-tls', { 'tls.pem': value, 'ca.crt': value }],
+  ['redis-credential', { password: value }],
+  ['redis-app', { password: value }],
+  ['redis-ca', { 'ca.crt': value }],
+  ['redis-server-tls', { 'tls.crt': value, 'tls.key': value, 'ca.crt': value }],
+  ['object-storage-credential', { access_key: value, secret_key: value }],
+  ['object-storage-app', { access_key: value, secret_key: value }],
+  ['object-storage-ca', { 'ca.crt': value }],
+  ['object-storage-server-tls', { 'public.crt': value, 'private.key': value }],
+  ['oidc-admin', { username: value, password: value }],
+  ['oidc-client', { client_secret: value }],
+  ['oidc-ca', { 'ca.crt': value }],
+  ['oidc-server-tls', { 'tls.crt': value, 'tls.key': value }]
+]);
+const data = dataByName.get(name);
+if (!data) {
+  process.stderr.write('unexpected fake kubectl secret name: ' + name + '\\n');
+  process.exit(2);
+}
+const emptyKey = process.env.FAKE_KUBECTL_EMPTY_SECRET_KEY || '';
+for (const key of Object.keys(data)) {
+  if (emptyKey === namespace + '/' + name + '/' + key || emptyKey === name + '/' + key) {
+    data[key] = '';
+  }
+}
+process.stdout.write(JSON.stringify({ data }) + '\\n');
+SECRET_NODE
+    exit 0
+  fi
+
   mode="\${FAKE_KUBECTL_GET_MODE:-not-found}"
   if [[ "$mode" == "not-found" ]]; then
     echo "Error from server (NotFound): resource not found" >&2
@@ -956,6 +1063,11 @@ if [[ "$command_name" == "get" ]]; then
 fi
 
 if [[ "$command_name" == "apply" ]]; then
+  if [[ "\${FAKE_KUBECTL_APPLY_MODE:-success}" == "fail" ]]; then
+    echo "fake kubectl apply stderr: substrate apply denied by apiserver client_secret=tail-client-secret-value" >&2
+    echo "fake kubectl apply stdout: no resources applied access_key=tail-access-key-value"
+    exit 42
+  fi
   resource_file=""
   previous=""
   for arg in "$@"; do
@@ -1030,7 +1142,12 @@ run_install() {
   local target_profile="${SUBSTRATE_INSTALL_TARGET_PROFILE:-$TARGET_PROFILE}"
   shift 2
 
-  FAKE_KUBECTL_LOG="$KUBECTL_LOG" FAKE_KUBECTL_GET_MODE="${FAKE_KUBECTL_GET_MODE:-not-found}" \
+  FAKE_KUBECTL_LOG="$KUBECTL_LOG" \
+    FAKE_KUBECTL_GET_MODE="${FAKE_KUBECTL_GET_MODE:-not-found}" \
+    FAKE_KUBECTL_NAMESPACE_MODE="${FAKE_KUBECTL_NAMESPACE_MODE:-exists}" \
+    FAKE_KUBECTL_APPLY_MODE="${FAKE_KUBECTL_APPLY_MODE:-success}" \
+    FAKE_KUBECTL_MISSING_SECRET="${FAKE_KUBECTL_MISSING_SECRET:-}" \
+    FAKE_KUBECTL_EMPTY_SECRET_KEY="${FAKE_KUBECTL_EMPTY_SECRET_KEY:-}" \
     bash "$ROOT_DIR/scripts/verify-release.sh" --substrate-install \
       --release-contract "$VALID_CONTRACT" \
       --deploy-template-package "$VALID_TEMPLATE" \
@@ -1110,6 +1227,30 @@ const prerequisites = {
 };
 
 fs.writeFileSync(output, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
+add_postgresql_server_tls_ref_to_install_fixture() {
+  local fixture_dir="$1"
+
+  "$NODE_BIN" --input-type=module - \
+    "$fixture_dir/substrate-install-inputs.json" \
+    "$fixture_dir/target-prerequisites.json" <<'NODE'
+import fs from 'node:fs';
+
+const [installInputsPath, prerequisitesPath] = process.argv.slice(2);
+const installInputs = JSON.parse(fs.readFileSync(installInputsPath, 'utf8'));
+const prerequisites = JSON.parse(fs.readFileSync(prerequisitesPath, 'utf8'));
+const ref = 'secretRef:release/postgresql-server-tls';
+
+installInputs.substrate_truth.services.postgresql.tls.server_secret_ref = ref;
+if (!prerequisites.substrate_secret_refs.includes(ref)) {
+  prerequisites.substrate_secret_refs.push(ref);
+  prerequisites.substrate_secret_refs.sort();
+}
+
+fs.writeFileSync(installInputsPath, `${JSON.stringify(installInputs, null, 2)}\n`);
+fs.writeFileSync(prerequisitesPath, `${JSON.stringify(prerequisites, null, 2)}\n`);
 NODE
 }
 
@@ -1764,6 +1905,25 @@ grep -Fq "not owned by agentsmith-release-kit" "$TMP_DIR/collision-installation-
 assert_kubectl_no_apply
 pass "existing resource installation_id mismatch is not overwrite-owned"
 
+missing_namespace_output="$TMP_DIR/out-missing-namespace"
+reset_kubectl_log
+if FAKE_KUBECTL_NAMESPACE_MODE=missing run_install "$valid_dir" "$missing_namespace_output" >"$TMP_DIR/missing-namespace.out" 2>&1; then
+  fail "missing target namespace should fail"
+fi
+grep -Fq "target namespace agentsmith does not exist or is not readable; create the namespace before install_substrates" "$TMP_DIR/missing-namespace.out" || \
+  fail "missing namespace failure message did not explain namespace prerequisite"
+grep -q '^get namespace agentsmith -o json$' "$KUBECTL_LOG" || \
+  fail "missing namespace preflight did not query target namespace"
+if grep -q '^get configmaps ' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "missing namespace should fail before collision guard"
+fi
+assert_kubectl_no_apply
+if [[ -f "$missing_namespace_output/substrate-install-report.json" ]]; then
+  fail "missing namespace failure must not write substrate install report"
+fi
+pass "missing target namespace fails before kubectl apply"
+
 missing_registry_dir="$TMP_DIR/missing-registry"
 write_fixture_set "$missing_registry_dir" missing_registry_proof
 reset_kubectl_log
@@ -1811,6 +1971,43 @@ grep -Eq '^apply .*--dry-run=server' "$KUBECTL_LOG" || \
 assert_install_report "$dry_run_output/substrate-install-report.json" "$dry_run_output/substrate-truth.json" server-dry-run
 pass "server-dry-run writes diagnostic substrate install report and truth"
 
+tls_server_dir="$TMP_DIR/tls-server-secret-preflight"
+write_fixture_set "$tls_server_dir" valid
+add_postgresql_server_tls_ref_to_install_fixture "$tls_server_dir"
+tls_server_dry_run_output="$TMP_DIR/out-tls-server-secret-dry-run"
+reset_kubectl_log
+FAKE_KUBECTL_MISSING_SECRET="release/postgresql-server-tls" \
+  run_install "$tls_server_dir" "$tls_server_dry_run_output" >/dev/null
+if grep -q '^get secret postgresql-server-tls ' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "server-dry-run should not require live substrate TLS Secrets"
+fi
+grep -Eq '^apply .*--dry-run=server' "$KUBECTL_LOG" || \
+  fail "server-dry-run with missing live TLS Secret did not reach server dry-run apply"
+assert_install_report "$tls_server_dry_run_output/substrate-install-report.json" "$tls_server_dry_run_output/substrate-truth.json" server-dry-run
+pass "server-dry-run does not require live substrate TLS Secrets"
+
+tls_server_missing_output="$TMP_DIR/out-tls-server-secret-missing"
+tls_server_install_digest="$(install_parameters_digest "$tls_server_dir/substrate-install-inputs.json")"
+reset_kubectl_log
+if FAKE_KUBECTL_MISSING_SECRET="release/postgresql-server-tls" \
+  run_install "$tls_server_dir" "$tls_server_missing_output" \
+    --mode apply \
+    --confirm-substrate-install "$TARGET_PROFILE" \
+    --confirm-install-parameters "$tls_server_install_digest" \
+    --operator-run-id operator-run-substrate-tls-secret-missing >"$TMP_DIR/tls-server-secret-missing.out" 2>&1; then
+  fail "missing substrate TLS Secret should fail apply-mode substrate install"
+fi
+grep -Fq 'required substrate Secret key missing: secretRef:release/postgresql-server-tls key ca.crt decoded_length=missing' "$TMP_DIR/tls-server-secret-missing.out" ||
+  fail "missing substrate TLS Secret failure must identify secretRef, key, and missing category"
+grep -q '^get secret postgresql-server-tls --namespace release -o json$' "$KUBECTL_LOG" ||
+  fail "apply-mode substrate install did not check live server TLS Secret"
+assert_kubectl_no_apply
+if [[ -f "$tls_server_missing_output/substrate-install-report.json" ]]; then
+  fail "missing substrate TLS Secret failure must not write substrate install report"
+fi
+pass "apply-mode substrate install rejects missing server TLS Secret before kubectl apply"
+
 operator_facing_dir="$TMP_DIR/operator-facing-inputs"
 write_fixture_set "$operator_facing_dir" operator_facing_install_inputs
 operator_facing_output="$TMP_DIR/out-operator-facing-inputs"
@@ -1844,11 +2041,171 @@ write_target_prerequisites_from_install_inputs \
 assert_resource_secret_refs_bound_to_target_prerequisites \
   "$materialized_minimal_dir/substrate-install-inputs.json" \
   "$materialized_minimal_dir/target-prerequisites.json"
+"$NODE_BIN" --input-type=module - "$materialized_minimal_dir/substrate-install-inputs.json" <<'NODE'
+import fs from 'node:fs';
+import { requiredSubstrateSecretKeyRefs } from './scripts/lib/substrate-truth-validation.mjs';
+
+const [installInputsPath] = process.argv.slice(2);
+const installInputs = JSON.parse(fs.readFileSync(installInputsPath, 'utf8'));
+const requirements = requiredSubstrateSecretKeyRefs(installInputs.substrate_truth);
+const keysByRef = new Map();
+for (const { ref, key } of requirements) {
+  if (!keysByRef.has(ref)) {
+    keysByRef.set(ref, []);
+  }
+  keysByRef.get(ref).push(key);
+}
+
+const expected = new Map([
+  ['secretRef:agentsmith/postgresql-ca', ['ca.crt']],
+  ['secretRef:agentsmith/postgresql-server-tls', ['ca.crt', 'tls.crt', 'tls.key']],
+  ['secretRef:agentsmith/mongodb-ca', ['ca.crt']],
+  ['secretRef:agentsmith/mongodb-server-tls', ['ca.crt', 'tls.pem']],
+  ['secretRef:agentsmith/redis-ca', ['ca.crt']],
+  ['secretRef:agentsmith/redis-server-tls', ['ca.crt', 'tls.crt', 'tls.key']],
+  ['secretRef:agentsmith/object-storage-ca', ['ca.crt']],
+  ['secretRef:agentsmith/object-storage-server-tls', ['private.key', 'public.crt']],
+  ['secretRef:agentsmith/oidc-ca', ['ca.crt']],
+  ['secretRef:agentsmith/oidc-server-tls', ['tls.crt', 'tls.key']]
+]);
+
+for (const [ref, expectedKeys] of expected) {
+  const actual = [...(keysByRef.get(ref) ?? [])].sort();
+  if (JSON.stringify(actual) !== JSON.stringify(expectedKeys)) {
+    throw new Error(`${ref} expected keys ${expectedKeys.join(',')} got ${actual.join(',')}`);
+  }
+}
+NODE
+pass "materialized substrate truth live TLS Secret key requirements use service-specific mappings"
 "$NODE_BIN" --input-type=module - "$materialized_minimal_dir/templates/substrate-resources.json" <<'NODE'
 import fs from 'node:fs';
 
 const [resourceListPath] = process.argv.slice(2);
 const resources = JSON.parse(fs.readFileSync(resourceListPath, 'utf8'));
+
+function sameJson(actual, expected) {
+  return JSON.stringify(actual) === JSON.stringify(expected);
+}
+
+function requireNetworkPolicy(name) {
+  const policy = resources.find((resource) => (
+    resource?.apiVersion === 'networking.k8s.io/v1' &&
+    resource?.kind === 'NetworkPolicy' &&
+    resource?.metadata?.name === name
+  ));
+  if (!policy) {
+    throw new Error(`materialized minimal pack must include NetworkPolicy/${name}`);
+  }
+  if (policy.metadata.namespace !== 'agentsmith') {
+    throw new Error(`NetworkPolicy/${name} must be materialized into the target namespace`);
+  }
+  return policy;
+}
+
+function assertExactMatchLabels(actual, expected, label) {
+  if (!sameJson(actual, expected)) {
+    throw new Error(`${label} expected ${JSON.stringify(expected)} got ${JSON.stringify(actual)}`);
+  }
+}
+
+function assertSinglePortIngress(policy, expectedPort) {
+  const ingress = policy.spec?.ingress;
+  if (!Array.isArray(ingress) || ingress.length !== 1) {
+    throw new Error(`NetworkPolicy/${policy.metadata.name} must have exactly one ingress rule`);
+  }
+  const ports = ingress[0].ports;
+  const expectedPorts = [
+    {
+      protocol: 'TCP',
+      port: expectedPort
+    }
+  ];
+  if (!sameJson(ports, expectedPorts)) {
+    throw new Error(`NetworkPolicy/${policy.metadata.name} must allow only TCP ${expectedPort}`);
+  }
+  return ingress[0].from ?? [];
+}
+
+function assertScopedPeer(peer, expectedPodLabels, label) {
+  assertExactMatchLabels(
+    peer?.namespaceSelector?.matchLabels,
+    {
+      'kubernetes.io/metadata.name': 'kube-system'
+    },
+    `${label} namespaceSelector.matchLabels`
+  );
+  assertExactMatchLabels(peer?.podSelector?.matchLabels, expectedPodLabels, `${label} podSelector.matchLabels`);
+}
+
+function assertNoWholeCsiNamespacePeer(policy) {
+  for (const [index, ingress] of (policy.spec?.ingress ?? []).entries()) {
+    for (const [peerIndex, peer] of (ingress.from ?? []).entries()) {
+      const namespaceName = peer?.namespaceSelector?.matchLabels?.['kubernetes.io/metadata.name'];
+      const podLabels = peer?.podSelector?.matchLabels;
+      if (namespaceName === 'kube-system' && (!podLabels || Object.keys(podLabels).length === 0)) {
+        throw new Error(`NetworkPolicy/${policy.metadata.name} ingress[${index}].from[${peerIndex}] allows the whole CSI namespace`);
+      }
+    }
+  }
+}
+
+const sameNamespacePolicy = requireNetworkPolicy('agentsmith-substrates-same-namespace');
+assertExactMatchLabels(
+  sameNamespacePolicy.spec?.podSelector?.matchLabels,
+  {
+    'app.kubernetes.io/part-of': 'agentsmith-substrate'
+  },
+  'same namespace policy podSelector.matchLabels'
+);
+if (!sameJson(sameNamespacePolicy.spec?.ingress?.[0]?.from, [{ podSelector: {} }])) {
+  throw new Error('same namespace policy must remain scoped to same-namespace pod traffic');
+}
+
+const postgresqlJuicefsPolicy = requireNetworkPolicy('agentsmith-substrates-juicefs-postgresql');
+assertExactMatchLabels(
+  postgresqlJuicefsPolicy.spec?.podSelector?.matchLabels,
+  {
+    'app.kubernetes.io/part-of': 'agentsmith-substrate',
+    'app.kubernetes.io/name': 'postgresql'
+  },
+  'PostgreSQL JuiceFS policy podSelector.matchLabels'
+);
+const postgresqlPeers = assertSinglePortIngress(postgresqlJuicefsPolicy, 5432);
+if (postgresqlPeers.length !== 2) {
+  throw new Error('PostgreSQL JuiceFS policy must allow exactly CSI node and mount pod peers');
+}
+assertScopedPeer(postgresqlPeers[0], { app: 'juicefs-csi-node' }, 'PostgreSQL CSI node peer');
+assertScopedPeer(
+  postgresqlPeers[1],
+  {
+    'app.kubernetes.io/name': 'juicefs-mount'
+  },
+  'PostgreSQL mount pod peer'
+);
+assertNoWholeCsiNamespacePeer(postgresqlJuicefsPolicy);
+
+const objectStorageJuicefsPolicy = requireNetworkPolicy('agentsmith-substrates-juicefs-object-storage');
+assertExactMatchLabels(
+  objectStorageJuicefsPolicy.spec?.podSelector?.matchLabels,
+  {
+    'app.kubernetes.io/part-of': 'agentsmith-substrate',
+    'app.kubernetes.io/name': 'object-storage'
+  },
+  'object-storage JuiceFS policy podSelector.matchLabels'
+);
+const objectStoragePeers = assertSinglePortIngress(objectStorageJuicefsPolicy, 9000);
+if (objectStoragePeers.length !== 1) {
+  throw new Error('object-storage JuiceFS policy must allow exactly the mount pod peer');
+}
+assertScopedPeer(
+  objectStoragePeers[0],
+  {
+    'app.kubernetes.io/name': 'juicefs-mount'
+  },
+  'object-storage mount pod peer'
+);
+assertNoWholeCsiNamespacePeer(objectStorageJuicefsPolicy);
+
 const postgresql = resources.find((resource) => (
   resource?.kind === 'StatefulSet' && resource?.metadata?.name === 'postgresql'
 ));
@@ -1888,6 +2245,7 @@ if ((mainContainer?.volumeMounts ?? []).some((mount) => mount.name === 'postgres
   throw new Error('postgresql main container must not mount the raw TLS secret directly');
 }
 NODE
+pass "materialized substrate NetworkPolicy scopes JuiceFS CSI cross-namespace ingress"
 run_pack_check "$materialized_minimal_dir" "$TMP_DIR/out-materialized-minimal-pack-check" >/dev/null
 materialized_minimal_output="$TMP_DIR/out-materialized-minimal-install"
 reset_kubectl_log
@@ -1942,6 +2300,34 @@ fi
 
 apply_output="$TMP_DIR/out-apply"
 install_digest="$(install_parameters_digest "$valid_dir/substrate-install-inputs.json")"
+
+apply_failure_output="$TMP_DIR/out-apply-failure"
+reset_kubectl_log
+if FAKE_KUBECTL_APPLY_MODE=fail run_install "$valid_dir" "$apply_failure_output" \
+  --mode apply \
+  --confirm-substrate-install "$TARGET_PROFILE" \
+  --confirm-install-parameters "$install_digest" \
+  --operator-run-id operator-run-substrate-apply-failure >"$TMP_DIR/apply-failure.out" 2>&1; then
+  fail "kubectl apply failure should fail substrate install"
+fi
+grep -Fq "kubectl apply failed with exit code 42" "$TMP_DIR/apply-failure.out" || \
+  fail "apply failure did not include kubectl exit status"
+grep -Fq "fake kubectl apply stderr: substrate apply denied by apiserver" "$TMP_DIR/apply-failure.out" || \
+  fail "apply failure did not include kubectl stderr summary"
+grep -Fq "fake kubectl apply stdout: no resources applied" "$TMP_DIR/apply-failure.out" || \
+  fail "apply failure did not include kubectl stdout summary"
+if grep -Eq 'tail-client-secret-value|tail-access-key-value' "$TMP_DIR/apply-failure.out"; then
+  fail "apply failure summary leaked tail secret-looking values"
+fi
+grep -Fq 'client_secret=[redacted]' "$TMP_DIR/apply-failure.out" || \
+  fail "apply failure summary did not redact tail client_secret"
+grep -Fq 'access_key=[redacted]' "$TMP_DIR/apply-failure.out" || \
+  fail "apply failure summary did not redact tail access_key"
+if [[ -f "$apply_failure_output/substrate-install-report.json" ]]; then
+  fail "kubectl apply failure must not write substrate install report"
+fi
+pass "kubectl apply failure includes output summary and does not write report"
+
 reset_kubectl_log
 run_install "$valid_dir" "$apply_output" \
   --mode apply \

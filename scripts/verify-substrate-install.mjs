@@ -22,6 +22,7 @@ import {
   digestText,
   resolveSubstrateInstallParameters
 } from './lib/substrate-install-parameters.mjs';
+import { redactSecretLikeOutput } from './lib/output-redaction.mjs';
 import {
   formatResourceRef,
   imageRefsFromSubstratePackManifest,
@@ -29,6 +30,7 @@ import {
   resourceRefForKubectl,
   validateNamespaceScopedResources
 } from './lib/kubernetes-namespace-scope-guard.mjs';
+import { assertLiveRequiredSubstrateSecrets } from './lib/substrate-secret-preflight.mjs';
 import {
   CURRENT_RELEASE_KIT_VERSION,
   parseCanonicalTargetProfile
@@ -444,7 +446,7 @@ function kubectlPrefixArgs(args) {
 }
 
 function summarizeOutput(output) {
-  const text = output.trim();
+  const text = redactSecretLikeOutput(output).trim();
   if (!text) {
     return '';
   }
@@ -526,6 +528,50 @@ function runKubectlVersion(args) {
     'kubectl version'
   );
   return normalizeKubectlVersion(result.stdout);
+}
+
+function runKubectlGetNamespace(args) {
+  return spawnSync(
+    args.kubectl,
+    [
+      ...kubectlPrefixArgs(args),
+      'get',
+      'namespace',
+      args.namespace,
+      '-o',
+      'json'
+    ],
+    {
+      encoding: 'utf8',
+      maxBuffer: 2 * 1024 * 1024
+    }
+  );
+}
+
+function assertTargetNamespaceReadable(args) {
+  const prerequisiteMessage =
+    `target namespace ${args.namespace} does not exist or is not readable; ` +
+    'create the namespace before install_substrates';
+  const result = runKubectlGetNamespace(args);
+  if (result.error) {
+    fail(`${prerequisiteMessage}: kubectl failed to start: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    fail(`${prerequisiteMessage}${summarizeOutput(`${result.stderr || ''}\n${result.stdout || ''}`)}`);
+  }
+
+  let namespace;
+  try {
+    namespace = JSON.parse(result.stdout);
+  } catch (error) {
+    fail(`${prerequisiteMessage}: kubectl returned invalid JSON: ${error.message}`);
+  }
+  if (namespace?.metadata?.name !== args.namespace) {
+    const returnedName = typeof namespace?.metadata?.name === 'string'
+      ? namespace.metadata.name
+      : 'unknown';
+    fail(`${prerequisiteMessage}: kubectl returned namespace ${returnedName}`);
+  }
 }
 
 function isNotFound(result) {
@@ -626,7 +672,7 @@ async function runKubectlApply(args, applyResourceListBytes) {
     }
 
     applyArgs.push('-o', 'name');
-    return runCommand(args.kubectl, applyArgs, 'kubectl apply');
+    return runCommand(args.kubectl, applyArgs, 'kubectl apply', { includeOutput: true });
   } finally {
     await fs.rm(resourceListFile, { force: true });
   }
@@ -827,6 +873,16 @@ async function main() {
   });
 
   const kubectlVersion = runKubectlVersion(args);
+  assertTargetNamespaceReadable(args);
+  if (args.mode === 'apply') {
+    assertLiveRequiredSubstrateSecrets({
+      substrateTruth: installSummary.substrateTruth,
+      kubectl: args.kubectl,
+      kubeconfig: args.kubeconfig,
+      context: args.context,
+      fail
+    });
+  }
   const collisionSummary = assertNoNonKitCollision(args, resources, installSummary.installationId);
   const kubectlApplyOutput = await runKubectlApply(args, applyResourceListBytes);
 

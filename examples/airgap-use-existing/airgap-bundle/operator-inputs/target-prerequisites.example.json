@@ -3,7 +3,7 @@
   "namespace": "agentsmith",
   "rbac": {
     "policy": "pre_provisioned_namespace_admin",
-    "proof": "operator kubectl auth can-i apply deployments in namespace agentsmith 2026-05-23T12:00:00Z"
+    "proof": "operator kubectl auth can-i apply deployments in namespace agentsmith; ASBCP ServiceAccount system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane persistentvolumes verbs get/list/watch/create/update/patch/delete verified 2026-05-23T12:00:00Z"
   },
   "ingress": {
     "host": "agentsmith.airgap.example.com",

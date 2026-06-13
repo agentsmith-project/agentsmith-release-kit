@@ -55,6 +55,120 @@
     }
   },
   {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "agentsmith-substrates-juicefs-postgresql",
+      "namespace": "{{NAMESPACE}}",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "{{INSTALLATION_ID}}"
+      }
+    },
+    "spec": {
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/part-of": "agentsmith-substrate",
+          "app.kubernetes.io/name": "postgresql"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ],
+      "ingress": [
+        {
+          "from": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "{{JUICEFS_CSI_NAMESPACE}}"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "app": "juicefs-csi-node"
+                }
+              }
+            },
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "{{JUICEFS_CSI_NAMESPACE}}"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "app.kubernetes.io/name": "juicefs-mount"
+                }
+              }
+            }
+          ],
+          "ports": [
+            {
+              "protocol": "TCP",
+              "port": 5432
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "name": "agentsmith-substrates-juicefs-object-storage",
+      "namespace": "{{NAMESPACE}}",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "{{INSTALLATION_ID}}"
+      }
+    },
+    "spec": {
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/part-of": "agentsmith-substrate",
+          "app.kubernetes.io/name": "object-storage"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ],
+      "ingress": [
+        {
+          "from": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "{{JUICEFS_CSI_NAMESPACE}}"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "app.kubernetes.io/name": "juicefs-mount"
+                }
+              }
+            }
+          ],
+          "ports": [
+            {
+              "protocol": "TCP",
+              "port": 9000
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     "apiVersion": "v1",
     "kind": "Service",
     "metadata": {

@@ -256,7 +256,7 @@ function stepReport(name, profile, bindings = {}) {
     case 'apply':
       return {
         schema_version: 'agentsmith.kubernetes-apply-report/v1',
-        scope: 'kubernetes_apply_only',
+        scope: 'kubernetes_apply_with_pre_apply_controls',
         readiness: false,
         status: 'pass',
         ...releaseFields(profile),
@@ -272,6 +272,30 @@ function stepReport(name, profile, bindings = {}) {
           }
         ],
         kubectl_resource_refs: ['deployment.apps/agentsmith-web'],
+        pre_apply_controls: {
+          secret_preflight: {
+            status: 'pass',
+            reason: 'required_rendered_secret_refs_readable',
+            required_secret_count: 0,
+            required_secret_key_count: 0
+          },
+          afscp_juicefs_csi_tls_readiness: {
+            status: 'skipped',
+            reason: 'rendered_afscp_static_juicefs_pv_not_found'
+          },
+          afscp_static_juicefs_pv_reconcile: {
+            status: 'skipped',
+            reason: 'rendered_afscp_static_juicefs_pv_not_found'
+          },
+          completed_job_replacements: {
+            status: 'pass',
+            reason: 'completed_existing_jobs_checked_before_apply',
+            replacement_count: 0,
+            replacements: []
+          }
+        },
+        pre_apply_job_replacements: [],
+        pre_apply_reconcile: {},
         render_check: {
           schema: 'agentsmith.render-check-report/v1',
           scope: 'render_check_image_inventory_only',

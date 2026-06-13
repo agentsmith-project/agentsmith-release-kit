@@ -450,7 +450,7 @@ guard, then uses `kubectl` against the target API. Default mode is
 and `--operator-run-id <id>`. It accepts `--forbidden-source-root` and treats
 an existing sibling `../agentsmith` checkout as a default forbidden source
 root for the render/check guard. Its `apply-report.json` must keep
-`readiness: false` and `scope: kubernetes_apply_only`; it does not roll out
+`readiness: false` and `scope: kubernetes_apply_with_pre_apply_controls`; it does not roll out
 workloads, smoke routes, run product flows, provision cloud resources, or claim
 deploy or release readiness.
 

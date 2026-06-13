@@ -6,6 +6,13 @@ NODE_BIN="${NODE:-node}"
 TARGET_PROFILE="existing_kubernetes/external_declared/online"
 VALID_CONTRACT="$ROOT_DIR/tests/fixtures/release-contract.valid.json"
 VALID_DEPLOY_TEMPLATE_PACKAGE="$ROOT_DIR/tests/fixtures/deploy-template-package.valid.json"
+AFSCP_VOLUME_BASE_REF="afscp-default-volume-juicefs"
+AFSCP_VOLUME_REVISION_HEX="$(printf '1a24f776a1db%052d' 0)"
+AFSCP_VOLUME_REVISION="sha256:$AFSCP_VOLUME_REVISION_HEX"
+AFSCP_VOLUME_REVISION_SUFFIX="${AFSCP_VOLUME_REVISION_HEX:0:12}"
+AFSCP_EFFECTIVE_VOLUME_REF="$AFSCP_VOLUME_BASE_REF-$AFSCP_VOLUME_REVISION_SUFFIX"
+AFSCP_STALE_SUFFIX_EFFECTIVE_VOLUME_REF="$AFSCP_VOLUME_BASE_REF-deadbeefdead-$AFSCP_VOLUME_REVISION_SUFFIX"
+AFSCP_EXPLICIT_RUNTIME_SECRETS_CHECKSUM="sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -143,6 +150,8 @@ import fs from 'node:fs';
 
 const [output, mutation] = process.argv.slice(2);
 const values = JSON.parse(fs.readFileSync(output, 'utf8'));
+const afscpBaseRef = 'afscp-default-volume-juicefs';
+const afscpRevision = `sha256:${'1a24f776a1db'.padEnd(64, '0')}`;
 
 switch (mutation) {
   case 'valid':
@@ -191,6 +200,29 @@ switch (mutation) {
   case 'afscp_default_volume_pv_name_mismatch':
     values.namespace = 'agentsmith-install-online';
     values.AFSCP_DEFAULT_VOLUME_PV_NAME = 'agentsmith-afscp-default-volume';
+    break;
+  case 'afscp_volume_ref_stable':
+    values.AFSCP_VOLUME_REF = afscpBaseRef;
+    values.AFSCP_VOLUME_REF_REVISION = 'stable';
+    values.AFSCP_RUNTIME_SECRETS_CHECKSUM = 'stable';
+    break;
+  case 'afscp_volume_ref_sha':
+    values.AFSCP_VOLUME_REF = afscpBaseRef;
+    values.AFSCP_VOLUME_REF_REVISION = afscpRevision;
+    break;
+  case 'afscp_volume_ref_suffixed':
+    values.AFSCP_VOLUME_REF = `${afscpBaseRef}-1a24f776a1db`;
+    values.AFSCP_VOLUME_REF_REVISION = afscpRevision;
+    values.AFSCP_RUNTIME_SECRETS_CHECKSUM = afscpRevision;
+    break;
+  case 'afscp_volume_ref_stale_suffix':
+    values.AFSCP_VOLUME_REF = `${afscpBaseRef}-deadbeefdead`;
+    values.AFSCP_VOLUME_REF_REVISION = afscpRevision;
+    break;
+  case 'afscp_volume_ref_stale_checksum':
+    values.AFSCP_VOLUME_REF = afscpBaseRef;
+    values.AFSCP_VOLUME_REF_REVISION = afscpRevision;
+    values.AFSCP_RUNTIME_SECRETS_CHECKSUM = `sha256:${'f'.repeat(64)}`;
     break;
   default:
     throw new Error(`unknown render values mutation: ${mutation}`);
@@ -281,6 +313,62 @@ spec:
               image: ${{ images.llmup.image }}
             - name: managed-runner
               image: ${{ images.managed_runner.image }}
+YAML
+      ;;
+    substrate_tls_render_values)
+      cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: substrate-ca-bindings
+  namespace: ${{ values.namespace }}
+data:
+  POSTGRES_HOST: ${{ substrate.services.postgresql.host }}
+  SUBSTRATE_POSTGRES_CA_SECRET_REF: ${{ values.SUBSTRATE_POSTGRES_CA_SECRET_REF }}
+  SUBSTRATE_POSTGRES_CA_SECRET_NAME: ${{ values.SUBSTRATE_POSTGRES_CA_SECRET_NAME }}
+  SUBSTRATE_POSTGRES_TLS_MODE: ${{ values.SUBSTRATE_POSTGRES_TLS_MODE }}
+  SUBSTRATE_POSTGRES_SSLMODE: ${{ values.SUBSTRATE_POSTGRES_SSLMODE }}
+  SUBSTRATE_POSTGRESQL_CA_SECRET_REF: ${{ values.SUBSTRATE_POSTGRESQL_CA_SECRET_REF }}
+  SUBSTRATE_POSTGRESQL_CA_SECRET_NAME: ${{ values.SUBSTRATE_POSTGRESQL_CA_SECRET_NAME }}
+  SUBSTRATE_POSTGRESQL_TLS_MODE: ${{ values.SUBSTRATE_POSTGRESQL_TLS_MODE }}
+  SUBSTRATE_POSTGRESQL_SSLMODE: ${{ values.SUBSTRATE_POSTGRESQL_SSLMODE }}
+  SUBSTRATE_MINIO_CA_SECRET_REF: ${{ values.SUBSTRATE_MINIO_CA_SECRET_REF }}
+  SUBSTRATE_MINIO_CA_SECRET_NAME: ${{ values.SUBSTRATE_MINIO_CA_SECRET_NAME }}
+  SUBSTRATE_MINIO_TLS_MODE: ${{ values.SUBSTRATE_MINIO_TLS_MODE }}
+  SUBSTRATE_MINIO_USE_SSL: "${{ values.SUBSTRATE_MINIO_USE_SSL }}"
+  SUBSTRATE_OBJECT_STORAGE_CA_SECRET_REF: ${{ values.SUBSTRATE_OBJECT_STORAGE_CA_SECRET_REF }}
+  SUBSTRATE_OBJECT_STORAGE_CA_SECRET_NAME: ${{ values.SUBSTRATE_OBJECT_STORAGE_CA_SECRET_NAME }}
+  SUBSTRATE_OBJECT_STORAGE_TLS_MODE: ${{ values.SUBSTRATE_OBJECT_STORAGE_TLS_MODE }}
+  SUBSTRATE_OBJECT_STORAGE_USE_SSL: "${{ values.SUBSTRATE_OBJECT_STORAGE_USE_SSL }}"
+  SUBSTRATE_KEYCLOAK_CA_SECRET_REF: ${{ values.SUBSTRATE_KEYCLOAK_CA_SECRET_REF }}
+  SUBSTRATE_KEYCLOAK_CA_SECRET_NAME: ${{ values.SUBSTRATE_KEYCLOAK_CA_SECRET_NAME }}
+  SUBSTRATE_KEYCLOAK_TLS_MODE: ${{ values.SUBSTRATE_KEYCLOAK_TLS_MODE }}
+  SUBSTRATE_KEYCLOAK_USE_SSL: "${{ values.SUBSTRATE_KEYCLOAK_USE_SSL }}"
+  SUBSTRATE_OIDC_CA_SECRET_REF: ${{ values.SUBSTRATE_OIDC_CA_SECRET_REF }}
+  SUBSTRATE_OIDC_CA_SECRET_NAME: ${{ values.SUBSTRATE_OIDC_CA_SECRET_NAME }}
+  SUBSTRATE_OIDC_TLS_MODE: ${{ values.SUBSTRATE_OIDC_TLS_MODE }}
+  SUBSTRATE_OIDC_USE_SSL: "${{ values.SUBSTRATE_OIDC_USE_SSL }}"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
+  namespace: ${{ values.namespace }}
+  labels:
+    distribution: ${{ target.distribution }}
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+          env:
+            - name: POSTGRES_CA_SECRET_REF
+              value: ${{ values.SUBSTRATE_POSTGRES_CA_SECRET_REF }}
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: ${{ values.SUBSTRATE_POSTGRES_CA_SECRET_NAME }}
 YAML
       ;;
     with_ingress)
@@ -439,6 +527,53 @@ metadata:
   name: afscp-config
 data:
   AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS: workspace=agentsmith/afscp-workload-mounts,task_cache=agentsmith/task-cache
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentsmith-web
+  namespace: ${{ values.namespace }}
+  labels:
+    distribution: ${{ target.distribution }}
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: ${{ images.agentsmith_app.image }}
+          env:
+            - name: POSTGRES_HOST
+              value: ${{ substrate.services.postgresql.host }}
+YAML
+      ;;
+    afscp_volume_ref)
+      cat >"$package_dir/templates/workloads.yaml" <<'YAML'
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: afscp-default-volume
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  csi:
+    driver: csi.juicefs.com
+    volumeHandle: afscp-default-volume
+    nodePublishSecretRef:
+      name: ${{ values.AFSCP_VOLUME_REF }}
+      namespace: ${{ values.namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: afscp-mount-refs
+  namespace: ${{ values.namespace }}
+data:
+  AFSCP_VOLUME_REF: ${{ values.AFSCP_VOLUME_REF }}
+  AFSCP_RUNTIME_SECRETS_CHECKSUM: ${{ values.AFSCP_RUNTIME_SECRETS_CHECKSUM }}
+  AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS: workspace=${{ values.namespace }}/${{ values.AFSCP_VOLUME_REF }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -978,6 +1113,38 @@ if (!rendered.includes('postgresql.release.example.internal')) {
 NODE
 }
 
+assert_afscp_volume_ref_rendered() {
+  local rendered_file="$1"
+  local expected_ref="$2"
+  local expected_checksum="$3"
+
+  "$NODE_BIN" --input-type=module - \
+    "$rendered_file" \
+    "$expected_ref" \
+    "$expected_checksum" \
+    "$AFSCP_VOLUME_BASE_REF" <<'NODE'
+import fs from 'node:fs';
+
+const [renderedFile, expectedRef, expectedChecksum, baseRef] = process.argv.slice(2);
+const rendered = fs.readFileSync(renderedFile, 'utf8');
+const required = [
+  `name: ${expectedRef}`,
+  `AFSCP_VOLUME_REF: ${expectedRef}`,
+  `AFSCP_API_WORKLOAD_MOUNT_SECRET_REFS: workspace=agentsmith/${expectedRef}`,
+  `AFSCP_RUNTIME_SECRETS_CHECKSUM: ${expectedChecksum}`
+];
+
+for (const text of required) {
+  if (!rendered.includes(text)) {
+    throw new Error(`rendered AFSCP manifest missing: ${text}`);
+  }
+}
+if (expectedRef !== baseRef && rendered.includes(`name: ${baseRef}\n`)) {
+  throw new Error('rendered PV nodePublishSecretRef kept the base Secret ref');
+}
+NODE
+}
+
 write_image_map() {
   local contract="$1"
   local output_dir="$2"
@@ -1135,6 +1302,267 @@ assert_rendered_image_adoption \
   "$VALID_IMAGE_MAP" \
   source
 pass "valid render accepted with focused non-readiness report"
+
+SUBSTRATE_TLS_ARCHIVE="$TMP_DIR/substrate-tls-values.tgz"
+SUBSTRATE_TLS_MANIFEST_SHA="$(create_render_archive substrate-tls-values "$SUBSTRATE_TLS_ARCHIVE" substrate_tls_render_values)"
+SUBSTRATE_TLS_ARCHIVE_SHA="$(sha256_file "$SUBSTRATE_TLS_ARCHIVE")"
+SUBSTRATE_TLS_CONTRACT="$TMP_DIR/release-contract.substrate-tls-values.json"
+SUBSTRATE_TLS_PACKAGE="$TMP_DIR/deploy-template-package.substrate-tls-values.json"
+SUBSTRATE_TLS_OUT="$TMP_DIR/out-substrate-tls-values"
+write_materials \
+  "$SUBSTRATE_TLS_MANIFEST_SHA" \
+  "$SUBSTRATE_TLS_ARCHIVE_SHA" \
+  "$SUBSTRATE_TLS_CONTRACT" \
+  "$SUBSTRATE_TLS_PACKAGE"
+run_render \
+  "$SUBSTRATE_TLS_CONTRACT" \
+  "$SUBSTRATE_TLS_PACKAGE" \
+  "$SUBSTRATE_TLS_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$VALID_TRUTH" \
+  "$SUBSTRATE_TLS_OUT" >/dev/null
+assert_pass_report "$SUBSTRATE_TLS_OUT/manifest-render-report.json" "$SUBSTRATE_TLS_OUT/rendered-manifests"
+grep -Fq 'SUBSTRATE_POSTGRES_CA_SECRET_REF: secretRef:release/postgresql-ca' \
+  "$SUBSTRATE_TLS_OUT/rendered-manifests/templates/workloads.yaml" ||
+  fail "render did not derive postgresql CA secretRef from substrate truth"
+grep -Fq 'SUBSTRATE_POSTGRES_CA_SECRET_NAME: postgresql-ca' \
+  "$SUBSTRATE_TLS_OUT/rendered-manifests/templates/workloads.yaml" ||
+  fail "render did not derive postgresql CA secret name from substrate truth"
+grep -Fq 'SUBSTRATE_POSTGRES_SSLMODE: verify-full' \
+  "$SUBSTRATE_TLS_OUT/rendered-manifests/templates/workloads.yaml" ||
+  fail "render did not derive postgresql sslmode from substrate truth"
+grep -Fq 'SUBSTRATE_POSTGRESQL_SSLMODE: verify-full' \
+  "$SUBSTRATE_TLS_OUT/rendered-manifests/templates/workloads.yaml" ||
+  fail "render did not derive postgresql accepted-name sslmode alias from substrate truth"
+grep -Fq 'SUBSTRATE_MINIO_USE_SSL: "true"' \
+  "$SUBSTRATE_TLS_OUT/rendered-manifests/templates/workloads.yaml" ||
+  fail "render did not derive MinIO TLS use_ssl from substrate truth"
+grep -Fq 'SUBSTRATE_OBJECT_STORAGE_USE_SSL: "true"' \
+  "$SUBSTRATE_TLS_OUT/rendered-manifests/templates/workloads.yaml" ||
+  fail "render did not derive object-storage accepted-name use_ssl alias from substrate truth"
+grep -Fq 'SUBSTRATE_OIDC_CA_SECRET_REF: secretRef:release/oidc-ca' \
+  "$SUBSTRATE_TLS_OUT/rendered-manifests/templates/workloads.yaml" ||
+  fail "render did not derive OIDC accepted-name CA secretRef alias from substrate truth"
+grep -Fq 'secretName: postgresql-ca' \
+  "$SUBSTRATE_TLS_OUT/rendered-manifests/templates/workloads.yaml" ||
+  fail "render did not expose safe CA secret name for manifest mounts"
+pass "render derives substrate CA secret refs/names and TLS mode from substrate truth"
+
+AFSCP_VOLUME_REF_ARCHIVE="$TMP_DIR/afscp-volume-ref.tgz"
+AFSCP_VOLUME_REF_MANIFEST_SHA="$(create_render_archive afscp-volume-ref "$AFSCP_VOLUME_REF_ARCHIVE" afscp_volume_ref)"
+AFSCP_VOLUME_REF_ARCHIVE_SHA="$(sha256_file "$AFSCP_VOLUME_REF_ARCHIVE")"
+AFSCP_VOLUME_REF_CONTRACT="$TMP_DIR/release-contract.afscp-volume-ref.json"
+AFSCP_VOLUME_REF_PACKAGE="$TMP_DIR/deploy-template-package.afscp-volume-ref.json"
+write_materials \
+  "$AFSCP_VOLUME_REF_MANIFEST_SHA" \
+  "$AFSCP_VOLUME_REF_ARCHIVE_SHA" \
+  "$AFSCP_VOLUME_REF_CONTRACT" \
+  "$AFSCP_VOLUME_REF_PACKAGE"
+
+AFSCP_VOLUME_REF_STABLE_VALUES="$TMP_DIR/render-values.afscp-volume-ref-stable.json"
+AFSCP_VOLUME_REF_STABLE_OUT="$TMP_DIR/out-afscp-volume-ref-stable"
+write_render_values "$AFSCP_VOLUME_REF_STABLE_VALUES" afscp_volume_ref_stable
+run_render \
+  "$AFSCP_VOLUME_REF_CONTRACT" \
+  "$AFSCP_VOLUME_REF_PACKAGE" \
+  "$AFSCP_VOLUME_REF_ARCHIVE" \
+  "$AFSCP_VOLUME_REF_STABLE_VALUES" \
+  "$VALID_TRUTH" \
+  "$AFSCP_VOLUME_REF_STABLE_OUT" >/dev/null
+assert_pass_report "$AFSCP_VOLUME_REF_STABLE_OUT/manifest-render-report.json" "$AFSCP_VOLUME_REF_STABLE_OUT/rendered-manifests"
+assert_afscp_volume_ref_rendered \
+  "$AFSCP_VOLUME_REF_STABLE_OUT/rendered-manifests/templates/workloads.yaml" \
+  "$AFSCP_VOLUME_BASE_REF" \
+  stable
+pass "render keeps stable AFSCP volume ref literal"
+
+AFSCP_VOLUME_REF_SHA_VALUES="$TMP_DIR/render-values.afscp-volume-ref-sha.json"
+AFSCP_VOLUME_REF_SHA_OUT="$TMP_DIR/out-afscp-volume-ref-sha"
+write_render_values "$AFSCP_VOLUME_REF_SHA_VALUES" afscp_volume_ref_sha
+run_render \
+  "$AFSCP_VOLUME_REF_CONTRACT" \
+  "$AFSCP_VOLUME_REF_PACKAGE" \
+  "$AFSCP_VOLUME_REF_ARCHIVE" \
+  "$AFSCP_VOLUME_REF_SHA_VALUES" \
+  "$VALID_TRUTH" \
+  "$AFSCP_VOLUME_REF_SHA_OUT" >/dev/null
+assert_pass_report "$AFSCP_VOLUME_REF_SHA_OUT/manifest-render-report.json" "$AFSCP_VOLUME_REF_SHA_OUT/rendered-manifests"
+assert_afscp_volume_ref_rendered \
+  "$AFSCP_VOLUME_REF_SHA_OUT/rendered-manifests/templates/workloads.yaml" \
+  "$AFSCP_EFFECTIVE_VOLUME_REF" \
+  "$AFSCP_VOLUME_REVISION"
+pass "render derives revisioned AFSCP volume ref from sha256 revision"
+
+AFSCP_VOLUME_REF_SUFFIXED_VALUES="$TMP_DIR/render-values.afscp-volume-ref-suffixed.json"
+AFSCP_VOLUME_REF_SUFFIXED_OUT="$TMP_DIR/out-afscp-volume-ref-suffixed"
+write_render_values "$AFSCP_VOLUME_REF_SUFFIXED_VALUES" afscp_volume_ref_suffixed
+run_render \
+  "$AFSCP_VOLUME_REF_CONTRACT" \
+  "$AFSCP_VOLUME_REF_PACKAGE" \
+  "$AFSCP_VOLUME_REF_ARCHIVE" \
+  "$AFSCP_VOLUME_REF_SUFFIXED_VALUES" \
+  "$VALID_TRUTH" \
+  "$AFSCP_VOLUME_REF_SUFFIXED_OUT" >/dev/null
+assert_pass_report "$AFSCP_VOLUME_REF_SUFFIXED_OUT/manifest-render-report.json" "$AFSCP_VOLUME_REF_SUFFIXED_OUT/rendered-manifests"
+assert_afscp_volume_ref_rendered \
+  "$AFSCP_VOLUME_REF_SUFFIXED_OUT/rendered-manifests/templates/workloads.yaml" \
+  "$AFSCP_EFFECTIVE_VOLUME_REF" \
+  "$AFSCP_VOLUME_REVISION"
+pass "render keeps already suffixed AFSCP volume ref idempotent"
+
+AFSCP_VOLUME_REF_STALE_SUFFIX_VALUES="$TMP_DIR/render-values.afscp-volume-ref-stale-suffix.json"
+AFSCP_VOLUME_REF_STALE_SUFFIX_OUT="$TMP_DIR/out-afscp-volume-ref-stale-suffix"
+write_render_values "$AFSCP_VOLUME_REF_STALE_SUFFIX_VALUES" afscp_volume_ref_stale_suffix
+run_render \
+  "$AFSCP_VOLUME_REF_CONTRACT" \
+  "$AFSCP_VOLUME_REF_PACKAGE" \
+  "$AFSCP_VOLUME_REF_ARCHIVE" \
+  "$AFSCP_VOLUME_REF_STALE_SUFFIX_VALUES" \
+  "$VALID_TRUTH" \
+  "$AFSCP_VOLUME_REF_STALE_SUFFIX_OUT" >/dev/null
+assert_pass_report "$AFSCP_VOLUME_REF_STALE_SUFFIX_OUT/manifest-render-report.json" "$AFSCP_VOLUME_REF_STALE_SUFFIX_OUT/rendered-manifests"
+assert_afscp_volume_ref_rendered \
+  "$AFSCP_VOLUME_REF_STALE_SUFFIX_OUT/rendered-manifests/templates/workloads.yaml" \
+  "$AFSCP_STALE_SUFFIX_EFFECTIVE_VOLUME_REF" \
+  "$AFSCP_VOLUME_REVISION"
+pass "render appends current AFSCP volume ref suffix after a different 12hex suffix"
+
+AFSCP_VOLUME_REF_STALE_CHECKSUM_VALUES="$TMP_DIR/render-values.afscp-volume-ref-stale-checksum.json"
+AFSCP_VOLUME_REF_STALE_CHECKSUM_OUT="$TMP_DIR/out-afscp-volume-ref-stale-checksum"
+write_render_values "$AFSCP_VOLUME_REF_STALE_CHECKSUM_VALUES" afscp_volume_ref_stale_checksum
+run_render \
+  "$AFSCP_VOLUME_REF_CONTRACT" \
+  "$AFSCP_VOLUME_REF_PACKAGE" \
+  "$AFSCP_VOLUME_REF_ARCHIVE" \
+  "$AFSCP_VOLUME_REF_STALE_CHECKSUM_VALUES" \
+  "$VALID_TRUTH" \
+  "$AFSCP_VOLUME_REF_STALE_CHECKSUM_OUT" >/dev/null
+assert_pass_report "$AFSCP_VOLUME_REF_STALE_CHECKSUM_OUT/manifest-render-report.json" "$AFSCP_VOLUME_REF_STALE_CHECKSUM_OUT/rendered-manifests"
+assert_afscp_volume_ref_rendered \
+  "$AFSCP_VOLUME_REF_STALE_CHECKSUM_OUT/rendered-manifests/templates/workloads.yaml" \
+  "$AFSCP_EFFECTIVE_VOLUME_REF" \
+  "$AFSCP_EXPLICIT_RUNTIME_SECRETS_CHECKSUM"
+pass "render preserves explicit AFSCP runtime secrets checksum"
+
+"$NODE_BIN" --input-type=module - "$ROOT_DIR" "$AFSCP_VOLUME_REVISION" "$AFSCP_VOLUME_REVISION_SUFFIX" <<'NODE'
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, revision, suffix] = process.argv.slice(2);
+const { normalizeAfscpVolumeRefRenderValues } = await import(
+  pathToFileURL(path.join(rootDir, 'scripts/lib/substrate-render-values.mjs'))
+);
+const longBase = 'a'.repeat(300);
+const normalized = normalizeAfscpVolumeRefRenderValues({
+  AFSCP_VOLUME_REF: longBase,
+  AFSCP_VOLUME_REF_REVISION: revision
+});
+const expected = `${'a'.repeat(253 - suffix.length - 1)}-${suffix}`;
+if (normalized.AFSCP_VOLUME_REF !== expected) {
+  throw new Error(`expected truncated AFSCP ref ${expected}, got ${normalized.AFSCP_VOLUME_REF}`);
+}
+if (normalized.AFSCP_VOLUME_REF.length > 253) {
+  throw new Error('normalized AFSCP ref must not exceed Kubernetes Secret name length');
+}
+for (const badRef of ['afscp.volume', '-afscp-volume', 'afscp-volume-']) {
+  let rejected = false;
+  try {
+    normalizeAfscpVolumeRefRenderValues({
+      AFSCP_VOLUME_REF: badRef,
+      AFSCP_VOLUME_REF_REVISION: revision
+    });
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) {
+    throw new Error(`expected invalid AFSCP ref to be rejected: ${badRef}`);
+  }
+}
+NODE
+pass "render validates AFSCP volume refs as dotless DNS-label-shaped Secret names"
+
+"$NODE_BIN" --input-type=module - "$ROOT_DIR" "$VALID_TRUTH" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, truthPath] = process.argv.slice(2);
+const { deriveSubstrateRenderValues, mergeSubstrateRenderValues } = await import(
+  pathToFileURL(path.join(rootDir, 'scripts/lib/substrate-render-values.mjs'))
+);
+const truth = JSON.parse(fs.readFileSync(truthPath, 'utf8'));
+
+truth.services.postgresql.tls.mode = 'plaintext';
+truth.services.postgresql.sslmode = 'plaintext';
+truth.services.object_storage.tls.mode = 'http';
+truth.services.object_storage.url = 'http://objects.release.example.internal';
+
+const values = deriveSubstrateRenderValues(truth);
+const absentKeys = [
+  'SUBSTRATE_POSTGRES_CA_SECRET_REF',
+  'SUBSTRATE_POSTGRES_CA_SECRET_NAME',
+  'SUBSTRATE_POSTGRESQL_CA_SECRET_REF',
+  'SUBSTRATE_POSTGRESQL_CA_SECRET_NAME',
+  'SUBSTRATE_MINIO_CA_SECRET_REF',
+  'SUBSTRATE_MINIO_CA_SECRET_NAME',
+  'SUBSTRATE_OBJECT_STORAGE_CA_SECRET_REF',
+  'SUBSTRATE_OBJECT_STORAGE_CA_SECRET_NAME'
+];
+for (const key of absentKeys) {
+  if (Object.prototype.hasOwnProperty.call(values, key)) {
+    throw new Error(`disabled TLS mode must not derive CA render value: ${key}`);
+  }
+}
+
+const expected = {
+  SUBSTRATE_POSTGRES_TLS_MODE: 'plaintext',
+  SUBSTRATE_POSTGRES_SSLMODE: 'plaintext',
+  SUBSTRATE_POSTGRES_USE_SSL: false,
+  SUBSTRATE_POSTGRESQL_TLS_MODE: 'plaintext',
+  SUBSTRATE_POSTGRESQL_SSLMODE: 'plaintext',
+  SUBSTRATE_POSTGRESQL_USE_SSL: false,
+  SUBSTRATE_MINIO_TLS_MODE: 'http',
+  SUBSTRATE_MINIO_USE_SSL: false,
+  SUBSTRATE_OBJECT_STORAGE_TLS_MODE: 'http',
+  SUBSTRATE_OBJECT_STORAGE_USE_SSL: false
+};
+for (const [key, expectedValue] of Object.entries(expected)) {
+  if (values[key] !== expectedValue) {
+    throw new Error(`expected ${key}=${expectedValue}, got ${values[key]}`);
+  }
+}
+
+mergeSubstrateRenderValues(
+  {
+    SUBSTRATE_POSTGRES_USE_SSL: false,
+    SUBSTRATE_POSTGRESQL_USE_SSL: 'false',
+    SUBSTRATE_MINIO_USE_SSL: false,
+    SUBSTRATE_OBJECT_STORAGE_USE_SSL: 'false'
+  },
+  truth
+);
+NODE
+pass "render treats plaintext/http substrate TLS modes as disabled without CA or USE_SSL conflicts"
+
+DOTTED_CA_TRUTH="$TMP_DIR/substrate-truth.dotted-ca-secret.json"
+"$NODE_BIN" --input-type=module - "$VALID_TRUTH" "$DOTTED_CA_TRUTH" <<'NODE'
+import fs from 'node:fs';
+
+const [input, output] = process.argv.slice(2);
+const truth = JSON.parse(fs.readFileSync(input, 'utf8'));
+truth.services.postgresql.tls.ca_secret_ref = 'secretRef:release/postgresql.ca';
+fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
+NODE
+expect_fail_case \
+  dotted-ca-secret-name \
+  "$SUBSTRATE_TLS_CONTRACT" \
+  "$SUBSTRATE_TLS_PACKAGE" \
+  "$SUBSTRATE_TLS_ARCHIVE" \
+  "$VALID_VALUES" \
+  "$DOTTED_CA_TRUTH"
+grep -Fq 'must be a Kubernetes DNS label Secret name' "$TMP_DIR/dotted-ca-secret-name.err" ||
+  fail "render should reject substrate CA Secret names containing dots"
+pass "render rejects substrate CA Secret names that are not AgentSmith DNS labels"
 
 INGRESS_ARCHIVE="$TMP_DIR/with-ingress.tgz"
 INGRESS_MANIFEST_SHA="$(create_render_archive with-ingress "$INGRESS_ARCHIVE" with_ingress)"

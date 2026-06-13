@@ -18,6 +18,10 @@ import {
   validateSubstrateConnectionTruth,
   validateTargetPrerequisitesTruth
 } from './substrate-truth-validation.mjs';
+import {
+  mergeSubstrateRenderValues,
+  validateSubstrateRenderValues
+} from './substrate-render-values.mjs';
 
 const MANIFEST_FILE = 'operator-inputs.json';
 const PACKAGE_README_FILE = 'README.md';
@@ -2051,6 +2055,7 @@ async function validateDoctorRenderValues(refs) {
   assertNoStaticInputForbiddenContent(input.value, 'render_values');
   validateAfscpDefaultVolumeRenderValues(input.value, { label: 'render_values' });
   validateEndpointSliceRenderValues(input.value, { label: 'render_values' });
+  validateSubstrateRenderValues(input.value, { fail, label: 'render_values' });
 }
 
 async function validateDoctorUseExistingTruth({ refs, targetProfile }) {
@@ -2073,6 +2078,19 @@ async function validateDoctorTargetPrerequisites({
   validateTargetPrerequisitesTruth(input.value, targetProfile, substrateTruth, {
     label: 'target_prerequisites',
     expectedNamespace: namespace
+  });
+}
+
+async function validateDoctorSubstrateRenderValues({ refs, substrateTruth }) {
+  if (!refs.render_values || !substrateTruth) {
+    return;
+  }
+  const input = await readJson(refs.render_values.absolute_path, 'render_values');
+  requirePlainObject(input.value, 'render_values');
+  mergeSubstrateRenderValues(input.value, substrateTruth, {
+    fail,
+    label: 'render_values',
+    truthLabel: 'substrate_truth'
   });
 }
 
@@ -2147,6 +2165,11 @@ async function collectStaticDoctorIssues({ manifest, refs, config }) {
   }
 
   if (substrateTruth) {
+    try {
+      await validateDoctorSubstrateRenderValues({ refs, substrateTruth });
+    } catch (error) {
+      issues.push(staticIssue('render_values', error));
+    }
     try {
       await validateDoctorTargetPrerequisites({
         refs,

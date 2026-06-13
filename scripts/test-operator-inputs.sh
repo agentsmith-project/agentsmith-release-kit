@@ -7,6 +7,13 @@ EXAMPLE_ONLINE_DIR="$ROOT_DIR/examples/online-use-existing"
 EXAMPLE_ONLINE_INSTALL_DIR="$ROOT_DIR/examples/online-install-substrates"
 LARGE_FIXTURE_SIZE=$((2 * 1024 * 1024 * 1024 + 1))
 LARGE_READ_GUARD="$ROOT_DIR/scripts/lib/test-large-file-read-guard.cjs"
+AFSCP_VOLUME_BASE_REF="afscp-default-volume-juicefs"
+AFSCP_VOLUME_REVISION_HEX="$(printf '1a24f776a1db%052d' 0)"
+AFSCP_VOLUME_REVISION="sha256:$AFSCP_VOLUME_REVISION_HEX"
+AFSCP_VOLUME_REVISION_SUFFIX="${AFSCP_VOLUME_REVISION_HEX:0:12}"
+AFSCP_EFFECTIVE_VOLUME_REF="$AFSCP_VOLUME_BASE_REF-$AFSCP_VOLUME_REVISION_SUFFIX"
+AFSCP_STALE_SUFFIX_EFFECTIVE_VOLUME_REF="$AFSCP_VOLUME_BASE_REF-deadbeefdead-$AFSCP_VOLUME_REVISION_SUFFIX"
+AFSCP_EXPLICIT_RUNTIME_SECRETS_CHECKSUM="sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -304,6 +311,10 @@ function writeSubstrateInstallInputs(profileValue) {
         credential_secret_ref: 'secretRef:agentsmith/postgresql-app',
         admin_secret_ref: 'secretRef:agentsmith/postgresql-admin',
         sslmode: 'verify-full',
+        tls: {
+          mode: 'verify-full',
+          ca_secret_ref: 'secretRef:agentsmith/postgresql-ca'
+        },
         reachability: serviceReachability,
         extensions: {
           pgvector: {
@@ -316,14 +327,20 @@ function writeSubstrateInstallInputs(profileValue) {
         host: 'mongodb.agentsmith.svc',
         port: 27017,
         credential_secret_ref: 'secretRef:agentsmith/mongodb-app',
-        tls: { mode: 'verify-full' },
+        tls: {
+          mode: 'verify-full',
+          ca_secret_ref: 'secretRef:agentsmith/mongodb-ca'
+        },
         reachability: serviceReachability
       },
       redis: {
         host: 'redis.agentsmith.svc',
         port: 6379,
         credential_secret_ref: 'secretRef:agentsmith/redis-app',
-        tls: { mode: 'verify-full' },
+        tls: {
+          mode: 'verify-full',
+          ca_secret_ref: 'secretRef:agentsmith/redis-ca'
+        },
         reachability: serviceReachability
       },
       object_storage: {
@@ -331,14 +348,20 @@ function writeSubstrateInstallInputs(profileValue) {
         bucket: 'agentsmith-release-artifacts',
         region: 'us-west-2',
         credential_secret_ref: 'secretRef:agentsmith/object-storage-app',
-        tls: { mode: 'https' },
+        tls: {
+          mode: 'https',
+          ca_secret_ref: 'secretRef:agentsmith/object-storage-ca'
+        },
         reachability: serviceReachability
       },
       oidc: {
         issuer_url: 'https://oidc.agentsmith.example.com/realms/agentsmith',
         client_id: 'agentsmith-web',
         client_secret_ref: 'secretRef:agentsmith/oidc-client',
-        tls: { mode: 'https' },
+        tls: {
+          mode: 'https',
+          ca_secret_ref: 'secretRef:agentsmith/oidc-ca'
+        },
         reachability: serviceReachability
       }
     }
@@ -2075,6 +2098,139 @@ if (!renderIssue || !/AFSCP_DEFAULT_VOLUME_ISOLATION_CLASS/.test(renderIssue.rea
 NODE
 pass "operator-inputs doctor rejects legacy AFSCP default volume status/isolation"
 
+doctor_static_afscp_revision_dir="$TMP_DIR/doctor-static-afscp-volume-revision-online"
+copy_valid_package "$example_online_package" "$doctor_static_afscp_revision_dir"
+"$NODE_BIN" --input-type=module - \
+  "$doctor_static_afscp_revision_dir/render-values.example.json" \
+  "$AFSCP_VOLUME_BASE_REF" \
+  "$AFSCP_VOLUME_REVISION" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath, baseRef, revision] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.AFSCP_VOLUME_REF = baseRef;
+renderValues.AFSCP_VOLUME_REF_REVISION = revision;
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_afscp_revision_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-afscp-revision.json"
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_afscp_revision_dir" >/dev/null
+assert_plan \
+  "$doctor_static_afscp_revision_dir/.release-kit-internal/operator-inputs-plan.json" \
+  online/use_existing
+"$NODE_BIN" --input-type=module - \
+  "$ROOT_DIR" \
+  "$doctor_static_afscp_revision_dir/render-values.example.json" \
+  "$AFSCP_EFFECTIVE_VOLUME_REF" \
+  "$AFSCP_VOLUME_REVISION" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, renderValuesPath, expectedRef, expectedChecksum] = process.argv.slice(2);
+const { normalizeAfscpVolumeRefRenderValues } = await import(
+  pathToFileURL(path.join(rootDir, 'scripts/lib/substrate-render-values.mjs'))
+);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+const normalized = normalizeAfscpVolumeRefRenderValues(renderValues);
+if (normalized.AFSCP_VOLUME_REF !== expectedRef) {
+  throw new Error(`expected effective AFSCP_VOLUME_REF=${expectedRef}, got ${normalized.AFSCP_VOLUME_REF}`);
+}
+if (normalized.AFSCP_RUNTIME_SECRETS_CHECKSUM !== expectedChecksum) {
+  throw new Error('expected AFSCP runtime secrets checksum to derive from the revision digest');
+}
+NODE
+pass "operator-inputs doctor/plan accepts revisioned AFSCP volume render values"
+
+doctor_static_afscp_revision_checksum_dir="$TMP_DIR/doctor-static-afscp-volume-revision-explicit-checksum-online"
+copy_valid_package "$example_online_package" "$doctor_static_afscp_revision_checksum_dir"
+"$NODE_BIN" --input-type=module - \
+  "$doctor_static_afscp_revision_checksum_dir/render-values.example.json" \
+  "$AFSCP_VOLUME_BASE_REF" \
+  "$AFSCP_VOLUME_REVISION" \
+  "$AFSCP_EXPLICIT_RUNTIME_SECRETS_CHECKSUM" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath, baseRef, revision, explicitChecksum] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.AFSCP_VOLUME_REF = baseRef;
+renderValues.AFSCP_VOLUME_REF_REVISION = revision;
+renderValues.AFSCP_RUNTIME_SECRETS_CHECKSUM = explicitChecksum;
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_afscp_revision_checksum_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-afscp-revision-explicit-checksum.json"
+"$NODE_BIN" --input-type=module - \
+  "$ROOT_DIR" \
+  "$doctor_static_afscp_revision_checksum_dir/render-values.example.json" \
+  "$AFSCP_EFFECTIVE_VOLUME_REF" \
+  "$AFSCP_EXPLICIT_RUNTIME_SECRETS_CHECKSUM" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, renderValuesPath, expectedRef, expectedChecksum] = process.argv.slice(2);
+const { normalizeAfscpVolumeRefRenderValues } = await import(
+  pathToFileURL(path.join(rootDir, 'scripts/lib/substrate-render-values.mjs'))
+);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+const normalized = normalizeAfscpVolumeRefRenderValues(renderValues);
+if (normalized.AFSCP_VOLUME_REF !== expectedRef) {
+  throw new Error(`expected effective AFSCP_VOLUME_REF=${expectedRef}, got ${normalized.AFSCP_VOLUME_REF}`);
+}
+if (normalized.AFSCP_RUNTIME_SECRETS_CHECKSUM !== expectedChecksum) {
+  throw new Error('expected explicit AFSCP runtime secrets checksum to be preserved');
+}
+NODE
+pass "operator-inputs doctor accepts explicit AFSCP runtime secrets checksum"
+
+doctor_static_afscp_revision_stale_suffix_dir="$TMP_DIR/doctor-static-afscp-volume-revision-stale-suffix-online"
+copy_valid_package "$example_online_package" "$doctor_static_afscp_revision_stale_suffix_dir"
+"$NODE_BIN" --input-type=module - \
+  "$doctor_static_afscp_revision_stale_suffix_dir/render-values.example.json" \
+  "$AFSCP_VOLUME_BASE_REF" \
+  "$AFSCP_VOLUME_REVISION" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath, baseRef, revision] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.AFSCP_VOLUME_REF = `${baseRef}-deadbeefdead`;
+renderValues.AFSCP_VOLUME_REF_REVISION = revision;
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_afscp_revision_stale_suffix_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-afscp-revision-stale-suffix.json"
+"$NODE_BIN" --input-type=module - \
+  "$ROOT_DIR" \
+  "$doctor_static_afscp_revision_stale_suffix_dir/render-values.example.json" \
+  "$AFSCP_STALE_SUFFIX_EFFECTIVE_VOLUME_REF" \
+  "$AFSCP_VOLUME_REVISION" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, renderValuesPath, expectedRef, expectedChecksum] = process.argv.slice(2);
+const { normalizeAfscpVolumeRefRenderValues } = await import(
+  pathToFileURL(path.join(rootDir, 'scripts/lib/substrate-render-values.mjs'))
+);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+const normalized = normalizeAfscpVolumeRefRenderValues(renderValues);
+if (normalized.AFSCP_VOLUME_REF !== expectedRef) {
+  throw new Error(`expected effective AFSCP_VOLUME_REF=${expectedRef}, got ${normalized.AFSCP_VOLUME_REF}`);
+}
+if (normalized.AFSCP_RUNTIME_SECRETS_CHECKSUM !== expectedChecksum) {
+  throw new Error('expected AFSCP runtime secrets checksum to derive from the revision digest');
+}
+NODE
+pass "operator-inputs doctor accepts stale AFSCP suffix by appending the current suffix"
+
 doctor_static_schema_dir="$TMP_DIR/doctor-static-invalid-target-prerequisites"
 copy_valid_package "$example_online_package" "$doctor_static_schema_dir"
 "$NODE_BIN" --input-type=module - "$doctor_static_schema_dir/target-prerequisites.example.json" <<'NODE'
@@ -2531,6 +2687,64 @@ mkdir -p "$base_install"
 write_package_files "$base_install"
 write_manifest "$base_install" online/install_substrates
 
+"$NODE_BIN" --input-type=module - "$ROOT_DIR" "$base_install/substrate-install-inputs.json" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const [rootDir, installInputsPath] = process.argv.slice(2);
+const { deriveSubstrateRenderValues, mergeSubstrateRenderValues } = await import(
+  pathToFileURL(path.join(rootDir, 'scripts/lib/substrate-render-values.mjs'))
+);
+const installInputs = JSON.parse(fs.readFileSync(installInputsPath, 'utf8'));
+const values = deriveSubstrateRenderValues(installInputs.substrate_truth);
+
+const expected = {
+  SUBSTRATE_POSTGRES_CA_SECRET_REF: 'secretRef:agentsmith/postgresql-ca',
+  SUBSTRATE_POSTGRES_CA_SECRET_NAME: 'postgresql-ca',
+  SUBSTRATE_POSTGRES_TLS_MODE: 'verify-full',
+  SUBSTRATE_POSTGRES_SSLMODE: 'verify-full',
+  SUBSTRATE_POSTGRESQL_CA_SECRET_REF: 'secretRef:agentsmith/postgresql-ca',
+  SUBSTRATE_POSTGRESQL_CA_SECRET_NAME: 'postgresql-ca',
+  SUBSTRATE_POSTGRESQL_TLS_MODE: 'verify-full',
+  SUBSTRATE_POSTGRESQL_SSLMODE: 'verify-full',
+  SUBSTRATE_MINIO_CA_SECRET_REF: 'secretRef:agentsmith/object-storage-ca',
+  SUBSTRATE_MINIO_CA_SECRET_NAME: 'object-storage-ca',
+  SUBSTRATE_MINIO_TLS_MODE: 'https',
+  SUBSTRATE_MINIO_USE_SSL: true,
+  SUBSTRATE_OBJECT_STORAGE_CA_SECRET_REF: 'secretRef:agentsmith/object-storage-ca',
+  SUBSTRATE_OBJECT_STORAGE_CA_SECRET_NAME: 'object-storage-ca',
+  SUBSTRATE_OBJECT_STORAGE_TLS_MODE: 'https',
+  SUBSTRATE_OBJECT_STORAGE_USE_SSL: true,
+  SUBSTRATE_KEYCLOAK_CA_SECRET_REF: 'secretRef:agentsmith/oidc-ca',
+  SUBSTRATE_KEYCLOAK_CA_SECRET_NAME: 'oidc-ca',
+  SUBSTRATE_KEYCLOAK_TLS_MODE: 'https',
+  SUBSTRATE_KEYCLOAK_USE_SSL: true,
+  SUBSTRATE_OIDC_CA_SECRET_REF: 'secretRef:agentsmith/oidc-ca',
+  SUBSTRATE_OIDC_CA_SECRET_NAME: 'oidc-ca',
+  SUBSTRATE_OIDC_TLS_MODE: 'https',
+  SUBSTRATE_OIDC_USE_SSL: true
+};
+
+for (const [key, value] of Object.entries(expected)) {
+  if (values[key] !== value) {
+    throw new Error(`expected derived ${key}=${value}, got ${values[key]}`);
+  }
+}
+
+for (const key of ['SUBSTRATE_OBJECT_STORAGE_USE_SSL', 'SUBSTRATE_OIDC_CA_SECRET_NAME']) {
+  try {
+    mergeSubstrateRenderValues({ [key]: key.endsWith('_USE_SSL') ? false : 'wrong-oidc-ca' }, installInputs.substrate_truth);
+    throw new Error(`expected ${key} conflict to fail`);
+  } catch (error) {
+    if (!String(error.message).includes(key) || !String(error.message).includes('substrate_truth derived value')) {
+      throw error;
+    }
+  }
+}
+NODE
+pass "operator-inputs kit install substrate truth derives and validates CA/TLS render aliases"
+
 operator_facing_install_dir="$TMP_DIR/operator-facing-online-install"
 copy_valid_package "$base_install" "$operator_facing_install_dir"
 mutate_manifest "$operator_facing_install_dir" operator_facing_substrate_install_inputs
@@ -2538,6 +2752,60 @@ mutate_manifest "$operator_facing_install_dir" operator_facing_substrate_install
   --operator-inputs "$operator_facing_install_dir" >/dev/null
 assert_plan "$operator_facing_install_dir/.release-kit-internal/operator-inputs-plan.json" online/install_substrates
 pass "resolve-operator-inputs derives online install substrate target profile axes from deployment_path"
+
+install_render_conflict_dir="$TMP_DIR/invalid-online-install-render-substrate-conflict"
+copy_valid_package "$base_install" "$install_render_conflict_dir"
+"$NODE_BIN" --input-type=module - "$install_render_conflict_dir/render-values.json" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.SUBSTRATE_MINIO_USE_SSL = false;
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$install_render_conflict_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/install-render-conflict.json"; then
+  fail "operator-inputs doctor should fail when render values conflict with installed substrate TLS truth"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/install-render-conflict.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const issue = report.static_issues.find((item) => item.field === 'render_values');
+if (!issue || !/SUBSTRATE_MINIO_USE_SSL/.test(issue.reason) || !/substrate_truth derived value/.test(issue.reason)) {
+  throw new Error('doctor must explain render_values conflict with installed substrate truth');
+}
+NODE
+pass "operator-inputs doctor rejects render value TLS conflicts with installed substrate truth"
+
+dotted_secret_dir="$TMP_DIR/invalid-online-install-dotted-ca-secret"
+copy_valid_package "$base_install" "$dotted_secret_dir"
+"$NODE_BIN" --input-type=module - "$dotted_secret_dir/substrate-install-inputs.json" <<'NODE'
+import fs from 'node:fs';
+
+const [installInputsPath] = process.argv.slice(2);
+const installInputs = JSON.parse(fs.readFileSync(installInputsPath, 'utf8'));
+installInputs.substrate_truth.services.object_storage.tls.ca_secret_ref = 'secretRef:agentsmith/object.storage-ca';
+fs.writeFileSync(installInputsPath, `${JSON.stringify(installInputs, null, 2)}\n`);
+NODE
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$dotted_secret_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/dotted-secret.json"; then
+  fail "operator-inputs doctor should fail when substrate CA Secret names contain dots"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/dotted-secret.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const issue = report.static_issues.find((item) => item.field === 'render_values');
+if (!issue || !/Kubernetes DNS label Secret name/.test(issue.reason)) {
+  throw new Error('doctor must reject substrate CA Secret names that are not AgentSmith DNS labels');
+}
+NODE
+pass "operator-inputs doctor rejects substrate CA Secret names that are not AgentSmith DNS labels"
 
 legacy_install_truth_dir="$TMP_DIR/invalid-online-install-substrate-truth"
 copy_valid_package "$base_install" "$legacy_install_truth_dir"

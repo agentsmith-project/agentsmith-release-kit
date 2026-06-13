@@ -19,6 +19,7 @@ export const SUBSTRATE_INSTALL_SCOPE = 'substrate_install_only';
 export const TARGET_PREFLIGHT_SCHEMA = 'agentsmith.target-preflight-report/v1';
 export const RENDER_CHECK_SCHEMA = 'agentsmith.render-check-report/v1';
 export const APPLY_SCHEMA = 'agentsmith.kubernetes-apply-report/v1';
+export const APPLY_SCOPE = 'kubernetes_apply_with_pre_apply_controls';
 export const ROLLOUT_SCHEMA = 'agentsmith.kubernetes-rollout-report/v1';
 export const ROUTE_SMOKE_SCHEMA = 'agentsmith.route-smoke-report/v1';
 export const AIRGAP_IMAGE_LOAD_SCHEMA = 'agentsmith.airgap-image-load-report/v1';
@@ -57,7 +58,7 @@ export const SOURCE_STEP_REPORTS = new Map([
   }],
   ['apply', {
     schema: APPLY_SCHEMA,
-    scope: 'kubernetes_apply_only',
+    scope: APPLY_SCOPE,
     mode: 'apply'
   }],
   ['rollout', {
@@ -92,7 +93,7 @@ export const FINALIZED_STEP_SOURCE_REPORTS = new Map([
   ['apply', {
     source_step: 'apply',
     source_schema: APPLY_SCHEMA,
-    source_scope: 'kubernetes_apply_only'
+    source_scope: APPLY_SCOPE
   }],
   ['rollout', {
     source_step: 'rollout',
@@ -1267,10 +1268,80 @@ function validateRenderCheckStepReport(report, release) {
   }
 }
 
+function validatePreApplyControl(value, label, allowedStatuses) {
+  const control = requireObject(value, label);
+  const status = requireString(control.status, `${label}.status`);
+  if (!allowedStatuses.has(status)) {
+    fail(`${label}.status must be one of ${[...allowedStatuses].join(', ')}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(control, 'reason')) {
+    requireString(control.reason, `${label}.reason`);
+  }
+  return control;
+}
+
+function validateCompletedJobReplacementControl(value, label) {
+  const control = validatePreApplyControl(
+    value,
+    label,
+    new Set(['pass', 'skipped'])
+  );
+  const replacements = requireArray(control.replacements, `${label}.replacements`);
+  if (Object.prototype.hasOwnProperty.call(control, 'replacement_count')) {
+    const replacementCount = requireInteger(control.replacement_count, `${label}.replacement_count`);
+    if (replacementCount !== replacements.length) {
+      fail(`${label}.replacement_count must match ${label}.replacements length`);
+    }
+  }
+  for (const [index, replacement] of replacements.entries()) {
+    const entry = requireObject(replacement, `${label}.replacements[${index}]`);
+    requireString(entry.kind, `${label}.replacements[${index}].kind`);
+    requireString(entry.name, `${label}.replacements[${index}].name`);
+    requireString(entry.namespace, `${label}.replacements[${index}].namespace`);
+    requireString(entry.reason, `${label}.replacements[${index}].reason`);
+  }
+}
+
+function validateSecretPreflightControl(value, label) {
+  const control = validatePreApplyControl(
+    value,
+    label,
+    new Set(['pass', 'skipped'])
+  );
+  if (Object.prototype.hasOwnProperty.call(control, 'required_secret_count')) {
+    requireInteger(control.required_secret_count, `${label}.required_secret_count`);
+  }
+  if (Object.prototype.hasOwnProperty.call(control, 'required_secret_key_count')) {
+    requireInteger(control.required_secret_key_count, `${label}.required_secret_key_count`);
+  }
+}
+
+function validateApplyPreApplyControls(value, label) {
+  const controls = requireObject(value, label);
+  validateSecretPreflightControl(controls.secret_preflight, `${label}.secret_preflight`);
+  validatePreApplyControl(
+    controls.afscp_juicefs_csi_tls_readiness,
+    `${label}.afscp_juicefs_csi_tls_readiness`,
+    new Set(['pass', 'skipped'])
+  );
+  validatePreApplyControl(
+    controls.afscp_static_juicefs_pv_reconcile,
+    `${label}.afscp_static_juicefs_pv_reconcile`,
+    new Set(['reconciled', 'noop', 'skipped'])
+  );
+  validateCompletedJobReplacementControl(
+    controls.completed_job_replacements,
+    `${label}.completed_job_replacements`
+  );
+}
+
 function validateApplyStepReport(report) {
   requireOperatorRunId(report.operator_run_id, 'apply step report.operator_run_id');
   validateResourceRefs(report.resource_refs, 'apply step report.resource_refs');
   requireNonEmptyStringArray(report.kubectl_resource_refs, 'apply step report.kubectl_resource_refs');
+  validateApplyPreApplyControls(report.pre_apply_controls, 'apply step report.pre_apply_controls');
+  requireArray(report.pre_apply_job_replacements, 'apply step report.pre_apply_job_replacements');
+  requireObject(report.pre_apply_reconcile, 'apply step report.pre_apply_reconcile');
   validateRenderCheckSummary(report.render_check, 'apply step report.render_check');
 }
 

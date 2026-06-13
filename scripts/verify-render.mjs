@@ -12,6 +12,11 @@ import {
   validateSubstrateConnectionTruth
 } from './lib/substrate-truth-validation.mjs';
 import {
+  isSafeRenderSecretLikeValue,
+  mergeSubstrateRenderValues,
+  validateSubstrateRenderValues
+} from './lib/substrate-render-values.mjs';
+import {
   parseCanonicalTargetProfile,
   validateContractTargetProfileEntry
 } from './lib/release-kit-version-policy.mjs';
@@ -500,6 +505,10 @@ function isSafeSecretReference(value) {
   );
 }
 
+function isSafeSecretLikeValue(key, value) {
+  return isSafeSecretReference(value) || isSafeRenderSecretLikeValue(key, value);
+}
+
 function hasSecretRefReservedWord(value) {
   return SECRET_REF_RESERVED_WORD_RE.test(value);
 }
@@ -591,7 +600,7 @@ function scanForUnsafePayload(value, label, issues = []) {
         SECRET_KEY_RE.test(key) &&
         typeof nested === 'string' &&
         !isAllowedAfscpWorkloadMountSecretRefs(key, nested) &&
-        !isSafeSecretReference(nested)
+        !isSafeSecretLikeValue(key, nested)
       ) {
         issues.push(`${nestedLabel} contains a secret-looking payload`);
       }
@@ -680,7 +689,7 @@ function assertNoRenderedUnsafePayload(raw, label) {
       value !== '{}' &&
       value !== '[]' &&
       !isAllowedAfscpWorkloadMountSecretRefs(key, value) &&
-      !isSafeSecretReference(value)
+      !isSafeSecretLikeValue(key, value)
     ) {
       fail(`${label} contains a secret-looking payload`);
     }
@@ -1547,20 +1556,30 @@ function deriveAfscpDefaultVolumePvName(renderValues) {
   return expected;
 }
 
-function normalizeRenderValues(renderValues, targetProfile) {
-  if (Object.prototype.hasOwnProperty.call(renderValues, 'PROFILE')) {
-    const profile = requireString(renderValues.PROFILE, 'render_values.PROFILE');
+function normalizeRenderValues(renderValues, targetProfile, substrateTruth) {
+  const substrateRenderValues = mergeSubstrateRenderValues(
+    renderValues,
+    substrateTruth,
+    {
+      fail,
+      label: 'render_values',
+      truthLabel: 'substrate_truth'
+    }
+  );
+
+  if (Object.prototype.hasOwnProperty.call(substrateRenderValues, 'PROFILE')) {
+    const profile = requireString(substrateRenderValues.PROFILE, 'render_values.PROFILE');
     if (profile !== targetProfile.value) {
       fail('render_values.PROFILE must match --target-profile');
     }
   }
 
   const normalized = {
-    ...renderValues,
+    ...substrateRenderValues,
     PROFILE: targetProfile.value,
-    AFSCP_DEFAULT_VOLUME_PV_NAME: deriveAfscpDefaultVolumePvName(renderValues)
+    AFSCP_DEFAULT_VOLUME_PV_NAME: deriveAfscpDefaultVolumePvName(substrateRenderValues)
   };
-  const ingressHost = deriveIngressHost(renderValues);
+  const ingressHost = deriveIngressHost(substrateRenderValues);
   if (ingressHost) {
     normalized.INGRESS_HOST = ingressHost;
   }
@@ -1586,7 +1605,7 @@ function buildRenderContext({
   }
 
   return {
-    values: normalizeRenderValues(renderValues, targetProfile),
+    values: normalizeRenderValues(renderValues, targetProfile, substrateTruth),
     images,
     target: targetProfile,
     substrate: substrateTruth,
@@ -2344,6 +2363,7 @@ async function main() {
   );
   validateAfscpDefaultVolumeRenderValues(renderValues, { label: 'render_values' });
   validateEndpointSliceRenderValues(renderValues, { label: 'render_values' });
+  validateSubstrateRenderValues(renderValues, { fail, label: 'render_values' });
   assertNoUnsafeSubstratePayload(substrateTruth, 'substrate_truth', substrateTruthInput.raw);
   validateSubstrateConnectionTruth(substrateTruth, targetProfile, { label: 'substrate_truth' });
 

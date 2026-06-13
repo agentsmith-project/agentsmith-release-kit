@@ -14,6 +14,12 @@ installer guard: `Service`, `ConfigMap`, `NetworkPolicy`, `StatefulSet`,
 `Secret`, RBAC, `IngressClass`, `StorageClass`, or `PersistentVolume`
 resources.
 
+The substrate NetworkPolicy keeps substrate traffic namespace-local, with only
+the default `kube-system` JuiceFS CSI node and mount pods allowed to reach
+PostgreSQL `5432` and mount pods allowed to reach object-storage `9000`.
+Use `--juicefs-csi-namespace` during materialization when the CSI mount
+namespace is not `kube-system`.
+
 Secrets are operator-provided target facts. Resource manifests reference only
 secret names and keys, and substrate truth uses `secretRef:<namespace>/<name>`.
 The operator must create every referenced credential, admin, client, server

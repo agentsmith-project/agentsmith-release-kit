@@ -52,6 +52,58 @@ const REQUIRED_SUBSTRATE_SECRET_KEY_FIELDS = [
     keys: ['client_secret']
   }
 ];
+const REQUIRED_SUBSTRATE_TLS_SECRET_KEY_FIELDS = [
+  {
+    service: 'postgresql',
+    field: 'ca_secret_ref',
+    keys: ['ca.crt']
+  },
+  {
+    service: 'mongodb',
+    field: 'ca_secret_ref',
+    keys: ['ca.crt']
+  },
+  {
+    service: 'redis',
+    field: 'ca_secret_ref',
+    keys: ['ca.crt']
+  },
+  {
+    service: 'object_storage',
+    field: 'ca_secret_ref',
+    keys: ['ca.crt']
+  },
+  {
+    service: 'oidc',
+    field: 'ca_secret_ref',
+    keys: ['ca.crt']
+  },
+  {
+    service: 'postgresql',
+    field: 'server_secret_ref',
+    keys: ['tls.crt', 'tls.key', 'ca.crt']
+  },
+  {
+    service: 'mongodb',
+    field: 'server_secret_ref',
+    keys: ['tls.pem', 'ca.crt']
+  },
+  {
+    service: 'redis',
+    field: 'server_secret_ref',
+    keys: ['tls.crt', 'tls.key', 'ca.crt']
+  },
+  {
+    service: 'object_storage',
+    field: 'server_secret_ref',
+    keys: ['public.crt', 'private.key']
+  },
+  {
+    service: 'oidc',
+    field: 'server_secret_ref',
+    keys: ['tls.crt', 'tls.key']
+  }
+];
 const SUBSTRATE_TRUTH_FIELDS = [
   'schema_version',
   'target_cluster',
@@ -910,14 +962,9 @@ export function requiredSubstrateSecretKeyRefs(value, { label = 'substrate_truth
   const requirements = [];
   const seen = new Set();
 
-  for (const { service, field, keys } of REQUIRED_SUBSTRATE_SECRET_KEY_FIELDS) {
-    const serviceConfig = services[service];
-    if (!serviceConfig || typeof serviceConfig !== 'object' || Array.isArray(serviceConfig)) {
-      continue;
-    }
-    const ref = serviceConfig[field];
+  function addRequirement(ref, keys) {
     if (!isSecretRefValue(ref)) {
-      continue;
+      return;
     }
     for (const key of keys) {
       const dedupeKey = `${ref}\0${key}`;
@@ -927,6 +974,26 @@ export function requiredSubstrateSecretKeyRefs(value, { label = 'substrate_truth
       seen.add(dedupeKey);
       requirements.push({ ref, key });
     }
+  }
+
+  for (const { service, field, keys } of REQUIRED_SUBSTRATE_SECRET_KEY_FIELDS) {
+    const serviceConfig = services[service];
+    if (!serviceConfig || typeof serviceConfig !== 'object' || Array.isArray(serviceConfig)) {
+      continue;
+    }
+    addRequirement(serviceConfig[field], keys);
+  }
+
+  for (const { service, field, keys } of REQUIRED_SUBSTRATE_TLS_SECRET_KEY_FIELDS) {
+    const serviceConfig = services[service];
+    if (!serviceConfig || typeof serviceConfig !== 'object' || Array.isArray(serviceConfig)) {
+      continue;
+    }
+    const tlsConfig = serviceConfig.tls;
+    if (!tlsConfig || typeof tlsConfig !== 'object' || Array.isArray(tlsConfig)) {
+      continue;
+    }
+    addRequirement(tlsConfig[field], keys);
   }
 
   return requirements.sort((left, right) =>

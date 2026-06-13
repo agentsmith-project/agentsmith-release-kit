@@ -7,6 +7,7 @@ import {
   parseCanonicalTargetProfile,
   validateContractTargetProfileEntry
 } from './lib/release-kit-version-policy.mjs';
+import { isSafeRenderSecretLikeValue } from './lib/substrate-render-values.mjs';
 
 const REQUIRED_ARGS = [
   'releaseContract',
@@ -397,6 +398,10 @@ function isSafeSecretReference(value) {
   );
 }
 
+function isSafeSecretLikeValue(key, value) {
+  return isSafeSecretReference(value) || isSafeRenderSecretLikeValue(key, value);
+}
+
 function hasSecretRefReservedWord(value) {
   return SECRET_REF_RESERVED_WORD_RE.test(value);
 }
@@ -500,7 +505,7 @@ function assertNoSecretPayload(raw, label) {
       value !== '{}' &&
       value !== '[]' &&
       !isAllowedAfscpWorkloadMountSecretRefs(key, value) &&
-      !isSafeSecretReference(value)
+      !isSafeSecretLikeValue(key, value)
     ) {
       fail(`${label} contains a secret-looking payload`);
     }

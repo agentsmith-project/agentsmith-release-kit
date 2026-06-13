@@ -545,6 +545,17 @@ async function readJsonFile(file, label) {
   }
 }
 
+async function assertApplyLivePrerequisites(args) {
+  const substrateTruth = (await readJsonFile(args.substrateTruth, 'substrate truth')).value;
+  assertLiveRequiredSubstrateSecrets({
+    substrateTruth,
+    kubectl: args.kubectl,
+    kubeconfig: args.kubeconfig,
+    context: args.context,
+    fail
+  });
+}
+
 async function readReleaseContract(file) {
   const input = await readJsonFile(file, 'release contract');
   const contract = input.value;
@@ -1305,6 +1316,10 @@ async function main(argv) {
     ]
   });
 
+  if (args.mode === 'apply' && isKitOnline(args)) {
+    await assertApplyLivePrerequisites(args);
+  }
+
   if (isKitOnline(args)) {
     const substrateRoutabilityArgv = [
       '--target-profile',
@@ -1381,15 +1396,8 @@ async function main(argv) {
     }
   }
 
-  if (args.mode === 'apply') {
-    const substrateTruth = (await readJsonFile(args.substrateTruth, 'substrate truth')).value;
-    assertLiveRequiredSubstrateSecrets({
-      substrateTruth,
-      kubectl: args.kubectl,
-      kubeconfig: args.kubeconfig,
-      context: args.context,
-      fail
-    });
+  if (args.mode === 'apply' && !isKitOnline(args)) {
+    await assertApplyLivePrerequisites(args);
   }
 
   const renderArgv = [

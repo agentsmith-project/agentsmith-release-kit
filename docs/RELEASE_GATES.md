@@ -953,9 +953,9 @@ image inventory guard. The default mode is `server-dry-run`, which runs
 and `--operator-run-id <id>`.
 
 The generated `apply-report.json` must keep `schema_version:
-agentsmith.kubernetes-apply-report/v1`, `scope: kubernetes_apply_only`,
+agentsmith.kubernetes-apply-report/v1`, `scope: kubernetes_apply_with_pre_apply_controls`,
 `readiness: false`, and `status: pass`. It records the release contract digest,
-target axes, namespace, mode, resource refs, kubectl version, and
+target axes, namespace, mode, resource refs, pre-apply controls, kubectl version, and
 `operator_run_id` only for real apply mode. It must not contain `verdict`,
 `release_verdict`, deploy readiness, product-flow fields, kubeconfig content,
 or raw secret payloads.

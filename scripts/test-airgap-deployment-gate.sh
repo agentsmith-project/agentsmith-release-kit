@@ -987,13 +987,291 @@ printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" || "$arg" == "wait" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "create" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" || "$arg" == "wait" ]]; then
     command_name="$arg"
     break
   fi
 done
 
 case "$command_name" in
+  create)
+    node --input-type=module - "$@" <<'DECODE_NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const args = process.argv.slice(2);
+const manifestSources = [];
+let outputFormat = '';
+let dryRunClient = false;
+let previous = '';
+
+for (const arg of args) {
+  if (previous === '-f' || previous === '--filename') {
+    manifestSources.push(arg);
+  }
+  if (previous === '-o' || previous === '--output') {
+    outputFormat = arg;
+  }
+  if (arg.startsWith('-f=')) {
+    manifestSources.push(arg.slice(3));
+  } else if (arg.startsWith('--filename=')) {
+    manifestSources.push(arg.slice('--filename='.length));
+  } else if (arg.startsWith('-o=')) {
+    outputFormat = arg.slice(3);
+  } else if (arg.startsWith('--output=')) {
+    outputFormat = arg.slice('--output='.length);
+  } else if (arg === '--dry-run=client') {
+    dryRunClient = true;
+  }
+  previous = arg;
+}
+
+if (manifestSources.length === 0 || outputFormat !== 'json' || !dryRunClient) {
+  process.stderr.write('unexpected fake kubectl create args: ' + args.join(' ') + '\n');
+  process.exit(2);
+}
+
+function manifestFiles(source) {
+  if (!fs.existsSync(source)) {
+    process.stderr.write('error: the path "' + source + '" does not exist\n');
+    process.exit(1);
+  }
+  const stat = fs.statSync(source);
+  if (stat.isFile()) {
+    return [source];
+  }
+  if (!stat.isDirectory()) {
+    return [];
+  }
+  return fs.readdirSync(source)
+    .filter((entry) => /\.(json|ya?ml)$/i.test(entry))
+    .sort()
+    .map((entry) => path.join(source, entry))
+    .filter((file) => fs.statSync(file).isFile());
+}
+
+function stripQuotes(value) {
+  const text = String(value ?? '').trim();
+  if (text.length >= 2) {
+    const first = text[0];
+    const last = text[text.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return text.slice(1, -1);
+    }
+  }
+  return text;
+}
+
+function scalar(value) {
+  const text = stripQuotes(value);
+  if (text === '') {
+    return '';
+  }
+  if (text === 'true') {
+    return true;
+  }
+  if (text === 'false') {
+    return false;
+  }
+  if (text === 'null' || text === '~') {
+    return null;
+  }
+  if (/^-?\d+(\.\d+)?$/.test(text)) {
+    return Number(text);
+  }
+  return text;
+}
+
+function stripComment(line) {
+  let quote = '';
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if ((char === '"' || char === "'") && line[index - 1] !== '\\') {
+      quote = quote === char ? '' : quote || char;
+    }
+    if (char === '#' && quote === '' && (index === 0 || /\s/.test(line[index - 1]))) {
+      return line.slice(0, index);
+    }
+  }
+  return line;
+}
+
+function yamlLines(raw) {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => stripComment(line).replace(/\s+$/, ''))
+    .filter((line) => line.trim() !== '' && line.trim() !== '---' && line.trim() !== '...');
+}
+
+function indentOf(line) {
+  return line.match(/^ */)[0].length;
+}
+
+function splitKeyValue(text) {
+  const index = text.indexOf(':');
+  if (index === -1) {
+    return [text.trim(), undefined];
+  }
+  return [text.slice(0, index).trim(), text.slice(index + 1).trim()];
+}
+
+function parseBlock(lines, start, indent) {
+  if (start >= lines.length) {
+    return [undefined, start];
+  }
+  const first = lines[start];
+  const isList = indentOf(first) === indent && first.slice(indent).startsWith('- ');
+  return isList ? parseList(lines, start, indent) : parseMap(lines, start, indent);
+}
+
+function parseMap(lines, start, indent) {
+  const object = {};
+  let index = start;
+  while (index < lines.length) {
+    const line = lines[index];
+    const currentIndent = indentOf(line);
+    if (currentIndent < indent) {
+      break;
+    }
+    if (currentIndent > indent) {
+      index += 1;
+      continue;
+    }
+    const text = line.slice(indent);
+    if (text.startsWith('- ')) {
+      break;
+    }
+    const [key, value] = splitKeyValue(text);
+    if (!key) {
+      index += 1;
+      continue;
+    }
+    if (value === undefined || value === '') {
+      const nextIndent = index + 1 < lines.length ? indentOf(lines[index + 1]) : indent + 2;
+      if (index + 1 < lines.length && nextIndent > currentIndent) {
+        const parsed = parseBlock(lines, index + 1, nextIndent);
+        object[key] = parsed[0];
+        index = parsed[1];
+      } else {
+        object[key] = {};
+        index += 1;
+      }
+    } else {
+      object[key] = scalar(value);
+      index += 1;
+    }
+  }
+  return [object, index];
+}
+
+function parseList(lines, start, indent) {
+  const list = [];
+  let index = start;
+  while (index < lines.length) {
+    const line = lines[index];
+    const currentIndent = indentOf(line);
+    if (currentIndent < indent) {
+      break;
+    }
+    if (currentIndent !== indent || !line.slice(indent).startsWith('- ')) {
+      break;
+    }
+    const text = line.slice(indent + 2);
+    if (text === '') {
+      const parsed = parseBlock(lines, index + 1, indent + 2);
+      list.push(parsed[0]);
+      index = parsed[1];
+      continue;
+    }
+    const [key, value] = splitKeyValue(text);
+    if (value !== undefined && key) {
+      const item = { [key]: value === '' ? {} : scalar(value) };
+      let nextIndex = index + 1;
+      if (nextIndex < lines.length && indentOf(lines[nextIndex]) > indent) {
+        const parsed = parseMap(lines, nextIndex, indent + 2);
+        Object.assign(item, parsed[0]);
+        nextIndex = parsed[1];
+      }
+      list.push(item);
+      index = nextIndex;
+      continue;
+    }
+    list.push(scalar(text));
+    index += 1;
+  }
+  return [list, index];
+}
+
+function splitDocuments(raw) {
+  const docs = [];
+  let current = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (line.trim() === '---') {
+      docs.push(current.join('\n'));
+      current = [];
+      continue;
+    }
+    current.push(line);
+  }
+  docs.push(current.join('\n'));
+  return docs;
+}
+
+function appendResource(resources, value) {
+  if (!value) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      appendResource(resources, item);
+    }
+    return;
+  }
+  if (value.kind === 'List' && Array.isArray(value.items)) {
+    for (const item of value.items) {
+      appendResource(resources, item);
+    }
+    return;
+  }
+  resources.push(value);
+}
+
+function parseYaml(raw) {
+  return splitDocuments(raw).flatMap((document) => {
+    const lines = yamlLines(document);
+    if (lines.length === 0) {
+      return [];
+    }
+    const parsed = parseBlock(lines, 0, indentOf(lines[0]))[0];
+    return parsed ? [parsed] : [];
+  });
+}
+
+const resources = [];
+for (const source of manifestSources) {
+  for (const file of manifestFiles(source)) {
+    const raw = fs.readFileSync(file, 'utf8');
+    const trimmed = raw.trim();
+    if (trimmed === '') {
+      continue;
+    }
+    if (path.extname(file).toLowerCase() === '.json' || /^[\[{]/.test(trimmed)) {
+      appendResource(resources, JSON.parse(trimmed));
+      continue;
+    }
+    for (const resource of parseYaml(raw)) {
+      appendResource(resources, resource);
+    }
+  }
+}
+
+process.stdout.write(JSON.stringify({
+  apiVersion: 'v1',
+  kind: 'List',
+  items: resources
+}) + '\n');
+DECODE_NODE
+    ;;
   version)
     printf '%s\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
     ;;
@@ -1050,6 +1328,23 @@ case "$command_name" in
       get_target="secret"
     fi
 
+    if [[ "$get_target" == "namespace" || "$get_target" == "namespaces" ]]; then
+      namespace_name=""
+      previous=""
+      for arg in "$@"; do
+        if [[ "$previous" == "$get_target" && -z "$namespace_name" ]]; then
+          namespace_name="$arg"
+        fi
+        previous="$arg"
+      done
+      if [[ -z "$namespace_name" || "$output_format" != "json" ]]; then
+        echo "unexpected fake kubectl get namespace args: $*" >&2
+        exit 2
+      fi
+      printf '{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"%s"}}\n' "$namespace_name"
+      exit 0
+    fi
+
     if [[ "$get_target" == "secret" ]]; then
       if [[ -z "$get_name" || -z "$get_namespace" || "$output_format" != "json" ]]; then
         echo "unexpected fake kubectl get secret args: $*" >&2
@@ -1062,14 +1357,24 @@ const dataByName = new Map([
   ['postgresql-credential', { username: value, password: value }],
   ['postgresql-app', { username: value, password: value }],
   ['postgresql-admin', { username: value, password: value }],
+  ['postgresql-ca', { 'ca.crt': value }],
+  ['postgresql-server-tls', { 'tls.crt': value, 'tls.key': value, 'ca.crt': value }],
   ['mongodb-credential', { username: value, password: value }],
   ['mongodb-app', { username: value, password: value }],
+  ['mongodb-ca', { 'ca.crt': value }],
+  ['mongodb-server-tls', { 'tls.pem': value, 'ca.crt': value }],
   ['redis-credential', { password: value }],
   ['redis-app', { password: value }],
+  ['redis-ca', { 'ca.crt': value }],
+  ['redis-server-tls', { 'tls.crt': value, 'tls.key': value, 'ca.crt': value }],
   ['object-storage-credential', { access_key: value, secret_key: value }],
   ['object-storage-app', { access_key: value, secret_key: value }],
+  ['object-storage-ca', { 'ca.crt': value }],
+  ['object-storage-server-tls', { 'public.crt': value, 'private.key': value }],
   ['oidc-admin', { username: value, password: value }],
-  ['oidc-client', { client_secret: value }]
+  ['oidc-client', { client_secret: value }],
+  ['oidc-ca', { 'ca.crt': value }],
+  ['oidc-server-tls', { 'tls.crt': value, 'tls.key': value }]
 ]);
 const data = dataByName.get(name);
 if (!data) {

@@ -37,6 +37,7 @@ const SAFE_REPOSITORY_RE = /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][
 const KUBERNETES_NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const INSTALLATION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const DIGEST_PINNED_IMAGE_RE = /^[^\s@]+@sha256:[0-9a-f]{64}$/;
+const DEFAULT_JUICEFS_CSI_NAMESPACE = 'kube-system';
 const MATERIALIZED_FILES = {
   manifest: 'substrate-pack-manifest.json',
   installInputs: 'substrate-install-inputs.json',
@@ -69,6 +70,7 @@ function usage() {
     --namespace <namespace> \\
     --installation-id <id> \\
     --storage-class <storage-class> \\
+    [--juicefs-csi-namespace <namespace, default kube-system>] \\
     [--source-dir substrate-packs/minimal] \\
     [--target-registry <registry-host[/namespace]> for airgap/install_substrates] \\
     [--verify-source-images [--skopeo <path-or-command>]] \\
@@ -123,6 +125,9 @@ function parseArgs(argv) {
         break;
       case '--storage-class':
         args.storageClass = nextValue();
+        break;
+      case '--juicefs-csi-namespace':
+        args.juicefsCsiNamespace = nextValue();
         break;
       case '--source-dir':
         args.sourceDir = nextValue();
@@ -204,10 +209,10 @@ function assertDeploymentPath(value) {
   };
 }
 
-function assertNamespace(value) {
-  const namespace = requireString(value, 'namespace');
+function assertNamespace(value, label = 'namespace') {
+  const namespace = requireString(value, label);
   if (namespace.length > 63 || !KUBERNETES_NAMESPACE_RE.test(namespace)) {
-    fail('namespace must be a Kubernetes namespace name');
+    fail(`${label} must be a Kubernetes namespace name`);
   }
   return namespace;
 }
@@ -663,6 +668,10 @@ async function main() {
 
   const { deploymentPath, targetProfile } = assertDeploymentPath(args.deploymentPath);
   const namespace = assertNamespace(args.namespace);
+  const juicefsCsiNamespace = assertNamespace(
+    args.juicefsCsiNamespace ?? DEFAULT_JUICEFS_CSI_NAMESPACE,
+    'juicefs_csi_namespace'
+  );
   const installationId = assertInstallationId(args.installationId);
   const storageClass = assertStorageClass(args.storageClass);
   const declaredAt = assertDeclaredAt(args.declaredAt);
@@ -692,6 +701,7 @@ async function main() {
     TARGET_PROFILE: targetProfile,
     INSTALLATION_ID: installationId,
     NAMESPACE: namespace,
+    JUICEFS_CSI_NAMESPACE: juicefsCsiNamespace,
     STORAGE_CLASS: storageClass,
     ...imageReplacements(images)
   };

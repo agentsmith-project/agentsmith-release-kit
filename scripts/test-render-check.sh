@@ -356,6 +356,7 @@ metadata:
   name: safe-config
 data:
   client_secret: secretRef:oidc-client
+  SUBSTRATE_POSTGRES_CA_SECRET_NAME: postgresql-ca
   password: operator_secret_ref
   token: redacted
 `

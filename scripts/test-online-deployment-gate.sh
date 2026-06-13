@@ -225,6 +225,32 @@ fs.writeFileSync(prerequisitesPath, `${JSON.stringify(prerequisites, null, 2)}\n
 NODE
 }
 
+write_postgresql_server_tls_inputs() {
+  local truth_output="$1"
+  local prerequisites_output="$2"
+  local profile="${3:-$TARGET_PROFILE}"
+
+  write_truth "$truth_output" "$profile"
+  write_prerequisites "$prerequisites_output" "$profile" valid
+  "$NODE_BIN" --input-type=module - "$truth_output" "$prerequisites_output" <<'NODE'
+import fs from 'node:fs';
+
+const [truthPath, prerequisitesPath] = process.argv.slice(2);
+const truth = JSON.parse(fs.readFileSync(truthPath, 'utf8'));
+const prerequisites = JSON.parse(fs.readFileSync(prerequisitesPath, 'utf8'));
+const ref = 'secretRef:release/postgresql-server-tls';
+
+truth.services.postgresql.tls.server_secret_ref = ref;
+if (!prerequisites.substrate_secret_refs.includes(ref)) {
+  prerequisites.substrate_secret_refs.push(ref);
+  prerequisites.substrate_secret_refs.sort();
+}
+
+fs.writeFileSync(truthPath, `${JSON.stringify(truth, null, 2)}\n`);
+fs.writeFileSync(prerequisitesPath, `${JSON.stringify(prerequisites, null, 2)}\n`);
+NODE
+}
+
 write_render_values() {
   local output="$1"
 
@@ -568,7 +594,7 @@ printf '%s\\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "wait" || "$arg" == "get" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "create" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "wait" || "$arg" == "get" ]]; then
     command_name="$arg"
     break
   fi
@@ -576,6 +602,286 @@ done
 
 if [[ "$command_name" == "version" ]]; then
   printf '%s\\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
+  exit 0
+fi
+
+if [[ "$command_name" == "create" ]]; then
+  node --input-type=module - "$@" <<'DECODE_NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const args = process.argv.slice(2);
+const manifestSources = [];
+let outputFormat = '';
+let dryRunClient = false;
+let previous = '';
+
+for (const arg of args) {
+  if (previous === '-f' || previous === '--filename') {
+    manifestSources.push(arg);
+  }
+  if (previous === '-o' || previous === '--output') {
+    outputFormat = arg;
+  }
+  if (arg.startsWith('-f=')) {
+    manifestSources.push(arg.slice(3));
+  } else if (arg.startsWith('--filename=')) {
+    manifestSources.push(arg.slice('--filename='.length));
+  } else if (arg.startsWith('-o=')) {
+    outputFormat = arg.slice(3);
+  } else if (arg.startsWith('--output=')) {
+    outputFormat = arg.slice('--output='.length);
+  } else if (arg === '--dry-run=client') {
+    dryRunClient = true;
+  }
+  previous = arg;
+}
+
+if (manifestSources.length === 0 || outputFormat !== 'json' || !dryRunClient) {
+  process.stderr.write('unexpected fake kubectl create args: ' + args.join(' ') + '\\n');
+  process.exit(2);
+}
+
+function manifestFiles(source) {
+  if (!fs.existsSync(source)) {
+    process.stderr.write('error: the path "' + source + '" does not exist\\n');
+    process.exit(1);
+  }
+  const stat = fs.statSync(source);
+  if (stat.isFile()) {
+    return [source];
+  }
+  if (!stat.isDirectory()) {
+    return [];
+  }
+  return fs.readdirSync(source)
+    .filter((entry) => /\\.(json|ya?ml)$/i.test(entry))
+    .sort()
+    .map((entry) => path.join(source, entry))
+    .filter((file) => fs.statSync(file).isFile());
+}
+
+function stripQuotes(value) {
+  const text = String(value ?? '').trim();
+  if (text.length >= 2) {
+    const first = text[0];
+    const last = text[text.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return text.slice(1, -1);
+    }
+  }
+  return text;
+}
+
+function scalar(value) {
+  const text = stripQuotes(value);
+  if (text === '') {
+    return '';
+  }
+  if (text === 'true') {
+    return true;
+  }
+  if (text === 'false') {
+    return false;
+  }
+  if (text === 'null' || text === '~') {
+    return null;
+  }
+  if (/^-?\\d+(\\.\\d+)?$/.test(text)) {
+    return Number(text);
+  }
+  return text;
+}
+
+function stripComment(line) {
+  let quote = '';
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if ((char === '"' || char === "'") && line[index - 1] !== '\\\\') {
+      quote = quote === char ? '' : quote || char;
+    }
+    if (char === '#' && quote === '' && (index === 0 || /\\s/.test(line[index - 1]))) {
+      return line.slice(0, index);
+    }
+  }
+  return line;
+}
+
+function yamlLines(raw) {
+  return raw
+    .split(/\\r?\\n/)
+    .map((line) => stripComment(line).replace(/\\s+$/, ''))
+    .filter((line) => line.trim() !== '' && line.trim() !== '---' && line.trim() !== '...');
+}
+
+function indentOf(line) {
+  return line.match(/^ */)[0].length;
+}
+
+function splitKeyValue(text) {
+  const index = text.indexOf(':');
+  if (index === -1) {
+    return [text.trim(), undefined];
+  }
+  return [text.slice(0, index).trim(), text.slice(index + 1).trim()];
+}
+
+function parseBlock(lines, start, indent) {
+  if (start >= lines.length) {
+    return [undefined, start];
+  }
+  const first = lines[start];
+  const isList = indentOf(first) === indent && first.slice(indent).startsWith('- ');
+  return isList ? parseList(lines, start, indent) : parseMap(lines, start, indent);
+}
+
+function parseMap(lines, start, indent) {
+  const object = {};
+  let index = start;
+  while (index < lines.length) {
+    const line = lines[index];
+    const currentIndent = indentOf(line);
+    if (currentIndent < indent) {
+      break;
+    }
+    if (currentIndent > indent) {
+      index += 1;
+      continue;
+    }
+    const text = line.slice(indent);
+    if (text.startsWith('- ')) {
+      break;
+    }
+    const [key, value] = splitKeyValue(text);
+    if (!key) {
+      index += 1;
+      continue;
+    }
+    if (value === undefined || value === '') {
+      const nextIndent = index + 1 < lines.length ? indentOf(lines[index + 1]) : indent + 2;
+      if (index + 1 < lines.length && nextIndent > currentIndent) {
+        const parsed = parseBlock(lines, index + 1, nextIndent);
+        object[key] = parsed[0];
+        index = parsed[1];
+      } else {
+        object[key] = {};
+        index += 1;
+      }
+    } else {
+      object[key] = scalar(value);
+      index += 1;
+    }
+  }
+  return [object, index];
+}
+
+function parseList(lines, start, indent) {
+  const list = [];
+  let index = start;
+  while (index < lines.length) {
+    const line = lines[index];
+    const currentIndent = indentOf(line);
+    if (currentIndent < indent) {
+      break;
+    }
+    if (currentIndent !== indent || !line.slice(indent).startsWith('- ')) {
+      break;
+    }
+    const text = line.slice(indent + 2);
+    if (text === '') {
+      const parsed = parseBlock(lines, index + 1, indent + 2);
+      list.push(parsed[0]);
+      index = parsed[1];
+      continue;
+    }
+    const [key, value] = splitKeyValue(text);
+    if (value !== undefined && key) {
+      const item = { [key]: value === '' ? {} : scalar(value) };
+      let nextIndex = index + 1;
+      if (nextIndex < lines.length && indentOf(lines[nextIndex]) > indent) {
+        const parsed = parseMap(lines, nextIndex, indent + 2);
+        Object.assign(item, parsed[0]);
+        nextIndex = parsed[1];
+      }
+      list.push(item);
+      index = nextIndex;
+      continue;
+    }
+    list.push(scalar(text));
+    index += 1;
+  }
+  return [list, index];
+}
+
+function splitDocuments(raw) {
+  const docs = [];
+  let current = [];
+  for (const line of raw.split(/\\r?\\n/)) {
+    if (line.trim() === '---') {
+      docs.push(current.join('\\n'));
+      current = [];
+      continue;
+    }
+    current.push(line);
+  }
+  docs.push(current.join('\\n'));
+  return docs;
+}
+
+function appendResource(resources, value) {
+  if (!value) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      appendResource(resources, item);
+    }
+    return;
+  }
+  if (value.kind === 'List' && Array.isArray(value.items)) {
+    for (const item of value.items) {
+      appendResource(resources, item);
+    }
+    return;
+  }
+  resources.push(value);
+}
+
+function parseYaml(raw) {
+  return splitDocuments(raw).flatMap((document) => {
+    const lines = yamlLines(document);
+    if (lines.length === 0) {
+      return [];
+    }
+    const parsed = parseBlock(lines, 0, indentOf(lines[0]))[0];
+    return parsed ? [parsed] : [];
+  });
+}
+
+const resources = [];
+for (const source of manifestSources) {
+  for (const file of manifestFiles(source)) {
+    const raw = fs.readFileSync(file, 'utf8');
+    const trimmed = raw.trim();
+    if (trimmed === '') {
+      continue;
+    }
+    if (path.extname(file).toLowerCase() === '.json' || /^[\\[{]/.test(trimmed)) {
+      appendResource(resources, JSON.parse(trimmed));
+      continue;
+    }
+    for (const resource of parseYaml(raw)) {
+      appendResource(resources, resource);
+    }
+  }
+}
+
+process.stdout.write(JSON.stringify({
+  apiVersion: 'v1',
+  kind: 'List',
+  items: resources
+}) + '\\n');
+DECODE_NODE
   exit 0
 fi
 
@@ -640,6 +946,11 @@ if [[ "$command_name" == "get" ]]; then
       echo "unexpected fake kubectl get secret args: $*" >&2
       exit 2
     fi
+    missing_secret="\${FAKE_KUBECTL_MISSING_SECRET:-}"
+    if [[ "$missing_secret" == "$get_namespace/$get_name" || "$missing_secret" == "$get_name" ]]; then
+      echo "Error from server (NotFound): secrets \\"$get_name\\" not found" >&2
+      exit 1
+    fi
     node --input-type=module - "$get_namespace" "$get_name" <<'SECRET_NODE'
 const [namespace, name] = process.argv.slice(2);
 const value = 'dg==';
@@ -647,14 +958,24 @@ const dataByName = new Map([
   ['postgresql-credential', { username: value, password: value }],
   ['postgresql-app', { username: value, password: value }],
   ['postgresql-admin', { username: value, password: value }],
+  ['postgresql-ca', { 'ca.crt': value }],
+  ['postgresql-server-tls', { 'tls.crt': value, 'tls.key': value, 'ca.crt': value }],
   ['mongodb-credential', { username: value, password: value }],
   ['mongodb-app', { username: value, password: value }],
+  ['mongodb-ca', { 'ca.crt': value }],
+  ['mongodb-server-tls', { 'tls.pem': value, 'ca.crt': value }],
   ['redis-credential', { password: value }],
   ['redis-app', { password: value }],
+  ['redis-ca', { 'ca.crt': value }],
+  ['redis-server-tls', { 'tls.crt': value, 'tls.key': value, 'ca.crt': value }],
   ['object-storage-credential', { access_key: value, secret_key: value }],
   ['object-storage-app', { access_key: value, secret_key: value }],
+  ['object-storage-ca', { 'ca.crt': value }],
+  ['object-storage-server-tls', { 'public.crt': value, 'private.key': value }],
   ['oidc-admin', { username: value, password: value }],
-  ['oidc-client', { client_secret: value }]
+  ['oidc-client', { client_secret: value }],
+  ['oidc-ca', { 'ca.crt': value }],
+  ['oidc-server-tls', { 'tls.crt': value, 'tls.key': value }]
 ]);
 const data = dataByName.get(name);
 if (!data) {
@@ -1093,6 +1414,7 @@ run_gate() {
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE:-}" \
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID:-}" \
   FAKE_KUBECTL_EMPTY_SECRET_KEY="${FAKE_KUBECTL_EMPTY_SECRET_KEY:-}" \
+  FAKE_KUBECTL_MISSING_SECRET="${FAKE_KUBECTL_MISSING_SECRET:-}" \
   REGISTRY_PROBE_LOG="$REGISTRY_PROBE_LOG" \
   ROUTABILITY_PROBE_LOG="$ROUTABILITY_PROBE_LOG" \
   bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
@@ -1528,6 +1850,8 @@ VALID_TRUTH="$TMP_DIR/substrate-truth.valid.json"
 VALID_KIT_TRUTH="$TMP_DIR/substrate-truth.kit-online.valid.json"
 VALID_PREREQUISITES="$TMP_DIR/target-prerequisites.valid.json"
 VALID_KIT_PREREQUISITES="$TMP_DIR/target-prerequisites.kit-online.valid.json"
+KIT_TLS_TRUTH="$TMP_DIR/substrate-truth.kit-online.server-tls.json"
+KIT_TLS_PREREQUISITES="$TMP_DIR/target-prerequisites.kit-online.server-tls.json"
 EMPTY_REDIS_TRUTH="$TMP_DIR/substrate-truth.redis-app.json"
 EMPTY_REDIS_PREREQUISITES="$TMP_DIR/target-prerequisites.redis-app.json"
 INVALID_PREFLIGHT_PREREQUISITES="$TMP_DIR/target-prerequisites.invalid-preflight.json"
@@ -1556,6 +1880,7 @@ write_truth "$VALID_TRUTH"
 write_truth "$VALID_KIT_TRUTH" "$KIT_ONLINE_PROFILE"
 write_prerequisites "$VALID_PREREQUISITES" valid
 write_prerequisites "$VALID_KIT_PREREQUISITES" "$KIT_ONLINE_PROFILE" valid
+write_postgresql_server_tls_inputs "$KIT_TLS_TRUTH" "$KIT_TLS_PREREQUISITES" "$KIT_ONLINE_PROFILE"
 write_redis_app_inputs "$EMPTY_REDIS_TRUTH" "$EMPTY_REDIS_PREREQUISITES"
 write_prerequisites "$INVALID_PREFLIGHT_PREREQUISITES" missing_namespace
 write_kit_substrate_pack_manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" "$KIT_ONLINE_PROFILE"
@@ -2287,6 +2612,46 @@ assert_no_gate_report "$kit_registry_probe_output"
 [[ ! -e "$kit_registry_probe_output/render/manifest-render-report.json" ]] || fail "kit registry probe must fail before render"
 [[ ! -e "$kit_registry_probe_output/apply/apply-report.json" ]] || fail "kit registry probe must fail before apply"
 pass "kit online rejects registry probe before probe/kubectl"
+
+kit_missing_tls_output="$TMP_DIR/out-kit-online-missing-server-tls"
+mkdir -p "$kit_missing_tls_output/substrate-routability" "$kit_missing_tls_output/render" "$kit_missing_tls_output/apply"
+printf '%s\n' '{"stale":true}' >"$kit_missing_tls_output/online-deployment-gate-report.json"
+printf '%s\n' '{"stale":true}' >"$kit_missing_tls_output/substrate-routability/substrate-routability-report.json"
+printf '%s\n' '{"stale":true}' >"$kit_missing_tls_output/render/manifest-render-report.json"
+printf '%s\n' '{"stale":true}' >"$kit_missing_tls_output/apply/apply-report.json"
+reset_kubectl_log
+reset_routability_probe_log
+before_kit_missing_tls="$(hit_count)"
+if FAKE_KUBECTL_MISSING_SECRET="release/postgresql-server-tls" \
+  TARGET_PREREQUISITES_OVERRIDE="$KIT_TLS_PREREQUISITES" \
+  run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$KIT_TLS_TRUTH" "$kit_missing_tls_output" "$KIT_ONLINE_PROFILE" \
+    --mode apply \
+    --confirm-apply "$KIT_ONLINE_PROFILE" \
+    --operator-run-id operator-run-kit-online-missing-server-tls \
+    --timeout 120s \
+    --substrate-pack-manifest "$VALID_KIT_SUBSTRATE_PACK_MANIFEST" \
+    --routability-probe "$PASS_ROUTABILITY_PROBE" >"$TMP_DIR/kit-online-missing-server-tls.out" 2>"$TMP_DIR/kit-online-missing-server-tls.err"; then
+  fail "expected missing kit online server TLS Secret to fail"
+fi
+after_kit_missing_tls="$(hit_count)"
+grep -Fq 'required substrate Secret key missing: secretRef:release/postgresql-server-tls key ca.crt decoded_length=missing' "$TMP_DIR/kit-online-missing-server-tls.err" ||
+  fail "kit online missing TLS Secret failure must identify secretRef, key, and missing category"
+grep -q '^get secret postgresql-server-tls --namespace release -o json$' "$KUBECTL_LOG" ||
+  fail "kit online missing TLS Secret preflight must read the server TLS Secret"
+assert_routability_probe_not_called
+if grep -Eq '^(apply|rollout) ' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "kit online missing TLS Secret must stop before apply or rollout"
+fi
+[[ "$before_kit_missing_tls" == "$after_kit_missing_tls" ]] || fail "kit online missing TLS Secret reached route/network smoke"
+assert_no_gate_report "$kit_missing_tls_output"
+[[ ! -e "$kit_missing_tls_output/substrate-routability/substrate-routability-report.json" ]] ||
+  fail "kit online missing TLS Secret must not leave substrate-routability report"
+[[ ! -e "$kit_missing_tls_output/render/manifest-render-report.json" ]] ||
+  fail "kit online missing TLS Secret must not leave render report"
+[[ ! -e "$kit_missing_tls_output/apply/apply-report.json" ]] ||
+  fail "kit online missing TLS Secret must not leave apply report"
+pass "kit online apply rejects missing server TLS Secret before substrate routability or apply"
 
 kit_target_registry_apply_output="$TMP_DIR/out-kit-online-target-registry-apply"
 reset_kubectl_log
