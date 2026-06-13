@@ -666,6 +666,89 @@ function parseKubectlJson(stdout, label) {
   return parsed;
 }
 
+function jsonValueEnd(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{' || char === '[') {
+      depth += 1;
+      continue;
+    }
+    if (char === '}' || char === ']') {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
+      }
+      if (depth < 0) {
+        return undefined;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function parseKubectlJsonTexts(stdout, label) {
+  const values = [];
+  let index = 0;
+
+  while (index < stdout.length) {
+    while (index < stdout.length && /\s/.test(stdout[index])) {
+      index += 1;
+    }
+    if (index >= stdout.length) {
+      break;
+    }
+
+    const first = stdout[index];
+    if (first !== '{' && first !== '[') {
+      fail(`${label} returned invalid JSON: unexpected character at offset ${index}`);
+    }
+
+    const end = jsonValueEnd(stdout, index);
+    if (end === undefined) {
+      try {
+        JSON.parse(stdout.slice(index));
+      } catch (error) {
+        fail(`${label} returned invalid JSON: ${error.message}`);
+      }
+      fail(`${label} returned invalid JSON: incomplete JSON value`);
+    }
+
+    const raw = stdout.slice(index, end);
+    try {
+      values.push(JSON.parse(raw));
+    } catch (error) {
+      fail(`${label} returned invalid JSON: ${error.message}`);
+    }
+    index = end;
+  }
+
+  if (values.length === 0) {
+    fail(`${label} returned invalid JSON: empty output`);
+  }
+  return values;
+}
+
 function stripYamlComment(line) {
   let quote;
   for (let index = 0; index < line.length; index += 1) {
@@ -903,11 +986,13 @@ function decodeRenderedManifestResources(args, manifestFiles) {
     'kubectl client dry-run decode rendered manifests',
     { includeOutput: true }
   );
-  const parsed = parseKubectlJson(
+  const parsedValues = parseKubectlJsonTexts(
     result.stdout,
     'kubectl client dry-run decode rendered manifests'
   );
-  return flattenManifestResources(parsed).filter((resource) => isPlainObject(resource));
+  return parsedValues
+    .flatMap((parsed) => flattenManifestResources(parsed))
+    .filter((resource) => isPlainObject(resource));
 }
 
 async function collectRenderedManifestResources(args, manifestFiles) {

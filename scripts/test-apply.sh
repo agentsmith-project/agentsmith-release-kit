@@ -1091,11 +1091,36 @@ for (const file of files) {
   }
 }
 
-process.stdout.write(JSON.stringify({
+const decodedList = {
   apiVersion: 'v1',
   kind: 'List',
   items: resources
-}) + LF);
+};
+
+switch (process.env.FAKE_KUBECTL_DECODE_OUTPUT_MODE || 'list') {
+  case 'list':
+    process.stdout.write(JSON.stringify(decodedList) + LF);
+    break;
+  case 'single':
+    if (resources.length !== 1) {
+      process.stderr.write('single fake decode output requires exactly one resource' + LF);
+      process.exit(2);
+    }
+    process.stdout.write(JSON.stringify(resources[0]) + LF);
+    break;
+  case 'concatenated':
+    for (const resource of resources) {
+      process.stdout.write(JSON.stringify(resource) + LF);
+    }
+    break;
+  default:
+    process.stderr.write(
+      'unknown FAKE_KUBECTL_DECODE_OUTPUT_MODE: ' +
+        process.env.FAKE_KUBECTL_DECODE_OUTPUT_MODE +
+        LF
+    );
+    process.exit(2);
+}
 DECODE_NODE
   exit 0
 fi
@@ -1519,6 +1544,7 @@ run_apply_raw() {
     FAKE_KUBECTL_SECRET_KEYS="${FAKE_KUBECTL_SECRET_KEYS:-DATABASE_URL}" \
     FAKE_KUBECTL_SECRET_VALUE="${FAKE_KUBECTL_SECRET_VALUE:-plain-secret-value}" \
     FAKE_KUBECTL_APPLY_OUTPUT="${FAKE_KUBECTL_APPLY_OUTPUT:-deployment.apps/agentsmith-web}" \
+    FAKE_KUBECTL_DECODE_OUTPUT_MODE="${FAKE_KUBECTL_DECODE_OUTPUT_MODE:-list}" \
     FAKE_KUBECTL_AFSCP_MODE="${FAKE_KUBECTL_AFSCP_MODE:-not_found}" \
     FAKE_KUBECTL_AFSCP_VOLUME_SECRET_MODE="${FAKE_KUBECTL_AFSCP_VOLUME_SECRET_MODE:-valid}" \
     FAKE_KUBECTL_AFSCP_MOUNT_SECRET_MODE="${FAKE_KUBECTL_AFSCP_MOUNT_SECRET_MODE:-present}" \
@@ -1556,6 +1582,7 @@ run_apply_from_release_kit() {
     FAKE_KUBECTL_SECRET_KEYS="${FAKE_KUBECTL_SECRET_KEYS:-DATABASE_URL}" \
     FAKE_KUBECTL_SECRET_VALUE="${FAKE_KUBECTL_SECRET_VALUE:-plain-secret-value}" \
     FAKE_KUBECTL_APPLY_OUTPUT="${FAKE_KUBECTL_APPLY_OUTPUT:-deployment.apps/agentsmith-web}" \
+    FAKE_KUBECTL_DECODE_OUTPUT_MODE="${FAKE_KUBECTL_DECODE_OUTPUT_MODE:-list}" \
     FAKE_KUBECTL_AFSCP_MODE="${FAKE_KUBECTL_AFSCP_MODE:-not_found}" \
     FAKE_KUBECTL_AFSCP_VOLUME_SECRET_MODE="${FAKE_KUBECTL_AFSCP_VOLUME_SECRET_MODE:-valid}" \
     FAKE_KUBECTL_AFSCP_MOUNT_SECRET_MODE="${FAKE_KUBECTL_AFSCP_MOUNT_SECRET_MODE:-present}" \
@@ -2565,6 +2592,41 @@ if grep -Eq '^(delete |apply )' "$KUBECTL_LOG"; then
   fail "flow-style secretKeyRef failure must stop before delete or apply"
 fi
 pass "kubectl client dry-run decode preserves flow-style Secret refs for preflight"
+
+single_decode_secret_manifests="$TMP_DIR/manifests-single-decode-secret"
+write_secret_ref_manifests "$single_decode_secret_manifests" missing_key
+reset_kubectl_log
+if FAKE_KUBECTL_DECODE_OUTPUT_MODE=single \
+  FAKE_KUBECTL_SECRET_KEYS=OTHER_KEY \
+  run_apply "$single_decode_secret_manifests" "$TMP_DIR/out-single-decode-secret" "$TARGET_PROFILE" \
+    --mode apply \
+    --confirm-apply "$TARGET_PROFILE" \
+    --operator-run-id operator-run-secret-single-decode >"$TMP_DIR/single-decode-secret.out" 2>"$TMP_DIR/single-decode-secret.err"; then
+  cat "$TMP_DIR/single-decode-secret.out" >&2
+  cat "$TMP_DIR/single-decode-secret.err" >&2
+  fail "expected single-object decoded Secret key preflight to fail before apply"
+fi
+grep -Fq 'rendered required Secret key missing: Secret/agentsmith-app key DATABASE_URL required by Deployment/agentsmith-api env' "$TMP_DIR/single-decode-secret.err" ||
+  fail "single-object decoded Secret key failure did not identify required key"
+if grep -Fq 'invalid JSON' "$TMP_DIR/single-decode-secret.out" "$TMP_DIR/single-decode-secret.err"; then
+  cat "$TMP_DIR/single-decode-secret.err" >&2
+  fail "single-object kubectl decode output must be accepted as JSON"
+fi
+pass "kubectl client dry-run decode accepts single JSON object output"
+
+concatenated_decode_manifests="$TMP_DIR/manifests-concatenated-decode-secret"
+write_manifests "$concatenated_decode_manifests"
+write_secret_ref_manifests "$concatenated_decode_manifests" missing_key
+reset_kubectl_log
+FAKE_KUBECTL_DECODE_OUTPUT_MODE=concatenated \
+  run_apply "$concatenated_decode_manifests" "$TMP_DIR/out-concatenated-decode-secret" "$TARGET_PROFILE" \
+    --mode apply \
+    --confirm-apply "$TARGET_PROFILE" \
+    --operator-run-id operator-run-secret-concatenated-decode >/dev/null
+grep -q '^get secret agentsmith-app --namespace agentsmith -o json$' "$KUBECTL_LOG" ||
+  fail "concatenated decoded Secret ref was not checked"
+assert_apply_report "$TMP_DIR/out-concatenated-decode-secret/apply-report.json" apply operator-run-secret-concatenated-decode "$TARGET_PROFILE" 2
+pass "kubectl client dry-run decode accepts concatenated JSON objects and checks each resource"
 
 missing_volume_item_key_manifests="$TMP_DIR/manifests-missing-volume-item-key"
 write_secret_ref_manifests "$missing_volume_item_key_manifests" missing_volume_item_key
