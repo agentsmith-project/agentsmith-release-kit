@@ -34,6 +34,9 @@ text with values from the target environment.
 The facade chooses the path from `deployment_path`; do not add extra deployment
 selection fields to `substrate-truth.example.json` or
 `target-prerequisites.example.json`.
+Do not add `substrate_pack_manifest`, `substrate_install_inputs`, or
+`install_confirmation`; this package uses only operator-declared existing
+endpoint/secret facts.
 
 ## Build The Package
 

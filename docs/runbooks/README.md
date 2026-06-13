@@ -22,6 +22,10 @@ buckets, IAM, networks, or OIDC realms.
 
 ### 2. What do I prepare?
 
+For a fresh namespace, prepare the namespace/RBAC, ingress or route facts,
+registry/pull facts, storage facts, reachable substrate endpoints, and declared
+`secretRef:` Secrets before `--run`; `--doctor` is static package validation
+only.
 Prepare one directory or JSON manifest containing `operator-inputs.json` for
 the selected deployment path. Keep secrets as references, not raw values. For
 airgap packages, release/material inputs consumed from the bundle are

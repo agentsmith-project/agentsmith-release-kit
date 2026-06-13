@@ -22,6 +22,9 @@ bundle-local operator input files, namespace, secret refs, endpoint values, and
 package-local tools.
 The facade chooses the path from `deployment_path`; do not add extra deployment
 selection fields to the bundle-local substrate truth or target prerequisites.
+Do not add `substrate_pack_manifest`, `substrate_install_inputs`, or
+`install_confirmation`; this package uses only operator-declared existing
+endpoint/secret facts.
 
 ## Build The Package
 

@@ -99,6 +99,11 @@ values are:
 
 The GA operator substrate choices are `use_existing` and
 `install_substrates`.
+`use_existing` means operator-provided existing substrates: PostgreSQL,
+MongoDB, Redis, object storage, and OIDC endpoints plus namespace-scoped
+`secretRef:` credentials/CA refs and target prerequisites already exist before
+`--run`; release-kit only consumes declared target truth and never runs
+substrate-install for this choice.
 For `online/use_existing` and `online/install_substrates` apply packages, an
 operator may set `target_registry` and provide a package-local `registry_probe`
 executable. The target registry must already contain digest refs for the
