@@ -708,13 +708,27 @@ printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "auth" || "$arg" == "create" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
     command_name="$arg"
     break
   fi
 done
 
 case "$command_name" in
+  auth)
+    if [[ "$*" != *"auth can-i"* || "$*" != *"persistentvolumes"* || "$*" != *"--as system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane"* ]]; then
+      echo "unexpected fake kubectl auth args: $*" >&2
+      exit 2
+    fi
+    printf '%s\n' 'yes'
+    ;;
+  create)
+    if [[ "$*" != *"--dry-run=client"* || "$*" != *"-o json"* ]]; then
+      echo "unexpected fake kubectl create args: $*" >&2
+      exit 2
+    fi
+    printf '%s\n' '{"apiVersion":"v1","kind":"List","items":[]}'
+    ;;
   version)
     printf '%s\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
     ;;
@@ -770,14 +784,24 @@ const dataByName = new Map([
   ['postgresql-credential', { username: value, password: value }],
   ['postgresql-app', { username: value, password: value }],
   ['postgresql-admin', { username: value, password: value }],
+  ['postgresql-ca', { 'ca.crt': value }],
+  ['postgresql-server-tls', { 'tls.crt': value, 'tls.key': value, 'ca.crt': value }],
   ['mongodb-credential', { username: value, password: value }],
   ['mongodb-app', { username: value, password: value }],
+  ['mongodb-ca', { 'ca.crt': value }],
+  ['mongodb-server-tls', { 'tls.pem': value, 'ca.crt': value }],
   ['redis-credential', { password: value }],
   ['redis-app', { password: value }],
+  ['redis-ca', { 'ca.crt': value }],
+  ['redis-server-tls', { 'tls.crt': value, 'tls.key': value, 'ca.crt': value }],
   ['object-storage-credential', { access_key: value, secret_key: value }],
   ['object-storage-app', { access_key: value, secret_key: value }],
+  ['object-storage-ca', { 'ca.crt': value }],
+  ['object-storage-server-tls', { 'public.crt': value, 'private.key': value }],
   ['oidc-admin', { username: value, password: value }],
-  ['oidc-client', { client_secret: value }]
+  ['oidc-client', { client_secret: value }],
+  ['oidc-ca', { 'ca.crt': value }],
+  ['oidc-server-tls', { 'tls.crt': value, 'tls.key': value }]
 ]);
 const data = dataByName.get(name);
 if (!data) {

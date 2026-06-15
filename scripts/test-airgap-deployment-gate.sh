@@ -987,13 +987,20 @@ printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "create" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" || "$arg" == "wait" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "auth" || "$arg" == "create" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" || "$arg" == "wait" ]]; then
     command_name="$arg"
     break
   fi
 done
 
 case "$command_name" in
+  auth)
+    if [[ "$*" != *"auth can-i"* || "$*" != *"persistentvolumes"* || "$*" != *"--as system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane"* ]]; then
+      echo "unexpected fake kubectl auth args: $*" >&2
+      exit 2
+    fi
+    printf '%s\n' 'yes'
+    ;;
   create)
     node --input-type=module - "$@" <<'DECODE_NODE'
 import fs from 'node:fs';

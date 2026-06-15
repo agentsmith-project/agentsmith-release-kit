@@ -6,7 +6,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { assertLiveRequiredSubstrateSecrets } from './lib/substrate-secret-preflight.mjs';
+import {
+  assertLiveAsbcpPersistentVolumeRbac,
+  assertLiveRequiredSubstrateSecrets
+} from './lib/substrate-secret-preflight.mjs';
 import { validateInstalledSubstrateTruthProof } from './lib/substrate-install-proof.mjs';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1244,6 +1247,13 @@ async function main(argv) {
     const substrateTruth = (await readJsonFile(args.substrateTruth, 'substrate truth')).value;
     assertLiveRequiredSubstrateSecrets({
       substrateTruth,
+      kubectl: args.kubectl,
+      kubeconfig: args.kubeconfig,
+      context: args.context,
+      fail
+    });
+    assertLiveAsbcpPersistentVolumeRbac({
+      namespace: args.namespace,
       kubectl: args.kubectl,
       kubeconfig: args.kubeconfig,
       context: args.context,

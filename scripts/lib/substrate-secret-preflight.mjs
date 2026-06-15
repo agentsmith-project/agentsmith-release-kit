@@ -3,6 +3,16 @@ import { spawnSync } from 'node:child_process';
 import { requiredSubstrateSecretKeyRefs } from './substrate-truth-validation.mjs';
 
 const SECRET_REF_PREFIX = 'secretRef:';
+const ASBCP_SERVICE_ACCOUNT = 'agentsmith-sandbox-control-plane';
+const ASBCP_REQUIRED_PV_VERBS = [
+  'get',
+  'list',
+  'watch',
+  'create',
+  'update',
+  'patch',
+  'delete'
+];
 const KUBERNETES_NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const KUBERNETES_SECRET_NAME_RE = /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/;
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -77,6 +87,26 @@ function runKubectlGetSecret({ kubectl, kubeconfig, context, parsedRef }) {
   );
 }
 
+function runKubectlAuthCanI({ kubectl, kubeconfig, context, namespace, verb }) {
+  return spawnSync(
+    kubectl,
+    [
+      ...kubectlPrefixArgs({ kubeconfig, context }),
+      'auth',
+      'can-i',
+      verb,
+      'persistentvolumes',
+      '--as',
+      `system:serviceaccount:${namespace}:${ASBCP_SERVICE_ACCOUNT}`
+    ],
+    {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+      env: process.env
+    }
+  );
+}
+
 function parseSecretJson(stdout) {
   const value = JSON.parse(stdout);
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -136,6 +166,36 @@ export function assertLiveRequiredSubstrateSecrets({
       if (length === 0) {
         failWith(fail, formatEmpty(ref, key));
       }
+    }
+  }
+}
+
+export function assertLiveAsbcpPersistentVolumeRbac({
+  namespace,
+  kubectl = 'kubectl',
+  kubeconfig,
+  context,
+  fail
+}) {
+  if (typeof namespace !== 'string' || !KUBERNETES_NAMESPACE_RE.test(namespace)) {
+    failWith(fail, 'namespace must be a Kubernetes namespace name before ASBCP PV RBAC preflight');
+  }
+
+  const serviceAccount = `system:serviceaccount:${namespace}:${ASBCP_SERVICE_ACCOUNT}`;
+  for (const verb of ASBCP_REQUIRED_PV_VERBS) {
+    const result = runKubectlAuthCanI({
+      kubectl,
+      kubeconfig,
+      context,
+      namespace,
+      verb
+    });
+    const allowed = !result.error && result.status === 0 && (result.stdout || '').trim().toLowerCase() === 'yes';
+    if (!allowed) {
+      failWith(
+        fail,
+        `${serviceAccount} must be able to ${verb} persistentvolumes before product smoke`
+      );
     }
   }
 }

@@ -594,7 +594,7 @@ printf '%s\\n' "$*" >> "$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "create" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "wait" || "$arg" == "get" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "auth" || "$arg" == "create" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "wait" || "$arg" == "get" ]]; then
     command_name="$arg"
     break
   fi
@@ -602,6 +602,20 @@ done
 
 if [[ "$command_name" == "version" ]]; then
   printf '%s\\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
+  exit 0
+fi
+
+if [[ "$command_name" == "auth" ]]; then
+  if [[ "$*" != *"auth can-i"* || "$*" != *"persistentvolumes"* || "$*" != *"--as system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane"* ]]; then
+    echo "unexpected fake kubectl auth args: $*" >&2
+    exit 2
+  fi
+  denied_verb="\${FAKE_KUBECTL_DENY_ASBCP_PV_VERB:-}"
+  if [[ -n "$denied_verb" && "$*" == *"can-i $denied_verb persistentvolumes"* ]]; then
+    printf '%s\\n' 'no'
+    exit 1
+  fi
+  printf '%s\\n' 'yes'
   exit 0
 fi
 
@@ -1415,6 +1429,7 @@ run_gate() {
   FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID="${FAKE_KUBECTL_LIVE_CONTAINER_IMAGE_ID:-}" \
   FAKE_KUBECTL_EMPTY_SECRET_KEY="${FAKE_KUBECTL_EMPTY_SECRET_KEY:-}" \
   FAKE_KUBECTL_MISSING_SECRET="${FAKE_KUBECTL_MISSING_SECRET:-}" \
+  FAKE_KUBECTL_DENY_ASBCP_PV_VERB="${FAKE_KUBECTL_DENY_ASBCP_PV_VERB:-}" \
   REGISTRY_PROBE_LOG="$REGISTRY_PROBE_LOG" \
   ROUTABILITY_PROBE_LOG="$ROUTABILITY_PROBE_LOG" \
   bash "$ROOT_DIR/scripts/verify-release.sh" --online-deployment-gate \
@@ -2209,6 +2224,35 @@ assert_no_evidence_files "$empty_redis_evidence_root"
 [[ ! -e "$empty_redis_output/apply/apply-report.json" ]] || fail "empty redis password must not leave apply report"
 [[ ! -e "$empty_redis_output/smoke/smoke-report.json" ]] || fail "empty redis password must not leave smoke report"
 pass "online apply rejects empty redis-app/password before apply, smoke, or evidence"
+
+asbcp_pv_rbac_output="$TMP_DIR/out-asbcp-pv-rbac"
+reset_kubectl_log
+before_asbcp_pv_rbac="$(hit_count)"
+if FAKE_KUBECTL_DENY_ASBCP_PV_VERB="create" \
+  run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$asbcp_pv_rbac_output" "$TARGET_PROFILE" \
+    --mode apply \
+    --confirm-apply "$TARGET_PROFILE" \
+    --operator-run-id operator-run-asbcp-pv-rbac \
+    --timeout 120s \
+    --smoke-url "$BASE_URL/ok" \
+    --allow-http \
+    --allow-localhost >"$TMP_DIR/asbcp-pv-rbac.out" 2>"$TMP_DIR/asbcp-pv-rbac.err"; then
+  fail "expected missing ASBCP persistentvolumes RBAC to fail"
+fi
+after_asbcp_pv_rbac="$(hit_count)"
+grep -Fq 'system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane must be able to create persistentvolumes before product smoke' "$TMP_DIR/asbcp-pv-rbac.err" ||
+  fail "ASBCP PV RBAC failure must identify the target ServiceAccount and missing verb"
+grep -Fq 'auth can-i create persistentvolumes --as system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane' "$KUBECTL_LOG" ||
+  fail "ASBCP PV RBAC preflight must check the target namespace ServiceAccount"
+if grep -q '^apply ' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "ASBCP PV RBAC failure must stop before kubectl apply"
+fi
+[[ "$before_asbcp_pv_rbac" == "$after_asbcp_pv_rbac" ]] || fail "ASBCP PV RBAC failure reached route/network smoke"
+assert_no_gate_report "$asbcp_pv_rbac_output"
+[[ ! -e "$asbcp_pv_rbac_output/apply/apply-report.json" ]] || fail "ASBCP PV RBAC failure must not leave apply report"
+[[ ! -e "$asbcp_pv_rbac_output/smoke/smoke-report.json" ]] || fail "ASBCP PV RBAC failure must not leave smoke report"
+pass "online apply rejects missing ASBCP persistentvolumes RBAC before apply or smoke"
 
 apply_output="$TMP_DIR/out-apply-smoke"
 reset_kubectl_log

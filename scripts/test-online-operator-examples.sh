@@ -378,7 +378,7 @@ printf '%s\n' "$*" >>"$FAKE_KUBECTL_LOG"
 
 command_name=""
 for arg in "$@"; do
-  if [[ "$arg" == "version" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
+  if [[ "$arg" == "version" || "$arg" == "auth" || "$arg" == "create" || "$arg" == "apply" || "$arg" == "rollout" || "$arg" == "get" ]]; then
     command_name="$arg"
     break
   fi
@@ -386,6 +386,24 @@ done
 
 if [[ "$command_name" == "version" ]]; then
   printf '%s\n' '{"clientVersion":{"gitVersion":"v1.30.0","major":"1","minor":"30","platform":"linux/amd64"},"serverVersion":{"gitVersion":"v1.30.1","major":"1","minor":"30","platform":"linux/amd64"}}'
+  exit 0
+fi
+
+if [[ "$command_name" == "auth" ]]; then
+  if [[ "$*" != *"auth can-i"* || "$*" != *"persistentvolumes"* || "$*" != *"--as system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane"* ]]; then
+    echo "unexpected fake kubectl auth args: $*" >&2
+    exit 2
+  fi
+  printf '%s\n' 'yes'
+  exit 0
+fi
+
+if [[ "$command_name" == "create" ]]; then
+  if [[ "$*" != *"--dry-run=client"* || "$*" != *"-o json"* ]]; then
+    echo "unexpected fake kubectl create args: $*" >&2
+    exit 2
+  fi
+  printf '%s\n' '{"apiVersion":"v1","kind":"List","items":[]}'
   exit 0
 fi
 
