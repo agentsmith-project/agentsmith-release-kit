@@ -159,6 +159,7 @@ function usage() {
     --render-values <json> \\
     --substrate-truth <json> \\
     --output-dir <dir> \\
+    [--expected-namespace <name>] \\
     [--image-map <json>] \\
     [--forbidden-source-root <dir>]`;
 }
@@ -210,6 +211,9 @@ function parseArgs(argv) {
         break;
       case '--output-dir':
         parsed.outputDir = nextValue();
+        break;
+      case '--expected-namespace':
+        parsed.expectedNamespace = nextValue();
         break;
       case '--image-map':
         parsed.imageMap = nextValue();
@@ -1556,7 +1560,7 @@ function deriveAfscpDefaultVolumePvName(renderValues) {
   return expected;
 }
 
-function normalizeRenderValues(renderValues, targetProfile, substrateTruth) {
+function normalizeRenderValues(renderValues, targetProfile, substrateTruth, expectedNamespace) {
   const substrateRenderValues = mergeSubstrateRenderValues(
     renderValues,
     substrateTruth,
@@ -1571,6 +1575,14 @@ function normalizeRenderValues(renderValues, targetProfile, substrateTruth) {
     const profile = requireString(substrateRenderValues.PROFILE, 'render_values.PROFILE');
     if (profile !== targetProfile.value) {
       fail('render_values.PROFILE must match --target-profile');
+    }
+  }
+
+  const namespace = validateRenderNamespace(substrateRenderValues.namespace, 'render_values.namespace');
+  if (expectedNamespace !== undefined) {
+    const expected = validateRenderNamespace(expectedNamespace, '--expected-namespace');
+    if (namespace !== expected) {
+      fail('render_values.namespace must match --expected-namespace');
     }
   }
 
@@ -1592,7 +1604,8 @@ function buildRenderContext({
   targetProfile,
   renderValues,
   substrateTruth,
-  imageMapImages
+  imageMapImages,
+  expectedNamespace
 }) {
   const images = {};
   for (const [id, item] of inventory.byId.entries()) {
@@ -1605,7 +1618,7 @@ function buildRenderContext({
   }
 
   return {
-    values: normalizeRenderValues(renderValues, targetProfile, substrateTruth),
+    values: normalizeRenderValues(renderValues, targetProfile, substrateTruth, expectedNamespace),
     images,
     target: targetProfile,
     substrate: substrateTruth,
@@ -2397,7 +2410,8 @@ async function main() {
     targetProfile,
     renderValues,
     substrateTruth,
-    imageMapImages
+    imageMapImages,
+    expectedNamespace: args.expectedNamespace
   });
   const renderedRoot = await prepareRenderedRoot(args.outputDir, forbiddenSourceRoots);
   const renderedFiles = await writeRenderedTemplates({

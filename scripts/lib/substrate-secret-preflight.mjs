@@ -13,6 +13,7 @@ const ASBCP_REQUIRED_PV_VERBS = [
   'patch',
   'delete'
 ];
+const ASBCP_PV_CLUSTER_ROLE = 'agentsmith-sandbox-control-plane-pv';
 const KUBERNETES_NAMESPACE_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
 const KUBERNETES_SECRET_NAME_RE = /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/;
 const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -107,6 +108,58 @@ function runKubectlAuthCanI({ kubectl, kubeconfig, context, namespace, verb }) {
   );
 }
 
+function runKubectlApply({ kubectl, kubeconfig, context, input }) {
+  return spawnSync(
+    kubectl,
+    [
+      ...kubectlPrefixArgs({ kubeconfig, context }),
+      'apply',
+      '-f',
+      '-'
+    ],
+    {
+      encoding: 'utf8',
+      input,
+      maxBuffer: 1024 * 1024,
+      env: process.env
+    }
+  );
+}
+
+function asbcpPersistentVolumeRbacManifest(namespace) {
+  const bindingName = `${ASBCP_PV_CLUSTER_ROLE}-${namespace}`;
+  return `apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ${ASBCP_PV_CLUSTER_ROLE}
+  labels:
+    app.kubernetes.io/name: agentsmith
+    app.kubernetes.io/component: asbcp
+    app.kubernetes.io/part-of: agentsmith-deploy
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ${bindingName}
+  labels:
+    app.kubernetes.io/name: agentsmith
+    app.kubernetes.io/component: asbcp
+    app.kubernetes.io/part-of: agentsmith-deploy
+subjects:
+  - kind: ServiceAccount
+    name: ${ASBCP_SERVICE_ACCOUNT}
+    namespace: ${namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ${ASBCP_PV_CLUSTER_ROLE}
+`;
+}
+
 function parseSecretJson(stdout) {
   const value = JSON.parse(stdout);
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -170,6 +223,37 @@ export function assertLiveRequiredSubstrateSecrets({
   }
 }
 
+function assertNamespace({ namespace, fail }) {
+  if (typeof namespace !== 'string' || !KUBERNETES_NAMESPACE_RE.test(namespace)) {
+    failWith(fail, 'namespace must be a Kubernetes namespace name before ASBCP PV RBAC preflight');
+  }
+}
+
+export function ensureLiveAsbcpPersistentVolumeRbac({
+  namespace,
+  kubectl = 'kubectl',
+  kubeconfig,
+  context,
+  fail
+}) {
+  assertNamespace({ namespace, fail });
+
+  const serviceAccount = `system:serviceaccount:${namespace}:${ASBCP_SERVICE_ACCOUNT}`;
+  const result = runKubectlApply({
+    kubectl,
+    kubeconfig,
+    context,
+    input: asbcpPersistentVolumeRbacManifest(namespace)
+  });
+  if (result.error || result.status !== 0) {
+    const diagnostic = result.stderr || result.stdout || result.error?.message || `kubectl exited ${result.status}`;
+    failWith(
+      fail,
+      `${serviceAccount} persistentvolumes RBAC bootstrap failed before product smoke: ${diagnostic}`
+    );
+  }
+}
+
 export function assertLiveAsbcpPersistentVolumeRbac({
   namespace,
   kubectl = 'kubectl',
@@ -177,9 +261,7 @@ export function assertLiveAsbcpPersistentVolumeRbac({
   context,
   fail
 }) {
-  if (typeof namespace !== 'string' || !KUBERNETES_NAMESPACE_RE.test(namespace)) {
-    failWith(fail, 'namespace must be a Kubernetes namespace name before ASBCP PV RBAC preflight');
-  }
+  assertNamespace({ namespace, fail });
 
   const serviceAccount = `system:serviceaccount:${namespace}:${ASBCP_SERVICE_ACCOUNT}`;
   for (const verb of ASBCP_REQUIRED_PV_VERBS) {

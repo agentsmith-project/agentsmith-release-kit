@@ -606,7 +606,7 @@ if [[ "$command_name" == "version" ]]; then
 fi
 
 if [[ "$command_name" == "auth" ]]; then
-  if [[ "$*" != *"auth can-i"* || "$*" != *"persistentvolumes"* || "$*" != *"--as system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane"* ]]; then
+  if [[ "$*" != *"auth can-i"* || "$*" != *"persistentvolumes"* || "$*" != *"--as system:serviceaccount:"*":agentsmith-sandbox-control-plane"* ]]; then
     echo "unexpected fake kubectl auth args: $*" >&2
     exit 2
   fi
@@ -900,6 +900,10 @@ DECODE_NODE
 fi
 
 if [[ "$command_name" == "apply" ]]; then
+  if [[ "$*" == "apply -f -" && "\${FAKE_KUBECTL_FAIL_ASBCP_PV_RBAC_APPLY:-}" == "1" ]]; then
+    echo "Error from server (Forbidden): cannot apply ASBCP persistentvolume RBAC" >&2
+    exit 1
+  fi
   printf '%s\\n' "deployment.apps/agentsmith-web"
   exit 0
 fi
@@ -2225,6 +2229,35 @@ assert_no_evidence_files "$empty_redis_evidence_root"
 [[ ! -e "$empty_redis_output/smoke/smoke-report.json" ]] || fail "empty redis password must not leave smoke report"
 pass "online apply rejects empty redis-app/password before apply, smoke, or evidence"
 
+asbcp_pv_rbac_apply_output="$TMP_DIR/out-asbcp-pv-rbac-apply"
+reset_kubectl_log
+before_asbcp_pv_rbac_apply="$(hit_count)"
+if FAKE_KUBECTL_FAIL_ASBCP_PV_RBAC_APPLY="1" \
+  run_gate "$VALID_CONTRACT_MATERIAL" "$VALID_PACKAGE_MATERIAL" "$VALID_ARCHIVE" "$VALID_VALUES" "$VALID_TRUTH" "$asbcp_pv_rbac_apply_output" "$TARGET_PROFILE" \
+    --mode apply \
+    --confirm-apply "$TARGET_PROFILE" \
+    --operator-run-id operator-run-asbcp-pv-rbac-apply \
+    --timeout 120s \
+    --smoke-url "$BASE_URL/ok" \
+    --allow-http \
+    --allow-localhost >"$TMP_DIR/asbcp-pv-rbac-apply.out" 2>"$TMP_DIR/asbcp-pv-rbac-apply.err"; then
+  fail "expected ASBCP persistentvolumes RBAC bootstrap apply failure"
+fi
+after_asbcp_pv_rbac_apply="$(hit_count)"
+grep -Fq 'persistentvolumes RBAC bootstrap failed before product smoke' "$TMP_DIR/asbcp-pv-rbac-apply.err" ||
+  fail "ASBCP PV RBAC bootstrap failure must be reported before product smoke"
+grep -Fq 'apply -f -' "$KUBECTL_LOG" ||
+  fail "ASBCP PV RBAC bootstrap failure must attempt the admin RBAC apply"
+if grep -q '^apply --server-side' "$KUBECTL_LOG"; then
+  cat "$KUBECTL_LOG" >&2
+  fail "ASBCP PV RBAC bootstrap failure must stop before app kubectl apply"
+fi
+[[ "$before_asbcp_pv_rbac_apply" == "$after_asbcp_pv_rbac_apply" ]] || fail "ASBCP PV RBAC bootstrap failure reached route/network smoke"
+assert_no_gate_report "$asbcp_pv_rbac_apply_output"
+[[ ! -e "$asbcp_pv_rbac_apply_output/apply/apply-report.json" ]] || fail "ASBCP PV RBAC bootstrap failure must not leave apply report"
+[[ ! -e "$asbcp_pv_rbac_apply_output/smoke/smoke-report.json" ]] || fail "ASBCP PV RBAC bootstrap failure must not leave smoke report"
+pass "online apply bootstraps target ASBCP persistentvolumes RBAC before app apply"
+
 asbcp_pv_rbac_output="$TMP_DIR/out-asbcp-pv-rbac"
 reset_kubectl_log
 before_asbcp_pv_rbac="$(hit_count)"
@@ -2244,9 +2277,11 @@ grep -Fq 'system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane must
   fail "ASBCP PV RBAC failure must identify the target ServiceAccount and missing verb"
 grep -Fq 'auth can-i create persistentvolumes --as system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane' "$KUBECTL_LOG" ||
   fail "ASBCP PV RBAC preflight must check the target namespace ServiceAccount"
-if grep -q '^apply ' "$KUBECTL_LOG"; then
+grep -Fq 'apply -f -' "$KUBECTL_LOG" ||
+  fail "ASBCP PV RBAC preflight must apply the target namespace ClusterRoleBinding before can-i"
+if grep -q '^apply --server-side' "$KUBECTL_LOG"; then
   cat "$KUBECTL_LOG" >&2
-  fail "ASBCP PV RBAC failure must stop before kubectl apply"
+  fail "ASBCP PV RBAC failure must stop before app kubectl apply"
 fi
 [[ "$before_asbcp_pv_rbac" == "$after_asbcp_pv_rbac" ]] || fail "ASBCP PV RBAC failure reached route/network smoke"
 assert_no_gate_report "$asbcp_pv_rbac_output"

@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   assertLiveAsbcpPersistentVolumeRbac,
-  assertLiveRequiredSubstrateSecrets
+  assertLiveRequiredSubstrateSecrets,
+  ensureLiveAsbcpPersistentVolumeRbac
 } from './lib/substrate-secret-preflight.mjs';
 import { validateInstalledSubstrateTruthProof } from './lib/substrate-install-proof.mjs';
 
@@ -1252,6 +1253,13 @@ async function main(argv) {
       context: args.context,
       fail
     });
+    ensureLiveAsbcpPersistentVolumeRbac({
+      namespace: args.namespace,
+      kubectl: args.kubectl,
+      kubeconfig: args.kubeconfig,
+      context: args.context,
+      fail
+    });
     assertLiveAsbcpPersistentVolumeRbac({
       namespace: args.namespace,
       kubectl: args.kubectl,
@@ -1337,6 +1345,8 @@ async function main(argv) {
     args.renderValues,
     '--substrate-truth',
     args.substrateTruth,
+    '--expected-namespace',
+    args.namespace,
     '--output-dir',
     outputSubdir(args, 'airgap-bundle-render-check')
   ];

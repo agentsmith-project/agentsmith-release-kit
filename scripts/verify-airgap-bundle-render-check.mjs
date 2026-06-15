@@ -93,6 +93,7 @@ function usage() {
     --render-values <bundle-local-json> \\
     --substrate-truth <bundle-local-json> \\
     --output-dir <dir> \\
+    [--expected-namespace <name>] \\
     [--allow-installed-substrate-truth --substrate-install-report <json>]`;
 }
 
@@ -162,6 +163,9 @@ function parseArgs(argv) {
         break;
       case '--output-dir':
         parsed.outputDir = nextValue();
+        break;
+      case '--expected-namespace':
+        parsed.expectedNamespace = nextValue();
         break;
       case '--allow-installed-substrate-truth':
         parsed.allowInstalledSubstrateTruth = true;
@@ -906,26 +910,31 @@ async function main() {
       'airgap bundle self-check'
     );
 
+    const renderArgs = [
+      '--release-contract',
+      bundleLocalPaths.releaseContract,
+      '--deploy-template-package',
+      bundleLocalPaths.deployTemplatePackage,
+      '--archive',
+      bundleLocalPaths.archive,
+      '--target-profile',
+      targetProfile.value,
+      '--render-values',
+      bundleLocalPaths.renderValues,
+      '--substrate-truth',
+      bundleLocalPaths.substrateTruth,
+      '--image-map',
+      bundleLocalPaths.imageMap,
+      '--output-dir',
+      renderDir
+    ];
+    if (args.expectedNamespace) {
+      renderArgs.push('--expected-namespace', args.expectedNamespace);
+    }
+
     runNodeScript(
       'verify-render.mjs',
-      [
-        '--release-contract',
-        bundleLocalPaths.releaseContract,
-        '--deploy-template-package',
-        bundleLocalPaths.deployTemplatePackage,
-        '--archive',
-        bundleLocalPaths.archive,
-        '--target-profile',
-        targetProfile.value,
-        '--render-values',
-        bundleLocalPaths.renderValues,
-        '--substrate-truth',
-        bundleLocalPaths.substrateTruth,
-        '--image-map',
-        bundleLocalPaths.imageMap,
-        '--output-dir',
-        renderDir
-      ],
+      renderArgs,
       'airgap bundle render'
     );
 

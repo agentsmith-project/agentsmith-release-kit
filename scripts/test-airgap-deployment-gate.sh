@@ -995,7 +995,7 @@ done
 
 case "$command_name" in
   auth)
-    if [[ "$*" != *"auth can-i"* || "$*" != *"persistentvolumes"* || "$*" != *"--as system:serviceaccount:agentsmith:agentsmith-sandbox-control-plane"* ]]; then
+    if [[ "$*" != *"auth can-i"* || "$*" != *"persistentvolumes"* || "$*" != *"--as system:serviceaccount:"*":agentsmith-sandbox-control-plane"* ]]; then
       echo "unexpected fake kubectl auth args: $*" >&2
       exit 2
     fi
@@ -2063,7 +2063,7 @@ substrate_ready_wait_line="$(
     head -n 1 |
     cut -d: -f1
 )"
-app_apply_line="$(grep -n '^apply ' "$KUBECTL_LOG" | head -n 1 | cut -d: -f1)"
+app_apply_line="$(grep -n '^apply --server-side' "$KUBECTL_LOG" | head -n 1 | cut -d: -f1)"
 [[ -n "$substrate_ready_wait_line" && -n "$app_apply_line" ]] ||
   fail "kit apply mode must log substrate ready wait and app apply"
 [[ "$substrate_ready_wait_line" -lt "$app_apply_line" ]] ||
@@ -2104,7 +2104,7 @@ for token in \
   grep -Fq "$token" "$TMP_DIR/kit-substrate-ready-wait-fail.err" ||
     fail "substrate ready wait failure must include evidence token: $token"
 done
-if grep -q '^apply ' "$KUBECTL_LOG"; then
+if grep -q '^apply --server-side' "$KUBECTL_LOG"; then
   cat "$KUBECTL_LOG" >&2
   fail "substrate ready wait failure must stop before app apply"
 fi

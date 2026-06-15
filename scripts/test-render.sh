@@ -197,6 +197,9 @@ switch (mutation) {
   case 'ingress_host_mismatch':
     values.INGRESS_HOST = 'other.release.example.com';
     break;
+  case 'namespace_mismatch':
+    values.namespace = 'agentsmith-release-slice';
+    break;
   case 'afscp_default_volume_pv_name_mismatch':
     values.namespace = 'agentsmith-install-online';
     values.AFSCP_DEFAULT_VOLUME_PV_NAME = 'agentsmith-afscp-default-volume';
@@ -926,6 +929,7 @@ run_render() {
   local target_profile="${7:-$TARGET_PROFILE}"
   local forbidden_source_root="${8:-}"
   local image_map="${9:-}"
+  local expected_namespace="${10:-}"
 
   local command=(
     bash "$ROOT_DIR/scripts/verify-release.sh" --render
@@ -942,6 +946,9 @@ run_render() {
   fi
   if [[ -n "$image_map" ]]; then
     command+=(--image-map "$image_map")
+  fi
+  if [[ -n "$expected_namespace" ]]; then
+    command+=(--expected-namespace "$expected_namespace")
   fi
 
   "${command[@]}"
@@ -1734,6 +1741,27 @@ expect_fail_case \
   "" \
   "" \
   "render_values.INGRESS_HOST must match render_values.PUBLIC_BASE_URL host"
+
+NAMESPACE_MISMATCH_VALUES="$TMP_DIR/render-values.namespace-mismatch.json"
+write_render_values "$NAMESPACE_MISMATCH_VALUES" namespace_mismatch
+if run_render \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$NAMESPACE_MISMATCH_VALUES" \
+  "$VALID_TRUTH" \
+  "$TMP_DIR/out-namespace-mismatch" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "agentsmith" >"$TMP_DIR/namespace-mismatch.out" 2>"$TMP_DIR/namespace-mismatch.err"; then
+  cat "$TMP_DIR/namespace-mismatch.out" >&2
+  cat "$TMP_DIR/namespace-mismatch.err" >&2
+  fail "expected render_values.namespace mismatch with expected namespace to fail"
+fi
+grep -Fq 'render_values.namespace must match --expected-namespace' "$TMP_DIR/namespace-mismatch.err" ||
+  fail "expected namespace mismatch failure to name render_values.namespace and --expected-namespace"
+pass "render rejects render_values namespace drift from expected deployment namespace"
 
 AFSCP_DEFAULT_VOLUME_PV_NAME_MISMATCH_VALUES="$TMP_DIR/render-values.afscp-default-volume-pv-name-mismatch.json"
 write_render_values "$AFSCP_DEFAULT_VOLUME_PV_NAME_MISMATCH_VALUES" afscp_default_volume_pv_name_mismatch
