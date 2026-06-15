@@ -63,6 +63,9 @@ The operator-facing path is a single package-driven facade:
 4. Generate the final GA report from the four package paths plus AgentSmith
    product-side reports.
 
+Chinese operator documentation is available at
+[`docs/operator-guide.zh-CN.md`](docs/operator-guide.zh-CN.md).
+
 ```bash
 bash scripts/operator-release.sh --init-operator-inputs <deployment_path> --output-dir <dir>
 bash scripts/operator-release.sh --operator-inputs <dir-or-json> --doctor

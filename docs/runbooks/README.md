@@ -2,6 +2,9 @@
 
 Status: operator package flow first.
 
+Chinese operator documentation:
+[`../operator-guide.zh-CN.md`](../operator-guide.zh-CN.md).
+
 ## Operator First Screen
 
 ### 1. Which path do I choose?
