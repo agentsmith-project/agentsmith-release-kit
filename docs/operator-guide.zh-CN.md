@@ -81,7 +81,9 @@ NAMESPACE="<agentsmith-namespace>"
 KUBE_CONTEXT="<kube-context>"
 
 kubectl --context "$KUBE_CONTEXT" create namespace "$NAMESPACE"
-kubectl --context "$KUBE_CONTEXT" auth can-i apply deployments -n "$NAMESPACE"
+kubectl --context "$KUBE_CONTEXT" auth can-i create deployments -n "$NAMESPACE"
+kubectl --context "$KUBE_CONTEXT" auth can-i patch deployments -n "$NAMESPACE"
+kubectl --context "$KUBE_CONTEXT" auth can-i update deployments -n "$NAMESPACE"
 kubectl --context "$KUBE_CONTEXT" auth can-i get pods -n "$NAMESPACE"
 ```
 
@@ -120,6 +122,15 @@ kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" create secret generic object-s
 
 kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" create secret generic oidc-client \
   --from-literal=client_secret='<oidc-client-secret>'
+```
+
+如果 truth 或 install inputs 包含 `services.oidc.admin_secret_ref`，还需要创建它
+指向的 `oidc-admin` Secret，并包含 `username` 和 `password`：
+
+```bash
+kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" create secret generic oidc-admin \
+  --from-literal=username='<oidc-admin-user>' \
+  --from-literal=password='<oidc-admin-password>'
 ```
 
 如果 truth 里声明了 CA Secret，key 使用 `ca.crt`：
@@ -434,6 +445,11 @@ bash scripts/verify-release.sh --bundle-create \
   --output-dir "$BUNDLE_OUT"
 ```
 
+`kit_installed` 离线包必须同时携带产品镜像 archive 和 substrate pack 镜像
+archive：`--image-archive` 除了覆盖 release contract/product image-map 中声明的
+镜像，也必须覆盖 `substrate-pack-manifest.json` 中列出的 substrate images，例如
+PostgreSQL、MongoDB、Redis 或对象存储等 archive。
+
 `--bundle-create` 会组装 `airgap-bundle-manifest.json` 并立即做 bundle 一致性
 检查。它不是最终部署结果；最终结果仍来自 `operator-release.sh --ga-report`。
 
@@ -448,7 +464,7 @@ bash scripts/verify-release.sh --bundle-create \
 | `--skopeo` | image export / source image verify | `skopeo` 命令或绝对路径；只在导出镜像或显式校验源镜像时需要 |
 | `--target-profile` | bundle-create / check / load | `existing_kubernetes/external_declared/airgap` 对应 `airgap/use_existing`；`existing_kubernetes/kit_installed/airgap` 对应 `airgap/install_substrates` |
 | `--target-registry` | bundle-create / airgap substrate pack | 离线目标 registry 地址，可带 namespace，例如 `registry.local/agentsmith` |
-| `--image-archive` | bundle-create | 可重复；格式是 `<image_id>=<local-oci-archive-file>`，必须覆盖 release contract 中声明的镜像 |
+| `--image-archive` | bundle-create | 可重复；格式是 `<image_id>=<local-oci-archive-file>`；`use_existing` 必须覆盖 release contract/product image-map 中声明的产品镜像，`kit_installed` 还必须覆盖 substrate pack manifest 中的 substrate images archive |
 | `--runbook` | bundle-create | 放入 bundle 的 operator runbook 文件 |
 | `--script` | bundle-create | 放入 bundle 的离线安装脚本文件 |
 | `--profile-values-schema` | bundle-create | 放入 bundle 的 values schema |
