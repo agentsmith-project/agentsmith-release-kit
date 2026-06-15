@@ -53,7 +53,7 @@ Usage:
   bash scripts/verify-release.sh --ga-release --release-contract <json> --deploy-template-package <json> --deployment-path-report <online/use_existing deployment-path-report.json> --deployment-path-report <online/install_substrates deployment-path-report.json> --deployment-path-report <airgap/use_existing deployment-path-report.json> --deployment-path-report <airgap/install_substrates deployment-path-report.json> --product-readiness-report <json> --post-deploy-product-smoke-report <online-json> --post-deploy-product-smoke-report <airgap-json> --output-dir <dir>
   bash scripts/verify-release.sh --operator-signoff-intake --release-contract <json> --online-deployment-gate-report <json> --operator-signoff-intake <json> --target-profile existing_kubernetes/external_declared/online --output-dir <dir>
   bash scripts/verify-release.sh --evidence --release-contract <json> --evidence-root <dir> --target-profile <target_cluster>/<substrate_source>/<distribution> --output-dir <dir> [--allow-required-target-profiles]
-  bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --target-prerequisites <json> --output-dir <dir> [--expected-namespace <name>] [--release-contract <json>]
+  bash scripts/verify-release.sh --target-preflight --target-profile <target_cluster>/<substrate_source>/<distribution> --substrate-truth <json> --target-prerequisites <json> --output-dir <dir> [--expected-namespace <name>] [--release-contract <json>] [--verify-oidc-discovery-issuer] [--oidc-discovery-timeout-ms <ms>]
   bash scripts/verify-release.sh --help
 
 Mode status:

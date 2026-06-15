@@ -490,8 +490,11 @@ fingerprints, TLS or sslmode, `extensions.pgvector.status: installed`,
 reachability status `declared_reachable` or `verified_by_operator`, and target
 prerequisites for namespace, RBAC policy/proof, ingress TLS, registry auth mode
 (`pull_secret_ref` required only for `secret` mode), storage, and substrate
-secret refs. It does not connect to Kubernetes, render, apply, smoke, package,
-deploy, or claim release readiness.
+secret refs. By default it does not connect to Kubernetes, render, apply,
+smoke, package, deploy, or claim release readiness. With
+`--verify-oidc-discovery-issuer` on an online target, it fetches the declared
+OIDC issuer discovery document and requires discovery `.issuer` to exactly
+equal `substrate_truth.services.oidc.issuer_url`.
 
 Future contracts should cover:
 

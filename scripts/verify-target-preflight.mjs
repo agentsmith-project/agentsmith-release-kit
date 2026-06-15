@@ -16,6 +16,8 @@ const REQUIRED_ARGS = ['targetProfile', 'substrateTruth', 'targetPrerequisites',
 const REPORT_SCHEMA = 'agentsmith.target-preflight-report/v1';
 const RELEASE_CONTRACT_SCHEMA = 'agentsmith.release-contract/v1';
 const GIT_SHA_RE = /^[0-9a-f]{40}$/;
+const DEFAULT_OIDC_DISCOVERY_TIMEOUT_MS = 5000;
+const MAX_OIDC_DISCOVERY_TIMEOUT_MS = 300000;
 
 class CliError extends Error {
   constructor(message) {
@@ -38,7 +40,9 @@ function usage() {
     --substrate-truth <json> \\
     --target-prerequisites <json> \\
     --output-dir <dir> \\
-    [--release-contract <json>]`;
+    [--release-contract <json>] \\
+    [--verify-oidc-discovery-issuer] \\
+    [--oidc-discovery-timeout-ms <ms>]`;
 }
 
 function cliFail(message) {
@@ -54,7 +58,10 @@ function toKebab(value) {
 }
 
 function parseArgs(argv) {
-  const parsed = {};
+  const parsed = {
+    verifyOidcDiscoveryIssuer: false,
+    oidcDiscoveryTimeoutMs: String(DEFAULT_OIDC_DISCOVERY_TIMEOUT_MS)
+  };
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -79,6 +86,12 @@ function parseArgs(argv) {
         break;
       case '--release-contract':
         parsed.releaseContract = nextValue();
+        break;
+      case '--verify-oidc-discovery-issuer':
+        parsed.verifyOidcDiscoveryIssuer = true;
+        break;
+      case '--oidc-discovery-timeout-ms':
+        parsed.oidcDiscoveryTimeoutMs = nextValue();
         break;
       case '--expected-namespace':
         parsed.expectedNamespace = nextValue();
@@ -190,6 +203,17 @@ function requireString(value, label) {
   return value;
 }
 
+function assertTimeoutMs(value, label) {
+  if (!/^[1-9][0-9]*$/.test(String(value))) {
+    fail(`${label} must be a positive integer`);
+  }
+  const timeoutMs = Number(value);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs > MAX_OIDC_DISCOVERY_TIMEOUT_MS) {
+    fail(`${label} must be <= ${MAX_OIDC_DISCOVERY_TIMEOUT_MS}`);
+  }
+  return timeoutMs;
+}
+
 function requireGitSha(value, label) {
   const gitSha = requireString(value, label);
   if (!GIT_SHA_RE.test(gitSha)) {
@@ -223,6 +247,69 @@ async function writeReport(outputDir, report) {
   );
 }
 
+function oidcDiscoveryUrl(issuerUrl) {
+  let parsed;
+  try {
+    parsed = new URL(issuerUrl);
+  } catch {
+    fail('substrate_truth.services.oidc.issuer_url must be a valid issuer URL');
+  }
+  const issuerPath = parsed.pathname.replace(/\/+$/, '');
+  parsed.pathname = `${issuerPath}/.well-known/openid-configuration`;
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString();
+}
+
+async function assertOidcDiscoveryIssuer({ substrateTruth, timeoutMs }) {
+  const issuerUrl = requireString(
+    substrateTruth.services?.oidc?.issuer_url,
+    'substrate_truth.services.oidc.issuer_url'
+  );
+  const discoveryUrl = oidcDiscoveryUrl(issuerUrl);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+
+  try {
+    response = await fetch(discoveryUrl, {
+      redirect: 'error',
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      fail(`oidc discovery issuer check timed out for declared issuer_url ${issuerUrl}`);
+    }
+    fail(`oidc discovery issuer check failed for declared issuer_url ${issuerUrl}: ${error.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    fail(
+      `oidc discovery issuer check failed for declared issuer_url ${issuerUrl}: HTTP ${response.status}`
+    );
+  }
+
+  let discovery;
+  try {
+    discovery = await response.json();
+  } catch (error) {
+    fail(`oidc discovery response for declared issuer_url ${issuerUrl} must be JSON: ${error.message}`);
+  }
+
+  if (!discovery || typeof discovery !== 'object' || Array.isArray(discovery)) {
+    fail(`oidc discovery response for declared issuer_url ${issuerUrl} must be a JSON object`);
+  }
+
+  const liveIssuer = requireString(discovery.issuer, 'oidc discovery issuer');
+  if (liveIssuer !== issuerUrl) {
+    fail(
+      `oidc discovery issuer mismatch: declared issuer_url ${issuerUrl} but discovery issuer is ${liveIssuer}`
+    );
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -231,6 +318,13 @@ async function main() {
   }
 
   const targetProfile = parseTargetProfile(args.targetProfile);
+  const oidcDiscoveryTimeoutMs = assertTimeoutMs(
+    args.oidcDiscoveryTimeoutMs,
+    'oidc-discovery-timeout-ms'
+  );
+  if (args.verifyOidcDiscoveryIssuer && targetProfile.distribution === 'airgap') {
+    fail('--verify-oidc-discovery-issuer is only accepted for online target profiles');
+  }
   const releaseIdentity = await readReleaseIdentity(args.releaseContract);
   const substrateTruthInput = await readJson(args.substrateTruth, 'substrate truth');
   const targetPrerequisitesInput = await readJson(
@@ -261,6 +355,12 @@ async function main() {
       expectedNamespace: args.expectedNamespace
     }
   );
+  if (args.verifyOidcDiscoveryIssuer) {
+    await assertOidcDiscoveryIssuer({
+      substrateTruth: substrateTruthInput.value,
+      timeoutMs: oidcDiscoveryTimeoutMs
+    });
+  }
 
   await writeReport(
     args.outputDir,

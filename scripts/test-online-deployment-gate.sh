@@ -18,7 +18,9 @@ NODE
 
 TMP_DIR="$(mktemp -d)"
 SERVER_PID=""
-trap 'if [[ -n "$SERVER_PID" ]]; then kill "$SERVER_PID" 2>/dev/null || true; fi; rm -rf "$TMP_DIR"' EXIT
+OIDC_SERVER_PID=""
+OIDC_DISCOVERY_ISSUER_FILE=""
+trap 'if [[ -n "$SERVER_PID" ]]; then kill "$SERVER_PID" 2>/dev/null || true; fi; if [[ -n "$OIDC_SERVER_PID" ]]; then kill "$OIDC_SERVER_PID" 2>/dev/null || true; fi; rm -rf "$TMP_DIR"' EXIT
 
 fail() {
   echo "FAIL: $*" >&2
@@ -132,6 +134,20 @@ if (substrateSource === 'kit_installed') {
 }
 
 fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
+NODE
+}
+
+set_truth_oidc_issuer() {
+  local truth_file="$1"
+  local issuer_url="$2"
+
+  "$NODE_BIN" --input-type=module - "$truth_file" "$issuer_url" <<'NODE'
+import fs from 'node:fs';
+
+const [truthFile, issuerUrl] = process.argv.slice(2);
+const truth = JSON.parse(fs.readFileSync(truthFile, 'utf8'));
+truth.services.oidc.issuer_url = issuerUrl;
+fs.writeFileSync(truthFile, `${JSON.stringify(truth, null, 2)}\n`);
 NODE
 }
 
@@ -1279,6 +1295,63 @@ NODE
   fail "online gate smoke server did not become ready"
 }
 
+start_oidc_discovery_server() {
+  local ready_file="$TMP_DIR/oidc-discovery-ready"
+  local stdout_file="$TMP_DIR/oidc-discovery.out"
+  local stderr_file="$TMP_DIR/oidc-discovery.err"
+
+  OIDC_DISCOVERY_ISSUER_FILE="$TMP_DIR/oidc-discovery-issuer.txt"
+
+  "$NODE_BIN" --input-type=module - "$ready_file" "$OIDC_DISCOVERY_ISSUER_FILE" >"$stdout_file" 2>"$stderr_file" <<'NODE' &
+import fs from 'node:fs';
+import http from 'node:http';
+
+const [readyFile, issuerFile] = process.argv.slice(2);
+
+const server = http.createServer((request, response) => {
+  const url = new URL(request.url, `http://${request.headers.host || 'agentsmith.localtest.me'}`);
+  if (request.method === 'GET' && url.pathname.endsWith('/.well-known/openid-configuration')) {
+    const issuer = fs.readFileSync(issuerFile, 'utf8').trim();
+    response.setHeader('content-type', 'application/json');
+    response.end(`${JSON.stringify({ issuer })}\n`);
+    return;
+  }
+  response.statusCode = 404;
+  response.end('not found');
+});
+
+server.listen(0, '::1', () => {
+  fs.writeFileSync(readyFile, String(server.address().port));
+});
+
+process.on('SIGTERM', () => {
+  server.close(() => process.exit(0));
+});
+NODE
+  OIDC_SERVER_PID=$!
+
+  for _ in {1..50}; do
+    if [[ -s "$ready_file" ]]; then
+      OIDC_SERVER_PORT="$(<"$ready_file")"
+      return
+    fi
+    if ! kill -0 "$OIDC_SERVER_PID" 2>/dev/null; then
+      cat "$stdout_file" >&2 || true
+      cat "$stderr_file" >&2 || true
+      fail "OIDC discovery fixture exited before ready"
+    fi
+    sleep 0.1
+  done
+
+  cat "$stdout_file" >&2 || true
+  cat "$stderr_file" >&2 || true
+  fail "OIDC discovery fixture did not become ready"
+}
+
+set_discovery_issuer() {
+  printf '%s\n' "$1" >"$OIDC_DISCOVERY_ISSUER_FILE"
+}
+
 hit_count() {
   if [[ -f "$SERVER_LOG" ]]; then
     wc -l <"$SERVER_LOG" | tr -d '[:space:]'
@@ -1920,6 +1993,11 @@ write_evidence_provenance "$SIGNED_CLI_MISMATCH_OPERATOR_PROVENANCE" signed_oper
 write_evidence_provenance "$SIGNED_UNBOUND_OPERATOR_PROVENANCE" signed_unbound_operator_run_uri
 start_server
 BASE_URL="http://127.0.0.1:$SERVER_PORT"
+start_oidc_discovery_server
+OIDC_DECLARED_ISSUER="http://agentsmith.localtest.me:$OIDC_SERVER_PORT/realms/app"
+set_discovery_issuer "$OIDC_DECLARED_ISSUER"
+set_truth_oidc_issuer "$VALID_TRUTH" "$OIDC_DECLARED_ISSUER"
+set_truth_oidc_issuer "$EMPTY_REDIS_TRUTH" "$OIDC_DECLARED_ISSUER"
 
 all_required_inputs_output="$TMP_DIR/out-all-required-inputs-naked"
 if bash "$ROOT_DIR/scripts/verify-release.sh" --inputs \

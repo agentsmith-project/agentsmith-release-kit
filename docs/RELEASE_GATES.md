@@ -1496,9 +1496,12 @@ bash scripts/test-target-preflight.sh
 This focused guard exercises `bash scripts/verify-release.sh
 --target-preflight`. It checks only repo-local intake of a neutral substrate
 connection truth document and a separate target prerequisites truth document.
-It does not open a Kubernetes client, render manifests, run checks, apply
-resources, roll out workloads, smoke product endpoints, create cloud resources,
-or build an airgap bundle.
+By default it does not open a Kubernetes client, render manifests, run checks,
+apply resources, roll out workloads, smoke product endpoints, create cloud
+resources, or build an airgap bundle. With
+`--verify-oidc-discovery-issuer` on an online target, it additionally fetches
+the declared OIDC issuer discovery document and requires discovery `.issuer` to
+exactly equal `substrate_truth.services.oidc.issuer_url`.
 
 The accepted truth schemas are
 `agentsmith.substrate-connection.truth/v1` and

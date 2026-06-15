@@ -10,7 +10,9 @@ EXISTING_KIT_AIRGAP_PROFILE="existing_kubernetes/kit_installed/airgap"
 KIT_PROFILE="kind_rehearsal/kit_installed/online"
 
 TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+OIDC_SERVER_PID=""
+OIDC_DISCOVERY_ISSUER_FILE=""
+trap 'if [[ -n "$OIDC_SERVER_PID" ]]; then kill "$OIDC_SERVER_PID" 2>/dev/null || true; fi; rm -rf "$TMP_DIR"' EXIT
 
 fail() {
   echo "FAIL: $*" >&2
@@ -19,6 +21,63 @@ fail() {
 
 pass() {
   echo "PASS: $*"
+}
+
+start_oidc_discovery_server() {
+  local ready_file="$TMP_DIR/oidc-discovery-ready"
+  local stdout_file="$TMP_DIR/oidc-discovery.out"
+  local stderr_file="$TMP_DIR/oidc-discovery.err"
+
+  OIDC_DISCOVERY_ISSUER_FILE="$TMP_DIR/oidc-discovery-issuer.txt"
+
+  "$NODE_BIN" --input-type=module - "$ready_file" "$OIDC_DISCOVERY_ISSUER_FILE" >"$stdout_file" 2>"$stderr_file" <<'NODE' &
+import fs from 'node:fs';
+import http from 'node:http';
+
+const [readyFile, issuerFile] = process.argv.slice(2);
+
+const server = http.createServer((request, response) => {
+  const url = new URL(request.url, `http://${request.headers.host || 'agentsmith.localtest.me'}`);
+  if (request.method === 'GET' && url.pathname.endsWith('/.well-known/openid-configuration')) {
+    const issuer = fs.readFileSync(issuerFile, 'utf8').trim();
+    response.setHeader('content-type', 'application/json');
+    response.end(`${JSON.stringify({ issuer })}\n`);
+    return;
+  }
+  response.statusCode = 404;
+  response.end('not found');
+});
+
+server.listen(0, '::1', () => {
+  fs.writeFileSync(readyFile, String(server.address().port));
+});
+
+process.on('SIGTERM', () => {
+  server.close(() => process.exit(0));
+});
+NODE
+  OIDC_SERVER_PID=$!
+
+  for _ in {1..50}; do
+    if [[ -s "$ready_file" ]]; then
+      OIDC_SERVER_PORT="$(<"$ready_file")"
+      return
+    fi
+    if ! kill -0 "$OIDC_SERVER_PID" 2>/dev/null; then
+      cat "$stdout_file" >&2 || true
+      cat "$stderr_file" >&2 || true
+      fail "OIDC discovery fixture exited before ready"
+    fi
+    sleep 0.1
+  done
+
+  cat "$stdout_file" >&2 || true
+  cat "$stderr_file" >&2 || true
+  fail "OIDC discovery fixture did not become ready"
+}
+
+set_discovery_issuer() {
+  printf '%s\n' "$1" >"$OIDC_DISCOVERY_ISSUER_FILE"
 }
 
 write_truth() {
@@ -279,6 +338,20 @@ switch (mutation) {
 }
 
 fs.writeFileSync(output, `${JSON.stringify(truth, null, 2)}\n`);
+NODE
+}
+
+set_truth_oidc_issuer() {
+  local truth_file="$1"
+  local issuer_url="$2"
+
+  "$NODE_BIN" --input-type=module - "$truth_file" "$issuer_url" <<'NODE'
+import fs from 'node:fs';
+
+const [truthFile, issuerUrl] = process.argv.slice(2);
+const truth = JSON.parse(fs.readFileSync(truthFile, 'utf8'));
+truth.services.oidc.issuer_url = issuerUrl;
+fs.writeFileSync(truthFile, `${JSON.stringify(truth, null, 2)}\n`);
 NODE
 }
 
@@ -602,6 +675,48 @@ write_prerequisites "$EXTERNAL_PREREQUISITES" "$EXTERNAL_PROFILE" valid
 run_target_preflight "$EXTERNAL_PROFILE" "$EXTERNAL_TRUTH" "$EXTERNAL_PREREQUISITES" "$EXTERNAL_OUT" >/dev/null
 assert_pass_report "$EXTERNAL_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
 pass "valid existing_kubernetes/external_declared/online truth accepted with focused non-readiness report"
+
+start_oidc_discovery_server
+OIDC_DECLARED_ISSUER="http://agentsmith.localtest.me:$OIDC_SERVER_PORT/realms/mbos"
+OIDC_MISMATCH_ISSUER="http://127.0.0.1:$OIDC_SERVER_PORT/realms/mbos"
+
+OIDC_MATCH_TRUTH="$TMP_DIR/external-oidc-discovery-match.json"
+OIDC_MATCH_OUT="$TMP_DIR/out-external-oidc-discovery-match"
+write_truth "$OIDC_MATCH_TRUTH" "$EXTERNAL_PROFILE" valid
+set_truth_oidc_issuer "$OIDC_MATCH_TRUTH" "$OIDC_DECLARED_ISSUER"
+set_discovery_issuer "$OIDC_DECLARED_ISSUER"
+run_target_preflight \
+  "$EXTERNAL_PROFILE" \
+  "$OIDC_MATCH_TRUTH" \
+  "$EXTERNAL_PREREQUISITES" \
+  "$OIDC_MATCH_OUT" \
+  --verify-oidc-discovery-issuer \
+  --oidc-discovery-timeout-ms 2000 >/dev/null
+assert_pass_report "$OIDC_MATCH_OUT/target-preflight-report.json" "$EXTERNAL_PROFILE"
+pass "OIDC discovery issuer equality accepted when live issuer matches declared issuer_url"
+
+OIDC_MISMATCH_TRUTH="$TMP_DIR/external-oidc-discovery-mismatch.json"
+OIDC_MISMATCH_OUT="$TMP_DIR/out-external-oidc-discovery-mismatch"
+write_truth "$OIDC_MISMATCH_TRUTH" "$EXTERNAL_PROFILE" valid
+set_truth_oidc_issuer "$OIDC_MISMATCH_TRUTH" "$OIDC_DECLARED_ISSUER"
+set_discovery_issuer "$OIDC_MISMATCH_ISSUER"
+if run_target_preflight \
+  "$EXTERNAL_PROFILE" \
+  "$OIDC_MISMATCH_TRUTH" \
+  "$EXTERNAL_PREREQUISITES" \
+  "$OIDC_MISMATCH_OUT" \
+  --verify-oidc-discovery-issuer \
+  --oidc-discovery-timeout-ms 2000 >"$TMP_DIR/oidc-mismatch.out" 2>"$TMP_DIR/oidc-mismatch.err"; then
+  fail "expected OIDC discovery issuer mismatch to fail"
+fi
+grep -Fq "oidc discovery issuer mismatch: declared issuer_url $OIDC_DECLARED_ISSUER but discovery issuer is $OIDC_MISMATCH_ISSUER" "$TMP_DIR/oidc-mismatch.err" || {
+  cat "$TMP_DIR/oidc-mismatch.out" >&2
+  cat "$TMP_DIR/oidc-mismatch.err" >&2
+  fail "OIDC discovery issuer mismatch failure message did not explain drift"
+}
+[[ ! -e "$OIDC_MISMATCH_OUT/target-preflight-report.json" ]] ||
+  fail "OIDC discovery mismatch must not write target preflight report"
+pass "OIDC discovery issuer drift rejected before target preflight report is written"
 
 SINGLE_LABEL_ENDPOINT_TRUTH="$TMP_DIR/external-single-label-endpoint-valid.json"
 SINGLE_LABEL_ENDPOINT_OUT="$TMP_DIR/out-external-single-label-endpoint"

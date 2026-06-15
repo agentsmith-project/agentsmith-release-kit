@@ -1266,25 +1266,30 @@ async function main(argv) {
     reportPaths: [path.join(outputSubdir(args, 'inputs'), 'target-profile-coverage-report.json')]
   });
 
+  const targetPreflightArgv = [
+    '--target-profile',
+    targetProfile,
+    '--substrate-truth',
+    args.substrateTruth,
+    '--target-prerequisites',
+    args.targetPrerequisites,
+    '--release-contract',
+    args.releaseContract,
+    '--expected-namespace',
+    args.namespace,
+    '--output-dir',
+    outputSubdir(args, 'target-preflight')
+  ];
+  if (isExternalOnline(args) && args.mode === 'apply') {
+    targetPreflightArgv.push('--verify-oidc-discovery-issuer');
+  }
+
   runStep({
     args,
     steps,
     name: 'target-preflight',
     mode: '--target-preflight',
-    argv: [
-      '--target-profile',
-      targetProfile,
-      '--substrate-truth',
-      args.substrateTruth,
-      '--target-prerequisites',
-      args.targetPrerequisites,
-      '--release-contract',
-      args.releaseContract,
-      '--expected-namespace',
-      args.namespace,
-      '--output-dir',
-      outputSubdir(args, 'target-preflight')
-    ],
+    argv: targetPreflightArgv,
     reportPaths: [
       path.join(outputSubdir(args, 'target-preflight'), 'target-preflight-report.json')
     ]

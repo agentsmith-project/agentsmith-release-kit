@@ -656,13 +656,16 @@ document, and an operator-provided
 `agentsmith.target-prerequisites.truth/v1` document. Its
 `target-preflight-report.json` must keep `schema:
 agentsmith.target-preflight-report/v1`, `readiness: false`, and `scope:
-target_preflight_prerequisite_only`; it does not connect to
+target_preflight_prerequisite_only`. By default it does not connect to
 Kubernetes, render manifests, apply resources, smoke a cluster, package
-artifacts, or claim deploy or release readiness. The prerequisites document is
-the only place for namespace, RBAC policy/proof, ingress host and TLS secret
-ref, registry auth mode (with `pull_secret_ref` required only for `secret`
-mode), storage class/PV policy proof, and substrate secret refs needed before a
-real Kubernetes or cloud target deploy. The substrate installer does not create
+artifacts, or claim deploy or release readiness. When
+`--verify-oidc-discovery-issuer` is supplied for an online target, it fetches
+the declared OIDC issuer's discovery document and requires discovery `.issuer`
+to exactly equal `substrate_truth.services.oidc.issuer_url`. The prerequisites
+document is the only place for namespace, RBAC policy/proof, ingress host and
+TLS secret ref, registry auth mode (with `pull_secret_ref` required only for
+`secret` mode), storage class/PV policy proof, and substrate secret refs needed
+before a real Kubernetes or cloud target deploy. The substrate installer does not create
 PVCs; storage readiness is proven here. Its `registry` object accepts only
 `auth.mode` and conditional `pull_secret_ref`; `preloaded`, `mirror_done`,
 `verdict`, `token`, and other pseudo-proof or secret payload fields fail fast.
