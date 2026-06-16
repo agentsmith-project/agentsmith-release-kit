@@ -275,6 +275,8 @@ const KUBERNETES_SECRET_REFERENCE_BLOCK_RE =
   /(^|\n)([ \t]*(?:secret|secretKeyRef):[ \t]*(?:#.*)?\n(?:[ \t]+[A-Za-z0-9_.-]+:[^\n]*(?:\n|$)){0,8})/g;
 const KUBERNETES_TLS_REFERENCE_BLOCK_RE =
   /(^|\n)([ \t]*tls:[ \t]*(?:#.*)?\n(?:[ \t]+(?:-[ \t]*)?[A-Za-z0-9_.-]+:[^\n]*(?:\n|$)){0,12})/g;
+const KUBERNETES_SECRET_REFERENCE_FIELDS = ['secretName', 'name', 'key', 'optional'];
+const KUBERNETES_TLS_REFERENCE_FIELDS = ['secretName'];
 const SECRET_KEY_RE = /(^|[_-])(access[_-]?key|api[_-]?key|client[_-]?secret|credential|kubeconfig|kube[_-]?config|password|private[_-]?key|refresh[_-]?token|secret|session[_-]?token|token)([_-]|$)/i;
 const SECRET_VALUE_RE = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/i,
@@ -737,6 +739,22 @@ function blockContainsSecretReference(block, key) {
   return new RegExp(`^[ \\t]*${key}:[ \\t]*[A-Za-z0-9_.-]+[ \\t]*(?:#.*)?$`, 'm').test(block);
 }
 
+function maskKubernetesReferenceFields(block, fields) {
+  const fieldAlternation = fields.join('|');
+  const fieldLineRe = new RegExp(
+    `^([ \\t]*(?:-[ \\t]*)?(?:${fieldAlternation}):[ \\t]*)[^#\\n]*([ \\t]*(?:#.*)?)$`,
+    'gm'
+  );
+  return block.replace(fieldLineRe, (_line, prefix, suffix) => `${prefix}reference${suffix}`);
+}
+
+function maskKubernetesSecretReferenceHeader(block) {
+  return block.replace(
+    /^([ \t]*)(?:secret|secretKeyRef):([ \t]*(?:#.*)?(?:\n|$))/,
+    '$1kubernetes_secret_reference:$2'
+  );
+}
+
 function maskKubernetesSecretReferenceBlocks(value) {
   const maskedSecretBlocks = value.replace(
     KUBERNETES_SECRET_REFERENCE_BLOCK_RE,
@@ -744,14 +762,16 @@ function maskKubernetesSecretReferenceBlocks(value) {
       if (!blockContainsSecretReference(block, 'secretName') && !blockContainsSecretReference(block, 'name')) {
         return match;
       }
-      return `${prefix}kubernetes_secret_reference: reference`;
+      return `${prefix}${maskKubernetesSecretReferenceHeader(
+        maskKubernetesReferenceFields(block, KUBERNETES_SECRET_REFERENCE_FIELDS)
+      )}`;
     }
   );
   return maskedSecretBlocks.replace(KUBERNETES_TLS_REFERENCE_BLOCK_RE, (match, prefix, block) => {
     if (!blockContainsSecretReference(block, 'secretName')) {
       return match;
     }
-    return `${prefix}kubernetes_tls_secret_reference: reference`;
+    return `${prefix}${maskKubernetesReferenceFields(block, KUBERNETES_TLS_REFERENCE_FIELDS)}`;
   });
 }
 

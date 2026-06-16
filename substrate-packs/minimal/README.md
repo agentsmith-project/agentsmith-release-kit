@@ -16,7 +16,9 @@ resources.
 
 The substrate NetworkPolicy keeps substrate traffic namespace-local, with only
 the default `kube-system` JuiceFS CSI node and mount pods allowed to reach
-PostgreSQL `5432` and mount pods allowed to reach object-storage `9000`.
+PostgreSQL `5432`, mount pods allowed to reach object-storage `9000`, and the
+public OIDC ingress policy allowing only the `ingress-nginx` controller to
+reach OIDC `8443`.
 Use `--juicefs-csi-namespace` during materialization when the CSI mount
 namespace is not `kube-system`.
 
