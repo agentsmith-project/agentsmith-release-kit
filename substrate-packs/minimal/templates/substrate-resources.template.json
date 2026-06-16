@@ -121,6 +121,57 @@
     "apiVersion": "networking.k8s.io/v1",
     "kind": "NetworkPolicy",
     "metadata": {
+      "name": "agentsmith-substrates-public-oidc-ingress",
+      "namespace": "{{NAMESPACE}}",
+      "labels": {
+        "app.kubernetes.io/managed-by": "agentsmith-release-kit",
+        "app.kubernetes.io/part-of": "agentsmith-substrate"
+      },
+      "annotations": {
+        "agentsmith.io/managed-by": "agentsmith-release-kit",
+        "agentsmith.io/installation-id": "{{INSTALLATION_ID}}"
+      }
+    },
+    "spec": {
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/part-of": "agentsmith-substrate",
+          "app.kubernetes.io/name": "oidc"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ],
+      "ingress": [
+        {
+          "from": [
+            {
+              "namespaceSelector": {
+                "matchLabels": {
+                  "kubernetes.io/metadata.name": "ingress-nginx"
+                }
+              },
+              "podSelector": {
+                "matchLabels": {
+                  "app.kubernetes.io/name": "ingress-nginx"
+                }
+              }
+            }
+          ],
+          "ports": [
+            {
+              "protocol": "TCP",
+              "port": 8443
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
       "name": "agentsmith-substrates-juicefs-object-storage",
       "namespace": "{{NAMESPACE}}",
       "labels": {
@@ -492,7 +543,8 @@
                 "--tlsCertificateKeyFile",
                 "/tls/tls.pem",
                 "--tlsCAFile",
-                "/tls/ca.crt"
+                "/tls/ca.crt",
+                "--tlsAllowConnectionsWithoutCertificates"
               ],
               "volumeMounts": [
                 {
@@ -649,6 +701,8 @@
                 "/tls/tls.key",
                 "--tls-ca-cert-file",
                 "/tls/ca.crt",
+                "--tls-auth-clients",
+                "no",
                 "--requirepass",
                 "$(REDIS_PASSWORD)"
               ],

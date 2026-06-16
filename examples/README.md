@@ -25,8 +25,8 @@ materials, operator target facts, operator tools, and operator confirmations.
 Run `--run` only when the package is ready to execute.
 Replace scaffold scalar placeholders such as
 `context: replace-with-kube-context` and
-`smoke_url: https://agentsmith.example.com/healthz`; doctor keeps them as
-blockers until replaced.
+`smoke_url: https://agentsmith.example.com/en-US/login/workspace`; doctor keeps
+them as blockers until replaced. Apply packages must also set `expected_status`.
 
 Available examples:
 

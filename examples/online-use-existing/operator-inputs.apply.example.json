@@ -12,7 +12,8 @@
   "mode": "apply",
   "kubectl": "tools/kubectl",
   "context": "agentsmith-online-context",
-  "smoke_url": "https://agentsmith.online.example.com/healthz",
+  "smoke_url": "https://agentsmith.online.example.com/en-US/login/workspace",
+  "expected_status": 200,
   "deploy_confirmation": {
     "confirmed": true,
     "operator_run_id": "operator-run-20260523-001"

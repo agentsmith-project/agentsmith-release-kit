@@ -131,8 +131,9 @@ creates a skeleton package for one of the four GA deployment paths and refuses
 to overwrite an existing `operator-inputs.json`. The scaffold intentionally
 does not prefill explicit deploy/install confirmations. Scaffold scalar
 placeholders such as `context: replace-with-kube-context` and
-`smoke_url: https://agentsmith.example.com/healthz` must be replaced; doctor
-treats them as blockers.
+`smoke_url: https://agentsmith.example.com/en-US/login/workspace` must be
+replaced; doctor treats them as blockers. Apply packages must also set
+`expected_status`.
 
 With `--run`, the current orchestration slice supports `online/use_existing`,
 `online/install_substrates`, `airgap/use_existing`, and

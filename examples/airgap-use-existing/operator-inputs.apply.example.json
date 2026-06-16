@@ -16,7 +16,7 @@
   "kubectl": "tools/kubectl",
   "archive_probe": "tools/archive-probe",
   "image_loader": "tools/image-loader",
-  "smoke_url": "https://agentsmith.airgap.example.com/healthz",
+  "smoke_url": "https://agentsmith.airgap.example.com/en-US/login/workspace",
   "expected_status": 200,
   "timeout": "120s",
   "timeout_ms": 60000,

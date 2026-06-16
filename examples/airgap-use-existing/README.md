@@ -49,8 +49,9 @@ cp -R "$EXAMPLE_DIR/tools" "$PKG/tools"
 not a components-only manifest. Replace package-local tools before `--run`.
 If this package started from init scaffold, replace
 `context: replace-with-kube-context` and
-`smoke_url: https://agentsmith.example.com/healthz`; doctor treats those
-placeholder values as blockers.
+`smoke_url: https://agentsmith.example.com/en-US/login/workspace`; doctor treats
+those placeholder values as blockers. Apply packages must also set
+`expected_status`.
 
 ## Doctor And Run
 

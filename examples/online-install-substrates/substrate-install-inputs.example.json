@@ -19,7 +19,8 @@
         "sslmode": "verify-full",
         "tls": {
           "mode": "verify-full",
-          "ca_secret_ref": "secretRef:agentsmith/postgresql-ca"
+          "ca_secret_ref": "secretRef:agentsmith/postgresql-ca",
+          "server_secret_ref": "secretRef:agentsmith/postgresql-server-tls"
         },
         "reachability": {
           "status": "declared_reachable",
@@ -38,7 +39,8 @@
         "credential_secret_ref": "secretRef:agentsmith/mongodb-app",
         "tls": {
           "mode": "verify-full",
-          "ca_secret_ref": "secretRef:agentsmith/mongodb-ca"
+          "ca_secret_ref": "secretRef:agentsmith/mongodb-ca",
+          "server_secret_ref": "secretRef:agentsmith/mongodb-server-tls"
         },
         "reachability": {
           "status": "declared_reachable",
@@ -51,7 +53,8 @@
         "credential_secret_ref": "secretRef:agentsmith/redis-app",
         "tls": {
           "mode": "verify-full",
-          "ca_secret_ref": "secretRef:agentsmith/redis-ca"
+          "ca_secret_ref": "secretRef:agentsmith/redis-ca",
+          "server_secret_ref": "secretRef:agentsmith/redis-server-tls"
         },
         "reachability": {
           "status": "declared_reachable",
@@ -65,7 +68,8 @@
         "credential_secret_ref": "secretRef:agentsmith/object-storage-app",
         "tls": {
           "mode": "https",
-          "ca_secret_ref": "secretRef:agentsmith/object-storage-ca"
+          "ca_secret_ref": "secretRef:agentsmith/object-storage-ca",
+          "server_secret_ref": "secretRef:agentsmith/object-storage-server-tls"
         },
         "reachability": {
           "status": "declared_reachable",
@@ -75,10 +79,12 @@
       "oidc": {
         "issuer_url": "https://oidc.agentsmith.example.com/realms/agentsmith",
         "client_id": "agentsmith-web",
+        "admin_secret_ref": "secretRef:agentsmith/oidc-admin",
         "client_secret_ref": "secretRef:agentsmith/oidc-client",
         "tls": {
           "mode": "https",
-          "ca_secret_ref": "secretRef:agentsmith/oidc-ca"
+          "ca_secret_ref": "secretRef:agentsmith/oidc-ca",
+          "server_secret_ref": "secretRef:agentsmith/oidc-server-tls"
         },
         "reachability": {
           "status": "declared_reachable",

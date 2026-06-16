@@ -756,6 +756,15 @@ switch (caseName) {
     manifest.smoke_url = 'https://release.example/ok';
     manifest.expected_status = 200;
     break;
+  case 'apply_missing_expected_status':
+    manifest.mode = 'apply';
+    manifest.deploy_confirmation = {
+      confirmed: true,
+      operator_run_id: 'operator-inputs-deploy-1002'
+    };
+    manifest.smoke_url = 'https://release.example/en-US/login/workspace';
+    delete manifest.expected_status;
+    break;
   case 'smoke_url_userinfo':
     manifest.mode = 'apply';
     manifest.deploy_confirmation = {
@@ -1064,6 +1073,7 @@ switch (caseName) {
       operator_run_id: 'operator-inputs-deploy-1002'
     };
     manifest.smoke_url = 'https://release.example/ok';
+    manifest.expected_status = 200;
     manifest.target_registry = 'registry.release.example/agentsmith';
     break;
   case 'target_registry_server_dry_run_with_probe':
@@ -1077,6 +1087,7 @@ switch (caseName) {
       operator_run_id: 'operator-inputs-deploy-1002'
     };
     manifest.smoke_url = 'https://release.example/ok';
+    manifest.expected_status = 200;
     manifest.target_registry = 'registry.release.example/agentsmith';
     manifest.registry_probe = 'tools/registry-probe';
     break;
@@ -1981,6 +1992,118 @@ grep -Fq -- '- render_values:' "$TMP_DIR/doctor-static-invalid-facade.out" ||
   fail "operator-inputs doctor static checks must not write an intake plan"
 pass "operator-inputs doctor fails existing refs with static package blockers without writing a plan"
 
+doctor_static_container_ca_dir="$TMP_DIR/doctor-static-container-ca-path"
+copy_valid_package "$example_online_package" "$doctor_static_container_ca_dir"
+"$NODE_BIN" --input-type=module - "$doctor_static_container_ca_dir/render-values.example.json" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.ca_bundle_path = '/etc/agentsmith/substrate-ca/postgresql/ca.crt';
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_container_ca_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-container-ca-path.json"
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-container-ca-path.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.status !== 'pass') {
+  throw new Error('doctor static container CA path package must pass');
+}
+if ((report.static_issues || []).some((issue) => issue.field === 'render_values')) {
+  throw new Error('explicit container CA mount path must not be treated as a host-local source path');
+}
+NODE
+pass "operator-inputs doctor accepts explicit container substrate CA mount paths"
+
+doctor_static_secret_refs_dir="$TMP_DIR/doctor-static-kubernetes-secret-refs"
+copy_valid_package "$example_online_package" "$doctor_static_secret_refs_dir"
+"$NODE_BIN" --input-type=module - "$doctor_static_secret_refs_dir/render-values.example.json" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.kubernetes_secret_ref_snippet = `
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+spec:
+  tls:
+    - hosts:
+        - agentsmith.release.example.com
+      secretName: agentsmith-ingress-tls
+---
+apiVersion: v1
+kind: Pod
+spec:
+  volumes:
+    - name: oidc-tls
+      secret:
+        secretName: oidc-server-tls
+  containers:
+    - name: app
+      env:
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgresql-app
+              key: password
+`;
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+"$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_secret_refs_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-kubernetes-secret-refs.json"
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-kubernetes-secret-refs.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.status !== 'pass') {
+  throw new Error('doctor static Kubernetes Secret reference package must pass');
+}
+if ((report.static_issues || []).some((issue) => issue.field === 'render_values')) {
+  throw new Error('Kubernetes Secret references must not be classified as raw secret payloads');
+}
+NODE
+pass "operator-inputs doctor treats Kubernetes Secret reference fields as references"
+
+doctor_static_secret_payload_dir="$TMP_DIR/doctor-static-kubernetes-secret-payload"
+copy_valid_package "$example_online_package" "$doctor_static_secret_payload_dir"
+"$NODE_BIN" --input-type=module - "$doctor_static_secret_payload_dir/render-values.example.json" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.kubernetes_secret_payload = `
+apiVersion: v1
+kind: Secret
+metadata:
+  name: unsafe-secret
+data:
+  password: dmFsdWU=
+`;
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_secret_payload_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-kubernetes-secret-payload.json"; then
+  fail "operator-inputs doctor should fail when render values contain Kubernetes Secret payload data"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-kubernetes-secret-payload.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const issue = report.static_issues.find((item) => item.field === 'render_values');
+if (!issue || !/Kubernetes Secret data/.test(issue.reason)) {
+  throw new Error('doctor static payload blocker must explain Kubernetes Secret data');
+}
+NODE
+pass "operator-inputs doctor still rejects Kubernetes Secret data payloads"
+
 expect_doctor_endpoint_render_fail() {
   local label="$1"
   local address_type="$2"
@@ -2024,6 +2147,11 @@ NODE
   pass "operator-inputs doctor rejects render_values invalid EndpointSlice address: $label"
 }
 
+expect_doctor_endpoint_render_fail \
+  routable-endpointslice-fqdn \
+  FQDN \
+  postgres.ops.example.com \
+  'EndpointSlice addressType FQDN is not supported'
 expect_doctor_endpoint_render_fail \
   single-label-endpointslice-fqdn \
   FQDN \
@@ -2330,7 +2458,7 @@ grep -Fq 'Missing or blocking inputs by category:' "$TMP_DIR/doctor-category.out
   fail "operator facade doctor did not print blocker category summary"
 grep -Fq -- '- release materials: release_contract' "$TMP_DIR/doctor-category.out" ||
   fail "operator facade doctor did not group missing release materials"
-grep -Fq -- '- operator target facts: target_prerequisites, substrate_pack_manifest, substrate_install_inputs, smoke_url' "$TMP_DIR/doctor-category.out" ||
+grep -Fq -- '- operator target facts: target_prerequisites, substrate_pack_manifest, substrate_install_inputs, smoke_url, expected_status' "$TMP_DIR/doctor-category.out" ||
   fail "operator facade doctor did not group missing target facts"
 grep -Fq -- '- operator tools: kubectl, routability_probe' "$TMP_DIR/doctor-category.out" ||
   fail "operator facade doctor did not group missing operator tools"
@@ -2585,6 +2713,7 @@ for case_name in \
   smoke_url_query \
   smoke_url_hash \
   smoke_url_http_without_allow \
+  apply_missing_expected_status \
   smoke_timeout_too_large \
   timeout_without_unit \
   timeout_leading_zero_duration \

@@ -85,13 +85,13 @@ Edit `"$PKG/operator-inputs.json"` before apply:
 
 - Keep `deployment_path` as `online/use_existing`.
 - Replace `tools/kubectl` and set `context` to the target Kubernetes context.
-- Set `smoke_url` to the HTTPS route smoke endpoint for this target.
+- Set `smoke_url` and `expected_status` to the HTTPS route smoke check for this target.
 - Set `deploy_confirmation.operator_run_id` to the real operator run id.
 - When using the target registry variant, replace the placeholder
   `tools/registry-probe` before `--run`; it intentionally exits non-zero until
   replaced.
-- Use `expected_status`, `timeout`, and `timeout_ms` only when the route smoke
-  needs non-default checks.
+- Use `timeout` and `timeout_ms` only when the route smoke needs non-default
+  timing.
 
 ## Doctor
 

@@ -196,6 +196,7 @@ bash scripts/operator-release.sh --init-operator-inputs airgap/install_substrate
 | `archive_probe` | airgap 需要；包内可执行镜像归档探针 |
 | `image_loader` | airgap 需要；包内可执行镜像加载器 |
 | `smoke_url` | 部署后 route smoke URL；不要填骨架默认占位 URL |
+| `expected_status` | `mode: apply` 需要；route smoke 期望 HTTP 状态码 |
 | `install_confirmation` | `install_substrates` 需要，确认安装 substrate pack |
 | `deploy_confirmation` | `mode: apply` 需要，确认执行部署 |
 
@@ -258,7 +259,7 @@ chmod +x "$PKG/tools/kubectl"
 - `deployment_path` 保持 `online/use_existing`。
 - `release_contract`、`deploy_template_package`、`deploy_template_archive`、
   `render_values`、`substrate_truth`、`target_prerequisites` 指向包内文件。
-- `namespace`、`context`、`smoke_url` 改成目标真实值。
+- `namespace`、`context`、`smoke_url`、`expected_status` 改成目标真实值。
 - `deploy_confirmation.confirmed` 设为 `true`。
 - `deploy_confirmation.operator_run_id` 填本次操作编号，例如
   `operator-online-existing-20260615-001`。
@@ -324,7 +325,7 @@ chmod +x "$PKG/tools/kubectl" "$PKG/tools/routability-probe"
   `substrate-pack/substrate-pack-manifest.json`。
 - `substrate_install_inputs` 指向
   `substrate-pack/substrate-install-inputs.json`。
-- `namespace`、`context`、`smoke_url` 改成目标真实值。
+- `namespace`、`context`、`smoke_url`、`expected_status` 改成目标真实值。
 - `install_confirmation.confirmed` 设为 `true`。
 - `install_confirmation.confirm_current_install_parameters` 设为 `true`，让
   release-kit 按当前 install inputs 计算并使用
@@ -582,7 +583,7 @@ chmod +x "$PKG/tools/kubectl" "$PKG/tools/archive-probe" "$PKG/tools/image-loade
   `airgap-bundle/operator-inputs/...`。
 - `airgap_bundle` 指向 `airgap-bundle`。
 - `airgap_bundle_manifest` 指向 `airgap-bundle/airgap-bundle-manifest.json`。
-- `namespace`、`context`、`smoke_url` 改成离线目标真实值。
+- `namespace`、`context`、`smoke_url`、`expected_status` 改成离线目标真实值。
 - `deploy_confirmation.confirmed` 设为 `true`。
 
 执行：
@@ -625,7 +626,7 @@ chmod +x "$PKG/tools/kubectl" "$PKG/tools/archive-probe" "$PKG/tools/image-loade
   `airgap-bundle/components/substrate-install-inputs.json`，或 bundle manifest
   中声明的真实位置。
 - `airgap_bundle` 和 `airgap_bundle_manifest` 指向包内 bundle。
-- `namespace`、`context`、`smoke_url` 改成离线目标真实值。
+- `namespace`、`context`、`smoke_url`、`expected_status` 改成离线目标真实值。
 - `install_confirmation.confirmed` 设为 `true`。
 - `install_confirmation.confirm_current_install_parameters` 设为 `true`。
 - `install_confirmation.operator_run_id` 和

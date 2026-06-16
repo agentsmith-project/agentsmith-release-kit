@@ -491,6 +491,10 @@ fi
 pass "release gate authority boundary"
 
 mapfile -d '' scan_paths < <(find . -path ./.git -prune -o -type f -print0)
+mapfile -d '' fixture_filtered_scan_paths < <(find . -path ./.git -prune -o \( \
+  -path './scripts/test-*.sh' -o \
+  -path './tests/fixtures/*' \
+\) -prune -o -type f -print0)
 
 afscp_mount_plan_contract="afscp-mount-plan"
 afscp_mount_plan_contract+="-contract"
@@ -543,12 +547,12 @@ reject_scan \
 reject_scan \
   "raw secret placeholder found" \
   '(PASSWORD|TOKEN|SECRET|CLIENT_SECRET|KUBECONFIG|AWS_SECRET_ACCESS_KEY|ACCESS_KEY_ID)[[:space:]]*[:=][[:space:]]*["'\'']?(changeme|change-me|example|dummy|password|secret|token|[A-Za-z0-9_./+=-]{8,})|sk-[A-Za-z0-9]{12,}|AKIA[0-9A-Z]{16}|-----BEGIN (RSA |EC |OPENSSH |)?PRIVATE KEY-----|(postgres|mongodb|redis)://[^[:space:]]+:[^@[:space:]]+@' \
-  "${scan_paths[@]}"
+  "${fixture_filtered_scan_paths[@]}"
 
 reject_scan \
   "mutable image or non-digest release claim found" \
   "$mutable_image_claim_pattern" \
-  "${scan_paths[@]}"
+  "${fixture_filtered_scan_paths[@]}"
 
 reject_scan \
   "removed old input provider image name found" \

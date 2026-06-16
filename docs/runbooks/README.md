@@ -76,8 +76,9 @@ final release result. After all four package runs and product-side reports are
 available, use `--ga-report` to write the final `ga-release-report.json`.
 Replace scaffold scalar placeholders such as
 `context: replace-with-kube-context` and
-`smoke_url: https://agentsmith.example.com/healthz`; doctor reports them as
-blockers until they are real target facts.
+`smoke_url: https://agentsmith.example.com/en-US/login/workspace`; doctor
+reports them as blockers until they are real target facts. Apply packages must
+also set `expected_status`.
 When doctor fails, its human output groups the blockers as release materials,
 operator target facts, operator tools, and operator confirmations before the
 raw field list.

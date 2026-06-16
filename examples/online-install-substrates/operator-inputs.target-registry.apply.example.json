@@ -16,7 +16,8 @@
   "kubectl": "tools/kubectl",
   "registry_probe": "tools/registry-probe",
   "routability_probe": "tools/routability-probe",
-  "smoke_url": "https://agentsmith.online.example.com/healthz",
+  "smoke_url": "https://agentsmith.online.example.com/en-US/login/workspace",
+  "expected_status": 200,
   "install_confirmation": {
     "confirmed": true,
     "confirm_current_install_parameters": true,

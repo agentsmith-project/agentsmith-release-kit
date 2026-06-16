@@ -344,6 +344,9 @@ export function validateEndpointSliceRenderValues(value, { label = 'render_value
       fail(`${label}.${addressTypeKey} must be IPv4, IPv6, or FQDN`);
     }
     assertEndpointSliceAddressLiteral(renderValues[hostKey], `${label}.${hostKey}`, addressType);
+    if (addressType === 'FQDN') {
+      fail(`${label}.${addressTypeKey} EndpointSlice addressType FQDN is not supported`);
+    }
   }
 }
 

@@ -114,7 +114,8 @@ const DOCTOR_BLOCKER_CATEGORIES = [
       'target_registry',
       'namespace',
       'context',
-      'smoke_url'
+      'smoke_url',
+      'expected_status'
     ])
   },
   {

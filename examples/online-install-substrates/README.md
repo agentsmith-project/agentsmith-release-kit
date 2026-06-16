@@ -78,8 +78,8 @@ images, push images, or perform registry login.
 Replace `tools/kubectl` and `tools/routability-probe` with operator-approved
 package-local executables before `--run`. When using the target registry
 variant, replace `tools/registry-probe` too; it intentionally exits non-zero
-until replaced. Set `smoke_url` to the HTTPS route smoke endpoint for this
-target before apply.
+until replaced. Set `smoke_url` and `expected_status` to the HTTPS route smoke
+check for this target before apply.
 When replacing `substrate-pack-manifest.example.json`, also copy the real
 pack material tree next to it, or update the manifest paths to match.
 

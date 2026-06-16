@@ -13,7 +13,8 @@
   "mode": "apply",
   "kubectl": "tools/kubectl",
   "context": "agentsmith-online-context",
-  "smoke_url": "https://agentsmith.online.example.com/healthz",
+  "smoke_url": "https://agentsmith.online.example.com/en-US/login/workspace",
+  "expected_status": 200,
   "registry_probe": "tools/registry-probe",
   "deploy_confirmation": {
     "confirmed": true,

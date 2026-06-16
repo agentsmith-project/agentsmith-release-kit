@@ -144,7 +144,10 @@ const STRING_FIELDS = new Set([
 ]);
 const PLACEHOLDER_SCALAR_VALUES = new Map([
   ['context', new Set(['replace-with-kube-context'])],
-  ['smoke_url', new Set(['https://agentsmith.example.com/healthz'])],
+  ['smoke_url', new Set([
+    'https://agentsmith.example.com/healthz',
+    'https://agentsmith.example.com/en-US/login/workspace'
+  ])],
   ['deploy_confirmation.operator_run_id', new Set(['replace-with-deploy-run-id'])],
   ['install_confirmation.operator_run_id', new Set(['replace-with-install-run-id'])]
 ]);
@@ -265,6 +268,13 @@ const STATIC_LOCALHOST_URI_RE = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|\[?::1\]
 const STATIC_RELATIVE_URI_RE = /(^|[\s"'(=])\.\.?\//;
 const STATIC_ABSOLUTE_LOCAL_PATH_RE = /(^|[\s"'(=])(?:~\/|\/(?:Users|home|tmp|var|private|workspace|workspaces|mnt|opt|etc)\/|[A-Za-z]:[\\/])/;
 const STATIC_SOURCE_LIKE_LABEL_RE = /(?:^|\.)(?:source_uri|source_path|artifact_uri|package_uri|local_path|path|file|dir|kubeconfig)$/;
+const STATIC_CONTAINER_CA_PATH_RE = /(^|[\s"'(=])\/etc\/agentsmith\/substrate-ca\/[^\s"'()<>]+/g;
+const KUBERNETES_SECRET_KIND_RE = /^[ \t]*kind:[ \t]*Secret[ \t]*(?:#.*)?$/m;
+const KUBERNETES_SECRET_DATA_FIELD_RE = /^[ \t]*(?:data|stringData|binaryData):[ \t]*(?:#.*)?$/m;
+const KUBERNETES_SECRET_REFERENCE_BLOCK_RE =
+  /(^|\n)([ \t]*(?:secret|secretKeyRef):[ \t]*(?:#.*)?\n(?:[ \t]+[A-Za-z0-9_.-]+:[^\n]*(?:\n|$)){0,8})/g;
+const KUBERNETES_TLS_REFERENCE_BLOCK_RE =
+  /(^|\n)([ \t]*tls:[ \t]*(?:#.*)?\n(?:[ \t]+(?:-[ \t]*)?[A-Za-z0-9_.-]+:[^\n]*(?:\n|$)){0,12})/g;
 const SECRET_KEY_RE = /(^|[_-])(access[_-]?key|api[_-]?key|client[_-]?secret|credential|kubeconfig|kube[_-]?config|password|private[_-]?key|refresh[_-]?token|secret|session[_-]?token|token)([_-]|$)/i;
 const SECRET_VALUE_RE = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/i,
@@ -703,20 +713,92 @@ function isRelativeStaticSourcePath(value, label) {
   );
 }
 
-function scanStaticInputString(value, label, issues) {
+function isAllowedContainerCaMountPath(value) {
+  const relative = value.slice('/etc/agentsmith/substrate-ca/'.length);
+  return (
+    relative !== '' &&
+    !relative.includes('..') &&
+    !relative.includes('//') &&
+    !relative.includes('\\')
+  );
+}
+
+function maskAllowedContainerCaMountPaths(value) {
+  return value.replace(STATIC_CONTAINER_CA_PATH_RE, (match, prefix) => {
+    const candidate = match.slice(prefix.length);
+    if (!isAllowedContainerCaMountPath(candidate)) {
+      return match;
+    }
+    return `${prefix}/container-ca-mount`;
+  });
+}
+
+function blockContainsSecretReference(block, key) {
+  return new RegExp(`^[ \\t]*${key}:[ \\t]*[A-Za-z0-9_.-]+[ \\t]*(?:#.*)?$`, 'm').test(block);
+}
+
+function maskKubernetesSecretReferenceBlocks(value) {
+  const maskedSecretBlocks = value.replace(
+    KUBERNETES_SECRET_REFERENCE_BLOCK_RE,
+    (match, prefix, block) => {
+      if (!blockContainsSecretReference(block, 'secretName') && !blockContainsSecretReference(block, 'name')) {
+        return match;
+      }
+      return `${prefix}kubernetes_secret_reference: reference`;
+    }
+  );
+  return maskedSecretBlocks.replace(KUBERNETES_TLS_REFERENCE_BLOCK_RE, (match, prefix, block) => {
+    if (!blockContainsSecretReference(block, 'secretName')) {
+      return match;
+    }
+    return `${prefix}kubernetes_tls_secret_reference: reference`;
+  });
+}
+
+function scanKubernetesSecretData(raw, label, issues) {
+  const documents = raw.split(/(?:^|\n)---[^\n]*(?:\n|$)/);
   if (
-    STATIC_LOCAL_URI_RE.test(value) ||
-    STATIC_LOCALHOST_URI_RE.test(value) ||
-    STATIC_ABSOLUTE_LOCAL_PATH_RE.test(value) ||
-    STATIC_RELATIVE_URI_RE.test(value) ||
+    documents.some(
+      (document) =>
+        KUBERNETES_SECRET_KIND_RE.test(document) &&
+        KUBERNETES_SECRET_DATA_FIELD_RE.test(document)
+    )
+  ) {
+    issues.push(`${label} contains Kubernetes Secret data`);
+  }
+}
+
+function scanStaticInputString(value, label, issues) {
+  scanKubernetesSecretData(value, label, issues);
+  const maskedValue = maskKubernetesSecretReferenceBlocks(maskAllowedContainerCaMountPaths(value));
+
+  if (
+    STATIC_LOCAL_URI_RE.test(maskedValue) ||
+    STATIC_LOCALHOST_URI_RE.test(maskedValue) ||
+    STATIC_ABSOLUTE_LOCAL_PATH_RE.test(maskedValue) ||
+    STATIC_RELATIVE_URI_RE.test(maskedValue) ||
     isRelativeStaticSourcePath(value, label)
   ) {
     issues.push(`${label} contains a local or source URI`);
   }
 
-  if (SECRET_VALUE_RE.some((pattern) => pattern.test(value))) {
+  if (SECRET_VALUE_RE.some((pattern) => pattern.test(maskedValue))) {
     issues.push(`${label} contains a secret-looking value`);
   }
+}
+
+function isKubernetesSecretDataObject(value) {
+  return (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    value.kind === 'Secret' &&
+    (
+      Object.hasOwn(value, 'data') ||
+      Object.hasOwn(value, 'stringData') ||
+      Object.hasOwn(value, 'binaryData')
+    )
+  );
 }
 
 function scanStaticInputForForbiddenContent(value, label, pathParts = [], issues = []) {
@@ -727,6 +809,9 @@ function scanStaticInputForForbiddenContent(value, label, pathParts = [], issues
     return issues;
   }
   if (value && typeof value === 'object') {
+    if (isKubernetesSecretDataObject(value)) {
+      issues.push(`${label}.${pathParts.join('.') || '<root>'} contains Kubernetes Secret data`);
+    }
     for (const [key, nested] of Object.entries(value)) {
       scanStaticInputString(key, `${label}.${[...pathParts, key].join('.')} key`, issues);
       scanStaticInputForForbiddenContent(nested, label, [...pathParts, key], issues);
@@ -1126,7 +1211,7 @@ function requiredInputsFor({ manifest, config, mode }) {
     requiredCommands.push('registry_probe');
   }
   if (mode === 'apply') {
-    requiredScalars.push('smoke_url');
+    requiredScalars.push('smoke_url', 'expected_status');
   }
   return {
     files: config.requiredFiles,
@@ -2773,7 +2858,7 @@ function skeletonManifestForDeploymentPath(deploymentPath) {
     manifest.kubectl = 'tools/kubectl';
     manifest.archive_probe = 'tools/archive-probe';
     manifest.image_loader = 'tools/image-loader';
-    manifest.smoke_url = 'https://agentsmith.example.com/healthz';
+    manifest.smoke_url = 'https://agentsmith.example.com/en-US/login/workspace';
     manifest.expected_status = 200;
     manifest.timeout = '120s';
     manifest.timeout_ms = 60000;
@@ -2782,6 +2867,8 @@ function skeletonManifestForDeploymentPath(deploymentPath) {
   if (deploymentPath === 'online/use_existing' || deploymentPath === 'online/install_substrates') {
     manifest.context = 'replace-with-kube-context';
     manifest.kubectl = 'tools/kubectl';
+    manifest.smoke_url = 'https://agentsmith.example.com/en-US/login/workspace';
+    manifest.expected_status = 200;
   }
 
   if (deploymentPath === 'online/install_substrates') {
@@ -2859,7 +2946,7 @@ function packageReadmeForManifest(manifest) {
     ...installNote,
     ...airgapNote,
     ...kubectlNote,
-    '- Replace scaffold scalar placeholders such as context: replace-with-kube-context and smoke_url: https://agentsmith.example.com/healthz if present.',
+    '- Replace scaffold scalar placeholders such as context: replace-with-kube-context and smoke_url: https://agentsmith.example.com/en-US/login/workspace if present.',
     '- Add deploy_confirmation only when this package is ready to execute.',
     '- Keep secrets as references, not raw secret values.',
     '',

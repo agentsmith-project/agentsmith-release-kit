@@ -79,8 +79,9 @@ Because the airgap substrate pack manifest is under
 directory, or update the manifest paths to match.
 If this package started from init scaffold, replace
 `context: replace-with-kube-context` and
-`smoke_url: https://agentsmith.example.com/healthz`; doctor treats those
-placeholder values as blockers.
+`smoke_url: https://agentsmith.example.com/en-US/login/workspace`; doctor treats
+those placeholder values as blockers. Apply packages must also set
+`expected_status`.
 
 ## Confirm Install Parameters
 

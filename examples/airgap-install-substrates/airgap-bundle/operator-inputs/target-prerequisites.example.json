@@ -22,14 +22,20 @@
   "substrate_secret_refs": [
     "secretRef:agentsmith/mongodb-app",
     "secretRef:agentsmith/mongodb-ca",
+    "secretRef:agentsmith/mongodb-server-tls",
     "secretRef:agentsmith/object-storage-app",
     "secretRef:agentsmith/object-storage-ca",
+    "secretRef:agentsmith/object-storage-server-tls",
+    "secretRef:agentsmith/oidc-admin",
     "secretRef:agentsmith/oidc-ca",
     "secretRef:agentsmith/oidc-client",
+    "secretRef:agentsmith/oidc-server-tls",
     "secretRef:agentsmith/postgresql-admin",
     "secretRef:agentsmith/postgresql-app",
     "secretRef:agentsmith/postgresql-ca",
+    "secretRef:agentsmith/postgresql-server-tls",
     "secretRef:agentsmith/redis-app",
-    "secretRef:agentsmith/redis-ca"
+    "secretRef:agentsmith/redis-ca",
+    "secretRef:agentsmith/redis-server-tls"
   ]
 }

@@ -373,6 +373,27 @@ fi
 assert_smoke_report "$kit_airgap_output/smoke-report.json" "$BASE_URL" "127.0.0.1:$SERVER_PORT" "$KIT_AIRGAP_TARGET_PROFILE"
 pass "kit-installed airgap route smoke accepted without changing smoke behavior"
 
+created_output="$TMP_DIR/out-created"
+before_created="$(hit_count)"
+run_smoke "$BASE_URL/created" "$created_output" "$TARGET_PROFILE" --expected-status 201 --allow-http --allow-localhost >/dev/null
+after_created="$(hit_count)"
+if [[ "$after_created" -ne $((before_created + 1)) ]]; then
+  cat "$SERVER_LOG" >&2
+  fail "explicit expected status happy path should issue exactly one GET"
+fi
+"$NODE_BIN" --input-type=module - "$created_output/smoke-report.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (report.route?.path !== '/created') {
+  throw new Error(`unexpected created route path: ${report.route?.path}`);
+}
+if (report.expected_status !== 201 || report.status_code !== 201) {
+  throw new Error('smoke report must record explicit expected status and observed status');
+}
+NODE
+pass "route smoke accepts explicit non-200 expected status"
+
 mismatch_output="$TMP_DIR/out-status-mismatch"
 mkdir -p "$mismatch_output"
 printf '%s\n' '{"stale":true}' >"$mismatch_output/smoke-report.json"

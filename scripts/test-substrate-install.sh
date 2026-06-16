@@ -1309,6 +1309,101 @@ if (!resourceSecretRefs.has(`secretRef:${namespace}/oidc-admin`)) {
 NODE
 }
 
+assert_install_secret_refs_bound_to_target_prerequisites() {
+  local install_inputs="$1"
+  local target_prerequisites="$2"
+  local namespace="${3:-agentsmith}"
+
+  "$NODE_BIN" --input-type=module - "$install_inputs" "$target_prerequisites" "$namespace" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+
+const [installInputsFile, targetPrerequisitesFile, namespace] = process.argv.slice(2);
+const installInputs = JSON.parse(fs.readFileSync(installInputsFile, 'utf8'));
+const targetPrerequisites = JSON.parse(fs.readFileSync(targetPrerequisitesFile, 'utf8'));
+const expectedSecretRefs = new Set();
+
+function collectSecretRefs(value) {
+  if (Array.isArray(value)) {
+    value.forEach(collectSecretRefs);
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  for (const nested of Object.values(value)) {
+    if (typeof nested === 'string' && nested.startsWith('secretRef:')) {
+      expectedSecretRefs.add(nested);
+    } else {
+      collectSecretRefs(nested);
+    }
+  }
+}
+
+function collectResourceSecretRefs(value) {
+  if (Array.isArray(value)) {
+    value.forEach(collectResourceSecretRefs);
+    return;
+  }
+  if (!value || typeof value !== 'object') {
+    return;
+  }
+  if (
+    value.secretKeyRef &&
+    typeof value.secretKeyRef === 'object' &&
+    typeof value.secretKeyRef.name === 'string'
+  ) {
+    expectedSecretRefs.add(`secretRef:${namespace}/${value.secretKeyRef.name}`);
+  }
+  if (
+    value.secret &&
+    typeof value.secret === 'object' &&
+    typeof value.secret.secretName === 'string'
+  ) {
+    expectedSecretRefs.add(`secretRef:${namespace}/${value.secret.secretName}`);
+  }
+  if (
+    value.tls &&
+    typeof value.tls === 'object' &&
+    typeof value.tls.secretName === 'string'
+  ) {
+    expectedSecretRefs.add(`secretRef:${namespace}/${value.tls.secretName}`);
+  }
+  Object.values(value).forEach(collectResourceSecretRefs);
+}
+
+collectSecretRefs(installInputs.substrate_truth);
+if (Array.isArray(installInputs.resources)) {
+  collectResourceSecretRefs(installInputs.resources);
+}
+if (typeof installInputs.resource_list_path === 'string') {
+  const resourceList = JSON.parse(fs.readFileSync(
+    path.join(path.dirname(installInputsFile), installInputs.resource_list_path),
+    'utf8'
+  ));
+  collectResourceSecretRefs(resourceList);
+}
+
+const targetSecretRefs = new Set(targetPrerequisites.substrate_secret_refs || []);
+const missing = [...expectedSecretRefs].sort().filter((ref) => !targetSecretRefs.has(ref));
+if (missing.length > 0) {
+  throw new Error(`target prerequisites missing substrate Secret refs: ${missing.join(', ')}`);
+}
+for (const ref of [
+  `secretRef:${namespace}/postgresql-server-tls`,
+  `secretRef:${namespace}/mongodb-server-tls`,
+  `secretRef:${namespace}/redis-server-tls`,
+  `secretRef:${namespace}/object-storage-server-tls`,
+  `secretRef:${namespace}/oidc-admin`,
+  `secretRef:${namespace}/oidc-server-tls`
+]) {
+  if (!targetSecretRefs.has(ref)) {
+    throw new Error(`target prerequisites must include materialized substrate Secret ref ${ref}`);
+  }
+}
+NODE
+}
+
 assert_install_rejected_before_kubectl() {
   local mutation="$1"
   local expected_message="$2"
@@ -2027,6 +2122,14 @@ grep -Eq '^apply .*--dry-run=server' "$KUBECTL_LOG" || \
 assert_install_report "$airgap_dry_run_output/substrate-install-report.json" "$airgap_dry_run_output/substrate-truth.json" server-dry-run "" "$AIRGAP_TARGET_PROFILE"
 pass "airgap server-dry-run writes diagnostic substrate install report and truth"
 
+assert_install_secret_refs_bound_to_target_prerequisites \
+  "$ROOT_DIR/examples/online-install-substrates/substrate-install-inputs.example.json" \
+  "$ROOT_DIR/examples/online-install-substrates/target-prerequisites.example.json"
+assert_install_secret_refs_bound_to_target_prerequisites \
+  "$ROOT_DIR/examples/airgap-install-substrates/airgap-bundle/components/substrate-install-inputs.example.json" \
+  "$ROOT_DIR/examples/airgap-install-substrates/airgap-bundle/operator-inputs/target-prerequisites.example.json"
+pass "install_substrates example target prerequisites cover materialized substrate Secret refs"
+
 materialized_minimal_dir="$TMP_DIR/materialized-minimal-substrate-pack"
 "$NODE_BIN" "$ROOT_DIR/scripts/materialize-substrate-pack.mjs" \
   --deployment-path online/install_substrates \
@@ -2244,8 +2347,57 @@ if (mainTlsMount?.name !== 'postgresql-tls-workdir' || mainTlsMount?.readOnly !=
 if ((mainContainer?.volumeMounts ?? []).some((mount) => mount.name === 'postgresql-tls-source')) {
   throw new Error('postgresql main container must not mount the raw TLS secret directly');
 }
+
+const mongodb = resources.find((resource) => (
+  resource?.kind === 'StatefulSet' && resource?.metadata?.name === 'mongodb'
+));
+const mongodbArgs = mongodb?.spec?.template?.spec?.containers
+  ?.find((container) => container.name === 'mongodb')
+  ?.args ?? [];
+if (!mongodbArgs.includes('--tlsAllowConnectionsWithoutCertificates')) {
+  throw new Error('mongodb substrate must allow TLS clients without client certificates by default');
+}
+
+const redis = resources.find((resource) => (
+  resource?.kind === 'Deployment' && resource?.metadata?.name === 'redis'
+));
+const redisArgs = redis?.spec?.template?.spec?.containers
+  ?.find((container) => container.name === 'redis')
+  ?.args ?? [];
+const redisAuthClientIndex = redisArgs.indexOf('--tls-auth-clients');
+if (redisAuthClientIndex === -1 || redisArgs[redisAuthClientIndex + 1] !== 'no') {
+  throw new Error('redis substrate must not require TLS client certificates by default');
+}
+
+const keycloakIngressPolicy = requireNetworkPolicy('agentsmith-substrates-public-oidc-ingress');
+assertExactMatchLabels(
+  keycloakIngressPolicy.spec?.podSelector?.matchLabels,
+  {
+    'app.kubernetes.io/part-of': 'agentsmith-substrate',
+    'app.kubernetes.io/name': 'oidc'
+  },
+  'OIDC public ingress policy podSelector.matchLabels'
+);
+const keycloakIngressPeers = assertSinglePortIngress(keycloakIngressPolicy, 8443);
+if (keycloakIngressPeers.length !== 1) {
+  throw new Error('OIDC public ingress policy must allow exactly one ingress-controller peer');
+}
+assertExactMatchLabels(
+  keycloakIngressPeers[0]?.namespaceSelector?.matchLabels,
+  {
+    'kubernetes.io/metadata.name': 'ingress-nginx'
+  },
+  'OIDC public ingress namespaceSelector.matchLabels'
+);
+assertExactMatchLabels(
+  keycloakIngressPeers[0]?.podSelector?.matchLabels,
+  {
+    'app.kubernetes.io/name': 'ingress-nginx'
+  },
+  'OIDC public ingress podSelector.matchLabels'
+);
 NODE
-pass "materialized substrate NetworkPolicy scopes JuiceFS CSI cross-namespace ingress"
+pass "materialized substrate runtime TLS and NetworkPolicy defaults match product online install"
 run_pack_check "$materialized_minimal_dir" "$TMP_DIR/out-materialized-minimal-pack-check" >/dev/null
 materialized_minimal_output="$TMP_DIR/out-materialized-minimal-install"
 reset_kubectl_log

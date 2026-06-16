@@ -160,6 +160,10 @@ switch (mutation) {
     values.SUBSTRATE_POSTGRES_ADDRESS_TYPE = 'FQDN';
     values.SUBSTRATE_POSTGRES_HOST = 'mbos-postgres';
     break;
+  case 'routable_endpointslice_fqdn':
+    values.SUBSTRATE_POSTGRES_ADDRESS_TYPE = 'FQDN';
+    values.SUBSTRATE_POSTGRES_HOST = 'postgres.ops.example.com';
+    break;
   case 'url_endpointslice_fqdn':
     values.SUBSTRATE_POSTGRES_ADDRESS_TYPE = 'FQDN';
     values.SUBSTRATE_POSTGRES_HOST = 'https://postgres.ops.example.com/path';
@@ -1629,6 +1633,20 @@ expect_fail_case \
   "" \
   "" \
   "render_values.SUBSTRATE_POSTGRES_HOST must be an IPv4/IPv6 address or an EndpointSlice FQDN with at least two DNS labels"
+
+ROUTABLE_ENDPOINTSLICE_FQDN_VALUES="$TMP_DIR/render-values.routable-endpointslice-fqdn.json"
+write_render_values "$ROUTABLE_ENDPOINTSLICE_FQDN_VALUES" routable_endpointslice_fqdn
+expect_fail_case \
+  routable-endpointslice-fqdn \
+  "$VALID_CONTRACT_MATERIAL" \
+  "$VALID_PACKAGE_MATERIAL" \
+  "$VALID_ARCHIVE" \
+  "$ROUTABLE_ENDPOINTSLICE_FQDN_VALUES" \
+  "$VALID_TRUTH" \
+  "$TARGET_PROFILE" \
+  "" \
+  "" \
+  "render_values.SUBSTRATE_POSTGRES_ADDRESS_TYPE EndpointSlice addressType FQDN is not supported"
 
 URL_ENDPOINTSLICE_VALUES="$TMP_DIR/render-values.url-endpointslice-fqdn.json"
 write_render_values "$URL_ENDPOINTSLICE_VALUES" url_endpointslice_fqdn

@@ -363,6 +363,51 @@ data:
   );
 }
 
+if (mutation === 'kubernetes_secret_references') {
+  fs.writeFileSync(
+    path.join(renderedManifests, 'kubernetes-secret-refs.yaml'),
+    `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rendered-secret-reference-snippets
+data:
+  ingress.yaml: |
+    spec:
+      tls:
+        - hosts:
+            - agentsmith.release.example.com
+          secretName: agentsmith-ingress-tls
+  pod.yaml: |
+    spec:
+      volumes:
+        - name: oidc-tls
+          secret:
+            secretName: oidc-server-tls
+      containers:
+        - name: app
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-app
+                  key: password
+`
+  );
+}
+
+if (mutation === 'kubernetes_secret_data') {
+  fs.writeFileSync(
+    path.join(renderedManifests, 'kubernetes-secret-data.yaml'),
+    `apiVersion: v1
+kind: Secret
+metadata:
+  name: unsafe-secret
+data:
+  password: dmFsdWU=
+`
+  );
+}
+
 const afscpSecretRefsCases = new Map([
   [
     'afscp_workload_mount_secret_refs',
@@ -493,6 +538,13 @@ run_render_check "$safe_secret_manifests" "$safe_secret_output"
 assert_pass_report "$safe_secret_output/render-report.json"
 pass "safe secretRef and redacted manifest values accepted"
 
+kubernetes_secret_ref_manifests="$TMP_DIR/manifests-kubernetes-secret-refs"
+kubernetes_secret_ref_output="$TMP_DIR/out-kubernetes-secret-refs"
+write_manifests "$kubernetes_secret_ref_manifests" kubernetes_secret_references
+run_render_check "$kubernetes_secret_ref_manifests" "$kubernetes_secret_ref_output"
+assert_pass_report "$kubernetes_secret_ref_output/render-report.json"
+pass "Kubernetes Secret references accepted without treating names as payloads"
+
 afscp_secret_refs_manifests="$TMP_DIR/manifests-afscp-secret-refs"
 afscp_secret_refs_output="$TMP_DIR/out-afscp-secret-refs"
 write_manifests "$afscp_secret_refs_manifests" afscp_workload_mount_secret_refs
@@ -513,6 +565,7 @@ expect_contract_target_profile_fail \
   contract_noncanonical_extra_kind_external_declared \
   noncanonical-extra-kind-external-declared
 expect_fail secret_payload
+expect_fail kubernetes_secret_data
 expect_fail afscp_workload_mount_secret_refs_missing_name
 expect_fail afscp_workload_mount_secret_refs_path_escape
 expect_fail afscp_workload_mount_secret_refs_token_volume
