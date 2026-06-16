@@ -2050,6 +2050,7 @@ spec:
             secretKeyRef:
               name: postgresql-app
               key: password
+              optional: true
 `;
 fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
 NODE
@@ -2069,6 +2070,86 @@ if ((report.static_issues || []).some((issue) => issue.field === 'render_values'
 }
 NODE
 pass "operator-inputs doctor treats Kubernetes Secret reference fields as references"
+
+doctor_static_secret_ref_optional_payload_dir="$TMP_DIR/doctor-static-kubernetes-secret-ref-optional-payload"
+copy_valid_package "$example_online_package" "$doctor_static_secret_ref_optional_payload_dir"
+"$NODE_BIN" --input-type=module - "$doctor_static_secret_ref_optional_payload_dir/render-values.example.json" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.kubernetes_secret_ref_optional_payload = `
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - name: app
+      env:
+        - name: APP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: password
+              optional: Bearer abcdefghijklmnop
+`;
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_secret_ref_optional_payload_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-kubernetes-secret-ref-optional-payload.json"; then
+  fail "operator-inputs doctor should fail when Secret reference optional contains a raw secret-like payload"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-kubernetes-secret-ref-optional-payload.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const issue = report.static_issues.find((item) => item.field === 'render_values');
+if (!issue || !/secret-looking value/.test(issue.reason)) {
+  throw new Error('doctor static Secret reference optional blocker must explain raw secret-like payload');
+}
+NODE
+pass "operator-inputs doctor rejects raw secret-like optional values inside Kubernetes Secret references"
+
+doctor_static_secret_ref_sibling_payload_dir="$TMP_DIR/doctor-static-kubernetes-secret-ref-sibling-payload"
+copy_valid_package "$example_online_package" "$doctor_static_secret_ref_sibling_payload_dir"
+"$NODE_BIN" --input-type=module - "$doctor_static_secret_ref_sibling_payload_dir/render-values.example.json" <<'NODE'
+import fs from 'node:fs';
+
+const [renderValuesPath] = process.argv.slice(2);
+const renderValues = JSON.parse(fs.readFileSync(renderValuesPath, 'utf8'));
+renderValues.kubernetes_secret_ref_sibling_payload = `
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - name: app
+      env:
+        - name: APP_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secret
+              key: password
+          name: sk-abcdefghijklmnopqrstuvwxyz
+`;
+fs.writeFileSync(renderValuesPath, `${JSON.stringify(renderValues, null, 2)}\n`);
+NODE
+if "$NODE_BIN" "$ROOT_DIR/scripts/resolve-operator-inputs.mjs" \
+  --operator-inputs "$doctor_static_secret_ref_sibling_payload_dir" \
+  --doctor \
+  --stdout >"$TMP_DIR/doctor-static-kubernetes-secret-ref-sibling-payload.json"; then
+  fail "operator-inputs doctor should fail when a Secret reference sibling contains a raw secret-like payload"
+fi
+"$NODE_BIN" --input-type=module - "$TMP_DIR/doctor-static-kubernetes-secret-ref-sibling-payload.json" <<'NODE'
+import fs from 'node:fs';
+
+const report = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const issue = report.static_issues.find((item) => item.field === 'render_values');
+if (!issue || !/secret-looking value/.test(issue.reason)) {
+  throw new Error('doctor static Secret reference sibling blocker must explain raw secret-like payload');
+}
+NODE
+pass "operator-inputs doctor rejects raw secret-like sibling fields after Kubernetes Secret references"
 
 doctor_static_secret_ref_payload_dir="$TMP_DIR/doctor-static-kubernetes-secret-ref-payload"
 copy_valid_package "$example_online_package" "$doctor_static_secret_ref_payload_dir"

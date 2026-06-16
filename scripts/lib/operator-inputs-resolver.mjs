@@ -271,12 +271,13 @@ const STATIC_SOURCE_LIKE_LABEL_RE = /(?:^|\.)(?:source_uri|source_path|artifact_
 const STATIC_CONTAINER_CA_PATH_RE = /(^|[\s"'(=])\/etc\/agentsmith\/substrate-ca\/[^\s"'()<>]+/g;
 const KUBERNETES_SECRET_KIND_RE = /^[ \t]*kind:[ \t]*Secret[ \t]*(?:#.*)?$/m;
 const KUBERNETES_SECRET_DATA_FIELD_RE = /^[ \t]*(?:data|stringData|binaryData):[ \t]*(?:#.*)?$/m;
-const KUBERNETES_SECRET_REFERENCE_BLOCK_RE =
-  /(^|\n)([ \t]*(?:secret|secretKeyRef):[ \t]*(?:#.*)?\n(?:[ \t]+[A-Za-z0-9_.-]+:[^\n]*(?:\n|$)){0,8})/g;
-const KUBERNETES_TLS_REFERENCE_BLOCK_RE =
-  /(^|\n)([ \t]*tls:[ \t]*(?:#.*)?\n(?:[ \t]+(?:-[ \t]*)?[A-Za-z0-9_.-]+:[^\n]*(?:\n|$)){0,12})/g;
-const KUBERNETES_SECRET_REFERENCE_FIELDS = ['secretName', 'name', 'key', 'optional'];
-const KUBERNETES_TLS_REFERENCE_FIELDS = ['secretName'];
+const KUBERNETES_SECRET_REFERENCE_HEADER_KEYS = new Set(['secret', 'secretKeyRef']);
+const KUBERNETES_TLS_REFERENCE_HEADER_KEYS = new Set(['tls']);
+const KUBERNETES_SECRET_REFERENCE_FIELDS = new Set(['secretName', 'name', 'key', 'optional']);
+const KUBERNETES_TLS_REFERENCE_FIELDS = new Set(['secretName']);
+const KUBERNETES_REFERENCE_IDENTIFIER_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+const KUBERNETES_REFERENCE_TOKEN_PAYLOAD_RE =
+  /^(?:sk-[A-Za-z0-9]{12,}|AKIA[0-9A-Z]{16}|(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})$/;
 const SECRET_KEY_RE = /(^|[_-])(access[_-]?key|api[_-]?key|client[_-]?secret|credential|kubeconfig|kube[_-]?config|password|private[_-]?key|refresh[_-]?token|secret|session[_-]?token|token)([_-]|$)/i;
 const SECRET_VALUE_RE = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/i,
@@ -735,44 +736,150 @@ function maskAllowedContainerCaMountPaths(value) {
   });
 }
 
-function blockContainsSecretReference(block, key) {
-  return new RegExp(`^[ \\t]*${key}:[ \\t]*[A-Za-z0-9_.-]+[ \\t]*(?:#.*)?$`, 'm').test(block);
+function leadingWhitespaceLength(value) {
+  return /^[ \t]*/.exec(value)[0].length;
 }
 
-function maskKubernetesReferenceFields(block, fields) {
-  const fieldAlternation = fields.join('|');
-  const fieldLineRe = new RegExp(
-    `^([ \\t]*(?:-[ \\t]*)?(?:${fieldAlternation}):[ \\t]*)[^#\\n]*([ \\t]*(?:#.*)?)$`,
-    'gm'
-  );
-  return block.replace(fieldLineRe, (_line, prefix, suffix) => `${prefix}reference${suffix}`);
+function parseYamlMappingLine(line) {
+  const match = /^([ \t]*)(-[ \t]*)?([A-Za-z0-9_.-]+):([ \t]*)(.*)$/.exec(line);
+  if (!match) {
+    return null;
+  }
+  const dash = match[2] ?? '';
+  const valueStart = match[1].length + dash.length + match[3].length + 1 + match[4].length;
+  const rest = line.slice(valueStart);
+  const commentIndex = rest.indexOf('#');
+  const beforeComment = commentIndex === -1 ? rest : rest.slice(0, commentIndex);
+  const valueEnd = beforeComment.replace(/[ \t\r]+$/, '').length;
+  return {
+    key: match[3],
+    keyColumn: match[1].length + dash.length,
+    value: beforeComment.slice(0, valueEnd),
+    valueStart,
+    suffix: `${beforeComment.slice(valueEnd)}${commentIndex === -1 ? '' : rest.slice(commentIndex)}`
+  };
 }
 
-function maskKubernetesSecretReferenceHeader(block) {
-  return block.replace(
-    /^([ \t]*)(?:secret|secretKeyRef):([ \t]*(?:#.*)?(?:\n|$))/,
-    '$1kubernetes_secret_reference:$2'
+function isBlankOrYamlComment(line) {
+  const trimmed = line.trim();
+  return trimmed === '' || trimmed.startsWith('#');
+}
+
+function isYamlObjectHeader(parsed, keys) {
+  return parsed && keys.has(parsed.key) && parsed.value.trim() === '';
+}
+
+function findYamlObjectEnd(lines, startIndex, parentColumn) {
+  let endIndex = startIndex + 1;
+  while (endIndex < lines.length) {
+    const line = lines[endIndex];
+    if (!isBlankOrYamlComment(line) && leadingWhitespaceLength(line) <= parentColumn) {
+      break;
+    }
+    endIndex += 1;
+  }
+  return endIndex;
+}
+
+function findYamlDirectChildColumn(lines, startIndex, endIndex, parentColumn) {
+  let childColumn = null;
+  for (let index = startIndex + 1; index < endIndex; index += 1) {
+    const parsed = parseYamlMappingLine(lines[index]);
+    if (!parsed || parsed.keyColumn <= parentColumn) {
+      continue;
+    }
+    childColumn = childColumn === null ? parsed.keyColumn : Math.min(childColumn, parsed.keyColumn);
+  }
+  return childColumn;
+}
+
+function isPlainKubernetesReferenceValue(value) {
+  const trimmed = value.trim();
+  return (
+    KUBERNETES_REFERENCE_IDENTIFIER_RE.test(trimmed) &&
+    !KUBERNETES_REFERENCE_TOKEN_PAYLOAD_RE.test(trimmed)
   );
+}
+
+function isKubernetesBooleanLikeValue(value) {
+  return /^(?:true|false)$/i.test(value.trim());
+}
+
+function shouldMaskKubernetesReferenceField(parsed, fields) {
+  if (!fields.has(parsed.key)) {
+    return false;
+  }
+  if (parsed.key === 'optional') {
+    return isKubernetesBooleanLikeValue(parsed.value);
+  }
+  return isPlainKubernetesReferenceValue(parsed.value);
+}
+
+function maskYamlMappingValue(line, parsed, replacement) {
+  return `${line.slice(0, parsed.valueStart)}${replacement}${parsed.suffix}`;
+}
+
+function maskKubernetesSecretReferenceHeaderLine(line, parsed) {
+  return `${line.slice(0, parsed.keyColumn)}kubernetes_secret_reference${line.slice(
+    parsed.keyColumn + parsed.key.length
+  )}`;
+}
+
+function maskKubernetesReferenceObjectAt(lines, startIndex, fields, { maskHeader = false } = {}) {
+  const header = parseYamlMappingLine(lines[startIndex]);
+  const endIndex = findYamlObjectEnd(lines, startIndex, header.keyColumn);
+  const childColumn = findYamlDirectChildColumn(lines, startIndex, endIndex, header.keyColumn);
+  if (childColumn === null) {
+    return { endIndex, masked: false };
+  }
+
+  const maskableIndexes = [];
+  let hasReferenceName = false;
+  for (let index = startIndex + 1; index < endIndex; index += 1) {
+    const parsed = parseYamlMappingLine(lines[index]);
+    if (!parsed || parsed.keyColumn !== childColumn || !shouldMaskKubernetesReferenceField(parsed, fields)) {
+      continue;
+    }
+    maskableIndexes.push({ index, parsed });
+    if (parsed.key === 'secretName' || parsed.key === 'name') {
+      hasReferenceName = true;
+    }
+  }
+
+  if (!hasReferenceName) {
+    return { endIndex, masked: false };
+  }
+
+  if (maskHeader) {
+    lines[startIndex] = maskKubernetesSecretReferenceHeaderLine(lines[startIndex], header);
+  }
+  for (const { index, parsed } of maskableIndexes) {
+    lines[index] = maskYamlMappingValue(lines[index], parsed, 'reference');
+  }
+  return { endIndex, masked: true };
 }
 
 function maskKubernetesSecretReferenceBlocks(value) {
-  const maskedSecretBlocks = value.replace(
-    KUBERNETES_SECRET_REFERENCE_BLOCK_RE,
-    (match, prefix, block) => {
-      if (!blockContainsSecretReference(block, 'secretName') && !blockContainsSecretReference(block, 'name')) {
-        return match;
+  const lines = value.split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const parsed = parseYamlMappingLine(lines[index]);
+    if (isYamlObjectHeader(parsed, KUBERNETES_SECRET_REFERENCE_HEADER_KEYS)) {
+      const result = maskKubernetesReferenceObjectAt(lines, index, KUBERNETES_SECRET_REFERENCE_FIELDS, {
+        maskHeader: true
+      });
+      if (result.masked) {
+        index = result.endIndex - 1;
       }
-      return `${prefix}${maskKubernetesSecretReferenceHeader(
-        maskKubernetesReferenceFields(block, KUBERNETES_SECRET_REFERENCE_FIELDS)
-      )}`;
+      continue;
     }
-  );
-  return maskedSecretBlocks.replace(KUBERNETES_TLS_REFERENCE_BLOCK_RE, (match, prefix, block) => {
-    if (!blockContainsSecretReference(block, 'secretName')) {
-      return match;
+    if (isYamlObjectHeader(parsed, KUBERNETES_TLS_REFERENCE_HEADER_KEYS)) {
+      const result = maskKubernetesReferenceObjectAt(lines, index, KUBERNETES_TLS_REFERENCE_FIELDS);
+      if (result.masked) {
+        index = result.endIndex - 1;
+      }
     }
-    return `${prefix}${maskKubernetesReferenceFields(block, KUBERNETES_TLS_REFERENCE_FIELDS)}`;
-  });
+  }
+  return lines.join('\n');
 }
 
 function scanKubernetesSecretData(raw, label, issues) {
